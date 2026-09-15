@@ -5,8 +5,7 @@ rules. `home/prog/player.nix` runs live Python/QML source on `top` and `book`
 (flake attribute `air`). Source edits take effect at the user's next launch;
 do not restart a running player or drive playback to verify a change.
 
-Read private `docs/DESIGN.md` before visual changes and
-`docs/agents/his-voice.md` Part A before desktop-visible strings. Operational
+Read private `docs/DESIGN.md` before visual changes. Operational
 procedures and retained failure history live in `docs/agents/player-maintenance.md`;
 SMB setup and recovery live in `docs/agents/air-library-share.md`.
 

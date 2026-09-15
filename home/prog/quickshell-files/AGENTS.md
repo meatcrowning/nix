@@ -1,239 +1,73 @@
-# AGENTS.md — the Quickshell panel
+# AGENTS.md — Quickshell panel
 
-The desktop shell's QML tree: a vertical bar, the desktop widgets, the
-wallpaper, and the popups. Runs under Hyprland, whose side of the desktop —
-`hyprland.lua`, the `hyprvtb` plugin, the sandbox — is `../AGENTS.md`. Repo-wide
-rules are `~/nix/AGENTS.md`.
-
-**Read `../AGENTS.md` too if your change touches window management, titlebars,
-logout, or anything the compositor owns.**
-
-**Read `~/nix/docs/DESIGN.md` before you draw anything.** It is the desktop's design
-language — type, palette, spacing, motion timing, menus, tooltips, rows,
-affordance honesty — and it is shared with the compositor plugin and the six
-apps so that all four trees come out looking like one desktop. This file owns
-the panel's *mechanics*; that one owns the *look*, for every surface at once.
-
----
+QML for the bar, desktop widgets, wallpaper, and popups.
+Root AGENTS.md owns host, Git, and test safety rules. Read ../AGENTS.md for
+compositor changes and private docs/DESIGN.md for visual changes.
 
 ## Getting an edit live
 
-Most files here are installed as **Nix-store symlinks**. A rebuild swaps the
-symlink, but Quickshell watches the *resolved* store path — so the swap does
-**not** trigger its hot reload and the panel keeps running the old tree. Force
-one by modifying the single real file it watches, `~/.config/quickshell/
-Theme.qml`, **in place (same inode)**:
+Edit the Nix sources and follow the root commit/rebuild workflow for the host.
+Most installed QML files are store symlinks. Quickshell watches the resolved
+path, so a symlink swap needs a forced reload through the writable Theme.qml:
+temporarily append a comment, then restore the original content in place.
+Keep the same inode; sed -i/mv will not trigger the watcher, and identical
+content is deduplicated. Never start a second panel with bare qs.
 
-```bash
-sudo rebuild-top
-cp ~/.config/quickshell/Theme.qml /tmp/Theme.bak
-printf '\n// x\n' >> ~/.config/quickshell/Theme.qml   # append…
-cat /tmp/Theme.bak > ~/.config/quickshell/Theme.qml   # …then restore, in place
-```
+Activation reconciles Theme.qml in place, retaining the runtime wal palette
+block. Do not edit the live copy for durable changes. Check tools/seed-drift.sh.
+Parse errors preserve the previous QML tree; inspect qs log.
 
-- **Do NOT use `sed -i` or `mv`** — a rename is a new inode, so no reload.
-- It **dedupes by content**, so an identical rewrite is a no-op.
-- A reload rebuilds only Quickshell's QML tree in-process; it never touches
-  Hyprland. A parse error keeps the old tree and fires a toast, so it cannot
-  crash the session.
-- A **new** `.qml` file must be `git add -N`-ed before the rebuild — the tree is
-  dirty and flake eval ignores untracked files, so a brand-new `Foo.qml` is
-  silently missing from the build otherwise.
+## State across reloads
 
-**`Theme.qml` is mutable, and RECONCILED on every switch.** It cannot be a
-store symlink, because `wal-set.sh` splices the live palette into its
-`// >>> wal palette` block in place. It used to be seeded once and then left
-alone — which meant a rebuild could never update it, so a pull that changed it
-did nothing until someone hand-edited the live copy too. Since 2026-08-05
-`tools/seed-reconcile.sh` runs from activation: **edit the nix source here
-only**, and the switch rewrites the live file in place, carrying the live
-palette block across. A live-only edit is overwritten (copy in
-`~/.cache/seed-reconcile/`). `~/nix/tools/seed-drift.sh` is the tripwire and
-should stay silent.
+shell.qml carries pins in $XDG_RUNTIME_DIR/qs-live-pins and widget contents in
+PersistentProperties. Pins load synchronously with FileView.blockLoading and
+snapPinned(). The v2 PID distinguishes an in-process reload from a new process;
+the runtime file's absence identifies a new login.
 
----
+SlidePopup must skip its layer remap during in-process reload: Quickshell
+hands over the mapped surface. Remap on other paths, including pre-map, since
+the layer is latched at window construction. Verify widget layers are bottom
+(level 1) and no widget closelayer/openlayer events occur during reload.
 
-## A reload must look like a state change IN PLACE, not a re-entry
+PersistentProperties must be a direct child of the root Scope. Carry strings,
+not JS arrays/objects: alternating QML engines cannot transfer JSValues.
+Sources expose stateJson()/restoreState() and stateRev; high-rate VU/spectrum
+feeds snapshot every 250 ms. Restore synchronously before a frame renders.
+qs ipc call state carried reports carried sizes and live buffer lengths;
+nonzero buffers and increasing cpuHist verify continuity.
 
-Theme or wallpaper changes rebuild the whole QML tree. The visible result must
-be an in-place state change: widgets keep their pins, data buffers, and layout
-without a refill animation or an empty first frame.
+### Settings and geometry
 
-Two mechanisms carry state across, both wired in `shell.qml`:
+Gate persisted-geometry Behaviors on ViewMode.settling (the first 400 ms):
+bar width, layout crossfades, wallpaper visibleArea, and dock tile geometry.
+Settings, screen enumeration, and compositor sizes arrive independently.
+Seed applyReserve() from the settle timer, not Component.onCompleted, to avoid
+treating the restored panel as new growth that displaces windows.
+qs ipc call view geom should eventually report settling=false.
 
-**The pin set** — mirrored to `$XDG_RUNTIME_DIR/qs-live-pins` and read back
-SYNCHRONOUSLY (`FileView { blockLoading: true }`) in `Component.onCompleted`,
-then applied with `snapPinned()`. The file's absence doubles as the
-login-vs-reload flag (`$XDG_RUNTIME_DIR` is wiped at logout), and the PID written
-alongside (`v2 <pid> …`) separates a RELOAD of that process from a fresh
-`quickshell` start. That distinction is the whole trick:
+One-shot handlers that branch on settings must call SettingsStore.loadNow()
+first. It calls file.reload() then file.text(); text() forces the synchronous
+read, while reload() alone does not deliver adapter values before returning.
 
-- **On a reload Quickshell hands the outgoing window's layer surface to the
-  incoming object, still mapped** — so `SlidePopup` must NOT run its layer remap
-  there. A remap destroys that surface and opens a new one, which Hyprland fades
-  out and in: the widgets blink on every wallpaper or theme change.
-- **Everywhere else the remap is mandatory, including pre-map.** Quickshell
-  latches the layer when it *creates* the window (at component completion,
-  regardless of `visible`), so the login fan would otherwise come up on Overlay
-  with every desktop widget floating on top of windows.
-- Both halves are checkable without looking: `hyprctl layers` — the `qs-*`
-  widget namespaces belong in level 1 (bottom) — and Hyprland's event socket,
-  which must emit **no** `closelayer`/`openlayer` for them across a reload.
+### Surface visibility and popup size
 
-**The widgets' contents** — a `PersistentProperties` block, which hands
-properties from the outgoing tree to the incoming one in-process. Each source
-exposes `stateJson()`/`restoreState()` plus a `stateRev` counter that
-`shell.qml` snapshots on; the 60fps VU/spectrum feeds are sampled on a 250 ms
-timer instead. Restore fires after every `Component.onCompleted` but inside the
-same synchronous reload pass, so no frame renders in between. **Two
-constraints, both found the hard way and both silent when violated:**
+PanelWindow.visible maps/unmaps a Wayland surface; unmapped geometry can be
+zero. Never derive visibility from that geometry. Use an imperative open flag,
+cleared one slide-duration after closing, as SlidePopup._visSurface does.
+During reload, qs-notifications may close/reopen because NotificationServer
+has keepOnReload: false and the reload notification creates a new card.
 
-- It must be a **direct child of the root `Scope`**. One level down inside a
-  plain `Item` it never restores — a non-Reloadable parent breaks the matching
-  chain.
-- **Every carried property must be a STRING.** Quickshell alternates between two
-  QML engines across reloads and a JSValue (any `property var` holding an array
-  or object) cannot move between them, so a `var` arrives `undefined` on every
-  *other* reload, with only a `JSValue can't be reassigned to another engine`
-  warning to show for it.
+A zero-sized PopupWindow causes a Wayland protocol error and disconnects the
+entire panel. Compute implicit sizes independently of the popup's own size;
+use a positive floor and refuse degenerate measurements. TaskMenu/Tooltip
+measure named children; ProcMenu measures entries in openFor().
+Use an entry's own shown flag, never effective Item.visible, when measuring a
+closed popup; otherwise the second opening measures zero.
 
-```bash
-qs ipc call state carried   # sizes of each carried blob + live buffer lengths
-```
-
-Poll that repeatedly across a forced reload: all non-zero and `cpuHist` counting
-up monotonically means the swap worked; a reset to 0 means something regressed.
-
-### A reload starts from defaults — so it must not animate
-
-Bindings in a fresh tree initially see shipped defaults before `settings.json`
-is loaded. The correction happens during the load pass; Behaviors must be
-disabled until persisted geometry has settled.
-
-**So `ViewMode.settling` is true for the first 400ms of every tree, and
-everything that animates a view-mode change gates its `Behavior` on it**: the
-bar's width and the two layout crossfades (`shell.qml`), the wallpaper's
-`visibleArea` x/width (`WallpaperLayer.qml`), the dock tiles' y/height
-(`DockTile.qml`). Anything that changes during the settle SNAPS. It is a
-wall-clock window rather than a signal from `SettingsStore`, because the values
-arrive from three independent places — the settings file, `Quickshell.screens`,
-and the compositor telling the surface its size — and the gate has to outlast
-the last of them.
-
-- **Add a `Behavior` on anything that follows a persisted geometry value and you
-  must gate it too**, or you have re-added the glitch for that one widget.
-- Loading settings earlier cannot change QML binding order: bindings run before
-  Component.onCompleted, and singleton completion is at the end of the pass.
-  `SettingsStore` still reloads there to bound lateness; settling makes it
-  invisible.
-- `ViewMode.applyReserve()` is seeded from the settle timer, not from
-  `Component.onCompleted`. At completion `dock` is still the default `false`, so
-  `_lastReservePx` was seeded 0 — and the next drag release then looked like the
-  panel had grown from nothing and pushed every floating window.
-
-```bash
-qs ipc call view geom     # ...dragging=false settling=false
-```
-
-`settling=true` when nothing is happening means the timer never fired.
-
-**A one-shot handler must load, not merely gate.**
-`SettingsStore.loadNow()` reads synchronously before handlers branch on a
-persisted value; the reload restore in `shell.qml` therefore sees real dock
-mode and does not repin widgets onto the wallpaper.
-
-```qml
-function loadNow() { file.reload(); return file.text(); }   // SettingsStore
-```
-
-**Call both in that order; `text()` forces the blocking read.**
-`reload()` alone does not deliver the adapter values before return. Use this
-pattern first in any `Component.onCompleted` that branches on persisted state.
-
-### `visible` gates layer-surface mapping — never derive it from geometry
-
-A `PanelWindow`'s `visible` is what maps and unmaps its Wayland surface, and an
-unmapped window has width 0. So a `visible` computed from the contents' geometry
-closes a loop through the compositor, and it does not merely warn: it maps and
-unmaps a real surface. `RecordingToast` had `visible: recording || card.x <
-card.hidden - 1` over a card whose `hidden` read the window's own `width`, which
-Qt reported as a binding loop on every load — and Hyprland logged an
-openlayer/closelayer pair for `qs-recording` on every reload, a toast nobody had
-asked for being mapped and unmapped behind the scenes. Fixing only the loop was
-not enough: the label's implicit width lands a moment after construction, the
-slide `Behavior` then animated `x` across the "still on screen" test, and the
-surface flickered again.
-
-The idiom, which `SlidePopup` (`_visSurface`) already used and is why it never
-had this: **keep an imperative flag**, set it when opening, clear it on a timer a
-slide-duration after closing, and let `visible` read the flag.
-
-```bash
-# What a clean reload looks like on the event socket:
-socat -u UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HIS/.socket2.sock -   # then force a reload
-```
-
-No `openlayer`/`closelayer` for any `qs-*` namespace. The one legitimate
-exception is `qs-notifications`: `NotificationServer` is `keepOnReload: false`,
-so a reload drops the toasts and unmaps it, and `onReloadCompleted`'s own
-"config reloaded" toast re-opens it ~300ms later. That pair is the reload
-announcing itself, not a surface being remapped.
-
-### A popup that maps at ZERO SIZE kills the whole panel
-
-`xdg_positioner.set_size` rejects a non-positive width or height with a Wayland
-**protocol error**, and a protocol error disconnects the client. So a
-`PopupWindow` whose `implicitWidth` or `implicitHeight` resolves to 0 does not
-draw wrong — quickshell **exits**, and the bar, the wallpaper and every popup go
-with it, on the first click that opens it.
-
-**There is almost nothing to find afterwards**, which is why this is written
-down rather than left to be re-derived. `SIGKILL`-class death, so no coredump;
-`qs log` simply stops mid-sentence with no QML exception; the only record
-anywhere is Hyprland's `error in client communication (pid N)` in the journal
-(`journalctl -t xsession`), where N is the dead instance — cross-check it
-against `$XDG_RUNTIME_DIR/quickshell/by-pid/`. It reads exactly like "some agent
-killed the panel".
-
-`ProcMenu.qml` shipped like this on 2026-07-27 and took the desktop down on the
-user's first right-click:
-
-```qml
-Rectangle { id: box
-    anchors.fill: parent                    // = the popup
-    implicitWidth: col.implicitWidth        // <- the popup's size…
-    Column { id: col
-        anchors.fill: parent
-        component MenuRow: Rectangle { width: box.width }   // …from its own size
-    }
-}
-```
-
-A `Column` that `anchors.fill`s its parent takes its implicit size from its
-children's **laid-out widths**, so the popup's width was defined in terms of
-itself: it resolved to 0 and stayed there. Two rules, both in that file:
-
-- **Compute a popup's implicit size only from things that do not follow the
-  popup's size.** `TaskMenu.qml` and `Tooltip.qml` do it with explicit
-  `Math.max(a.implicitWidth, b.implicitWidth)` over named children; `ProcMenu`
-  has a variable entry list, so it MEASURES in `openFor()` (walking the entries'
-  `implicitWidth`/`implicitHeight`) and refuses to open on a degenerate result.
-  `implicitWidth: Math.max(1, …)` is the floor under both.
-- **Measure on your own flag, never on `visible`.** `Item.visible` is EFFECTIVE
-  visibility and is false for everything inside an unmapped window — and a popup
-  is unmapped whenever it is closed. Measuring over `visible` gives a correct
-  size on the first open and 0x0 on every one after it, i.e. the menu works once
-  per panel lifetime and then silently refuses forever. `ProcMenu`'s entries
-  carry `property bool shown` and let `visible` follow it.
-
-Verify off-screen, never on the live panel: put the popup in a `FloatingWindow`
-in a throwaway config, `tools/sandbox.sh exec` it, and open the popup from a
-`Timer`. A zero-size one prints `error 0: Invalid size` then
-`The Wayland connection experienced a fatal error: Protocol error` and exits
-255; a good one prints its size and lives. Cycle close→open at least twice —
-that second open is the case above.
-
----
+Verify at least two open/close cycles in an isolated popup harness.
+Protocol failures may only appear as “error in client communication” in
+journalctl -t xsession; correlate the PID with Quickshell's runtime directory.
+qs log can end without a QML exception.
 
 ## One slide, one duration
 
@@ -1922,334 +1756,86 @@ minimized ones, parked off-screen deliberately.
 
 ---
 
-## A toast's OWN `expireTimeout` outranks the panel's default
+## Notifications
 
-`notifTimeoutMs` (5 s) is the *server default*, i.e. what a notification gets
-when it sends `expire_timeout -1`. `NotificationCard.qml` must honour the two
-cases where the sender said otherwise, per the freedesktop spec: **`0` means
-never expire** and **`>0` is an explicit lifetime in ms**. It did not, and that
-is a bug with a compounding failure mode rather than a cosmetic one.
+Notifications.onNotification owns popup admission and sound. Apply this order:
 
-**A progress toast is ONE notification morphed in place** — `notify-send -p` to
-learn its id, then `-r <id>` on every update (surfer's downloads,
-`filer/videoconv.py`'s compress). Quickshell's server reuses the object for a
-known `replaces_id` and, per `server.cpp`, does **not** re-emit `notification`
-— so no new card, no second sound. But the moment our timer expires it, that id
-leaves `idMap`, and the next `-r` names nothing: `Notify` falls through to the
-`new Notification` branch and opens a **brand new toast, with its own sound**.
-Every whole percent. The user's report was "longer downloads just trigger the
-toast over and over instead of staying on the screen until they are finished."
+1. _recordSeen records the sender even if suppressed.
+2. rule.popup gates every urgency, including critical.
+3. notifLowPopup gates urgency 0.
+4. dndNow() suppresses unless rule.dnd or critical + notifCriticalInDnd.
+5. Sound is separately gated by rule.sound and notifSoundMute.
 
-Three halves, all of which have to hold:
+dndNow() reads time at arrival: a Date.now() binding does not update itself.
+The minute timer only clears expired settings. keysFor matches desktop entry
+first, then app name; keyFor records the primary key. Reassign notifRules and
+notifSeen wholesale, or SettingsStore's JSON comparison sees no change.
+Record a sender's display name only on first sight.
 
-- **The card honours `expireTimeout`** — `persistent` (critical *or*
-  `expireTimeout === 0`) suppresses the timer; otherwise the interval is the
-  notification's own value, falling back to `Notifications.timeoutMs`.
-- **A replacement RESTARTS the countdown.** The card is not rebuilt, so an
-  ordinary toast updated in place would otherwise still die on the original
-  arrival's clock. `Connections` on `summaryChanged`/`bodyChanged` restarts it.
-- **`maxVisible` eviction spares `expireTimeout === 0`**, exactly as it spares
-  critical. Evicting a live progress toast puts its sender straight back in the
-  loop above. The `victim || vals[0]` fallback still bounds the stack.
+The panel has no history, badges, per-event catalogue, or screen-sharing/
+mirroring detection; do not offer unsupported settings. Critical-in-DND defaults
+on, but never bypasses a sender's popup=false rule.
 
-**Senders: a toast you intend to keep updating must ask for it** — `-t 0` on
-every progress update, and the *default* timeout on the completion/failure one,
-which has nothing left to update. Both app-side callers do this now.
+### Sender list
 
-Measured, not reasoned — two `notify-send -p` lanes 8 s apart (past the 5 s
-default), reading the returned id:
+SetPgNotifs merges installed desktop entries declaring
+X-GNOME-UsesNotifications=true, plasmanotifyrc application entries, notifSeen,
+and a live DesktopEntries picker. Adding via the picker records the sender
+without an explicit rule, retaining inherited defaults. Keep XDG data paths
+in the scan; DesktopEntry does not expose arbitrary keys.
 
-```
-control (default timeout):  first=36  after 8s=37   <- NEW TOAST, the bug
-persist (-t 0):             first=38  after 8s=38   <- same toast, replaced
-```
+panelSenders covers non-application senders (quickshell, screenshot, recording,
+nix); keep it aligned with their notify-send call sites. Do not add KDE-internal
+.notifyrc services to the Hyprland list. Send desktop-entry when the displayed
+sender differs from the ID: goetia uses board. Case normalization cannot infer
+that mapping. SetTextField.liveText serves search; ordinary fields still
+commit only on Enter/focus-out.
 
-That is the regression test: same id across a gap longer than `notifTimeoutMs`.
-Close the persistent one afterwards (`busctl --user call
-org.freedesktop.Notifications /org/freedesktop/Notifications
-org.freedesktop.Notifications CloseNotification u <id>`) — by construction it
-will not go away on its own. `gdbus` is not installed here; `busctl` is.
+### Lifetime, progress, and actions
 
-### Action buttons: the server advertised them for months and the card drew none
+NotificationCard honours expireTimeout: -1 uses Notifications.timeoutMs,
+0 persists, and positive values are milliseconds. Critical cards also persist.
+Restart timeouts on summary/body/hints changes; replacement reuses the card.
+maxVisible eviction prefers noncritical, nonpersistent victims, with the final
+fallback retaining a bounded stack.
 
-`NotificationServer.actionsSupported` has always been bound to the
-`notifActions` setting, and `NotificationCard.qml` never rendered
-`Notification.actions` — so an app that asked the server whether it could ship
-buttons was told **yes** and then had them silently dropped. Whatever the
-capability says, the card is what makes it true.
+Progress senders use -t 0 and replace-id on every update, then a normal timeout
+on completion/failure. Expiring a progress ID causes the next update to create
+a new card and sound. The value hint (0–100, registered in extraHints) draws
+progress; senders must not claim completion before it occurs.
 
-- **Buttons are a right-aligned `SetButton` row under the body**, sized to their
-  labels (`minWidth: 52`, `maxWidth: 120`) rather than the settings pages' 96px
-  floor — three of those do not fit a 300px card. Capped at three.
-- **`default` is not a button.** Per the spec it means "the notification itself
-  was clicked", so it rides the card's own MouseArea and pre-empts the plain
-  dismiss.
-- **Invoking does not close anything.** Quickshell's `invoke()` emits
-  `ActionInvoked` and stops there; the card calls `dismiss()` itself. A sender
-  blocked on `notify-send -w` gets the action key on stdout and exits.
-- **`bodyRow` sits at `z: 1`, over the fill-the-card dismiss MouseArea** — which
-  is declared last and would otherwise eat every button click. Text and images
-  accept no events, so a click anywhere else still falls through to dismiss.
-- **Rendering is gated on the same `notifActions` setting** the capability is,
-  so the panel cannot draw a control the sender was told would not be there.
-  A sender that needs the buttons should check the setting and offer a
-  text fallback — `repo-updates` (`home/srvs/repo-updates.nix`) reads
-  `settings.json` directly and names its CLI instead.
-- **Except at urgency 2, which always draws them.** A critical toast is the
-  level reserved for a question that has to be answered — `tools/heavy-gate.sh`
-  asking whether to stop ComfyUI/ollama for a heavy rebuild — and one whose
-  answer is drawn nowhere is the affordance-that-silently-fails DESIGN §10
-  forbids. Note the asymmetry that keeps this honest: the card draws MORE than
-  the server advertised, which loses nothing. The bug the gate exists to
-  prevent is the other direction, advertising buttons and then swallowing
-  them.
+Render at most three right-aligned SetButton actions. The default action is
+the card click, not a button. invoke() emits ActionInvoked but does not close;
+dismiss explicitly afterward. Keep bodyRow above the card's dismiss MouseArea.
+Use notifActions for both capability and rendering, except critical cards
+always expose their actions. Senders needing disabled actions offer a text/CLI
+fallback, as repo-updates does.
 
-**Do not test this by firing a toast.** A notification is his screen; the
-harness (`tools/repo-updates-test.py`) replaces `notify-send` with a log line,
-and `repo-updates.py --demo` exists so that raising a real one with real buttons
-is a command HE runs.
+### KDE Connect and downloaded images
 
-### A KDE Connect toast is titled with the PHONE, and only that one is
+Notifications.sender owns the header. Only identified KDE Connect notifications
+may substitute a device name for appName. Register x-kde-origin-name and
+x-kdeconnect-source-device in extraHints; unrequested hints are discarded.
+Prefer origin-name; source-device may contain a name in some builds but is
+documented as an ID. Resolve ID-like values via kdeconnect-cli name/ID lists,
+reject mismatched lengths, reassign kdeDevices, and throttle queries to one
+per minute. Fall back to appName rather than displaying an ID or empty header.
+Launch the Nix CLI through NixPath.sh and include it in launchTargets.
 
-The card's header line is the sender's `appName` — except for a notification
-relayed off his phone, where `appName` is the string `KDE Connect` on every one
-of them and says nothing. `Notifications.sender(n)` owns that choice and
-`NotificationCard.qml` just draws what it returns; nothing else in the stack
-knows about it.
+Image completion toasts carry x-download-image in extraHints; partial downloads
+do not. Resolve its current location through scripts/dl-resolve.py for both
+the thumbnail and click-time xdg-open, since sort-downloads may already have
+moved it. The resolver handles destination directories and collision suffixes.
 
-**The device name arrives in a HINT, and Quickshell drops hints it was not asked
-for.** `NotificationServer.extraHints` is the opt-in: without
-`["x-kde-origin-name", "x-kdeconnect-source-device"]` in it,
-`Notification.hints` holds only the hints Quickshell has properties for and the
-name is simply not there. That is silent — the header just keeps saying
-`KDE Connect`.
+### Verification
 
-Which hint carries what was **measured, not assumed** (26.04.3):
-
-- `kdeconnect_notifications.so`, `Notification::createKNotification`, calls
-  `KNotification::setHint` with `Device::name()` for **both**
-  `x-kde-origin-name` (17 chars, upstream's device-name hint) and
-  `x-kdeconnect-source-device` (26) — the latter is documented upstream as the
-  device *ID*, so treat the name there as this build's accident, not a contract.
-  `x-kde-display-appname` gets the phone-side app.
-- `knotifications` forwards them: `NotifyByPopup::sendNotificationToServer`
-  loops over `KNotification::hints()` unconditionally into the `QMap` it hands
-  `Notify`. The server's advertised capabilities do **not** filter hints, so
-  there is nothing to declare in `GetCapabilities` to earn them.
-
-Three rules the implementation is built on:
-
-- **Only KDE Connect's title changes.** `x-kde-origin-name` is a *general* KDE
-  hint (KMail sets it to an account name), so the notification has to be
-  identified as KDE Connect first — the `x-kdeconnect-source-device` hint being
-  present, or `appName`/`desktopEntry` naming kdeconnect. Everything else keeps
-  its `appName` untouched.
-- **Never draw a raw device id, and never draw nothing.** If the candidate looks
-  like an id (`>=16` chars of hex/`_`/`-`, which covers both forms kdeconnect
-  issues) it is looked up in a table built from `kdeconnect-cli --list-devices
-  --id-only` + `--name-only` — one `sh` line, zipped by index, **refused
-  outright on a length mismatch** rather than zipped into wrong names. Until
-  that lands the header falls back to `appName`. `kdeDevices` is reassigned
-  wholesale so the card's binding re-evaluates when it does; the spawn is
-  throttled to once a minute so a burst from an unknown id cannot fork per
-  notification.
-- **`kdeconnect-cli` is nix-only**, so it goes through `NixPath.sh` and is in
-  `NixPath.launchTargets` — book's panel has a Fedora-only PATH.
-
-Verify it without a phone and without touching his screen: copy this directory
-to a throwaway config, add a `shell.qml` that prints `Notifications.sender()`
-for every tracked notification, and run it under an isolated `HOME` **and an
-isolated bus** — `dbus-run-session`, because the live panel already owns
-`org.freedesktop.Notifications`:
-
-```bash
-HOME=$P XDG_CONFIG_HOME=$P/.config XDG_RUNTIME_DIR=$P/run QT_QPA_PLATFORM=offscreen \
-  dbus-run-session -- sh -c 'qs -p $P/.config/quickshell/shell.qml --no-duplicate & …
-    notify-send -a "KDE Connect" -h string:x-kde-origin-name:"Galaxy S22 Ultra" \
-        -h string:x-kdeconnect-source-device:"Galaxy S22 Ultra" "Signal" "hello"'
-```
-
-**Put a stub `kdeconnect-cli` first on `PATH` when you exercise the id lookup.**
-A private bus has no kdeconnect on it, so the real CLI *activates a second
-`kdeconnectd`* — which advertises this box on the LAN under the throwaway `HOME`
-and, measured 2026-07-29, **outlives the bus teardown** and has to be killed by
-hand. The CLI's output shape is verifiable once against the live daemon; the
-stub is what keeps the harness off the network.
-
-### A `value` hint makes a toast a progress toast
-
-An int 0-100 in the `value` hint — the de-facto progress hint every other
-notification server reads, so `notify-send -h int:value:37` is the whole sender
-side — makes `NotificationCard.qml` draw docs/DESIGN.md §8.1's bar under the
-body, filled in the card's urgency tint. It is in `extraHints` for the usual
-reason: Quickshell drops a hint nobody asked for.
-
-Two things the sender owns, not the card. **Persistence**: a progress toast is
-sent at `-t 0` and updated with `--replace-id`, because the card's expiry timer
-would otherwise retire it mid-operation and the next update, naming an id the
-server no longer holds, would open a fresh toast (the surfer-downloads bug,
-§10.4). **Honesty about the fraction**: the card draws what it is given, so a
-step with no countable denominator must ease and stop short of 100 rather than
-sit at 0 or claim to be finished. `repo-updates` is the reference sender —
-`home/srvs/repo-updates-files/repo-updates.py`, harness
-`tools/repo-updates-test.py`. A bar-only update still restarts the card's
-expiry (`onHintsChanged`), so a sender that *did* set a timeout keeps it fresh.
-
-### An image-download toast thumbnails + opens the file
-
-surfer's download **completion** toast for an image carries the downloaded
-file's absolute path in the `x-download-image` hint (surfer's `Downloads.done`
-threads the path through from `Main.qml`'s `onDownloadRequested` — `downloadDir
-+ "/" + downloadFileName` — and only attaches it for a download whose extension
-is in its `IMAGE_EXTS`, mirroring filer's). `NotificationCard.qml` renders a
-48px thumbnail from that path and, because the whole card is the affordance,
-clicking it `xdg-open`s the image (the default handler → viewer) before
-dismissing. A non-image toast, or a progress toast (whose file is still
-partial), carries no hint and clicks plain-dismiss. `x-download-image` is in
-`extraHints` for the same reason the KDE Connect hints are — Quickshell drops a
-hint it was not asked for.
-
-The hinted path is **not trusted as the file's location**: `sort-downloads`
-files finished image downloads out of `~/Downloads` into `~/Pictures` within
-seconds (a .path unit on ~/Downloads), so a toast pointed at the ~/Downloads
-path it was handed would render a broken thumbnail and `xdg-open` a file that
-had already moved — that was the feature "not working". `NotificationCard.qml`
-instead resolves the file's CURRENT location through `scripts/dl-resolve.py`
-(the hinted path, then the media dirs with sort-downloads' ` (n)` collision
-suffixes) for both the thumbnail and, again, at click time just before
-`xdg-open`. That script is registered by `quickshell.nix`.
-
----
-
-### Who gets a toast: one gate, modelled on Plasma's
-
-`Notifications.onNotification` is the ONLY place that decides whether a
-notification appears and whether it makes a sound. The shape is lifted from
-Plasma 6's `kcm_notifications` / `plasmanotifyrc`, which splits the question
-into global conditions and a per-sender rule; keeping the same split means the
-settings page reads like the one he already knows, and the parts we *cannot*
-do are visible as omissions rather than as invented alternatives.
-
-The branch order, which is the whole specification:
-
-1. **Learn the sender** (`_recordSeen`) — before any decision, so an app whose
-   popups you switched off still has a row to switch them back on.
-2. **`rule.popup`** — the sender's own switch, and it **binds even for
-   critical**. Plasma's `ShowPopups` does the same. A toggle a notification can
-   talk its way past is a dishonest control (§10).
-3. **Urgency 0** vs `notifLowPopup` (Plasma's `LowPriorityPopups`).
-4. **`dndNow()`** — suppress unless this sender has `rule.dnd`
-   (`ShowPopupsInDndMode`), or it is critical and `notifCriticalInDnd` is on.
-5. **The sound**, gated separately on `rule.sound` and `notifSoundMute`, so
-   silencing a sender never costs you the toast.
-
-Three things to know before editing it:
-
-- **`dndNow()` is a function, not a property, and that is deliberate.**
-  `notifDndUntil` is a wall-clock instant, and a binding over `Date.now()` never
-  re-evaluates. Everything asks at the moment a notification arrives. The
-  minute-timer beside it only *retires* a lapsed value so the Settings window is
-  not left claiming a quiet hour that ended; the gate is exact without it.
-- **A rule matches on EITHER of a sender's two names**, entry first
-  (`keysFor`). The desktop entry and the app name disagree constantly — Vivaldi
-  is `vivaldi-stable` / `Vivaldi`, and this desktop's own programs send
-  `-a filer` with no entry at all — so matching one only would mean a rule that
-  silently never fires, which is the exact failure this feature exists to
-  prevent. `keyFor` (the first of the two) is the key a sender is *recorded*
-  under; `ruleFor(n)` takes the notification, not a key.
-- **The seen registry is one of four sources for the app list, not the list.**
-  It stores a display name once, on first sight — never re-stamped, both to keep
-  the panel off the disk during a burst and because the name a rule was made
-  under should not shift under it.
-- **`notifRules` / `notifSeen` are rewritten wholesale, never mutated.**
-  `SettingsStore` diffs each key by `JSON.stringify` against its last-seen-on-disk
-  snapshot; editing the object it handed back changes both sides of that
-  comparison and the save finds nothing to write.
-
-**What Plasma has and we deliberately do not**, so nobody "restores" it:
-`ShowInHistory` (there is no notification history in this panel) and
-`ShowBadges` (no taskbar badge), which is why the per-app row has three
-switches and not five; the per-*event* table under a service (that exists
-because KNotification apps ship an event catalogue in a `.notifyrc` — our apps
-send plain `notify-send` and have none); and `WhenScreensMirrored` /
-`WhenScreenSharing`, portal-level state nothing here reads. One default is
-inverted on purpose: Plasma's `CriticalInDndMode` ships **off**, ours ships
-**on**, because letting critical through is what this panel has always done and
-quietly reversing it would lose an alert.
-
-**Test it with `tools/notif-rules-test.sh`, never by firing a toast.** A
-notification is his screen, and the failure mode here is *silence* — a wrong
-branch does not throw, it eats a notification. The harness copies the shell
-files to a temp dir and runs the gate and the settings page offscreen on a
-private DBus session (private because these files include a notification
-*server*, which must never contest the name his panel owns). It transcribes the
-branch order above; reorder the real gate and you reorder the harness too.
-
-`SetNotifApp.qml` is the per-app row — Plasma's master/detail pane will not fit
-a 640px single-column page, so the app is a row and its rules are an indented
-disclosure under it (docs/DESIGN.md §9.1).
-
-#### The app list must be populated BEFORE an app interrupts you
-
-A list you can only edit after the fact is useless exactly when you want it, and
-the first cut of this got that wrong twice: first it listed only learned
-senders, then it made up for that with a **hardcoded array of this desktop's
-apps**. Plasma hardcodes nothing — it runs a `KApplicationTrader` query and
-scans the `.notifyrc` dirs — and neither does this now. `SetPgNotifs.qml`
-merges four sources, weakest label first so the best name wins:
-
-1. **Installed `.desktop` files declaring `X-GNOME-UsesNotifications=true`**,
-   found by `grep` across `$XDG_DATA_HOME` + `$XDG_DATA_DIRS`. `grep` and not
-   `DesktopEntries` because Quickshell's `DesktopEntry` exposes the standard
-   fields and not arbitrary keys; `KApplicationTrader` does the same scan behind
-   a nicer face. **Measured on `top` 2026-08-07: zero of the 299 installed
-   entries declared it** — a GNOME convention nixpkgs does not carry, which is
-   also why Plasma's own list here is built almost entirely from its other two
-   sources. So **this desktop's five notifying apps now declare it themselves**
-   (`home/prog/{filer,player,painter,surfer,board}.nix`). Adding that one key to
-   a new app is the whole of listing it; there is no second list to update, and
-   Plasma's KCM picks them up too.
-2. **`~/.config/plasmanotifyrc`** `[Applications][…]`, read once by a `Process`,
-   best-effort — an absent file is simply no extra candidates. This is the one
-   place on the machine that knows firefox, discord, nheko and vivaldi notify
-   him, because Plasma learned it over months.
-3. **`notifSeen`** — what the panel has learned since.
-4. **The picker**: a live search over `DesktopEntries.applications.values`,
-   adding any installed program by its `.id`. Needs no declaration from the app,
-   so it cannot go stale, and it is the answer to "must I wait for it to
-   notify". Adding writes the app into `notifSeen` and **no rule** — the row
-   appears reading its inherited defaults.
-
-**`.notifyrc` services, Plasma's other source, are deliberately not one here**:
-31 are installed and every one is a Plasma/KDE internal (`kwin`, `powerdevil`,
-`akonadi_*`, `plasma_workspace`) that a Hyprland session never runs — 31 rows of
-noise for zero real senders.
-
-**`panelSenders` is the one list left, and it is four entries** — `quickshell`,
-`screenshot`, `recording`, `nix`. These are three panel features and a user
-service, not applications: they have no `.desktop` file to declare anything, and
-the name each uses exists only as the `-a` argument at its `notify-send` call
-site, so nothing can enumerate them. **Keep it in step** — `grep -rn
-'notify-send' apps home` finds every call site.
-
-**A sender whose `-a` name and `.desktop` id disagree must send the
-`desktop-entry` hint.** goetia is the only one: the program is `goetia`, the
-entry is `board.desktop`. Without the hint the scan offers a row keyed `board`
-while the notification arrives as `goetia`, and the rule silently never fires —
-so `board-notify.py` passes `-h string:desktop-entry:board`. The two-key lookup
-covers the ordinary case where they merely differ in *case* or where one is
-absent; it cannot invent a mapping between two different words.
-
-`SetTextField.liveText` exists for that search field and nothing else: the
-component still commits only on Enter/focus-out, because every other user of it
-persists a setting and must not see keystrokes.
-
-The harness pins `XDG_CONFIG_HOME` at a synthetic `plasmanotifyrc` with two keys
-that are deliberately not installed programs. A test whose expectation depends
-on which apps have notified him this week is not a test, and `book` may have no
-Plasma config at all.
-
----
+Use tools/notif-rules-test.sh and tools/repo-updates-test.py; never fire test
+notifications on the live bus. Notification-server harnesses require a private
+DBus session, offscreen rendering, scratch HOME/XDG paths, and synthetic
+plasmanotifyrc. Stub kdeconnect-cli even on a private bus: the real CLI can
+activate a second network-advertising daemon that survives bus teardown.
+For lifetime tests, verify an ID survives longer than the default timeout and
+close persistent test notifications on the isolated bus.
 
 ## The bar dims itself for the sudo modal (`Askpass.qml`)
 
@@ -2268,126 +1854,29 @@ do is leave the bar undimmed. Full seam: `apps/askpass/AGENTS.md`.
 
 ---
 
-## The panel draws the wallpaper — hyprpaper is gone
+## Wallpaper and first paint
 
-Removed 2026-07-26. `Wall.qml` (which image + tile/scale), `WallpaperLayer.qml`
-(a Background layer surface per monitor), `WallpaperImage.qml` (one cross-fade
-frame). Two reasons it had to change: hyprpaper re-rendered its whole background
-layer on every set, which reads on screen as the wallpaper FLASHING (`wal-set.sh`
-already skipped redundant sets purely to dodge it), and it had no notion of an
-OFFSET — so centring the art in the non-panel region meant compositing a fresh
-full-screen PNG with ImageMagick for *every* panel width, then setting it, then
-flashing. Drawn here, the recentre is a property binding on
-`ViewMode.liveWidth`, so it follows the drag at frame rate, and a wallpaper
-change is a cross-fade.
+Wall.qml selects path/mode, WallpaperLayer.qml owns each monitor's Background
+surface, and WallpaperImage.qml owns crossfade frames. wal-set.sh publishes
+~/.cache/wal/current and current.mode (tile|scale) in place; replacing their
+inodes detaches watches. --wallpaper-only writes selection without applying the
+palette or reloading Theme.qml.
 
-- `wal-set.sh` still DECIDES the wallpaper and owns the palette, kitty, cursor
-  and OpenRGB work. It now just publishes to `~/.cache/wal/current` (path) and
-  `~/.cache/wal/current.mode` (`tile`|`scale`), written **in place** — an inotify
-  watch follows the inode, so a temp+rename would silently detach it.
-- `--wallpaper-only` is now just those two writes — 14 ms, which is what the
-  picker's arrow-key preview rides on. It still must NOT do the full apply: that
-  rewrites `Theme.qml`, which reloads the panel.
-- **`sourceSize` must never be bound to the item's width** — the width changes
-  every frame of a drag and would re-decode a multi-megapixel image per frame.
-  It is the monitor resolution for `scale`, and 0 (natural size) for `tile`,
-  since a tile scaled to the screen no longer tiles.
-- **The blurred backdrop** behind everything is a PRE-COMPUTED file:
-  `wal-prepare.sh` caches a 400px-wide real Gaussian per wallpaper
-  (`~/.cache/wal/blur-$KEY.png`, path published in `current.blur`) and the panel
-  just draws it, so it costs one small static texture and nothing per frame. It
-  fills the strip that opens up between the panel edge and the sharp wallpaper
-  while the panel is being narrowed (the sharp copy only glides to the new width
-  on release). **Keep it static** — it is on screen exactly when the compositor
-  is busiest. Two things it encodes: **PNG, not JPEG** (the output is nothing but
-  smooth gradients, which is exactly what JPEG bands), and it is a real blur
-  rather than the original trick of decoding the wallpaper at ~96px and letting
-  the GPU stretch it. That upscale is free but it is *not* a blur — rendered out
-  and looked at, the picture was still plainly legible with interpolation facets.
-  That path survives only as the fallback for the moment before the cache exists.
+Bind sourceSize to monitor resolution for scale, or natural size (0) for tile,
+never the animated item width. wal-prepare.sh caches a 400px Gaussian PNG at
+blur-$KEY.png and publishes current.blur. Keep this backdrop static during
+panel drags; low-resolution upscaling is only the pre-cache fallback.
 
-```bash
-qs ipc call wallpaper status   # path, mode, and whether the visible frame actually DECODED (front=ready)
-```
+On tree completion, call Wall.loadNow() before reading singleton values:
+reload each FileView then text() to force its read. WallpaperImage.loadNow()
+decodes the first frame synchronously, then restores asynchronous loading for
+later crossfades. Otherwise the new tree commits a blank frame.
+qs ipc call wallpaper status must report front=ready and firstPaint=ready.
 
-That is the check that made switching hyprpaper off safe rather than a gamble on
-a blank desktop.
-
-### The first paint of a reload must be SYNCHRONOUS, or the wallpaper flashes
-
-The reload is a handoff of the layer surface, so the compositor keeps showing the
-old buffer until the new tree paints — which means the only way the wallpaper can
-flash is the new tree committing a frame it has not put the picture in yet. It
-did, on every theme and wallpaper change, and the screen went flat `Theme.bg` for
-about a tenth of a second. Traced with `Date.now()` warns across one forced
-reload:
-
-```
-t+0    ms  WallpaperLayer onCompleted   Wall.url.length = 0     <- singleton not loaded yet
-t+20   ms  _apply                       len = 79, status = Null <- source assigned AFTER the pass
-t+20   ms  Qt.callLater / 0 ms Timer    status = Loading
-t+103  ms  status = Ready                                       <- first frame was long gone
-```
-
-Two independent causes, and fixing either alone leaves the flash:
-
-- **A singleton completes at the END of the load pass**, so `Wall.url` is empty
-  in a consumer's `Component.onCompleted` — the same trap as
-  `SettingsStore.loadNow()`, and the same fix: **`Wall.loadNow()` first**, which
-  `reload()`s the three `FileView`s and reads `text()` (the `text()` is what
-  forces the read to complete).
-- **`asynchronous: true` cannot make the first frame.** A 1920x1080 webp decodes
-  in 23-37 ms measured with `QImageReader`, and that is a worker thread landing
-  after the pass either way. So the first paint of a tree — and ONLY the first
-  paint — goes through `WallpaperImage.loadNow()`, which drops `asynchronous`
-  for one assignment and restores it on the next line. A cross-fade must stay
-  asynchronous: the outgoing frame is still on screen, and the picker previews a
-  new wallpaper on every arrow key.
-
-```bash
-qs ipc call wallpaper status   # ... firstPaint=ready
-```
-
-`firstPaint` is the regression check and it is what the tree recorded at its own
-completion, so it stays readable long after the reload. Anything but `ready`
-means the flash is back.
-
-### The same rule, for the dock: NOTHING ON SCREEN MAY LOAD ASYNCHRONOUSLY
-
-The wallpaper was not a special case, it was the first instance. Anything the
-panel draws that is fetched by a `Loader` or an `Image` has exactly the same
-problem, because the reload's first frame is painted from whatever is in the
-tree *at completion* and an asynchronous load is by definition not.
-
-`DockTile`'s Loader was `asynchronous: true`, so on every reload all five dock
-tiles came up as their 1px frame over `Theme.bg` — a dock of empty outlines,
-which is what "the panel flashes black" was. Measured with a `Date.now()` warn
-on `Loader.onStatusChanged` across one forced reload, dock mode at 378px:
-
-```
-t+0  ms   status = Loading   x5
-t+0  ms   Configuration Loaded                          <- the tree is up, it will paint
-t+82..95  status = Ready     tasks, clock, calendar, weather, media
-```
-
-`asynchronous: false` spends that time inside the load pass instead, where the
-old frame is still on screen. **The laziness was notional anyway** — the grid is
-ONE PAGE with no scrolling, so every tile in `placements` is on screen at all
-times and gets built either way; async only meant *later*, never *not at all*.
-The `active` `Binding` in that file is unrelated and must stay: it is about the
-property arriving late, not the item.
-
-```bash
-qs log | grep "dock tiles"    # nothing = every tile was painted in the first frame
-```
-
-`DockGrid._auditFirstPaint()` runs at the grid's own completion and warns **only
-on a regression**, naming the tiles that were not `ready`. There is deliberately
-no IPC call for it: the answer is only true for the instant it runs, and a poll
-from outside always arrives after the tiles have caught up, so it would report a
-clean panel whether or not the bug was there.
-
----
+DockTile Loaders also load synchronously; every placement is visible in the
+single-page grid. Preserve the separate active Binding for late properties.
+DockGrid._auditFirstPaint logs unready tiles at completion; a later IPC poll
+cannot detect that first-frame failure.
 
 ## Scrolling: use the `Kinetic*` types, never a bare `Flickable`
 

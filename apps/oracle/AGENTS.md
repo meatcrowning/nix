@@ -1,183 +1,57 @@
-# `oracle` — a minimal ollama chat window
+# chatter — local model chat
 
-**User-facing name is "chatter"** (window title, `Name=` in the desktop
-entry) — presentation only, same as goetia keeps its store named board. The
-source directory, module/file names, `ORACLE_SANDBOX`, and the runtime data
-paths (`~/.local/share/oracle/{sandbox,sessions}`) all keep the `oracle` name
-on purpose, so existing sessions and the sandbox jail need no migration.
+The displayed name and commit prefix are chatter. Internal paths, module names,
+ORACLE_* variables, and persisted data retain oracle; do not rename stores.
+The app provides model selection, streaming chat, sessions, and base prompts.
 
-**Commit messages for this app say `chatter:`, not `oracle:`** (his call) —
-the subject line and any human-facing prose about it use the presented name,
-matching every other reference he reads. Only the directory and identifiers
-(`apps/oracle`, `ORACLE_*`, module names) keep `oracle`; those are internal.
+UI strings call the daemon “server”; technical tool descriptions may name
+ollama. Status left shows activity/results or idle when the server is up;
+right shows jobs and server state. stopReply clears stale activity text.
+With the server down, leave the left resting status empty.
 
-The smallest of the vendored apps, and deliberately so. Two things at its core:
-a **model selector** filled from the local ollama daemon's `/api/tags`, and a
-**prompt box** that sends one chat turn to `/api/chat` and shows the reply as it
-streams. It also keeps its **conversation sessions**: every conversation is a
-named, persisted transcript you can switch between (*Sessions* below), and a
-selectable **base system prompt** — a handful of built-in presets plus your own
-editable custom text (*The base prompt* below). It remembers the **model
-selector** too — the model last used and an agent-suggested ranking (see *The
-model selector* below).
+## Session shells
 
-## "server", not "ollama"
+Root.qml is an Item shared by the Hyprland Main.qml Window and Plasma's
+pylib/kdeshell.py shell (see ../AGENTS.md). Keep Window-only operations in the
+wrapper; Root publishes windowTitle. The actions table serves Plasma and
+tbButtons projects it into Hyprland's titlebar; both call tbAction(id).
+Keep hidden selector rows at zero height so their IDs continue to resolve.
+Plasma uses right-aligned model/session toolbar pickers, File session actions,
+Settings base prompts, and Tools server controls.
 
-**Every string he reads says `server`** [his, 2026-08-23] — the status bar
-(`server running` / `server · <model>` / `server down`), the start/stop reasons the
-askpass dialog shows, the pull heading. Which daemon is behind it is an
-implementation detail and the name of one is noise in a status bar. The
-model-facing text keeps `ollama` where it is a technical fact (the endpoint in
-`describe_self`, the tool descriptions), and so does every identifier.
+Confirm session deletion through the shared modeless DontUseNativeDialog
+pattern; static QMessageBox helpers crash this stack.
 
-The two halves say different kinds of thing, and neither repeats the other:
-the **left** is what is HAPPENING (`generating…`, an error, a server action's
-result) and the **right** is the standing fact (jobs, then the daemon). So the
-left names its resting state — **`idle`**, whenever the daemon is up and no
-turn is in flight — because a blank left half is also what a wedged window
-looks like [his, 2026-08-23], and `stopReply()` clears `win.status` so the
-line the interrupted turn was last saying about itself does not stand after it
-is over. With the daemon down the left is empty: the right already says
-`server down`, and `idle` beside it would be a claim about a server that is
-not running.
+Use the +plasma file-selector variants with unchanged component APIs.
+PromptBox keeps the native TextArea background; +oxygen/PromptBox must select
+that same implementation because Oxygen takes precedence over +plasma.
+Bubble and CapChip use non-flat, non-interactive native button frames.
+ViewFrame exposes its native padding; PromptEditor exposes load(text),
+saved(text), and cancelled(), leaving persistence to Root.
+Meter and reply picture frames retain custom content drawing: native
+ProgressBar painting inside this QQuickWidget has failed in the harness.
+CtxMenu and VScroll follow their shared counterparts.
 
-## Two roofs
+The Edit menu and transcript context menu share textMenu()/runTextRow().
+noteSelection and selectedBody identify the target editor. Disable Edit rows
+without a selection. Copy replies as markdown, not flattened rendered text.
 
-**Under Plasma, chatter is a REAL KDE window** — a `QMainWindow` with a real
-menubar, toolbar and status bar, built by `pylib/kdeshell.py` (the third app to
-get one, after painter and player; read `apps/AGENTS.md` → kdeshell BEFORE
-touching any of it, and docs/DESIGN.md §7.6 for why). The Hyprland face is
-exactly what it always was.
+## UI harness
 
-- **`qml/Root.qml` is the whole app, as an `Item`**; `qml/Main.qml` is the
-  Hyprland session's `Window` wrapper around it. Nothing Window-only lives in
-  Root — the title is published as `windowTitle`.
-- **The four header rows collapse in that session.** model, session, base
-  prompt and server become: two `QComboBox`es on the toolbar (model, session),
-  the File menu's session rows, the Settings menu's base-prompt radio set, and
-  the Tools menu's Unload/Start/Stop with the observed state in the status bar's
-  right-hand slot. They stay in the tree at zero height, not branched away, so
-  every id they carry (the three dropdowns, the prompt editor) still resolves
-  and one file still serves both faces.
-- **`actions` is the table for Plasma, and `tbButtons` is its compact Hyprland
-  projection.** chatter's model/session/system-prompt selectors and server
-  status/controls are secondary `mo`/`ss`/`pr`/`sv` buttons in the compositor's
-  inner titlebar. They call the same `tbAction(id)` path as the menus; the
-  server button opens a small popup containing unload and start/stop. Plasma
-  keeps the full menus and toolbar pickers, while the four content rows stay in
-  the tree at zero height under Hyprland.
-- **Deleting a session is asked about first** — the one row that destroys
-  something of his, with no undo in the store. A constructed `QMessageBox` with
-  `DontUseNativeDialog`, shown modelessly: the static helpers segfault this
-  stack (apps/AGENTS.md).
-- **The two pickers sit at the RIGHT end of the toolbar** [his, 2026-08-22] —
-  a `QToolBar` has no alignment of its own, so an expanding blank `QWidget` in
-  front of them takes every pixel the action buttons leave.
-- **Seven components have `+plasma` twins**, swapped by the file selector with
-  the same API either way: `PromptBox` (the compose box as the STYLE'S OWN
-  INPUT — a `ScrollView` holding a `TextArea` that keeps the background
-  qqc2-desktop-style gives it, beside a real `Button`. It was a `Frame` around a
-  background-less TextArea until 2026-08-22, and that is a group box's relief:
-  the window colour behind a flat outline, where Oxygen draws an input as a
-  recessed hole — a dark View-coloured fill in a rounded inset frame. [his] *"is
-  the bottom prompt section in style for oxygen? i feel like it's not"* — it was
-  not), `Chip` (the attachment chip as a flat `Button`),
-  `Bubble` (a message as a real KStyle `Button` frame — `enabled: false` so it
-  takes no hover, press or focus, with the message's own selectable text drawn
-  above it), and,
-  from the Oxygen audit of 2026-08-22 [his] *"the scroll bar is
-  not properly themed, but im sure there are other things as well"*:
-    - **`ViewFrame`** — the conversation's surround. Ours was a 1px rounded
-      Rectangle sitting directly above the compose box's real `Frame`: two
-      surrounds, two reliefs, one window. The twin is that same `Frame`, and the
-      content's inset is the frame's own `pad`.
-    - **`PromptEditor`** — the custom-prompt panel (Settings ▸ Edit Custom
-      Prompt…), which in that session was an accent-bordered aero box with
-      lowercase pixel `cancel` / `save` inches from the toolbar's real buttons.
-      The twin is a `Frame` + `ScrollView`/`TextArea` + `DialogButtonBox`, so
-      the words, the icons and the button ORDER are the platform's. It is a
-      component now rather than markup in `Root.qml`: `load(text)` fills and
-      shows it, `saved(text)` / `cancelled()` report the choice, and Root.qml
-      still decides what saving MEANS (it writes `Ollama`).
-    - **`CapChip`** — a capability indicator, as the KStyle's button frame with
-      the label above it, the same non-interactive treatment `Bubble` uses.
-      **Not `flat`**: a flat KStyle button draws no relief until it is hovered,
-      and these never are, so flat left three bare words with nothing boxing
-      them.
-    - **`CtxMenu`** — the log's right-click menu (below), ours under Hyprland
-      and the style's own popup under Plasma. Copied verbatim from player's
-      pair; it is generic by design.
-  `qmlcommon/+plasma/VScroll.qml` is the fifth fix and lives one level up,
-  since every app shares it (apps/AGENTS.md → oxygenstyle).
-  `+oxygen/PromptBox.qml` deliberately routes to that same native prompt
-  control: Oxygen is the selector's first choice, so without this entry it can
-  fall through to the hard-coded Hyprland rectangle instead.
-- **`Meter.qml` and the picture frames in a reply keep OUR drawing on purpose.**
-  A KStyle `ProgressBar` paints nothing inside the `QQuickWidget` (measured
-  2026-08-22: blank in the app and blank in a standalone qqc2-desktop-style
-  harness where a `Button` drew fine), and it is a ~20px control in a 16px text
-  row besides. Both are readouts in the CONTENT, not chrome — the line the
-  audit drew.
-- **There is an `&Edit` menu**, added 2026-08-23. chatter was the only app of
-  ours without one: Copy and Select All existed on the transcript's right-click
-  menu and nowhere a menu could show them, so `Ctrl+C` had no home and no way
-  to be discovered. Its three rows — **Copy** (Ctrl+C), **Copy Whole Message**,
-  **Select All** (Ctrl+A) — run `runTextRow(i)`, which calls the SAME
-  `textMenu()` rows the right-click menu does, so a reply is copied as markdown
-  from either and the two cannot drift.
-    - **They act on the message the selection is in.** A transcript is many
-      independent read-only editors, so "Copy" has no single target the way it
-      has in an editor; each body reports itself through `win.noteSelection()`
-      on `onSelectedTextChanged`, and `win.selectedBody` is what the rows use.
-    - **With no selection every row is DISABLED, not silently inert**
-      (docs/DESIGN.md §10). `ORACLE_SELECT=1` makes a real selection in the
-      longest reply — the only way a harness can see the rows live, since a
-      selection otherwise only comes from a drag.
-- **The transcript has a right-click menu** — Copy (dead while nothing is
-  selected), Copy Message, Select All — because Ctrl+C on a mouse selection was
-  the only way to get text out of it, and every other program on this desktop
-  offers the menu. `win.textMenu(item, isMarkdown)` builds the rows; a reply is
-  copied AS markdown (`Clip.copyMarkdown`, or `Clip.copyText` for the whole
-  message), never as the flattened render. The labels follow the session: KDE's
-  Copy / Select All there, lowercase here.
-- **The harness renders it**, offscreen and never on his screen:
+Use oracle-qtenv python3 main.py --selftest with the isolation rules in
+../AGENTS.md. ORACLE_CONFIG and ORACLE_SESSIONS must point to scratch stores:
+Settings actions persist changes.
 
-  ```
-  QT_QPA_PLATFORMTHEME=kde DESK_SESSION=plasma ORACLE_CHROME=1 ORACLE_POKE=1 \
-      ORACLE_FACES=1 ORACLE_SHOT=/tmp/chatter.png \
-      oracle-qtenv python3 main.py --selftest     # then LOOK at the PNG
-  ```
+- ORACLE_CHROME=1 prints menus; ORACLE_FACES=1 checks file selection.
+- ORACLE_POKE=edit-prompt,new-session targets action IDs in either session.
+- ORACLE_SELECT=1 selects text to exercise enabled Edit actions.
+- ORACLE_MENU=1 opens the transcript menu; it needs ORACLE_FAKE content.
+- ORACLE_SHOT chooses an offscreen capture path. QQuickWidget.grab returns
+  the last rendered frame; let the event loop render after a state change.
 
-  `ORACLE_CHROME` prints the menus as text (a menu is not on screen until it is
-  opened, so no render can show what is in one), `ORACLE_POKE` fires a few of
-  them, `ORACLE_FACES` proves the file selector took, and `ORACLE_SELECT` makes
-  a real text selection in the longest reply (what the `&Edit` rows are enabled
-  by). `--selftest` points
-  `ORACLE_CONFIG` and `ORACLE_SESSIONS` at a temp directory — poking Settings
-  calls `setPromptChoice`, which persists, and a run without that override
-  rewrote his own base prompt.
-
-  `tools/resource-fixture.py --state blank|fake|clear --seconds N` holds the
-  real Hyprland-face window for resource sampling. It hard-forces offscreen,
-  scratches every writable Oracle store, points the server at a closed local
-  port, and removes display/proxy environment. `clear` loads the fake transcript
-  and then clears it through the normal session-load seam, so retained memory
-  can be compared with a populated fixture without touching a live service.
-
-  Three things that make a render show STATE, not just the resting window:
-
-  - **`ORACLE_POKE=edit-prompt,new-session`** names the rows instead of firing
-    the default four, and works in BOTH sessions (under Hyprland the same ids
-    go through the QML side's `tbAction`). It is the only way to photograph a
-    panel with no other way in — the base-prompt editor opens from a menu row
-    and nothing else.
-  - **`ORACLE_MENU=1`** opens the log's right-click menu over the first reply
-    and prints its labels. Needs `ORACLE_FAKE` for a reply to exist.
-  - **A QQuickWidget's `grab()` returns its LAST RENDERED frame**, and
-    `processEvents()` alone does not force a new one: a poke that opened a
-    panel photographed byte-for-byte as the unpoked window until the harness
-    started spinning the loop for ~0.8s afterwards. If a change you made does
-    not appear in a shot, suspect this before suspecting the change.
+tools/resource-fixture.py --state blank|fake|clear --seconds N forces offscreen,
+isolates writable stores, and uses a closed local server port. clear exercises
+session-load cleanup after fake content; it does not contact live services.
 
 ## Shape
 
@@ -1504,428 +1378,110 @@ every turn) is the same GET with the three missing pieces, and nothing more.
   four boorus that answer anonymously. Re-run it after touching the registry,
   the projection or the keyring.
 
-## A reply that stopped short — `continue`
+## Continuation and tool budgets
 
-**Any finished answer offers `continue`, and it lives on the SEND BUTTON**
-[his, 2026-08-23] — not under the bubble, which is where it started as the way
-on from an answer cut off mid-sentence [his, 2026-08-22]. Three things end a
-reply: the model hits its generation ceiling (ollama's final frame says
-`done_reason: "length"`, which `Ollama` surfaces as `replyTruncated`), he
-presses stop — either marks the row `cutOff` — or it simply finishes. All three
-are continuable.
+The prompt button's precedence is stop (busy), send (typed text/attachments),
+then continue (a selected model and a finished, non-error last assistant row).
+PromptBox exposes canContinue/continued() in both session variants; native
+actions use the same state. Centre its one-line input within the button-height
+floor. ORACLE_TREE=1 reports offscreen geometry.
 
-**A fourth way, which nothing announces: the TURN ran out of window.** ollama
-shifts the context rather than failing, so a turn that spent its 32k on tool
-rounds gets a normal `done_reason: "stop"` on an answer that breaks off
-mid-sentence — observed 2026-08-23, a music-library turn whose table stops
-mid-row with no `continue` on it, because nothing in the app knew. So
-`_truncation_reason` reports `"context"` when the turn was **squeezed**
-(a round filled `CTX_FULL_FRACTION` of `CHAT_NUM_CTX`, or the tool loop was
-forced into its wrap-up round) **and** `_ends_abruptly` says the text stops
-mid-sentence. **Both halves are required**: measured across his saved sessions,
-one finished reply in nine ends on a bare word (a bullet list, a heading, a
-trailing link), so shape alone would put a `continue` on answers that are
-complete. Harness `tools/cutoff-detect-test.py`.
+Bump chatRev wherever a row settles: ListModel role edits do not invalidate
+this binding, and busy becomes false before the row's streaming flag clears.
+continueReply sets activeIndex to the existing last row and appends there.
+Its modes are resume/CONTINUE_PROMPT, extend/EXTEND_PROMPT (with a paragraph
+break), and ANSWER_PROMPT for an empty partial. Send the partial as an assistant
+message followed by a user instruction, not an assistant prefix.
 
-So the one button beside the prompt box has three states, in this precedence
-(docs/DESIGN.md §10.2 — one control, one place, and it says what it will do):
+replyTruncated reports done_reason=length; stop also marks cutOff.
+_truncation_reason may report context only when the turn was squeezed
+(CTX_FULL_FRACTION or forced wrap-up) and _ends_abruptly detects an unfinished
+ending. Text shape alone incorrectly flags complete lists/headings.
 
-| state | when |
-|---|---|
-| `stop` | a reply is streaming (`busy`) |
-| `send` | there is something typed or attached (`canSend`) — a prompt he wrote outranks carrying the last answer on |
-| `continue` | neither, and `canContinue` |
+The loop is bounded by MAX_TOOL_ROUNDS (24) and _ctx_room() against
+TOOL_CTX_FRACTION (0.75) of CHAT_NUM_CTX. Past 55%, _compact_tool_history keeps
+the newest four results intact and compacts middles of older results over
+1800 characters. Keep calls and result edges. PERSISTENCE_NOTE belongs on every
+system prompt.
 
-**The box hugs ONE line, and the slack is split.** Its height is the send
-button's, floored — the button is taller than a line of text — and the input is
-CENTRED on that rather than anchored to the top, because slack anchored to the
-top all falls out of the bottom: 34px around a 30px input put six pixels under
-the text and none above it [his, 2026-08-23: *"extra empty space under the text
-line and the bottom edge"*]. Both faces do it the same way (`root.pad` in
-`qml/PromptBox.qml`, `sendBtn.implicitHeight` in `qml/+plasma/PromptBox.qml`),
-and both are measurable offscreen — `ORACLE_TREE=1` prints every item's y and h,
-which is how the asymmetry was found rather than guessed at.
+At either limit, run the last tool calls and perform one wrap-up POST with no
+tools key and TOOL_CAP_PROMPT. _no_tools is one-shot and resets on send and
+continueReply; a tool-only final round must not leave an empty answer.
 
-`PromptBox` takes `canContinue` and emits `continued()`; both faces implement it
-(`qml/PromptBox.qml` and `qml/+plasma/PromptBox.qml`, where the states are
-`Stop`/`Send`/`Continue` on a real KStyle Button). The menubar/toolbar `send`
-action carries the same three verbs, since it is the same verb with a name on
-it. `win.canContinue` is true when a model is picked, nothing is streaming, and
-the LAST row is a finished non-error assistant turn — only the last, since
-continuing one further up would write into the middle of the conversation.
+looksUnfinished checks the last 400 characters against UNFINISHED_PATTERNS.
+autoContinue allows at most AUTO_CONTINUE_MAX (3) proceed continuations per
+prompt and reports them in status. Never continue a question ending in ? or
+treat a permission request as approval. stopReply exhausts the budget; only
+a new user prompt re-arms it.
 
-**`chatRev` is why that binding is live.** A `ListModel` notifies on `count`,
-never on a per-row `setProperty`, and `Ollama.busy` flips to false BEFORE the
-QML handler clears the row's `streaming` flag — so a binding on `busy` alone
-re-evaluates one step too early and the button never offers `continue`. Every
-place that settles a row (`onReplyDone`, `onReplyError`, `stopReply`,
-`continueReply`) bumps `chatRev`, which the binding reads first.
+### Working memory
 
-`Ollama.continueReply(model, history, partial, mode)` re-posts the chat with
-every earlier turn, then the partial as an `assistant` message, then one
-instruction as a user turn — a user turn rather than a bare assistant prefix
-because no model is reliable about not starting over when asked that way. `mode`
-picks the instruction, and QML picks `mode` off `cutOff`:
+_remember_turn snapshots the finished message list, including tools, into
+_prior. _carry matches raw user prompts (_prior_users), not assistant rows,
+because one answer can occupy several displayed rounds. A changed/reopened
+session or app restart falls back to persisted text-only history.
 
-- `resume` → `CONTINUE_PROMPT`: carry on from the very next character.
-- `extend` → `EXTEND_PROMPT`: the sentence ENDED, so ask for what comes next
-  rather than a mid-word resume. QML appends a blank line to the row first, so
-  the extension is its own paragraph.
-- an empty `partial`, either mode → `ANSWER_PROMPT`, with no assistant message
-  at all: the turn spent itself on tools and never wrote, so there is nothing to
-  carry on from.
+_trim_carry budgets TOOL_CARRY_CHARS (12k) newest first. Stub oversized results
+without deleting their assistant tool calls. continueReply carries this state
+too, excluding _synthetic instructions/partials and deduplicating a trailing
+partial through _partial_prefix. Tool memory is RAM-only; mediaNote records
+image/video paths and dimensions in persisted history, including wordless
+media rows.
 
-QML points `win.activeIndex` at the existing row first, so the continuation
-streams onto the END of it: a continued answer stays ONE answer, not two bubbles
-that have to be read together. Harnesses: `tools/continue-test.py` (the cut-off
-half) and `tools/continue-any-test.py` (extend, the empty turn, and the wrap-up
-round below) — both offscreen against a stub ollama on 127.0.0.1, so his daemon
-is never touched and no model is ever loaded — plus
-`tools/continue-button-test.py`, which drives the real window offscreen in BOTH
-faces (`--selftest` with `ORACLE_FAKE`, whose demo log ends on a finished turn)
-and reads the button's label back: `continue` with nothing typed, `send` the
-moment there is.
+_house_note/HOUSE_FILES names the nearest AGENTS.md once per conversation,
+walking toward HOME. Return the path, not an inlined guide; do not search / or
+/nix/store for house rules.
 
-### How long a turn may work — rounds, context, and the wrap-up
+### Reply rows and rendering
 
-**The tool loop is a work budget, and he should never have to press `continue`
-to get one task finished** [his, 2026-08-23]. It used to stop after
-`MAX_TOOL_ROUNDS = 4`, which a real job (find a directory, read three files,
-edit one, check the edit) exhausts halfway through, so a task took several
-presses. Two changes:
+roundStarted(n) settles the current row after tool results and opens the next.
+Persist step for harnesses, without a visible round caption. Continuation
+always targets the final answer row.
 
-- **`MAX_TOOL_ROUNDS` is 24** and is now only a runaway guard — the backstop for
-  a model looping on the same call forever. He can always press stop.
-- **What really ends a long turn is `_ctx_room()`**: four-chars-to-the-token
-  over the whole message list, against `TOOL_CTX_FRACTION` (0.75) of
-  `CHAT_NUM_CTX`. Past that the next tool result would be truncated by the
-  server anyway (no context-shift on this model), so the turn is better spent
-  answering. Measured, not guessed.
-- Past 55% context, `_compact_tool_history()` keeps the newest four results
-  whole and compacts only the middle of older results over 1800 characters;
-  calls and result edges remain, so the model keeps the actionable evidence.
-- **`PERSISTENCE_NOTE` is on every system prompt**: finish the job in THIS turn,
-  look → act → check, do not stop to announce a plan or ask permission for
-  something he already asked for. Without it a model treats one tool round as
-  one turn and hands back a description of what it would do next.
+Keep media-only rounds open for their following prose. Clear displayed tool
+preambles of at most preambleMax (140) characters; retain the original model
+context. Decide from row images/videos/body roles, never child visibility.
+Longer prose starts a separate row.
 
-### Working memory — what the last turn did comes with it
+turnHead identifies the first model row after a user prompt. turnAgg aggregates
+reasoning, tools, agents, sources, files, exec tails, and live state into one
+metadata block above the turn. metaRev updates every 300 ms while busy; chatRev
+publishes settled state. Hide silent rounds with visible: false (height zero
+still leaves spacing); retain every prose/image/video output.
 
-**A turn starts with the tool rounds of the turn before it, not blind.** Until
-2026-08-22 it did not, and that single fact is what made long jobs impossible:
-`send()` rebuilt the message list from the chat log every turn, and
-`_parse_history` keeps `user`/`assistant` TEXT and nothing else — so every tool
-call and every tool RESULT died with the turn that made it. Reading the session
-where he asked an agent to change something in `~/nix` is the whole argument: it
-re-read the same files turn after turn, re-derived the same conclusion five
-separate times, and never reached the edit. It was not short of tools. It had no
-memory of using them.
+Bubble natural width is max(plainBody, mdBody), capped at bubbleMax; speaker
+captions do not impose a width floor. Media rows use the full cap. timeLabel(ts)
+uses 12-hour lowercase time; opensNewDay draws the date once per day.
+Missing timestamps remain absent.
 
-- **`_prior`** holds the last finished turn's whole message list (tool rounds
-  included), snapshotted by **`_remember_turn()`** at the two points a turn ends.
-- **`_carry(hist)`** hands it back when this turn continues the same
-  conversation, and `None` otherwise — matched on `_prior_users`, the RAW
-  prompts, against the user turns QML sent. Prompts, deliberately, not assistant
-  text: the chat log splits one answer into a row per round (above) while the
-  message list holds one, so matching on assistant text would fail on exactly
-  the turns worth carrying. A switched session, a reopened one, an edited log or
-  a fresh app all fail the match and fall back to the old text-only history,
-  which is why nothing here can leak one chat into another.
-- **`TOOL_CARRY_CHARS` (12k) is charged NEWEST FIRST**, and what does not fit is
-  STUBBED, not dropped (`_trim_carry`): the assistant message that *called* the
-  tool always survives, so the model can see it already ran `read_file` on that
-  path even when the output is gone. ~3k tokens against a 32k window.
-- **`continueReply` carries it too**, and needs it most — `continue` is pressed
-  exactly when a turn ran out of room mid-job. Two things it does that `send`
-  does not: the instruction it writes and the partial answer QML hands it are
-  marked `_synthetic` and kept OUT of the memory (they were never his words, and
-  the partial comes back as part of the finished answer via `_partial_prefix`),
-  and if the memory already ends with that same partial, the memory's copy is
-  dropped so the model does not read its own last words twice.
-- **It is in RAM, per running app.** Restart chatter, or switch away and back,
-  and the conversation is still whole (the store has every turn) but the tool
-  memory of it is gone. That is the honest limit of this version.
-- **What a turn left on DISK survives that**, since 2026-08-24. `mediaNote(h)`
-  in Root.qml puts one `[image in this chat: /path · WxH]` line (and the same
-  for a clip) into the history content of any row carrying media, and a row with
-  media but no words is no longer skipped as empty. It is a dozen tokens and it
-  is only text in the log, so it comes back with the session. Without it he
-  generated a picture, restarted, reopened that conversation and asked for a
-  video from it — and the model, holding no path, made a text-to-video from
-  nothing: square, unrelated, `"input_image": ""` in the clip's own metadata
-  (session `sess-1787611635857`).
+_emit_image updates _image_entries and _row_urls. A URL mentioned again in a
+later round reuses the downloaded image on that row; deduplicate within each
+row, not across the entire turn.
 
-Harness: `tools/memory-carry-test.py` — two prompts through the real window
-against a stub daemon, asserting on the REQUEST BODIES that turn 2 still carries
-turn 1's tool call, its result and the file's actual text.
+MdFormat.styleCode clears Qt's NonBreakableLines, marks blocks with CODE_MARK,
+and returns character ranges for the QML background panels. Do not detect
+blocks by monospace font or rewrite source text. Qt Quick ignores block-format
+backgrounds, so paint panels behind positionToRectangle ranges. Debounce 60 ms
+and reapply after streaming rebuilds.
 
-### The tree tells the agent its own rules
+Root.hardBreaks substitutes U+2028 for prose soft breaks in displayed text only;
+preserve source markdown, fences, and structural block boundaries. MdFormat
+uses top margins PARA_TOP=12, HEAD_TOP=16, LIST_TOP=2, zero on the first block,
+and skips code lines. Write formats only when changed to avoid retriggering.
 
-**The first file tool to touch a tree that has an `AGENTS.md` gets that path
-handed back with the result** (`_house_note`, `HOUSE_FILES`), so he does not
-have to point the agent at the conventions of the place it is standing in [his,
-2026-08-22: *"i just want it to be easy for me to change things about chatter
-and the rest of the system without needing to point it to every little thing"*].
-It walks up from the path to `$HOME` and stops there — `/` and `/nix/store` have
-no house rules — takes the NEAREST guide, and names it once per conversation.
+send() calls replyFlick.toBottom(), cancelling flick and re-arming followBottom.
+Other updates follow only while already at the bottom. Empty loading and
+reasoning/waiting states must be mutually exclusive; verify simultaneous state,
+not a union of observations.
 
-**Named, never inlined.** `~/nix/AGENTS.md` alone is 62 KB, a fifth of the
-32k-token window, and there are three more in the trees chatter touches most.
-The pointer costs a line; reading it is the model's own call, with its own
-`read_file`, only when it is actually working there.
+### Focused harnesses
 
-### One bubble PER ROUND
-
-A turn that took six tool rounds used to be ONE row: six rounds of prose, every
-tool name and the final answer stacked together, with nothing to say where a
-round began [his, 2026-08-23]. Now each round is its own row.
-
-`Ollama.roundStarted(n)` fires in `_tool_done`, after a round's results are back
-and before the next POST. QML settles the row that round wrote into — its prose,
-and the tools, sources, files and images IT called, stay on it — and
-`appendReplyRow(n)` opens a fresh one. `step` is the round a row belongs to: 1
-for the row his prompt opens, 2 and up for each round after it, persisted with
-the turn — and NOT drawn anywhere. The caption used to read `model · round 2`
-from 2 on; he had it taken out [his, 2026-08-22]: the split is the point, and a
-new bubble already says a new round began. `step` stays in the store and in
-`rowsJson` (the harness asserts on it), it just has no label.
-
-Everything keyed on "the last row" still means the ANSWER row, since that is the
-last one: `continue`, the auto-press, `canContinue`.
-
-**One deliberate exception: a media-only round does NOT open a fresh bubble.**
-When the row a round leaves behind holds a picture (or a video) and no words,
-`onRoundStarted` keeps the same row streaming and lets the next round's text
-land on it — so the image and the answer it accompanies read as one message
-instead of a detached picture floating above a separate text bubble [his,
-2026-08-23]. Once a row HAS words, the rounds split again exactly as above. The
-merge decision is made off the row's `images`/`videos` roles, never a child
-item's `visible` (the latch in the bubble's `visible`).
-
-**And a SHORT line on a round that called a tool counts as no words at all.** He watched
-a turn draw "Here's your Lain image:" with the picture under it and then a
-second bubble saying "Here you go — here's Lain:" with nothing in it
-[2026-08-24]. The row that called the tool wrote before it had seen the result —
-which `PERSISTENCE_NOTE` already forbids and models do anyway — and the round
-after it says the same thing again. And it is not only the picture rows: one
-request put NINE bubbles between it and the result — "Seed locked: …", "Found
-shirow_masamune. Let me find one more." — each its own slab, none of them the
-answer. So ANY row whose body is at most `preambleMax` (140) characters AND that
-called a tool has its body cleared; if it also carries media it merges like a
-wordless one, and otherwise it is drawn as its tool block, which is where that
-work belongs. Longer prose is left alone and still splits — that is content, and losing it would be worse
-than repeating it. Only the DISPLAY is trimmed; the model's own context still
-holds what it wrote.
-
-Harness: `tools/round-split-test.py` — it drives one real prompt through the
-real window offscreen against a stub ollama that asks for two tool rounds, and
-asserts the log comes out as three reply rows with the prose and the tool on the
-round that made them; a second scenario (MODE=media, a `show_image` round then
-an answer) asserts the picture and the following text land on ONE row, and a
-third (MODE=preamble) replays exactly what he saw and asserts the announcement
-is dropped. It rides
-on `ORACLE_SEND` (send this prompt, then print the chat log as JSON via
-`Root.rowsJson()`), which is the only way to see what the ROWS became.
-
-### A bubble hugs its text, with no floor
-
-A message's bubble is as wide as its longest laid-out line and no wider (capped
-at `bubbleMax`). Two things used to stop that being true for a SHORT one, and
-both are gone [his, 2026-08-23]:
-
-- a **72px floor**, which drew a padded slab around a one-character `k`;
-- the **speaker caption in the measurement** — `whoText.contentWidth` was in
-  `turnCol.natural`, so every short reply was held open to the width of the
-  model's name, and the caption is not even inside the bubble.
-
-`natural` is now `max(plainBody, mdBody)`. A row carrying media still takes the
-full cap (`turn.wide`). Harness: `tools/exec-peek-test.py` — a one-character
-prompt beside a long-named model's two-letter answer, measured on the rendered
-`Bubble`.
-
-### The time under each bubble
-
-Every message carries the time it landed, under its bubble and on its own side
-— dim, faded, the weight of the speaker caption above it (§9.1) [his,
-2026-08-23]. `win.timeLabel(ts)` is 12h — `2:07 pm`, lowercase [his,
-2026-08-23]; the DATE stays a once-a-day separator across the
-column (`opensNewDay`), so a session held in one sitting draws one date and a
-time per message. A row from before the store kept `ts` shows no time rather
-than a made-up one. Harness: `tools/exec-peek-test.py`.
-
-### One meta block per turn, at the top of it
-
-One row per round fixed the "where did round 3 begin" problem and made a new
-one: between two things the model SAID sat three or four lines of bookkeeping —
-that round's reasoning heading, its tools, its sources, its files [his,
-2026-08-23]. So the bubbles of a turn now run **one after another with nothing
-between them but their timestamps**, and every disclosure of every round is
-aggregated into ONE block above the first bubble, where the counts, the clock
-and the live state already were. (It replaces the old per-run fold, which
-existed to get the silent rounds out of the way.)
-
-- **The head of a turn is the first model row after his prompt** —
-  `win.turnHead(i)`, read off the log, nothing stored. That row draws the block
-  for the whole run; no other row draws any meta at all, or repeats the
-  speaker's name.
-- **`win.turnAgg(head)` is the block's whole input**: reasoning text and
-  tokens, tool names and count, agents, sources, files and the exec tail,
-  summed and concatenated over the run, plus the live flags. One object, so a
-  disclosure reads `turn.agg.files` instead of a row role.
-- **What re-evaluates it.** A ListModel notifies no binding when `setProperty`
-  writes a role, and rebuilding the aggregate per token would redo the whole
-  turn for every visible row on every delta. So the block carries a 300ms
-  `Timer` that bumps `win.metaRev` while `Ollama.busy`, and `chatRev` (bumped
-  wherever a row settles) carries the final state.
-- **A round that said NOTHING is drawn nowhere** — its bookkeeping is in the
-  block, so the row has nothing left of its own. `win.roundIsSilent(r)` is the
-  test, read off the row's own roles (never a child item's `visible` — the
-  latch that hid a picture for good). `visible: false`, not height 0: an Item
-  of height 0 still takes the column's 12px spacing.
-- **Output is never hidden**: a round that produced prose, a picture or a video
-  keeps its bubble, under the same one block.
-- Harness: `tools/round-split-test.py`, on `Root.turnJson()` (what the block
-  made of each row, never drawn).
-
-### A picture the write-up names is drawn where it names it
-
-A turn that gathers pictures over several rounds and then writes them up used to
-end with a list naming eleven of them and a bubble holding NONE [his,
-2026-08-22]. Two rules met badly: a picture is attached to the ROUND bubble that
-fetched it, and `_attach_typed_images` skips a `![](url)` whose URL this turn
-already fetched (`_images_shown`) — so the write-up's own markdown was demoted
-to plain links and nothing was drawn under it, while the pictures sat further up
-the transcript.
-
-Now a named picture that is already on disk is DRAWN AGAIN on the bubble that
-names it: `_image_entries` keeps the entry each URL produced this turn, and
-`_emit_image` is the one door every picture goes through so that ledger and
-`_row_urls` (what is already on the bubble being written) both stay true. It is
-a redraw, not a second download, and `_row_urls` stops one bubble showing the
-same picture twice. Harness: `tools/typed-image-test.py`, case 5.
-
-### Code blocks stay inside the bubble
-
-Qt's markdown reader marks every fenced block `NonBreakableLines`, so a long
-line does not wrap: it lays out past the item's width and paints across whatever
-is beside it — code spilling out of the bubble [his, 2026-08-22]. That flag is
-on the QTextDocument's block formats, which QML cannot reach, so `MdFormat`
-(`Md.styleCode`, main.py) walks the document `MarkdownText.qml` is already
-drawing, clears the flag, gives each block a margin, and returns the CHARACTER
-RANGES of each run of code lines. The item draws the embedded panel behind those
-ranges itself (`positionToRectangle`, `z: -1`).
-
-- **The tint cannot be done in the document.** Qt Quick's text nodes paint a
-  CHARACTER format's background and ignore a BLOCK format's (measured: a block
-  background drew nothing at all), and a char background stops at the end of
-  each line — a ragged strip, not an embedded block.
-- **A block is recognised by Qt's flag, then by our own mark**
-  (`MdFormat.CODE_MARK`), because clearing the flag is the point and nothing
-  else on a block format remembers. NOT by the monospace family: a paragraph
-  that merely BEGINS with an inline `code` span reports monospace as its block
-  char format, and drew a whole prose line as a code panel.
-- **The text is never rewritten** — no re-wrapping of the source, no inserted
-  newlines — so `Clip.copyMarkdown` still hands over exactly what the model
-  wrote.
-- Debounced (60 ms) because a streaming reply rebuilds the document on every
-  delta and each rebuild brings the flag back. Harness:
-  `tools/code-block-test.py`.
-
-### Lines break where the model broke them, paragraphs stand apart
-
-Two things about a reply's shape, both his [2026-08-23], both measured on the
-laid-out document rather than on the source:
-
-- **A single newline is a LINE BREAK.** CommonMark joins it into the paragraph
-  above, so a reply written as short lines came back as one run-on block. Qt's
-  reader has no "soft breaks are hard breaks" switch, and markdown's own hard
-  break (two trailing spaces) opens a whole new BLOCK — which would give a soft
-  break the same standoff as a real paragraph and make the two
-  indistinguishable. So `Root.hardBreaks` swaps that newline for **U+2028**, the
-  separator Qt's layout breaks on INSIDE a block: same block, next line, no gap.
-  It is applied to `text` only — `source` stays the model's markdown verbatim,
-  so `Clip.copyMarkdown` still hands over what it wrote. One character for one,
-  so document positions still map to the source. Lines that open a block of
-  their own (a list marker, a heading, a quote, a fence, a table row) are left
-  alone, and nothing inside a fence is touched.
-- **A blank line opens a paragraph, and the paragraph says so.** Qt gives every
-  block a 6px top AND bottom margin, which collapse to a 6px gap — no stronger
-  than a wrapped line. `MdFormat` sets the gap on the TOP margin only (adjacent
-  margins collapse to the larger, so one side is enough): `PARA_TOP` 12,
-  `HEAD_TOP` 16, `LIST_TOP` 2 (bullets are one list, not a stack of
-  paragraphs), and 0 on the first block or every bubble opens with a blank
-  strip. Code is skipped — `styleCode` sees one block PER LINE inside a fence,
-  so a margin there would space the code out line by line.
-
-It runs in the same debounced document pass as the code blocks, and only writes
-a block format when the value differs, or the write would retrigger the pass.
-Harness: `tools/prose-layout-test.py`.
-
-### Sending scrolls him to the bottom
-
-Reading back up the log clears the view's `followBottom`, and his own new prompt
-then lands off-screen below him [his, 2026-08-23]. `send()` calls
-`replyFlick.toBottom()` — cancel any flick, re-arm `followBottom`, jump to the
-end — which is the one place jumping the view is not yanking it, since he just
-wrote the thing at the end of it. Everywhere else the rule stands: the log
-follows the newest text only while he is already at the bottom
-(docs/DESIGN.md §6.1). Harness: `tools/prose-layout-test.py`.
-
-### One state at a time in an unfinished bubble
-
-A model row that has said nothing yet draws a `loading…` line of its own; the
-reasoning clock beside it draws `waiting…` while a tool is out. An empty bubble
-on its FIRST tool round satisfied both and stacked them [his, 2026-08-22]. The
-clock block is now hidden while that loading line is up, so `loading` owns a
-bubble with nothing in it and the clock takes over the moment there is something
-to show. `tools/think-clock-test.py` samples the two together — a union of
-everything seen over time cannot tell coexistence from a handover.
-
-### It presses `continue` for him
-
-Even with `PERSISTENCE_NOTE` on every prompt, gemma4 ends a turn by ANNOUNCING
-its next step — "I'd like to proceed with…", "I'll now grep for…" — and he was
-pressing `continue` over and over to get one task done [his, 2026-08-23]. So the
-app presses it:
-
-- `Ollama.looksUnfinished(text)` reads the last 400 characters of a finished
-  answer against `UNFINISHED_PATTERNS` — announcements of the model's own next
-  action. An answer that just ENDS matches nothing.
-- **A tail that ends in `?` is never carried on**, whatever else it says. It is
-  his turn, and the press answers with `proceed` — so an unanswered question
-  gets answered for him. That is exactly what happened on 2026-08-23: a `hello`
-  drew "would you like me to play one of these tracks?", the app said yes twice,
-  and the turn ended with a track queued he never asked for. `shall i`,
-  `would you like me to` and `should i proceed` were patterns in that list and
-  are gone; a permission-ask now costs him one press, which is cheaper than an
-  action he did not ask for.
-- QML's `autoContinue()` runs off `onReplyDone`: at most
-  `AUTO_CONTINUE_MAX` (3) presses per prompt, `continueReply("proceed")` each
-  time, streaming into the same row. `PROCEED_PROMPT` tells the model to act
-  rather than ask again.
-- **It says so**: the status line reads `carrying on by itself (n/3)`, and when
-  the budget runs out with the answer still announcing, `it stopped short again
-  — press continue` (docs/DESIGN.md §10 — nothing on his behalf in silence).
-- **Stop is stop**: `stopReply` spends the whole budget, so a turn he
-  interrupted is never carried on for him. His next prompt re-arms it.
-
-### The wrap-up round — why replies came back EMPTY
-
-**Either limit above ends the loop, and ending it used to end the turn.** Until
-2026-08-23 the loop just stopped and "took the answer as-is" — but a model
-still calling tools when it stops has written NO prose in that frame, so what he got was an
-**empty message**: observed twice in a row on 2026-08-22, gemma4 spending four
-`run_bash` rounds hunting for a directory and then saying nothing at all, with
-no `cutOff` either (ollama's `done_reason` was `stop`, not `length`) so not even
-a `continue` to press.
-
-So the limit now takes one more round instead of dropping the turn: the last
-round's tool calls still run, and the follow-up POST carries **no `tools` key at
-all** plus `TOOL_CAP_PROMPT` as a user turn — leaving the model nothing to do
-but answer with what it found. `_no_tools` is the one-shot flag (`_post_chat`
-drops the tool list, `_tool_done` appends the prompt); it is cleared by `send`
-and `continueReply`, so the next turn gets the full loop back. Harness:
-`tools/continue-any-test.py`, which drives the whole loop to both limits.
+Use isolated offscreen windows and stub daemons: cutoff-detect-test.py,
+continue-test.py, continue-any-test.py, continue-button-test.py,
+memory-carry-test.py, round-split-test.py, exec-peek-test.py,
+typed-image-test.py, code-block-test.py, prose-layout-test.py, and
+think-clock-test.py under tools/. ORACLE_SEND with rowsJson()/turnJson()
+exposes actual row/turn state; memory-carry-test asserts outgoing requests.
 
 ## Web images (fetch_image)
 
