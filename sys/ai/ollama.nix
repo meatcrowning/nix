@@ -3,35 +3,17 @@
   lib,
   ...
 }: let
-  # The Qwen3.8 compatibility router is unfinished. Keep its implementation in
-  # the worktree without putting its custom llama.cpp/CUDA build in the system
-  # closure until the protocol and packaging work is resumed.
-  qwen38ShimEnabled = false;
+  qwen38ShimEnabled = true;
 
-  # A deliberately narrow llama.cpp fork for the one GGUF Ollama 0.32 cannot
-  # parse.  This revision is after upstream's Q2_0 CPU + CUDA merge and carries
-  # Qwen3.8's chat template, reasoning stream and tool-call parser.  Build only
-  # GB205's native sm_120 kernels: this package never runs on book and compiling
-  # every CUDA generation would turn a small compatibility backend into a much
-  # larger rebuild.
+  # A deliberately narrow llama.cpp build for the one GGUF Ollama cannot parse.
+  # Current upstream carries Q2_0, Qwen3.8's chat template, reasoning stream and
+  # tool-call parser.  Build only GB205's native sm_120 kernels: this package
+  # never runs on book and compiling every CUDA generation would turn a small
+  # compatibility backend into a much larger rebuild.
   qwen38Llama = (pkgs.llama-cpp.override {
     cudaSupport = true;
     cpuArchDynamicDispatch = false;
   }).overrideAttrs (old: {
-    version = "qwen38-6703d78";
-    src = pkgs.fetchFromGitHub {
-      owner = "ggml-org";
-      repo = "llama.cpp";
-      rev = "6703d7894c70e8b076ce4608157d056e42e6889c";
-      hash = "sha256-bzDQl51ZJ6sEmw3A8tOahL8Tx/pQkq+5OBnk8rldwno=";
-      leaveDotGit = true;
-      postFetch = ''
-        git -C "$out" rev-parse --short HEAD > "$out/COMMIT"
-        find "$out" -name .git -print0 | xargs -0 rm -rf
-      '';
-    };
-    # package-lock.json is unchanged from nixpkgs' b10408 package.
-    npmDepsHash = "sha256-2Q7XhaLAArmviOLdQsNbYTfdyDE5pW9lR26cRHEVl9k=";
     cmakeFlags =
       builtins.filter
         (flag: !(lib.hasPrefix "-DCMAKE_CUDA_ARCHITECTURES" flag))
@@ -105,7 +87,7 @@ in {
     } // lib.optionalAttrs qwen38ShimEnabled {
       # The public endpoint remains Ollama's 11434 contract.  The shim starts
       # Ollama on 11436 and lazily routes only sdkyuan's QAT Q2_0 tag to the
-      # pinned llama.cpp worker on 11437.  Consequently chatter, book's tunnel,
+      # dedicated llama.cpp worker on 11437.  Consequently chatter, book's tunnel,
       # ai-warden and the server controls all keep one endpoint and one unit.
       OLLAMA_SHIM_UPSTREAM = "http://127.0.0.1:11436";
       OLLAMA_SHIM_LLAMA = "http://127.0.0.1:11437";
