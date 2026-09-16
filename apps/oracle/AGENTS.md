@@ -1242,7 +1242,7 @@ empty and the reply area draws the error rather than nothing (docs/DESIGN.md
 **That port is an Ollama-compatible ROUTER now, still inside the same unit and
 the same cgroup.** `apps/oracle/tools/qwen38-ollama-shim.py` supervises Ollama
 on private port 11436 and relays ordinary requests byte-for-byte. Only
-`hf.co/sdkyuan/qwen3.8-27B-qat-q2_0-gguf:latest` is translated to the pinned
+`hf.co/sdkyuan/qwen3.8-27B-qat-q2_0-gguf:latest` is translated to the dedicated
 Q2_0-capable llama.cpp worker on 11437, started lazily with the publisher's
 Qwen3.8 flags. The translation covers streamed and non-streamed chat, thinking,
 tool calls/results, token accounting, `/api/show`, `/api/ps` and the existing
@@ -1252,8 +1252,8 @@ the shim does not silently defeat `OLLAMA_MAX_LOADED_MODELS=1`.
 Keep the router at 11434 and both children in `ollama.service`: that is why the
 model picker, stats, subagents, manage-model tools, start/stop/unload controls,
 book tunnel, ai-warden and heavy rebuild gate all work without a second UI or a
-second lifecycle contract. The custom llama.cpp revision, CUDA sm_120-only
-build, QAT blob digest and three ports live in `sys/ai/ollama.nix`; changing the
+second lifecycle contract. The CUDA sm_120-only llama.cpp build, QAT blob digest
+and three ports live in `sys/ai/ollama.nix`; changing the
 shim therefore needs a system rebuild even though the rest of `apps/oracle` is
 live source. Harness: `tools/qwen38-ollama-shim-test.py`, entirely on ephemeral
 stub ports and never a real daemon or GPU.
