@@ -1245,7 +1245,7 @@ on private port 11436 and relays ordinary requests byte-for-byte. Only
 `hf.co/sdkyuan/qwen3.8-27B-qat-q2_0-gguf:latest` is translated to the dedicated
 Q2_0-capable llama.cpp worker on 11437, started lazily with the publisher's
 Qwen3.8 flags. The translation covers streamed and non-streamed chat, thinking,
-tool calls/results, token accounting, `/api/show`, `/api/ps` and the existing
+tool calls/results, token accounting, `/api/tags`, `/api/show`, `/api/ps` and the existing
 `keep_alive: 0` unload. **Switching engines unloads the old model first**, so
 the shim does not silently defeat `OLLAMA_MAX_LOADED_MODELS=1`.
 

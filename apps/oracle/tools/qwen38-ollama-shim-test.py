@@ -145,6 +145,12 @@ def main():
         assert {m["name"] for m in models} == {"ordinary:latest", shim.MODEL}
         assert next(m for m in models if m["name"] == shim.MODEL)["context_length"] == shim.CTX
 
+        with urllib.request.urlopen(base + "/api/tags", timeout=5) as response:
+            models = json.loads(response.read())["models"]
+        assert {m["name"] for m in models} == {"ordinary:latest", shim.MODEL}
+        assert sum(m["name"] == shim.MODEL for m in models) == 1
+        assert next(m for m in models if m["name"] == shim.MODEL)["size"] == shim.MODEL_SIZE
+
         streamed = post(base + "/api/chat", {
             "model": shim.MODEL, "stream": True,
             "messages": [
@@ -180,7 +186,7 @@ def main():
         for srv in (router, llama, upstream):
             if srv is not None:
                 srv.shutdown(); srv.server_close()
-    print("qwen38 shim: 18 checks passed")
+    print("qwen38 shim: 21 checks passed")
 
 
 if __name__ == "__main__":
