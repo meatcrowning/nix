@@ -341,7 +341,10 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path.split("?", 1)[0] == "/api/ps":
+        path = self.path.split("?", 1)[0]
+        if path == "/api/tags":
+            self._merged_tags()
+        elif path == "/api/ps":
             self._merged_ps()
         else:
             self._proxy(b"")
@@ -395,6 +398,22 @@ class Handler(BaseHTTPRequestHandler):
                             "parameter_size": "26.9B", "quantization_level": "Q2_0"},
                 "context_length": CTX,
             })
+        self._send_json(200, {"models": models})
+
+    def _merged_tags(self) -> None:
+        try:
+            with urllib.request.urlopen(UPSTREAM + "/api/tags", timeout=5) as response:
+                doc = _json(response.read())
+        except (OSError, urllib.error.URLError):
+            doc = {"models": []}
+        models = doc.get("models") if isinstance(doc.get("models"), list) else []
+        models = [m for m in models if not is_q2_model(m.get("name") or m.get("model"))]
+        models.append({
+            "name": MODEL, "model": MODEL, "size": MODEL_SIZE,
+            "digest": "sha256:cadd809e691c5fa2",
+            "details": {"format": "gguf", "family": "qwen35",
+                        "parameter_size": "26.9B", "quantization_level": "Q2_0"},
+        })
         self._send_json(200, {"models": models})
 
     def _chat(self, body: dict) -> None:
