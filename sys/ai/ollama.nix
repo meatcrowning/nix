@@ -4,6 +4,7 @@
   ...
 }: let
   qwen38ShimEnabled = true;
+  bonsaiLlama = pkgs.callPackage ../../lib/bonsai-llama.nix {};
 
   # A deliberately narrow llama.cpp build for the one GGUF Ollama cannot parse.
   # Current upstream carries Q2_0, Qwen3.8's chat template, reasoning stream and
@@ -86,7 +87,7 @@ in {
       OLLAMA_KEEP_ALIVE = "2h";
     } // lib.optionalAttrs qwen38ShimEnabled {
       # The public endpoint remains Ollama's 11434 contract.  The shim starts
-      # Ollama on 11436 and lazily routes only sdkyuan's QAT Q2_0 tag to the
+      # Ollama on 11436 and lazily routes QAT Q2_0 and Bonsai tags to the
       # dedicated llama.cpp worker on 11437.  Consequently chatter, book's tunnel,
       # ai-warden and the server controls all keep one endpoint and one unit.
       OLLAMA_SHIM_UPSTREAM = "http://127.0.0.1:11436";
@@ -97,6 +98,7 @@ in {
       QWEN38_Q2_MODEL_PATH = "/home/lam/.ollama/models/blobs/sha256-cadd809e691c5fa2cc33a75020930fc404db84528bff9a06177bf77bedc0a877";
       QWEN38_Q2_MODEL_SIZE = "8759266208";
       QWEN38_Q2_CTX = "32768";
+      BONSAI_LLAMA_BIN = "${bonsaiLlama}/bin/llama-server";
     };
   };
 
