@@ -4,8 +4,13 @@
 import importlib.util
 import json
 import os
+import hashlib
+import io
+import tempfile
 import threading
+import urllib.error
 import urllib.request
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -49,6 +54,9 @@ class Upstream(Quiet):
 
 class Llama(Quiet):
     seen = []
+    mode = "normal"
+    entered = threading.Event()
+    release = threading.Event()
 
     def do_GET(self):  # noqa: N802
         raw = b'{"status":"ok"}'
@@ -58,6 +66,9 @@ class Llama(Quiet):
     def do_POST(self):  # noqa: N802
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         self.seen.append(body)
+        if self.mode == "blocked":
+            self.entered.set()
+            assert self.release.wait(5)
         if body.get("stream"):
             events = [
                 {"choices": [{"delta": {"reasoning_content": "think "}}]},
@@ -72,6 +83,12 @@ class Llama(Quiet):
             ]
             raw = b"".join(b"data: " + json.dumps(event).encode() + b"\n\n"
                            for event in events) + b"data: [DONE]\n\n"
+            if self.mode == "error":
+                raw = b'data: {"error":{"message":"fake failure"}}\n\n'
+            elif self.mode == "eof":
+                raw = b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            elif self.mode == "length":
+                raw = b'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'
             ctype = "text/event-stream"
         else:
             raw = json.dumps({
@@ -97,14 +114,21 @@ class Alive:
 class FakeEngines:
     def __init__(self):
         self.llama = Alive()
+        self.route = shim.QWEN
         self.starts = 0
         self.stops = 0
 
-    def start_llama(self):
+    def start_llama(self, route=shim.QWEN):
         self.starts += 1
+        self.route = route
+        self.llama = Alive()
 
-    def stop_llama(self):
+    def stop_llama(self, route=None):
+        if route is not None and self.route is not route:
+            return
         self.stops += 1
+        self.route = None
+        self.llama = None
 
 
 def server(handler):
@@ -121,6 +145,14 @@ def post(url, body):
 
 
 def main():
+    history = shim.ollama_messages_to_openai([
+        {"role": "assistant", "tool_calls": [
+            {"id": "a", "function": {"name": "first", "arguments": {}}},
+            {"id": "b", "function": {"name": "second", "arguments": {}}}]},
+        {"role": "tool", "tool_call_id": "b", "content": "second result"},
+        {"role": "tool", "tool_name": "first", "content": "first result"},
+    ])
+    assert [(m["tool_call_id"], m["name"]) for m in history[1:]] == [("b", "second"), ("a", "first")]
     upstream, llama, router = server(Upstream), server(Llama), None
     try:
         shim.UPSTREAM = "http://127.0.0.1:%d" % upstream.server_port
@@ -135,6 +167,9 @@ def main():
         assert b'"content":"ordinary"' in ordinary
         assert Upstream.seen[-1][1]["model"] == "ordinary:latest"
         assert shim.ENGINES.stops == 1
+
+        # A resident routed model for the metadata checks below.
+        shim.ENGINES.llama, shim.ENGINES.route = Alive(), shim.QWEN
 
         show = json.loads(post(base + "/api/show", {"model": shim.MODEL}))
         assert show["details"]["quantization_level"] == "Q2_0"
@@ -182,11 +217,114 @@ def main():
         assert result["message"]["tool_calls"][0]["function"]["arguments"] == {}
         assert result["eval_count"] == 3 and result["eval_duration"] == 150_000_000
         assert shim.ENGINES.starts == 2
+
+        for mode in ("error", "eof", "length"):
+            Llama.mode = mode
+            frames = [json.loads(line) for line in post(base + "/api/chat", {
+                "model": shim.MODEL, "messages": [], "stream": True}).splitlines()]
+            if mode == "length":
+                assert frames[-1]["done_reason"] == "length"
+            else:
+                assert "error" in frames[-1] and not any(f.get("done") for f in frames)
+        Llama.mode = "normal"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            weights = Path(tmp) / "model.gguf"
+            weights.write_bytes(b"fake model")
+            route = shim.Route("bonsai-test", str(weights), 10,
+                               hashlib.sha256(b"fake model").hexdigest(),
+                               "prism-server", 32768, "PQ2_0", shim.BONSAI.args)
+            shim.ROUTES.append(route)
+            with urllib.request.urlopen(base + "/api/tags") as response:
+                assert sum(m["name"] == route.name for m in json.load(response)["models"]) == 1
+            result = json.loads(post(base + "/api/chat", {
+                "model": route.name, "stream": False, "messages": []}))
+            assert result["model"] == route.name and Llama.seen[-1]["model"] == route.name
+            assert shim.ENGINES.route is route
+            post(base + "/api/generate", {"model": shim.MODEL, "keep_alive": 0})
+            assert shim.ENGINES.route is route  # unload is targeted
+            post(base + "/api/generate", {"model": route.name, "keep_alive": 0})
+            assert shim.ENGINES.route is None
+
+            # Hold a real fake HTTP generation open; another client cannot
+            # switch engines or unload it during the streaming lifetime.
+            Llama.mode = "blocked"
+            worker = threading.Thread(target=post, args=(base + "/api/chat", {
+                "model": route.name, "messages": [], "stream": True}))
+            worker.start()
+            assert Llama.entered.wait(3)
+            try:
+                for model in (route.name, shim.MODEL, "ordinary:latest"):
+                    try:
+                        post(base + "/api/generate", {"model": model, "keep_alive": 0})
+                    except urllib.error.HTTPError as error:
+                        assert error.code == 409
+                    else:
+                        raise AssertionError("concurrent unload was accepted")
+                assert shim.ENGINES.route is route
+            finally:
+                Llama.release.set()
+                worker.join(3)
+                Llama.mode = "normal"
+            assert not worker.is_alive() and not shim.REQUEST_LOCK.locked()
+
+            # Real engine lifecycle against fake processes/network only.
+            events = []
+            class Process:
+                pid, returncode = 123, None
+                def __init__(self, argv):
+                    events.append(("start", argv))
+                def poll(self):
+                    return self.returncode
+                def terminate(self):
+                    events.append(("stop",))
+                    self.returncode = 0
+                def wait(self, timeout):
+                    return 0
+            class Health(io.BytesIO):
+                status = 200
+            engines = shim.Engines()
+            route2 = shim.Route("second", str(weights), 10, route.digest,
+                                "stock-server", 16384, "Q2_0", shim.QWEN.args)
+            with patch.object(shim.subprocess, "Popen", Process), \
+                 patch.object(shim.urllib.request, "urlopen", lambda *a, **k: Health(b'{"models":[]}')):
+                engines.start_llama(route)
+                first_argv = events[-1][1]
+                assert first_argv[0] == "prism-server" and "--spec-type" not in first_argv
+                assert first_argv[first_argv.index("--parallel") + 1] == "1"
+                engines.start_llama(route2)
+                assert [e[0] for e in events] == ["start", "stop", "start"]
+                assert events[-1][1][0] == "stock-server" and "--spec-type" in events[-1][1]
+                engines.stop_llama(route)
+                assert engines.route is route2
+                engines.stop_llama()
+                assert engines.llama is None
+            with patch.object(shim.urllib.request, "urlopen", side_effect=OSError("fake unload failure")), \
+                 patch.object(shim.subprocess, "Popen") as launch:
+                try:
+                    engines.start_llama(route)
+                except OSError:
+                    pass
+                else:
+                    raise AssertionError("failed unload did not block load")
+                launch.assert_not_called()
+            weights.write_bytes(b"wrong data")
+            try:
+                route.verify()
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("corrupt model accepted")
+            weights.unlink()
+            with urllib.request.urlopen(base + "/api/tags") as response:
+                assert route.name not in [m["name"] for m in json.load(response)["models"]]
+            assert b'"ordinary"' in post(base + "/api/chat", {"model": "ordinary:latest"})
+            shim.ROUTES.remove(route)
     finally:
         for srv in (router, llama, upstream):
             if srv is not None:
                 srv.shutdown(); srv.server_close()
-    print("qwen38 shim: 21 checks passed")
+    print("router: original protocol, two routes, lifecycle, concurrency, corrupt/missing weights and stream failures passed")
 
 
 if __name__ == "__main__":

@@ -3411,6 +3411,11 @@ def sampler_for(model, preset="default"):
     wants, and a custom persona is not evidence that he wants invented dates.
     """
     name = (model or "").lower()
+    if name == "prism-ml/ternary-bonsai-2-27b-pq2_0":
+        # Prism's thinking profile; the factual clamp would override the
+        # runtime defaults and invalidate comparisons with this model's card.
+        return {"temperature": 1.0, "top_p": 0.95, "top_k": 20,
+                "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0}
     if re.search(r"qwen3[._-]6(?:\D|$)", name):
         return dict(QWEN_PUBLISHED_SAMPLER)
     opts = {}

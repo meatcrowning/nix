@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Ollama-compatible router for chatter's Qwen3.8 QAT Q2_0 model.
+"""Ollama-compatible router for chatter's Qwen QAT and Bonsai models.
 
 Ordinary requests are relayed byte-for-byte to the Ollama daemon on the
-private upstream port.  The one Q2_0 tag Ollama cannot parse is translated to
+private upstream port.  The registered tags Ollama cannot parse are translated to
 llama.cpp's OpenAI-compatible chat endpoint.  The shim owns the public Ollama
 port, so chatter keeps one backend contract for its picker, tool loop,
 streaming, model stats, lifecycle controls, book tunnel and ai-warden.
 
 The process also supervises the private Ollama daemon.  llama-server is lazy:
-it starts only for the Q2 model and is stopped by Ollama's existing
+it starts only for a routed model and is stopped by Ollama's existing
 ``keep_alive: 0`` unload request.  Switching between engines unloads the old
 one first, preserving the one-model invariant of OLLAMA_MAX_LOADED_MODELS=1.
 """
 
 from __future__ import annotations
 
-import http.client
+import hashlib
 import json
 import os
 import signal
@@ -48,13 +48,61 @@ LLAMA_BIN = os.environ.get("OLLAMA_SHIM_LLAMA_BIN", "llama-server")
 START_TIMEOUT = int(os.environ.get("QWEN38_Q2_START_TIMEOUT", "900"))
 
 
+class Route:
+    def __init__(self, name, path, size, digest, binary, ctx, quant, args=()):
+        self.name, self.path, self.size, self.digest = name, path, size, digest
+        self.binary, self.ctx, self.quant, self.args = binary, ctx, quant, args
+        self.verified_stat = None
+
+    def installed(self):
+        try:
+            return os.path.getsize(self.path) == self.size
+        except OSError:
+            return False
+
+    def verify(self):
+        stat = os.stat(self.path)
+        identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        if identity != self.verified_stat:
+            with open(self.path, "rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            if stat.st_size != self.size or digest != self.digest:
+                raise RuntimeError(f"{self.name}: model size/SHA-256 mismatch")
+            self.verified_stat = identity
+
+    def details(self):
+        return {"format": "gguf", "family": "qwen35",
+                "parameter_size": "26.9B", "quantization_level": self.quant}
+
+    def tag(self):
+        return {"name": self.name, "model": self.name, "size": self.size,
+                "digest": "sha256:" + self.digest, "details": self.details()}
+
+
+QWEN = Route(MODEL, MODEL_PATH, MODEL_SIZE,
+             "cadd809e691c5fa2cc33a75020930fc404db84528bff9a06177bf77bedc0a877",
+             LLAMA_BIN, CTX, "Q2_0",
+             ("--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "24",
+              "--spec-ngram-mod-n-min", "48", "--spec-ngram-mod-n-max", "64"))
+BONSAI_DIGEST = "3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1"
+BONSAI = Route("prism-ml/Ternary-Bonsai-2-27B-PQ2_0",
+               os.environ.get("BONSAI_MODEL_PATH", "/home/lam/.local/share/bonsai/" + BONSAI_DIGEST + ".gguf"),
+               7206168928, BONSAI_DIGEST, os.environ.get("BONSAI_LLAMA_BIN", ""),
+               32768, "PQ2_0", ("--parallel", "1", "--cache-type-k", "f16", "--cache-type-v", "f16"))
+ROUTES = [QWEN] + ([BONSAI] if BONSAI.binary else [])
+# Covers the whole generation, not just Popen: concurrent clients must never
+# switch/unload an engine while another request is still using it.
+REQUEST_LOCK = threading.Lock()
+
+
+def route_for(name):
+    name = str(name or "")
+    return next((r for r in ROUTES if name == r.name or
+                 (r.name.endswith(":latest") and name == r.name[:-7])), None)
+
+
 def log(message: str) -> None:
     print("qwen38-shim: " + message, file=sys.stderr, flush=True)
-
-
-def is_q2_model(name: object) -> bool:
-    text = str(name or "")
-    return text == MODEL or (MODEL.endswith(":latest") and text == MODEL[:-7])
 
 
 def _json(data: bytes) -> dict:
@@ -99,7 +147,11 @@ def ollama_messages_to_openai(messages: object) -> list[dict]:
                 pending.append((call_id, name))
             msg["tool_calls"] = calls
         elif role == "tool":
-            call_id, name = pending.pop(0) if pending else (
+            result_id = msg.get("tool_call_id")
+            result_name = msg.get("name") or msg.get("tool_name")
+            match = next((i for i, (cid, name) in enumerate(pending)
+                          if (cid == result_id if result_id else name == result_name)), 0)
+            call_id, name = pending.pop(match) if pending else (
                 f"call_orphan_{mi}", str(msg.get("tool_name") or "tool"))
             msg["tool_call_id"] = str(msg.get("tool_call_id") or call_id)
             msg["name"] = str(msg.get("name") or msg.get("tool_name") or name)
@@ -128,10 +180,10 @@ def openai_tools_to_ollama(calls: object) -> list[dict]:
     return out
 
 
-def ollama_chat_to_openai(body: dict) -> dict:
+def ollama_chat_to_openai(body: dict, route=QWEN) -> dict:
     opts = body.get("options") if isinstance(body.get("options"), dict) else {}
     payload = {
-        "model": MODEL,
+        "model": route.name,
         "messages": ollama_messages_to_openai(body.get("messages")),
         "stream": bool(body.get("stream", True)),
         "cache_prompt": True,
@@ -166,9 +218,11 @@ def _ollama_tool_calls_from_parts(parts: dict[int, dict]) -> list[dict]:
     return calls
 
 
-def openai_response_to_ollama(obj: dict) -> dict:
+def openai_response_to_ollama(obj: dict, route=QWEN) -> dict:
     choices = obj.get("choices") if isinstance(obj.get("choices"), list) else []
     choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+    if obj.get("error") or not choice.get("finish_reason"):
+        raise RuntimeError(str(obj.get("error") or "Incomplete llama-server response"))
     message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
     usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else {}
     timings = obj.get("timings") if isinstance(obj.get("timings"), dict) else {}
@@ -181,7 +235,7 @@ def openai_response_to_ollama(obj: dict) -> dict:
         out_msg["tool_calls"] = calls
     predicted_ms = float(timings.get("predicted_ms") or 0)
     return {
-        "model": MODEL,
+        "model": route.name,
         "message": out_msg,
         "done": True,
         "done_reason": "length" if choice.get("finish_reason") == "length" else "stop",
@@ -196,6 +250,7 @@ class Engines:
         self.lock = threading.RLock()
         self.ollama: subprocess.Popen | None = None
         self.llama: subprocess.Popen | None = None
+        self.route: Route | None = None
 
     def start_ollama(self) -> None:
         env = os.environ.copy()
@@ -205,66 +260,78 @@ class Engines:
         log(f"ollama on {parsed.hostname}:{parsed.port} (pid {self.ollama.pid})")
 
     def unload_ollama(self) -> None:
-        try:
+        deadline = time.monotonic() + 30
+        while True:
             with urllib.request.urlopen(UPSTREAM + "/api/ps", timeout=5) as response:
-                models = _json(response.read()).get("models") or []
+                models = json.loads(response.read()).get("models")
+            if not isinstance(models, list):
+                raise RuntimeError("Cannot confirm private Ollama's loaded models")
+            if not models:
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Private Ollama did not unload; refusing to load another model")
             for item in models:
                 name = item.get("name") or item.get("model")
                 if name:
-                    request_json(UPSTREAM + "/api/generate",
-                                 {"model": name, "keep_alive": 0}, timeout=30)
-        except (OSError, urllib.error.URLError, ValueError):
-            pass
+                    result = request_json(UPSTREAM + "/api/generate",
+                                          {"model": name, "keep_alive": 0}, timeout=30)
+                    if result.get("error"):
+                        raise RuntimeError(str(result["error"]))
+            time.sleep(0.1)
 
-    def start_llama(self) -> None:
+    def start_llama(self, route=QWEN) -> None:
         with self.lock:
             if self.llama is not None and self.llama.poll() is None:
-                return
-            if not os.path.isfile(MODEL_PATH):
-                raise RuntimeError("QAT Q2 model blob is missing; pull the model first")
+                if self.route is route:
+                    return
+            route.verify()
+            self.stop_llama()
             self.unload_ollama()
             parsed = urllib.parse.urlsplit(LLAMA)
             argv = [
-                LLAMA_BIN, "--model", MODEL_PATH, "--alias", MODEL,
+                route.binary, "--model", route.path, "--alias", route.name,
                 "--jinja", "--reasoning-budget", "-1",
-                "--ctx-size", str(CTX), "--host", str(parsed.hostname),
+                "--ctx-size", str(route.ctx), "--host", str(parsed.hostname),
                 "--port", str(parsed.port), "-ngl", "99",
                 "--temp", "1.0", "--top-p", "0.95", "--top-k", "20",
                 "--min-p", "0.0", "--presence-penalty", "0.0",
                 "--repeat-penalty", "1.0", "--flash-attn", "on",
-                "--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "24",
-                "--spec-ngram-mod-n-min", "48", "--spec-ngram-mod-n-max", "64",
                 "--no-mmproj", "--slots", "--metrics",
-            ]
+            ] + list(route.args)
             self.llama = subprocess.Popen(argv)
-            log(f"llama.cpp loading {MODEL} (pid {self.llama.pid})")
+            self.route = route
+            log(f"llama.cpp loading {route.name} (pid {self.llama.pid})")
             deadline = time.monotonic() + START_TIMEOUT
             while time.monotonic() < deadline:
                 if self.llama.poll() is not None:
-                    raise RuntimeError(f"QAT Q2 server exited {self.llama.returncode} while loading")
+                    raise RuntimeError(f"{route.name} server exited {self.llama.returncode} while loading")
                 try:
                     with urllib.request.urlopen(LLAMA + "/health", timeout=2) as response:
                         if response.status == 200:
-                            log("QAT Q2 server ready")
+                            log(f"{route.name} server ready")
                             return
                 except (OSError, urllib.error.URLError):
                     pass
                 time.sleep(1)
             self.stop_llama()
-            raise RuntimeError(f"QAT Q2 server did not load within {START_TIMEOUT}s")
+            raise RuntimeError(f"{route.name} server did not load within {START_TIMEOUT}s")
 
-    def stop_llama(self) -> None:
+    def stop_llama(self, route=None) -> None:
         with self.lock:
-            proc, self.llama = self.llama, None
-            if proc is None or proc.poll() is not None:
+            if route is not None and self.route is not route:
                 return
-            log("unloading QAT Q2 server")
+            proc = self.llama
+            if proc is None or proc.poll() is not None:
+                self.llama, self.route = None, None
+                return
+            log(f"unloading {self.route.name}")
             proc.terminate()
             try:
                 proc.wait(timeout=25)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=5)
+            self.llama, self.route = None, None
 
     def stop(self) -> None:
         self.stop_llama()
@@ -332,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 while True:
-                    chunk = response.read(64 * 1024)
+                    chunk = response.read1(64 * 1024)
                     if not chunk:
                         break
                     self.wfile.write(chunk)
@@ -351,31 +418,54 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         body = self._read_body()
-        if is_q2_model(_json(body).get("model") or _json(body).get("name")):
-            ENGINES.stop_llama()
-        self._proxy(body)
+        if route_for(_json(body).get("model") or _json(body).get("name")):
+            self._send_json(400, {"error": "Routed weights are managed outside Ollama; unload instead"})
+            return
+        if not REQUEST_LOCK.acquire(blocking=False):
+            self._send_json(409, {"error": "A model request is active; retry when it finishes"})
+            return
+        try:
+            self._proxy(body)
+        finally:
+            REQUEST_LOCK.release()
 
     def do_POST(self) -> None:  # noqa: N802
         body = self._read_body()
         obj = _json(body)
         path = self.path.split("?", 1)[0]
         model = obj.get("model") or obj.get("name")
-        if path == "/api/show" and is_q2_model(model):
-            self._show()
-        elif path == "/api/chat" and is_q2_model(model):
-            self._chat(obj)
-        elif path == "/api/generate" and is_q2_model(model) and obj.get("keep_alive") == 0:
-            ENGINES.stop_llama()
-            self._send_json(200, {"model": MODEL, "done": True, "done_reason": "unload"})
-        else:
-            if path in ("/api/chat", "/api/generate") and model:
-                ENGINES.stop_llama()
+        route = route_for(model)
+        if path == "/api/show" and route:
+            self._show(route)
+            return
+        if path not in ("/api/chat", "/api/generate", "/api/embed", "/api/embeddings",
+                        "/v1/chat/completions", "/v1/completions", "/v1/embeddings"):
             self._proxy(body)
+            return
+        if not REQUEST_LOCK.acquire(blocking=False):
+            self._send_json(409, {"error": "A model request is active; retry when it finishes"})
+            return
+        try:
+            if route and obj.get("keep_alive") == 0 and not obj.get("messages") and not obj.get("prompt"):
+                ENGINES.stop_llama(route)
+                self._send_json(200, {"model": route.name, "done": True, "done_reason": "unload"})
+            elif route and path == "/api/chat":
+                self._chat(obj, route)
+            elif route:
+                self._send_json(400, {"error": "Use /api/chat for routed model generation"})
+            else:
+                # An unload for an ordinary model must not evict another route.
+                if model and not (obj.get("keep_alive") == 0 and not obj.get("prompt") and not obj.get("messages")):
+                    ENGINES.stop_llama()
+                self._proxy(body)
+        except Exception as error:
+            self._send_json(503, {"error": str(error)})
+        finally:
+            REQUEST_LOCK.release()
 
-    def _show(self) -> None:
+    def _show(self, route=QWEN) -> None:
         self._send_json(200, {
-            "details": {"format": "gguf", "family": "qwen35",
-                        "parameter_size": "26.9B", "quantization_level": "Q2_0"},
+            "details": route.details(),
             "model_info": {"general.architecture": "qwen35",
                            "qwen35.context_length": 262144},
             "capabilities": ["completion", "tools", "thinking"],
@@ -389,15 +479,10 @@ class Handler(BaseHTTPRequestHandler):
             doc = {"models": []}
         models = doc.get("models") if isinstance(doc.get("models"), list) else []
         proc = ENGINES.llama
-        if proc is not None and proc.poll() is None:
-            models = [m for m in models if not is_q2_model(m.get("name"))]
-            models.append({
-                "name": MODEL, "model": MODEL, "size": MODEL_SIZE,
-                "size_vram": MODEL_SIZE, "digest": "sha256:cadd809e691c5fa2",
-                "details": {"format": "gguf", "family": "qwen35",
-                            "parameter_size": "26.9B", "quantization_level": "Q2_0"},
-                "context_length": CTX,
-            })
+        route = ENGINES.route
+        if proc is not None and proc.poll() is None and route is not None:
+            models = [m for m in models if not route_for(m.get("name"))]
+            models.append(dict(route.tag(), context_length=route.ctx))
         self._send_json(200, {"models": models})
 
     def _merged_tags(self) -> None:
@@ -407,24 +492,19 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, urllib.error.URLError):
             doc = {"models": []}
         models = doc.get("models") if isinstance(doc.get("models"), list) else []
-        models = [m for m in models if not is_q2_model(m.get("name") or m.get("model"))]
-        models.append({
-            "name": MODEL, "model": MODEL, "size": MODEL_SIZE,
-            "digest": "sha256:cadd809e691c5fa2",
-            "details": {"format": "gguf", "family": "qwen35",
-                        "parameter_size": "26.9B", "quantization_level": "Q2_0"},
-        })
+        models = [m for m in models if not route_for(m.get("name") or m.get("model"))]
+        models.extend(r.tag() for r in ROUTES if r is QWEN or r.installed())
         self._send_json(200, {"models": models})
 
-    def _chat(self, body: dict) -> None:
+    def _chat(self, body: dict, route=QWEN) -> None:
         try:
-            ENGINES.start_llama()
-            payload = ollama_chat_to_openai(body)
+            ENGINES.start_llama(route)
+            payload = ollama_chat_to_openai(body, route)
             if payload["stream"]:
                 self._chat_stream(payload)
             else:
                 obj = request_json(LLAMA + "/v1/chat/completions", payload, timeout=3600)
-                self._send_json(200, openai_response_to_ollama(obj))
+                self._send_json(200, openai_response_to_ollama(obj, route))
         except urllib.error.HTTPError as error:
             reason = error.read().decode("utf-8", "replace") or str(error)
             self._send_json(error.code, {"error": reason[:4000]})
@@ -443,7 +523,7 @@ class Handler(BaseHTTPRequestHandler):
         parts: dict[int, dict] = {}
         usage: dict = {}
         timings: dict = {}
-        finish = "stop"
+        finish = None
         try:
             with response:
                 for raw in response:
@@ -453,7 +533,9 @@ class Handler(BaseHTTPRequestHandler):
                     data = line[5:].strip()
                     if data == b"[DONE]":
                         break
-                    event = _json(data)
+                    event = json.loads(data)
+                    if event.get("error"):
+                        raise RuntimeError(str(event["error"]))
                     if isinstance(event.get("usage"), dict):
                         usage = event["usage"]
                     if isinstance(event.get("timings"), dict):
@@ -466,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
                     if reasoning:
                         message["thinking"] = str(reasoning)
                     if message["content"] or message.get("thinking"):
-                        self.wfile.write(json.dumps({"model": MODEL, "message": message,
+                        self.wfile.write(json.dumps({"model": payload["model"], "message": message,
                                                      "done": False}, separators=(",", ":")).encode() + b"\n")
                         self.wfile.flush()
                     for call in delta.get("tool_calls") if isinstance(delta.get("tool_calls"), list) else []:
@@ -483,13 +565,15 @@ class Handler(BaseHTTPRequestHandler):
                                               json.dumps(args) if args is not None else "")
                     if choice.get("finish_reason"):
                         finish = str(choice["finish_reason"])
+            if finish is None:
+                raise RuntimeError("llama-server stream ended without a finish reason")
             if parts:
-                self.wfile.write(json.dumps({"model": MODEL,
+                self.wfile.write(json.dumps({"model": payload["model"],
                     "message": {"role": "assistant", "content": "",
                                 "tool_calls": _ollama_tool_calls_from_parts(parts)},
                     "done": False}, separators=(",", ":")).encode() + b"\n")
             predicted_ms = float(timings.get("predicted_ms") or 0)
-            done = {"model": MODEL, "message": {"role": "assistant", "content": ""},
+            done = {"model": payload["model"], "message": {"role": "assistant", "content": ""},
                     "done": True, "done_reason": "length" if finish == "length" else "stop",
                     "prompt_eval_count": int(usage.get("prompt_tokens") or timings.get("prompt_n") or 0),
                     "eval_count": int(usage.get("completion_tokens") or timings.get("predicted_n") or 0),
@@ -498,6 +582,14 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
+        except Exception as error:
+            # Headers are already sent: an NDJSON error, never a second HTTP
+            # response or a successful final frame for an incomplete answer.
+            try:
+                self.wfile.write(json.dumps({"error": str(error)[:4000]}).encode() + b"\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
 
 def main() -> int:

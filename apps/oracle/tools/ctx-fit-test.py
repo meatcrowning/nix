@@ -60,7 +60,10 @@ SSH = ("#!/bin/sh\n"
        "  case \"$1\" in -o) shift 2 ;; *) break ;; esac\n"
        "done\n"
        "shift\n"          # the host
-       "eval \"$@\"\n")
+       "case \"$*\" in\n"
+       "  *MemAvailable*) printf 'MemAvailable: 25165824 kB\\n8192\\n' ;;\n"
+       "  *) eval \"$@\" ;;\n"
+       "esac\n")
 
 for name, body in (("journalctl", "#!/bin/sh\ncat <<'EOF'\n%s\nEOF\n" % KV_LOG),
                    ("nvidia-smi", "#!/bin/sh\necho 8192\n"),   # 8 GiB free
@@ -117,6 +120,9 @@ from PySide6.QtGui import QGuiApplication               # noqa: E402
 
 sys.argv = [sys.argv[0], "--selftest"]
 import main as oracle                                   # noqa: E402
+
+# The RAM floor must also be a fixture; book's live free RAM may be below it.
+oracle.CtxFit._mem_available = staticmethod(lambda: 24 * 1024 ** 3)
 
 app = QGuiApplication([])
 o = oracle.Ollama()
