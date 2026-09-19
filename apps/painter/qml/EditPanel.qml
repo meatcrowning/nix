@@ -50,7 +50,7 @@ Panel {
 
     // The additional reference images, each with its own remove.
     Repeater {
-        model: App.editExtraImages
+        model: App.editMultipleImages ? App.editExtraImages : []
         delegate: Column {
             width: panel.width
             required property int index
@@ -81,7 +81,7 @@ Panel {
     // Always-empty "add another reference image" well — only once there is a
     // primary, since a reference with nothing to size against makes no sense.
     FrameWell {
-        active: App.inputImage !== ""
+        active: App.editMultipleImages && App.inputImage !== ""
         path: ""
         url: ""
         emptyText: "drag or paste another reference image here"

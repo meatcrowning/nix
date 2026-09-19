@@ -884,6 +884,10 @@ class Painter(QObject):
     # the list is greyed out — and `edit` decides which pipeline is built.
     mode = Property(str, lambda self: self._mode, notify=modeChanged)
     isEdit = Property(bool, lambda self: self._mode == "edit", notify=modeChanged)
+    fixedSampling = Property(bool, lambda self: bool(self._selected_family().get("fixed_sampling")), notify=modelChanged)
+    editSampling = Property(bool, lambda self: bool((self._selected_family().get("edit") or {}).get("sampling_controls")), notify=modelChanged)
+    editMultipleImages = Property(bool, lambda self: (self._selected_family().get("edit") or {}).get("max_images") != 1, notify=modelChanged)
+    supportsLoras = Property(bool, lambda self: self._selected_family().get("supports_loras", True), notify=modelChanged)
     inputImage = Property(str, lambda self: self._input_image, notify=inputImageChanged)
     inputImageUrl = Property(str, lambda self: (
         QUrl.fromLocalFile(self._input_image).toString() if self._input_image else ""),
@@ -1107,6 +1111,8 @@ class Painter(QObject):
     # existing single-image behaviour are untouched.
     @Slot(str, result=bool)
     def addEditImage(self, url):
+        if not self.editMultipleImages:
+            return self.setInputImage(url)
         path = self._dropped_path(url)
         if not path:
             return False
@@ -1117,6 +1123,8 @@ class Painter(QObject):
 
     @Slot(result=bool)
     def pasteEditImage(self):
+        if not self.editMultipleImages:
+            return self.pasteInputImage()
         path = self._paste_target()
         if not path:
             return False
@@ -1354,7 +1362,8 @@ class Painter(QObject):
             # modelChanged -> applyDefaults() and overwriting the
             # just-restored video sampling settings (steps, sampler,
             # scheduler) with that other checkpoint's defaults.
-            in_family = (entry is not None and entry.family == spec.get("family")
+            in_family = (entry is not None and (entry.family == spec.get("family")
+                         or (want_mode == "edit" and (self.reg.family_of(entry) or {}).get("edit")))
                          and (spec.get("needs") != "edit"
                               or (self.reg.family_of(entry) or {}).get("edit")))
             if in_family:
@@ -1458,6 +1467,17 @@ class Painter(QObject):
 
     # -- modes -------------------------------------------------------------
 
+    def _selected_family(self):
+        entry = self.models.entry_at(self._selected)
+        return (self.reg.family_of(entry) or {}) if self.reg and entry else {}
+
+    def _mode_entry(self, mode_id):
+        if not self.reg:
+            return None
+        if mode_id == "edit" and self._selected_family().get("edit"):
+            return self.models.entry_at(self._selected)
+        return self.reg.mode_model(mode_id)
+
     @Slot(result="QVariantList")
     def modes(self):
         """The switcher's buttons: what each one is, and whether it can be had.
@@ -1469,12 +1489,12 @@ class Painter(QObject):
         """
         out = []
         for spec in R.MODES:
-            entry = self.reg.mode_model(spec["id"]) if self.reg else None
+            entry = self._mode_entry(spec["id"])
             out.append({
                 "id": spec["id"], "label": spec["label"],
                 "available": entry is not None,
                 "model": getattr(entry, "name", ""),
-                "tip": spec["tip"] if entry is not None
+                "tip": (f"Edit a dropped image - {entry.name}" if spec["id"] == "edit" else spec["tip"]) if entry is not None
                        else f"no {spec['family']} model found",
             })
         return out
@@ -1497,7 +1517,7 @@ class Painter(QObject):
             # The scan has not landed yet (startup restore) — remember it.
             self._want_mode = mode_id
             return
-        entry = self.reg.mode_model(mode_id)
+        entry = self._mode_entry(mode_id)
         if entry is None:
             spec = R.mode_spec(mode_id) or {}
             self.toast.emit(f"no {spec.get('family', mode_id)} model found here", True)
@@ -1632,7 +1652,9 @@ class Painter(QObject):
             if not self._input_image:
                 self.toast.emit("drop an image to edit first", True)
                 return
-            paths = [self._input_image] + [p for p in self._edit_extra if p]
+            paths = [self._input_image]
+            if self.editMultipleImages:
+                paths += [p for p in self._edit_extra if p]
             self._upload_edit_then_start(entry, params, count, paths)
             return
 
@@ -1740,13 +1762,21 @@ class Painter(QObject):
         self.client.upload_image(path, uploaded)
 
     def _weight_bytes(self, entry, params):
-        """What this batch is about to pull off disk, in bytes — the checkpoint
-        plus every enabled LoRA. Deliberately the RAW figure and nothing else:
-        the warden adds its own overhead for the encoder, the VAE and the
-        sampler's working tensors, and it is the one that knows how much of the
-        machine there is (apps/pylib/warden.py). 0 means "no idea", which the
-        warden reads as a big family."""
+        """Weight-memory estimate, normally raw checkpoint plus enabled LoRAs.
+
+        A measured offloaded AIO can use its CPU working set instead. The
+        warden adds overhead and checks the backend host's available memory.
+        Zero means unknown, which the warden reads as a big family.
+        """
         total = int(getattr(entry, "size", 0) or 0)
+        # This AIO mmaps all components but offloads them between stages. Its
+        # full file is not a simultaneous CPU working set. The mixed INT8
+        # bundle was verified within a 22 GiB cgroup on top's 12 GiB GPU;
+        # reserve 20 GiB plus the warden's own overhead. Other quants/BF16 keep
+        # the conservative raw-size estimate.
+        if (entry.family == "llada_image_ckpt" and entry.quant == "comfy_quant"
+                and 25 * 1024**3 < total < 27 * 1024**3):
+            total = 20 * 1024**3
         for row in self.loras.active():
             lora = self.reg.find(row.get("name", "")) if self.reg else None
             total += int(getattr(lora, "size", 0) or 0)

@@ -8,7 +8,7 @@ Panel {
     // section could be pinned — silently, since the lookup is guarded.
     id: panel
     title: "Sampling"
-    badge: App.samplers.length + " samplers"
+    badge: App.fixedSampling ? "Euler · native schedule" : App.samplers.length + " samplers"
 
     Field {
         label: "Steps"
@@ -32,6 +32,7 @@ Panel {
 
     Field {
         label: "Denoise"
+        visible: !App.fixedSampling
         Spin {
             value: root.gen.denoise; from: 0; to: 1; step: 0.01; decimals: 2
             onEdited: function (v) { root.set("denoise", v) }
@@ -40,6 +41,7 @@ Panel {
 
     Field {
         label: "Sampler"
+        visible: !App.fixedSampling
         Picker {
             width: 200
             options: App.samplers
@@ -50,6 +52,7 @@ Panel {
 
     Field {
         label: "Scheduler"
+        visible: !App.fixedSampling
         Picker {
             width: 200
             options: App.schedulers
@@ -61,21 +64,21 @@ Panel {
     SeedField {}
 
     Field {
-        label: App.isVideo ? "Count" : "Batch"
-        hint: App.isVideo
-              ? "How many separate video jobs to queue."
+        label: (App.isVideo || App.isEdit) ? "Count" : "Batch"
+        hint: (App.isVideo || App.isEdit)
+              ? "How many separate jobs to queue."
               : "Images per submitted job (one sampler run); count queues separate jobs."
         Row {
             spacing: 8
             Spin {
                 width: 56
-                visible: !App.isVideo
+                visible: !App.isVideo && !App.isEdit
                 value: root.gen.batch_size; from: 1; to: 16; step: 1
                 onEdited: function (v) { root.set("batch_size", v) }
             }
             PixelText {
                 text: "Count"
-                visible: !App.isVideo
+                visible: !App.isVideo && !App.isEdit
                 color: Theme.textDim
                 anchors.verticalCenter: parent.verticalCenter
             }

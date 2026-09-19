@@ -247,11 +247,11 @@ def fake_models(root):
     return root
 
 
-def write_safetensors(path, keys):
+def write_safetensors(path, keys, metadata=None):
     """A parseable safetensors header and nothing else — `keys` is name -> shape."""
     hdr = {k: {"dtype": "BF16", "shape": list(shape), "data_offsets": [0, 512]}
            for k, shape in keys.items()}
-    hdr["__metadata__"] = {"format": "pt"}
+    hdr["__metadata__"] = metadata or {"format": "pt"}
     blob = json.dumps(hdr).encode()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as fh:
@@ -374,6 +374,7 @@ def build(tmp):
         # warnings — so a stub without them would fail Main.qml for the stub's
         # own omission.
         clicked = Signal(str)
+        rclicked = Signal(str, int, int)
 
         @Slot("QVariantList")
         def setButtons(self, _b): pass
@@ -1380,6 +1381,52 @@ def test_paste(win, ctl, tmp):
     spin(200)
 
 
+def test_llada(win, ctl, tmp):
+    """The same selected AIO drives text-to-image and single-reference edits."""
+    root = os.environ["PAINTER_MODELS"]
+    path = os.path.join(root, "checkpoints", "llada-base.safetensors")
+    keys = {"model.diffusion_model." + k: [16, 16] for k in (
+        "all_x_embedder.1-1.weight", "noise_refiner.0.attention.to_q.weight",
+        "sigvq_refiner.0.attention.to_q.weight")}
+    keys["vae.decoder.conv_in.weight"] = [8, 16, 3, 3]
+    write_safetensors(path, keys, {"config": json.dumps({"llada_image": {"variant": "base"}})})
+    ctl.setMode("")
+    ctl.rescan()
+    spin(200)
+    ctl.selectModelByName("llada-base.safetensors")
+    spin(200)
+    check("LLaDA AIO is selectable", ctl.selectedName == "llada-base.safetensors")
+    check("LLaDA Base defaults are 50 steps and CFG 5", ctl.modelDefaults()["steps"] == 50 and ctl.modelDefaults()["cfg"] == 5)
+    check("LLaDA exposes only its native supported controls", ctl.fixedSampling and ctl.editSampling and not ctl.supportsLoras and not ctl.editMultipleImages)
+    modes = {m["id"]: m for m in ctl.modes()}
+    check("Edit offers selected LLaDA even without Klein", modes["edit"]["available"] and modes["edit"]["model"] == ctl.selectedName)
+    pane = find(win.contentItem(), "ParamsPane")
+    from PySide6.QtCore import QMetaObject, Qt, Q_RETURN_ARG
+    visible = lambda key: QMetaObject.invokeMethod(pane, "sectionVisible", Qt.DirectConnection, Q_RETURN_ARG("QVariant"), Q_ARG("QVariant", key))
+    check("LLaDA text sampling is visible; patches and LoRAs are hidden", visible("sampling") and not visible("patches") and not visible("lora"))
+    ctl.setMode("edit")
+    spin(150)
+    check("Edit preserves the selected LLaDA model", ctl.isEdit and ctl.selectedName == "llada-base.safetensors")
+    check("LLaDA editing keeps sampling and image controls, not resolution or duplicate seed", visible("sampling") and visible("edit") and not visible("resolution") and not visible("editseed"))
+    calls = []
+    original = ctl.generate
+    ctl.generate = lambda params, count: calls.append((params, count))
+    try:
+        g = prop(APP, "gen")
+        g.update(steps=1, cfg=4.5, positive="make it blue", negative="blur")
+        APP.setProperty("gen", g)
+        QMetaObject.invokeMethod(APP, "submit", Qt.DirectConnection)
+        p = calls[-1][0] if calls else {}
+        check("LLaDA Edit submits the visible step/CFG/negative controls", p.get("edit") and p.get("steps") == 1 and p.get("cfg") == 4.5 and p.get("negative") == "blur", p)
+    finally:
+        ctl.generate = original
+    ctl.setMode("")
+    check("Turning Edit off keeps LLaDA for text-to-image", not ctl.isEdit and ctl.selectedName == "llada-base.safetensors")
+    os.unlink(path)
+    ctl.rescan()
+    spin(150)
+
+
 def test_modes(win, ctl, tmp):
     """The switcher above the model list: four shortcuts, and the list greyed.
 
@@ -1494,7 +1541,7 @@ def test_modes(win, ctl, tmp):
     g.update({"randomSeed": False, "reuseSeed": False})
     APP.setProperty("gen", g)
     spin(60)
-    seed_spin = seed_panel and find(seed_panel, "Spin")
+    seed_spin = seed_panel and find(seed_panel, "SeedInput")
     check("...and its seed number is editable when not random/reuse",
           seed_spin is not None and seed_spin.property("enabled") is True,
           seed_spin and seed_spin.property("enabled"))
@@ -4657,9 +4704,13 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("seed", "preview", "live"):
+    if only in ("seed", "preview", "live", "llada", "modes"):
         print("== %s ==" % only)
-        if only == "seed":
+        if only == "llada":
+            test_llada(win, ctl, tmp)
+        elif only == "modes":
+            test_modes(win, ctl, tmp)
+        elif only == "seed":
             test_seed(win, ctl)
         elif only == "preview":
             test_preview_zoom(win, ctl, tmp)
@@ -4679,6 +4730,7 @@ def main():
     print("== video ==");             test_video(win, ctl, tmp)
     print("== paste ==");             test_paste(win, ctl, tmp)
     print("== modes ==");             test_modes(win, ctl, tmp)
+    print("== llada ==");             test_llada(win, ctl, tmp)
     print("== drag out ==");          test_drag_out(win, ctl, tmp)
     print("== hover play ==");        test_hover_play(win, ctl, tmp)
     print("== thumb cache ==");       test_thumb_cache(win, ctl, tmp)

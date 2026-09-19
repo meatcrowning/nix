@@ -143,16 +143,19 @@ which file each one means is `registry.MODES`**, painter answers it through
   itself rather than greying a list it no longer overrides.
 - The mode is remembered (`Prefs` key `mode`) and applied when the rows land —
   after the remembered model name, which it outranks.
+- Edit preserves the selected model when its family supports editing; otherwise
+  it selects the canonical Klein model. `_mode_entry()` owns this exception.
 
 ## Editing is a different pipeline, not a flag on the image one
 
 `edit` is the one mode that changes more than the selection: a family may
-declare an `edit` block (`families/flux2.json` — Flux 2 Klein, the only one) and
-`registry.build()` then branches to `_build_edit()` on `graphs/edit_flux2.json`,
+declare an `edit` block (`families/flux2.json` or `llada_image_ckpt.json`) and
+`registry.build()` chooses that family's pipeline. Klein uses `_build_edit()`
+on `graphs/edit_flux2.json`,
 **transcribed from the workflow behind the `Flux2-Klein_0000*.png` outputs**
 (their embedded `prompt` chunk is where to look if a node contract moves).
 
-What is genuinely different, and therefore what the left column stops offering
+For Flux 2 Klein, what is different and what the left column stops offering
 — [his] *"the left side of the program when edit is selected should really just
 be a box to drop the image in and a prompt box"*:
 
@@ -1016,6 +1019,44 @@ wiring are deliberate:
   check that did the latter passed throughout the bug).
 
 The numeric `Spin`/`Field` controls are not spellchecked and must not be.
+
+## LLaDA-Image Base
+
+`families/llada_image_ckpt.json` identifies the native T8 AIO checkpoint by
+tensor keys and its embedded Base variant metadata, not its filename. It bundles
+the diffusion model, MoE text encoder, SigVQ and VAE. Turbo is not supported.
+`Registry._build_llada()` adapts the checkpoint template: Euler with the native
+LLaDA scheduler, or `T8LLaDAImageEditConditioning` for one source image. Editing
+rounds source dimensions down to multiples of 32. Both paths expose steps, CFG,
+negative prompt and seed; hide unsupported sampler/scheduler/denoise, patches,
+and LoRA controls. Base defaults to 50 steps / CFG 5. Turning Edit off returns
+to text-to-image with the same selected checkpoint.
+
+Backend installation is top-only; both top and book use the same stdlib/Qt
+frontend code. Run `bash apps/painter/tools/install-llada.sh /home/lam/comfy`.
+The installer pins T8's standalone nodes and applies `tools/llada-compat.patch`:
+the older Comfy RMS-weight API plus per-LLaDA static, unpinned CPU offloading.
+Do not remove that memory policy without retesting the AIO under a memory cap;
+its MoE encoder cannot be dynamically staged in top's available RAM. Other
+model loaders and the global Comfy memory policy are untouched. Restart the
+backend only while idle, then relaunch the frontend manually / rescan models.
+
+The tested checkpoint is
+`t8star/LLaDa-Image-Comfy` revision `7727757`, file
+`LLaDA-Image-Base-INT8-ConvRot-Mixed-AIO.safetensors`, installed under
+`/home/lam/models/checkpoints`. Its SHA256 is
+`4766571e1fc6ac8bc16940e46b91083b1a9a7a00f42750165b852e07a95e36fc`.
+This is an experimental community quantization, not the official BF16 weights.
+The frontend reserves 20 GiB plus warden overhead for this mixed-INT8 size class;
+other quantizations retain the raw-size estimate. This is a working-set estimate,
+not the checkpoint's disk size or a promise that every resolution fits.
+
+Verify graph/detection with `python3 apps/painter/tools/llada-test.py` and the
+offscreen UI with `PAINTER_UI_ONLY=llada painter-qtenv python3
+apps/painter/tools/ui-test.py` after the offscreen session guard. Inference
+verification uses a separate loopback Comfy process with scratch input, output,
+user directory **and explicit `--database-url`**, a warden lease, and a memory
+cap; never submit smoke jobs into the user's active Painter queue.
 
 ## The backend is NOT packaged
 
