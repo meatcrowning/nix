@@ -558,13 +558,12 @@ class Registry:
     # -- editing -------------------------------------------------------------
 
     def _build_llada(self, entry, fam, g, p, pairing, object_info, edit):
-        """Base uses its native schedule and, for editing, SigVQ + VAE conditioning."""
+        """Base defaults to its native schedule; other Comfy samplers are opt-in."""
         if p.get("loras"):
             raise G.GraphError("LLaDA-Image LoRAs are not supported")
         g.remove("negpip")
         g.remove("model_sampling")
-        p = dict(p, sampler_name="euler", scheduler="llada_image", denoise=1.0,
-                 add_noise=True, toggles={"negpip": False, "model_sampling": False})
+        p = dict(p, add_noise=True, toggles={"negpip": False, "model_sampling": False})
         p.pop("model_sampling", None)
         loader = g.id_of("loader")
         pos, neg = p.get("positive", ""), p.get("negative", "")
@@ -600,9 +599,22 @@ class Registry:
             g.set_class("latent", fam["latent_class"], inputs={
                 "width": int(w), "height": int(h), "batch_size": int(p.get("batch_size", 1))})
             p.update(width=int(w), height=int(h))
-        g.set_input("sampler_select", "sampler_name", "euler")
-        g.set_class("scheduler", "T8LLaDAImageScheduler", drop=("scheduler", "denoise"))
-        g.set_input("scheduler", "steps", int(p["steps"]))
+        g.set_input("sampler_select", "sampler_name", p["sampler_name"])
+        steps, denoise = int(p["steps"]), float(p["denoise"])
+        if not 1 <= steps <= 1000 or not 0 <= denoise <= 1:
+            raise G.GraphError("LLaDA needs 1–1000 steps and denoise between 0 and 1")
+        if p["scheduler"] == "llada_image":
+            total = max(steps, int(steps / denoise)) if denoise > 0 else steps
+            if total > 1000:
+                raise G.GraphError("Native LLaDA schedule exceeds 1000 points; raise denoise or lower steps")
+            g.set_class("scheduler", "T8LLaDAImageScheduler", drop=("scheduler", "denoise"))
+            g.set_input("scheduler", "steps", total)
+            if denoise < 1:
+                split = g.add_node("SplitSigmas", {"sigmas": [g.id_of("scheduler"), 0],
+                    "step": total - steps if denoise > 0 else total}, "denoise_sigmas", "Denoise schedule")
+                g.set_input("sampler", "sigmas", [split, 1])
+        else:
+            g.set_inputs("scheduler", {"scheduler": p["scheduler"], "steps": steps, "denoise": denoise})
         g.set_inputs("sampler", {"cfg": float(p["cfg"]), "noise_seed": int(p.get("seed", 0)), "add_noise": True})
         g.set_input("save", "filename_prefix", p.get("filename_prefix", "painter"))
         prompt = g.to_prompt()

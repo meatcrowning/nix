@@ -1025,12 +1025,21 @@ The numeric `Spin`/`Field` controls are not spellchecked and must not be.
 `families/llada_image_ckpt.json` identifies the native T8 AIO checkpoint by
 tensor keys and its embedded Base variant metadata, not its filename. It bundles
 the diffusion model, MoE text encoder, SigVQ and VAE. Turbo is not supported.
-`Registry._build_llada()` adapts the checkpoint template: Euler with the native
-LLaDA scheduler, or `T8LLaDAImageEditConditioning` for one source image. Editing
-rounds source dimensions down to multiples of 32. Both paths expose steps, CFG,
-negative prompt and seed; hide unsupported sampler/scheduler/denoise, patches,
-and LoRA controls. Base defaults to 50 steps / CFG 5. Turning Edit off returns
-to text-to-image with the same selected checkpoint.
+`Registry._build_llada()` adapts the checkpoint template, defaulting to Euler
+with the native LLaDA scheduler. Sampler, scheduler and denoise are experimental
+overrides; generic schedules use BasicScheduler, and the native schedule uses
+SplitSigmas to retain the requested step count when denoise is reduced (at most
+1000 schedule points). Denoise truncates the schedule, not image-edit strength.
+Unsupported patches and LoRAs stay hidden. Base defaults to 50 steps / CFG 5.
+
+The optional source-image box is always available for LLaDA. Empty means
+text-to-image; a chosen, dropped or pasted image automatically enables native
+`T8LLaDAImageEditConditioning`. Clear returns to text-to-image without switching
+models or resetting sampling settings. Editing rounds source dimensions down
+to multiples of 32 and uses the source-size controls rather than t2i resolution.
+`editStateChanged` joins model, mode and input-image notifications; explicit
+Edit mode remains required for Klein, not LLaDA. ParamsPane forwards the file
+picker action to Root; tests must never open a real portal/file picker.
 
 Backend installation is top-only; both top and book use the same stdlib/Qt
 frontend code. Run `bash apps/painter/tools/install-llada.sh /home/lam/comfy`.

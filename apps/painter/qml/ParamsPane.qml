@@ -37,6 +37,7 @@ Item {
     function setMs(key, value) { if (app) app.setMs(key, value) }
     function recomputeDims() { if (app) app.recomputeDims() }
     function releaseFocus() { if (app) app.releaseFocus() }
+    function importImage() { if (app) app.importImage() }
 
     // The two scene-level overlays a `Picker` and a right-click need. The app's
     // own are used when there is one — they are anchored to the whole window
@@ -108,12 +109,13 @@ Item {
     // (the loader hides the item, the item then reports hidden) and the whole
     // column stays empty. Measured exactly that way.
     function sectionVisible(key) {
-        return key === "edit" || key === "editscale" ? App.isEdit
+        return key === "edit" ? (App.isEdit || App.optionalEditImage)
+             : key === "editscale" ? App.isEdit
              : key === "editseed" ? (App.isEdit && !App.editSampling)
              : key === "video" ? (App.isVideo && !App.isEdit)
              : key === "resolution" ? !App.isEdit
              : key === "sampling" ? (!App.isEdit || App.editSampling)
-             : key === "patches" ? (!App.isVideo && !App.isEdit && !App.fixedSampling)
+             : key === "patches" ? (!App.isVideo && !App.isEdit && App.supportsPatches)
              : key === "lora" ? App.supportsLoras
              : true
     }

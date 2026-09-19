@@ -1397,13 +1397,25 @@ def test_llada(win, ctl, tmp):
     spin(200)
     check("LLaDA AIO is selectable", ctl.selectedName == "llada-base.safetensors")
     check("LLaDA Base defaults are 50 steps and CFG 5", ctl.modelDefaults()["steps"] == 50 and ctl.modelDefaults()["cfg"] == 5)
-    check("LLaDA exposes only its native supported controls", ctl.fixedSampling and ctl.editSampling and not ctl.supportsLoras and not ctl.editMultipleImages)
+    check("LLaDA offers experimental sampling and optional single-image editing", not ctl.fixedSampling and ctl.optionalEditImage and ctl.editSampling and not ctl.supportsLoras and not ctl.editMultipleImages)
     modes = {m["id"]: m for m in ctl.modes()}
     check("Edit offers selected LLaDA even without Klein", modes["edit"]["available"] and modes["edit"]["model"] == ctl.selectedName)
     pane = find(win.contentItem(), "ParamsPane")
+    check("The image chooser is forwarded through the parameter pane", hasattr_qml(pane, "importImage"))
     from PySide6.QtCore import QMetaObject, Qt, Q_RETURN_ARG
     visible = lambda key: QMetaObject.invokeMethod(pane, "sectionVisible", Qt.DirectConnection, Q_RETURN_ARG("QVariant"), Q_ARG("QVariant", key))
     check("LLaDA text sampling is visible; patches and LoRAs are hidden", visible("sampling") and not visible("patches") and not visible("lora"))
+    ctl.clearInputImage()
+    spin(60)
+    check("Blank source shows t2i resolution and the optional upload box", not ctl.isEdit and visible("edit") and visible("resolution") and not visible("editscale"))
+    from PySide6.QtGui import QImage
+    source = os.path.join(tmp, "llada-source.png")
+    image = QImage(64, 64, QImage.Format_RGB32)
+    image.fill(0xff336699)
+    image.save(source)
+    ctl.setInputImage(source)
+    spin(60)
+    check("Adding a source automatically selects editing without a mode switch", ctl.isEdit and ctl.mode == "")
     ctl.setMode("edit")
     spin(150)
     check("Edit preserves the selected LLaDA model", ctl.isEdit and ctl.selectedName == "llada-base.safetensors")
@@ -1413,11 +1425,17 @@ def test_llada(win, ctl, tmp):
     ctl.generate = lambda params, count: calls.append((params, count))
     try:
         g = prop(APP, "gen")
-        g.update(steps=1, cfg=4.5, positive="make it blue", negative="blur")
+        g.update(steps=1, cfg=4.5, positive="make it blue", negative="blur", sampler_name="heun", scheduler="simple", denoise=.7)
         APP.setProperty("gen", g)
         QMetaObject.invokeMethod(APP, "submit", Qt.DirectConnection)
         p = calls[-1][0] if calls else {}
         check("LLaDA Edit submits the visible step/CFG/negative controls", p.get("edit") and p.get("steps") == 1 and p.get("cfg") == 4.5 and p.get("negative") == "blur", p)
+        check("Sampler, scheduler and denoise reach editing", p.get("sampler_name") == "heun" and p.get("scheduler") == "simple" and p.get("denoise") == .7)
+        ctl.clearInputImage()
+        spin(60)
+        QMetaObject.invokeMethod(APP, "submit", Qt.DirectConnection)
+        p = calls[-1][0]
+        check("Clearing the source switches the submitted job back to t2i", not p.get("edit") and p.get("width", 0) > 0 and not ctl.isEdit and visible("resolution"))
     finally:
         ctl.generate = original
     ctl.setMode("")
