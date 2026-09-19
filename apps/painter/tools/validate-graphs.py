@@ -97,6 +97,17 @@ def check_edit(built):
     prompt = built["prompt"]
     roles = _roles_of(prompt)
     problems = []
+    if "edit_conditioning" in roles:
+        cond = roles["edit_conditioning"]
+        ins = prompt[cond]["inputs"]
+        if ins.get("image") != [roles["scale_image"], 0]:
+            problems.append("LLaDA conditioning does not read the scaled source")
+        for key, slot in (("positive", 0), ("negative", 1), ("latent_image", 2)):
+            if prompt[roles["sampler"]]["inputs"].get(key) != [cond, slot]:
+                problems.append(f"LLaDA sampler {key} does not read edit conditioning")
+        if any(role in roles for role in ("encode_pos", "encode_neg", "latent")):
+            problems.append("LLaDA edit still carries unused text/latent nodes")
+        return problems + check_dangling(prompt)
     for role in ("load_image", "scale_image", "image_size", "vae_encode",
                  "encode_pos", "zero_out", "ref_pos", "ref_neg", "guider", "latent"):
         if role not in roles:
@@ -218,11 +229,14 @@ def main(argv=None):
                      "toggles": toggles},
                     object_info=oi,
                 )
-                probs = check_structure(built, toggles, fam)
+                effective = built["params"]["toggles"]
+                probs = check_structure(built, effective, fam)
+                if not (fam or {}).get("fixed_sampling") and effective != toggles:
+                    probs.append("requested toggles were not applied")
                 roles = _roles_of(built["prompt"])
                 pos = built["prompt"][roles["encode_pos"]]["inputs"]["text"]
                 neg = built["prompt"][roles["encode_neg"]]["inputs"]["text"]
-                if toggles["negpip"]:
+                if effective["negpip"]:
                     if "(negative test:-1)" not in pos or neg != "":
                         probs.append("NegPip did not fold the negative prompt into positive")
                 elif neg != "negative test":
@@ -294,7 +308,7 @@ def main(argv=None):
             probs = check_edit(built)
             if probs:
                 raise G.ValidationError(probs)
-            print(line + f" edit:ok({built['params']['megapixels']}MP,"
+            print(line + f" edit:ok({built['params'].get('editMegapixels', built['params'].get('megapixels'))}MP,"
                           f"{built['params']['steps']} steps)")
         except (G.GraphError, G.ValidationError) as exc:
             failures += 1

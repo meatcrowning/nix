@@ -83,7 +83,7 @@ Panel {
         tagsEnabled: root.gen.promptTransform === "danbooru"
         pillMode: panel.pillsAvailable && panel.pillsWanted
         tagPopup: root.tagPopup
-        visible: !App.isVideo && !App.isEdit
+        visible: !App.isVideo && (!App.isEdit || App.editSampling)
         boxHeight: Prefs.get("prompt.negH") > 0 ? Prefs.get("prompt.negH") : 64
         placeholder: "Negative"
         negative: true

@@ -17,7 +17,7 @@ import os
 import struct
 import sys
 
-SCHEMA = 3
+SCHEMA = 4
 
 MODEL_EXTS = (".safetensors", ".sft", ".gguf", ".ckpt", ".pt", ".bin")
 
@@ -321,6 +321,14 @@ def _loader_for(quant: str, path: str) -> str:
 
 def detect_diffusion(v: View):
     """Return (family, dims) or (None, {}).  Order matters; first hit wins."""
+
+    if v.has("all_x_embedder.1-1.weight", "noise_refiner.0.attention.to_q.weight",
+             "sigvq_refiner.0.attention.to_q.weight"):
+        try:
+            variant = json.loads(v.meta.get("config", "{}"))["llada_image"]["variant"]
+        except (ValueError, KeyError, TypeError):
+            variant = "unknown"
+        return "llada_image", {"variant": variant}
 
     # --- MiniMax H3: video and audio patch projectors side by side --------
     # The only model here that generates both modalities in one pass, so the

@@ -1,0 +1,18 @@
+{
+  "id": "llada_image_ckpt",
+  "label": "LLaDA-Image Base (AIO)",
+  "detect": "llada_image_ckpt",
+  "graph": "universal_ckpt.json",
+  "loader_shape": "checkpoint",
+  "loader_class": "T8LLaDAImageCheckpointLoader",
+  "latent_class": "EmptyFlux2LatentImage",
+  "prompt_transform": "none",
+  "fixed_sampling": true,
+  "supports_loras": false,
+  "toggles": {"negpip": false, "model_sampling": false},
+  "defaults": {"steps": 50, "cfg": 5.0, "sampler_name": "euler", "scheduler": "llada_image", "denoise": 1.0, "add_noise": true},
+  "resolution": {"megapixels": 1.0, "multiple": 32, "aspect": "1:1"},
+  "edit": {"graph": "universal_ckpt.json", "sampling_controls": true, "max_images": 1, "megapixels": 1.0},
+  "text_encoder": null,
+  "vae": null
+}

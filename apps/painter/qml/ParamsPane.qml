@@ -108,10 +108,13 @@ Item {
     // (the loader hides the item, the item then reports hidden) and the whole
     // column stays empty. Measured exactly that way.
     function sectionVisible(key) {
-        return key === "edit" || key === "editscale" || key === "editseed" ? App.isEdit
+        return key === "edit" || key === "editscale" ? App.isEdit
+             : key === "editseed" ? (App.isEdit && !App.editSampling)
              : key === "video" ? (App.isVideo && !App.isEdit)
-             : key === "resolution" || key === "sampling" ? !App.isEdit
-             : key === "patches" ? (!App.isVideo && !App.isEdit)
+             : key === "resolution" ? !App.isEdit
+             : key === "sampling" ? (!App.isEdit || App.editSampling)
+             : key === "patches" ? (!App.isVideo && !App.isEdit && !App.fixedSampling)
+             : key === "lora" ? App.supportsLoras
              : true
     }
 

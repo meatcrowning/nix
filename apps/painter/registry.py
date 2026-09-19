@@ -275,6 +275,9 @@ class Registry:
             )
             return out
 
+        if fam["id"] == "llada_image_ckpt" and entry.dims.get("variant") != "base":
+            out["problems"].append("Only LLaDA-Image Base is supported; checkpoint metadata must identify Base")
+
         if fam.get("loader_shape") == "checkpoint":
             out["notes"].append("bundled checkpoint: encoder and VAE come from the file")
         else:
@@ -351,6 +354,8 @@ class Registry:
 
     def lora_compat(self, lora: Entry, base: Entry, threshold: float = 0.8):
         """How well a LoRA fits a base model, and why."""
+        if (self.family_of(base) or {}).get("supports_loras") is False:
+            return {"ok": False, "score": 0.0, "reason": "LoRAs are not supported by this pipeline"}
         if base.family in self.overrides.forced_families(lora.path):
             return {"ok": True, "score": 1.0, "reason": "forced by user"}
         targets = self._lora_targets(lora)
@@ -422,6 +427,8 @@ class Registry:
 
         # --- loader ---------------------------------------------------------
         if fam.get("loader_shape") == "checkpoint":
+            if fam.get("loader_class"):
+                g.set_class("loader", fam["loader_class"])
             g.set_input("loader", "ckpt_name", entry.name)
         else:
             # A family may pin the loader class. MiniMax H3 ships comfy-quantized,
@@ -451,6 +458,9 @@ class Registry:
             g.set_input("vae", "vae_name", pairing["vae"].name)
             if pairing.get("vae_audio") is not None:
                 g.set_input("vae_audio", "vae_name", pairing["vae_audio"].name)
+
+        if fam["id"] == "llada_image_ckpt":
+            return self._build_llada(entry, fam, g, p, pairing, object_info, edit)
 
         if edit:
             return self._build_edit(entry, fam, g, p, pairing, object_info)
@@ -546,6 +556,62 @@ class Registry:
 
 
     # -- editing -------------------------------------------------------------
+
+    def _build_llada(self, entry, fam, g, p, pairing, object_info, edit):
+        """Base uses its native schedule and, for editing, SigVQ + VAE conditioning."""
+        if p.get("loras"):
+            raise G.GraphError("LLaDA-Image LoRAs are not supported")
+        g.remove("negpip")
+        g.remove("model_sampling")
+        p = dict(p, sampler_name="euler", scheduler="llada_image", denoise=1.0,
+                 add_noise=True, toggles={"negpip": False, "model_sampling": False})
+        p.pop("model_sampling", None)
+        loader = g.id_of("loader")
+        pos, neg = p.get("positive", ""), p.get("negative", "")
+        if edit:
+            images = p.get("input_images") or [p.get("input_image", "")]
+            if len(images) != 1 or not images[0]:
+                raise G.GraphError("LLaDA-Image editing requires exactly one source image")
+            li = g.add_node("LoadImage", {"image": images[0]}, "load_image", "Source image")
+            no_scale = bool(p.get("editNoScale", True))
+            mp = max(0.1, min(8.0, float(p.get("editMegapixels", 1.0))))
+            inputs = {"image": [li, 0], "upscale_method": "lanczos"}
+            inputs.update({"scale_by": 1.0} if no_scale else {"megapixels": mp, "resolution_steps": 1})
+            si = g.add_node("ImageScaleBy" if no_scale else "ImageScaleToTotalPixels",
+                            inputs, "scale_image", "Scale source")
+            ci = g.add_node("T8LLaDAImageEditConditioning", {
+                "clip": [loader, 1], "vae": [loader, 2], "image": [si, 0],
+                "prompt": pos, "negative_prompt": neg}, "edit_conditioning", "LLaDA edit conditioning")
+            g.set_inputs("sampler", {"positive": [ci, 0], "negative": [ci, 1], "latent_image": [ci, 2]})
+            # Remove now-unused text/latent nodes without bypassing any links.
+            for role in ("encode_pos", "encode_neg", "latent"):
+                g.drop(role)
+            for key in ("width", "height", "batch_size"):
+                p.pop(key, None)
+            p.update(kind="edit", input_image=images[0], input_images=images,
+                     editNoScale=no_scale, editMegapixels=mp)
+        else:
+            g.set_input("encode_pos", "text", pos)
+            g.set_input("encode_neg", "text", neg)
+            w, h = p.get("width"), p.get("height")
+            if not w or not h:
+                res = fam["resolution"]
+                w, h = calc_dims(res["aspect"], res["megapixels"], res["multiple"])
+            g.set_class("latent", fam["latent_class"], inputs={
+                "width": int(w), "height": int(h), "batch_size": int(p.get("batch_size", 1))})
+            p.update(width=int(w), height=int(h))
+        g.set_input("sampler_select", "sampler_name", "euler")
+        g.set_class("scheduler", "T8LLaDAImageScheduler", drop=("scheduler", "denoise"))
+        g.set_input("scheduler", "steps", int(p["steps"]))
+        g.set_inputs("sampler", {"cfg": float(p["cfg"]), "noise_seed": int(p.get("seed", 0)), "add_noise": True})
+        g.set_input("save", "filename_prefix", p.get("filename_prefix", "painter"))
+        prompt = g.to_prompt()
+        if object_info is not None:
+            problems = G.validate(prompt, object_info)
+            if problems:
+                raise G.ValidationError(problems)
+        p["prompt_boxes"] = {"positive": pos, "negative": neg}
+        return {"prompt": prompt, "pairing": pairing, "params": p}
 
     def _build_edit(self, entry, fam, g, p, pairing, object_info):
         """The edit branch of build(): one image in, one prompt, one image out.

@@ -352,12 +352,18 @@ Item {
         // would submit numbers he was never shown — the graph would run at
         // whatever the last image family left behind.
         if (App.isEdit) {
-            App.generate({
+            var editParams = {
                 edit: true,
                 positive: g.positive,
                 editNoScale: g.editNoScale, editMegapixels: g.editMegapixels,
                 seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed
-            }, g.count)
+            }
+            if (App.editSampling) {
+                editParams.negative = g.negative
+                editParams.steps = g.steps
+                editParams.cfg = g.cfg
+            }
+            App.generate(editParams, g.count)
             return
         }
         // A video job is a different set of controls, not a superset: one

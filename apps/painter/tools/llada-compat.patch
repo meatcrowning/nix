@@ -1,0 +1,53 @@
+diff --git a/runtime/text_encoder.py b/runtime/text_encoder.py
+index 34485f3..c50d998 100644
+--- a/runtime/text_encoder.py
++++ b/runtime/text_encoder.py
+@@ -102,8 +102,11 @@ def _require_config_values(component, config, expected):
+
+ def _rms_norm(hidden_states, norm):
+     # LLaDA rounds normalized activations before applying the affine weight.
+-    with comfy.ops.CastBiasWeightContext(norm, hidden_states, offloadable=True) as (weight, _):
++    weight, bias, stream = comfy.ops.cast_bias_weight(norm, hidden_states, offloadable=True)
++    try:
+         return F.rms_norm(hidden_states, norm.normalized_shape, None, norm.eps) * weight
++    finally:
++        comfy.ops.uncast_bias_weight(norm, weight, bias, stream)
+
+
+ class LLaDA2MLP(nn.Module):
+diff --git a/nodes.py b/nodes.py
+--- a/nodes.py
++++ b/nodes.py
+@@ -290,6 +290,14 @@ class LLaDAImageEditConditioning(io.ComfyNode):
+         )
+
+
++def _skip_pin(key):
++    pass
++
++
++def _copy_unpinned(original, clone):
++    clone.pin_weight_to_device = _skip_pin
++
++
+ class T8LLaDAImageCheckpointLoader(io.ComfyNode):
+     @classmethod
+     def define_schema(cls):
+@@ -304,7 +312,16 @@ class T8LLaDAImageCheckpointLoader(io.ComfyNode):
+     @classmethod
+     def execute(cls, ckpt_name):
+         path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
+-        return io.NodeOutput(*load_checkpoint(path, folder_paths.get_folder_paths("embeddings")))
++        # The AIO encoder exceeds top's VRAM; avoid dynamic staging its entire
++        # MoE weight set in locked host RAM. Other model loaders are unchanged.
++        model, clip, vae = load_checkpoint(path, folder_paths.get_folder_paths("embeddings"), disable_dynamic=True)
++        # Keep mmap-backed CPU weights reclaimable instead of pinning the
++        # entire offloaded MoE. The clone hook preserves this per-model policy.
++        from comfy.patcher_extension import CallbacksMP
++        for patcher in (model, clip.patcher):
++            patcher.pin_weight_to_device = _skip_pin
++            patcher.add_callback(CallbacksMP.ON_CLONE, _copy_unpinned)
++        return io.NodeOutput(model, clip, vae)
+
+
+ class LLaDAImageExtension(ComfyExtension):
