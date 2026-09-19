@@ -649,6 +649,7 @@ class Tags(QObject):
 
 
 class Painter(QObject):
+    editStateChanged = Signal()
     statusChanged = Signal()
     modelChanged = Signal()
     busyChanged = Signal()
@@ -664,6 +665,9 @@ class Painter(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.modeChanged.connect(self.editStateChanged)
+        self.modelChanged.connect(self.editStateChanged)
+        self.inputImageChanged.connect(self.editStateChanged)
         self.models = ModelList(self)
         self.loras = LoraStack(self)
         self.choices = LoraChoices(self)
@@ -883,7 +887,10 @@ class Painter(QObject):
     # is a shortcut to one model (registry.MODES), so it also decides whether
     # the list is greyed out — and `edit` decides which pipeline is built.
     mode = Property(str, lambda self: self._mode, notify=modeChanged)
-    isEdit = Property(bool, lambda self: self._mode == "edit", notify=modeChanged)
+    isEdit = Property(bool, lambda self: bool(self._input_image) if self.optionalEditImage else self._mode == "edit", notify=editStateChanged)
+    optionalEditImage = Property(bool, lambda self: bool(self._selected_family().get("optional_edit_image")), notify=modelChanged)
+    nativeScheduler = Property(str, lambda self: self._selected_family().get("native_scheduler", ""), notify=modelChanged)
+    supportsPatches = Property(bool, lambda self: self._selected_family().get("supports_patches", True), notify=modelChanged)
     fixedSampling = Property(bool, lambda self: bool(self._selected_family().get("fixed_sampling")), notify=modelChanged)
     editSampling = Property(bool, lambda self: bool((self._selected_family().get("edit") or {}).get("sampling_controls")), notify=modelChanged)
     editMultipleImages = Property(bool, lambda self: (self._selected_family().get("edit") or {}).get("max_images") != 1, notify=modelChanged)

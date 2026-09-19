@@ -43,12 +43,14 @@ def main():
                 built = reg.build(entry, {"edit": edit, "input_image": "source.png",
                     "editNoScale": scale, "steps": 1, "cfg": 5.0, "seed": 42,
                     "positive": "a fox", "negative": "blur", "width": 512, "height": 512,
-                    "sampler_name": "wrong", "scheduler": "wrong", "denoise": .2,
+                    "sampler_name": "heun", "scheduler": "simple", "denoise": .2,
                     "toggles": {"negpip": True, "model_sampling": True}})
                 roles = checks._roles_of(built["prompt"])
                 p = built["params"]
-                assert p["steps"] == 1 and p["cfg"] == 5 and p["denoise"] == 1
-                assert p["sampler_name"] == "euler" and p["scheduler"] == "llada_image"
+                assert p["steps"] == 1 and p["cfg"] == 5 and p["denoise"] == .2
+                assert p["sampler_name"] == "heun" and p["scheduler"] == "simple"
+                assert built["prompt"][roles["scheduler"]]["inputs"]["denoise"] == .2
+                assert built["prompt"][roles["sampler_select"]]["inputs"]["sampler_name"] == "heun"
                 assert not p["toggles"]["negpip"] and "model_sampling" not in roles
                 assert not checks.check_dangling(built["prompt"])
                 assert p["prompt_boxes"] == {"positive": "a fox", "negative": "blur"}
@@ -58,7 +60,18 @@ def main():
                 else:
                     assert not checks.check_structure(built, p["toggles"], reg.family_of(entry))
                     assert built["prompt"][roles["latent"]]["class_type"] == "EmptyFlux2LatentImage"
-        for params in ({"edit": True}, {"edit": True, "input_images": ["a", "b"]}, {"loras": [{"name": "bad"}]}):
+        for denoise in (0, .5, 1):
+            built = reg.build(entry, {"steps": 10, "denoise": denoise})
+            roles = checks._roles_of(built["prompt"])
+            sched = built["prompt"][roles["scheduler"]]
+            assert sched["class_type"] == "T8LLaDAImageScheduler"
+            assert sched["inputs"]["steps"] == (20 if denoise == .5 else 10)
+            if denoise < 1:
+                split = built["prompt"][roles["denoise_sigmas"]]
+                assert split["inputs"]["step"] == 10
+            else:
+                assert "denoise_sigmas" not in roles
+        for params in ({"edit": True}, {"edit": True, "input_images": ["a", "b"]}, {"loras": [{"name": "bad"}]}, {"denoise": -1}, {"steps": 300, "denoise": .01}):
             try:
                 reg.build(entry, params)
             except G.GraphError:

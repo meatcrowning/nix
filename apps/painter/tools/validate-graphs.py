@@ -231,7 +231,7 @@ def main(argv=None):
                 )
                 effective = built["params"]["toggles"]
                 probs = check_structure(built, effective, fam)
-                if not (fam or {}).get("fixed_sampling") and effective != toggles:
+                if (fam or {}).get("supports_patches", True) and effective != toggles:
                     probs.append("requested toggles were not applied")
                 roles = _roles_of(built["prompt"])
                 pos = built["prompt"][roles["encode_pos"]]["inputs"]["text"]

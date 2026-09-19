@@ -362,6 +362,9 @@ Item {
                 editParams.negative = g.negative
                 editParams.steps = g.steps
                 editParams.cfg = g.cfg
+                editParams.sampler_name = g.sampler_name
+                editParams.scheduler = g.scheduler
+                editParams.denoise = g.denoise
             }
             App.generate(editParams, g.count)
             return
@@ -697,7 +700,7 @@ Item {
         // paste. Offered only where there IS a well to fill (docs/DESIGN.md §10).
         { id: "import", tip: "Import Image…", menu: "file",
           icon: "document-import", shortcut: "Ctrl+O",
-          state: (App.isEdit || App.isVideo) ? 0 : 2 },
+          state: (App.isEdit || App.isVideo || App.optionalEditImage) ? 0 : 2 },
         // ------------------------------------------------------------- edit
         // The gallery's right-click verbs, hoisted: the same three subsets of a
         // finished job (its words, its numbers, both) plus its prompt on the
@@ -1047,6 +1050,7 @@ Item {
     // Import Image… — the platform's own file dialog, which is Plasma's under
     // Plasma and the portal's under Hyprland. QML's, not QFileDialog's: that
     // one is QtWidgets and the Hyprland roof runs a QGuiApplication.
+    function importImage() { importDialog.open() }
     FileDialog {
         id: importDialog
         title: "Import image"
@@ -1054,7 +1058,7 @@ Item {
         onAccepted: {
             var u = "" + importDialog.selectedFile
             if (App.isEdit) App.addEditImage(u)
-            else if (App.isVideo) App.setInputImage(u)
+            else if (App.isVideo || App.optionalEditImage) App.setInputImage(u)
         }
     }
 
@@ -1134,7 +1138,7 @@ Item {
     // first, which is the one a single pasted image is nearly always for.
     function pasteWell() {
         if (hoveredWell !== "") return hoveredWell
-        if (App.isEdit) return "input"
+        if (App.isEdit || App.optionalEditImage) return "input"
         if (!App.isVideo) return ""
         var first = gen.useInputImage, last = gen.useLastFrame
         if (first !== last) return first ? "input" : "last"

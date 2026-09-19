@@ -8,7 +8,7 @@ Panel {
     // section could be pinned — silently, since the lookup is guarded.
     id: panel
     title: "Sampling"
-    badge: App.fixedSampling ? "Euler · native schedule" : App.samplers.length + " samplers"
+    badge: App.nativeScheduler ? "Euler + native recommended" : App.samplers.length + " samplers"
 
     Field {
         label: "Steps"
@@ -32,6 +32,7 @@ Panel {
 
     Field {
         label: "Denoise"
+        hint: App.nativeScheduler ? "Experimental schedule truncation; not source-image preservation strength." : ""
         visible: !App.fixedSampling
         Spin {
             value: root.gen.denoise; from: 0; to: 1; step: 0.01; decimals: 2
@@ -41,6 +42,7 @@ Panel {
 
     Field {
         label: "Sampler"
+        hint: App.nativeScheduler ? "Euler is the reference sampler; other choices are experimental." : ""
         visible: !App.fixedSampling
         Picker {
             width: 200
@@ -52,10 +54,11 @@ Panel {
 
     Field {
         label: "Scheduler"
+        hint: App.nativeScheduler ? "llada_image is the reference schedule; other choices are experimental." : ""
         visible: !App.fixedSampling
         Picker {
             width: 200
-            options: App.schedulers
+            options: App.nativeScheduler ? [App.nativeScheduler].concat(App.schedulers) : App.schedulers
             value: root.gen.scheduler
             onPicked: function (v) { root.set("scheduler", v) }
         }
