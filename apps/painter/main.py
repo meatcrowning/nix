@@ -891,6 +891,7 @@ class Painter(QObject):
     optionalEditImage = Property(bool, lambda self: bool(self._selected_family().get("optional_edit_image")), notify=modelChanged)
     nativeScheduler = Property(str, lambda self: self._selected_family().get("native_scheduler", ""), notify=modelChanged)
     supportsPatches = Property(bool, lambda self: self._selected_family().get("supports_patches", True), notify=modelChanged)
+    editPatches = Property(bool, lambda self: bool((self._selected_family().get("edit") or {}).get("patch_controls")), notify=modelChanged)
     fixedSampling = Property(bool, lambda self: bool(self._selected_family().get("fixed_sampling")), notify=modelChanged)
     editSampling = Property(bool, lambda self: bool((self._selected_family().get("edit") or {}).get("sampling_controls")), notify=modelChanged)
     editMultipleImages = Property(bool, lambda self: (self._selected_family().get("edit") or {}).get("max_images") != 1, notify=modelChanged)

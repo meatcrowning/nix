@@ -206,8 +206,21 @@ def check_qwen21(built, edit):
     for name, slot in (("positive", 0), ("negative", 1)):
         if sampler[name] != [cond, slot]:
             problems.append(f"Qwen 2.1 {name} does not read joint conditioning")
-    if any(r in roles for r in ("encode_neg", "negpip", "model_sampling")):
+    if "encode_neg" in roles:
         problems.append("Qwen 2.1 carries an incompatible legacy conditioning node")
+    toggles = built["params"]["toggles"]
+    for role, cls in (("negpip", "PainterQwen21NegPip"),
+                      ("model_sampling", "PainterQwen21ModelSampling")):
+        if (role in roles) != bool(toggles.get(role)):
+            problems.append(f"Qwen 2.1 {role} does not follow its toggle")
+        elif role in roles and prompt[roles[role]]["class_type"] != cls:
+            problems.append(f"Qwen 2.1 {role} uses an incompatible patch")
+    model_src = [roles.get("model_sampling", roles.get("negpip", roles["loader"])), 0]
+    if any(prompt[roles[r]]["inputs"]["model"] != model_src for r in ("sampler", "scheduler")):
+        problems.append("Qwen 2.1 sampler/scheduler bypass the patches")
+    clip_src = [roles["negpip"], 1] if "negpip" in roles else [roles["clip"], 0]
+    if prompt[cond]["inputs"]["clip"] != clip_src:
+        problems.append("Qwen 2.1 conditioning bypasses the patched encoder")
     if edit:
         if sampler["latent_image"] != [cond, 2] or "latent" in roles:
             problems.append("Qwen 2.1 edit must size its latent from reference 1")

@@ -103,14 +103,16 @@ in
 {
   home.packages = [ painter ];
 
-  # Painter's graceful-stop sampler is a Comfy custom node, kept in this repo
-  # and linked into the mutable checkout at activation.  The unit is never
+  # Painter's sampler and Qwen patches are Comfy custom nodes, kept in this repo
+  # and linked into the mutable checkout at activation. The unit is never
   # restarted here: an active generation must finish under the code that began
   # it; the next backend start imports the new node.
   home.activation.painterPartialStopNode = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     if [ -d ${comfyDir}/custom_nodes ]; then
       $DRY_RUN_CMD ln -sfn ${../../apps/painter/comfy_nodes/painter_partial_stop.py} \
         ${comfyDir}/custom_nodes/painter_partial_stop.py
+      $DRY_RUN_CMD ln -sfn ${../../apps/painter/comfy_nodes/painter_qwen21.py} \
+        ${comfyDir}/custom_nodes/painter_qwen21.py
     fi
   '';
 
