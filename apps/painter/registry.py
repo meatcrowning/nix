@@ -312,6 +312,8 @@ class Registry:
         # base model's own dimensions confirm.
         hidden = spec.get("hidden")
         exact = [e for e in cands if e.dims.get("hidden") == hidden]
+        if spec.get("require_hidden"):
+            return exact[0] if exact else None
         return (exact or cands)[0]
 
     def _pick_vae(self, spec, ov, key="vae"):
@@ -462,6 +464,9 @@ class Registry:
         if fam["id"] == "llada_image_ckpt":
             return self._build_llada(entry, fam, g, p, pairing, object_info, edit)
 
+        if fam["id"] == "qwen_image21":
+            return self._build_qwen21(entry, fam, g, p, pairing, object_info, edit)
+
         if edit:
             return self._build_edit(entry, fam, g, p, pairing, object_info)
 
@@ -556,6 +561,62 @@ class Registry:
 
 
     # -- editing -------------------------------------------------------------
+
+    def _build_qwen21(self, entry, fam, g, p, pairing, object_info, edit):
+        """Native joint conditioning; keep Painter's sampler and saved controls."""
+        g.remove("negpip")
+        g.remove("model_sampling")
+        p = dict(p, toggles={"negpip": False, "model_sampling": False})
+        p.pop("model_sampling", None)
+        pos, neg = p.get("positive", ""), p.get("negative", "")
+        cond = g.id_of("encode_pos")
+        g.set_class("encode_pos", "TextEncodeQwenImage21", drop=("text",), inputs={
+            "clip": [g.id_of("clip"), 0], "vae": [g.id_of("vae"), 0],
+            "prompt": pos, "negative_prompt": neg, "resolution": 1024})
+        g.set_input("sampler", "negative", [cond, 1])
+        g.drop("encode_neg")
+        if edit:
+            images = p.get("input_images") or [p.get("input_image", "")]
+            if not 1 <= len(images) <= 16 or not all(images):
+                raise G.GraphError("Qwen 2.1 editing requires 1–16 reference images")
+            no_scale = bool(p.get("editNoScale", True))
+            mp = max(0.1, min(8.0, float(p.get("editMegapixels", 1.0))))
+            resolution = 0 if no_scale else round((mp * 1024 * 1024) ** .5 / 32) * 32
+            g.set_input("encode_pos", "resolution", resolution)
+            for i, image in enumerate(images, 1):
+                li = g.add_node("LoadImage", {"image": image},
+                                f"load_image_{i}", f"Reference {i}")
+                g.set_input("encode_pos", f"images.image_{i}", [li, 0])
+            # The conditioner sizes the canvas from reference 1, rounded to 32.
+            g.set_input("sampler", "latent_image", [cond, 2])
+            g.drop("latent")
+            for key in ("width", "height", "batch_size"):
+                p.pop(key, None)
+            p.update(kind="edit", input_image=images[0], input_images=images,
+                     editNoScale=no_scale, editMegapixels=mp)
+        else:
+            w, h = p.get("width"), p.get("height")
+            if not w or not h:
+                res = fam["resolution"]
+                w, h = calc_dims(res["aspect"], res["megapixels"], res["multiple"])
+            g.set_inputs("latent", {"width": int(w), "height": int(h),
+                                    "batch_size": int(p.get("batch_size", 1))})
+            p.update(width=int(w), height=int(h))
+        if p.get("loras"):
+            g.insert_lora_chain(p["loras"], [g.id_of("loader"), 0], [g.id_of("clip"), 0])
+        g.set_input("sampler_select", "sampler_name", p["sampler_name"])
+        g.set_inputs("scheduler", {"scheduler": p["scheduler"],
+                                   "steps": int(p["steps"]), "denoise": float(p["denoise"])})
+        g.set_inputs("sampler", {"cfg": float(p["cfg"]),
+            "noise_seed": int(p.get("seed", 0)), "add_noise": bool(p["add_noise"])})
+        g.set_input("save", "filename_prefix", p.get("filename_prefix", "painter"))
+        prompt = g.to_prompt()
+        if object_info is not None:
+            problems = G.validate(prompt, object_info)
+            if problems:
+                raise G.ValidationError(problems)
+        p["prompt_boxes"] = {"positive": pos, "negative": neg}
+        return {"prompt": prompt, "pairing": pairing, "params": p}
 
     def _build_llada(self, entry, fam, g, p, pairing, object_info, edit):
         """Base defaults to its native schedule; other Comfy samplers are opt-in."""

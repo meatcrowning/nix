@@ -97,6 +97,8 @@ def check_edit(built):
     prompt = built["prompt"]
     roles = _roles_of(prompt)
     problems = []
+    if built["pairing"]["family"]["id"] == "qwen_image21":
+        return check_qwen21(built, edit=True)
     if "edit_conditioning" in roles:
         cond = roles["edit_conditioning"]
         ins = prompt[cond]["inputs"]
@@ -143,6 +145,8 @@ def check_edit(built):
 
 def check_structure(built, toggles, fam):
     """Structural assertions the validator cannot make for us."""
+    if fam["id"] == "qwen_image21":
+        return check_qwen21(built, edit=False)
     prompt = built["prompt"]
     roles = _roles_of(prompt)
     problems = []
@@ -191,6 +195,27 @@ def check_structure(built, toggles, fam):
     return problems + check_dangling(prompt)
 
 
+def check_qwen21(built, edit):
+    prompt = built["prompt"]
+    roles = _roles_of(prompt)
+    cond = roles["encode_pos"]
+    sampler = prompt[roles["sampler"]]["inputs"]
+    problems = check_dangling(prompt)
+    if prompt[cond]["class_type"] != "TextEncodeQwenImage21":
+        problems.append("Qwen 2.1 requires native joint conditioning")
+    for name, slot in (("positive", 0), ("negative", 1)):
+        if sampler[name] != [cond, slot]:
+            problems.append(f"Qwen 2.1 {name} does not read joint conditioning")
+    if any(r in roles for r in ("encode_neg", "negpip", "model_sampling")):
+        problems.append("Qwen 2.1 carries an incompatible legacy conditioning node")
+    if edit:
+        if sampler["latent_image"] != [cond, 2] or "latent" in roles:
+            problems.append("Qwen 2.1 edit must size its latent from reference 1")
+        if "images.image_1" not in prompt[cond]["inputs"]:
+            problems.append("Qwen 2.1 edit has no reference image")
+    return problems
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--url", default="http://127.0.0.1:8188")
@@ -234,8 +259,12 @@ def main(argv=None):
                 if (fam or {}).get("supports_patches", True) and effective != toggles:
                     probs.append("requested toggles were not applied")
                 roles = _roles_of(built["prompt"])
-                pos = built["prompt"][roles["encode_pos"]]["inputs"]["text"]
-                neg = built["prompt"][roles["encode_neg"]]["inputs"]["text"]
+                enc = built["prompt"][roles["encode_pos"]]["inputs"]
+                if (fam or {}).get("id") == "qwen_image21":
+                    pos, neg = enc["prompt"], enc["negative_prompt"]
+                else:
+                    pos = enc["text"]
+                    neg = built["prompt"][roles["encode_neg"]]["inputs"]["text"]
                 if effective["negpip"]:
                     if "(negative test:-1)" not in pos or neg != "":
                         probs.append("NegPip did not fold the negative prompt into positive")

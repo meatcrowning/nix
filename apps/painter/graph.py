@@ -511,6 +511,27 @@ def enum_values(object_info: dict, class_type: str, key: str):
 LIVE_ENUMS = {("LoadImage", "image"), ("LoadImageMask", "image")}
 
 
+def expanded_inputs(spec: dict) -> dict:
+    """Expand Comfy V3 reference-image slots without importing its runtime."""
+    out = {section: dict(spec.get(section) or {}) for section in ("required", "optional")}
+    for section in ("required", "optional"):
+        for key, value in list(out[section].items()):
+            if not value or value[0] != "COMFY_AUTOGROW_V3":
+                continue
+            template = value[1]["template"]
+            names = template.get("names")
+            if names is None:
+                names = [f"{template['prefix']}{i}" for i in range(template["max"])]
+            inputs = template["input"]
+            required = bool(inputs.get("required"))
+            child = next(iter((inputs.get("required") or inputs.get("optional")).values()))
+            del out[section][key]
+            for i, name in enumerate(names):
+                target = "required" if required and i < template.get("min", 1) else "optional"
+                out[target][f"{key}.{name}"] = child
+    return out
+
+
 def validate(prompt: dict, object_info: dict, check_enums: bool = True):
     """Return a list of human-readable problems; empty means the graph will run."""
     problems = []
@@ -520,7 +541,7 @@ def validate(prompt: dict, object_info: dict, check_enums: bool = True):
         if cls not in object_info:
             problems.append(f"{role}: node class {cls!r} is not installed")
             continue
-        spec = object_info[cls].get("input") or {}
+        spec = expanded_inputs(object_info[cls].get("input") or {})
         known = set(spec.get("required") or {}) | set(spec.get("optional") or {})
         for key, val in (node.get("inputs") or {}).items():
             if key not in known:
