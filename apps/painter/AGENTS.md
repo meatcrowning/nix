@@ -1067,6 +1067,25 @@ verification uses a separate loopback Comfy process with scratch input, output,
 user directory **and explicit `--database-url`**, a warden lease, and a memory
 cap; never submit smoke jobs into the user's active Painter queue.
 
+## Qwen-Image 2.1
+
+`families/qwen_image21.json` uses native `TextEncodeQwenImage21` joint
+conditioning for generation and up to 16 ordered edit references. Reference 1
+sizes the edit canvas; no-scaling rounds to multiples of 32. Generation and
+editing retain the per-model sampler, scheduler, CFG, steps, negative prompt,
+and seed. The optional source-image well selects editing, as with LLaDA.
+Legacy NegPip/model-sampling patches are disabled for this family.
+
+Install on top with `python3 apps/painter/tools/install-qwen21.py /home/lam/comfy`.
+The installer applies the native upstream support commit
+`6bfaacc67c2103481e5f0c84d75257cd0581d86a` as a checked, repeatable backport,
+preserving the checkout's unrelated changes. It downloads checksum-pinned INT8
+ConvRot diffusion and Qwen3-VL-8B weights plus the BF16 RGBA VAE; the manifest
+is `tools/qwen21-models.json`. Book uses top's existing model mount and backend.
+It neither restarts the backend nor generates images. Before a future upstream
+rebase, account for `tools/qwen21-backend.patch`, which upstream already includes.
+`tools/qwen21-test.py` checks detection and graph wiring without inference.
+
 ## The backend is NOT packaged
 
 ComfyUI stays the venv+`nix-shell` checkout at `/home/lam/comfy` (symlink →

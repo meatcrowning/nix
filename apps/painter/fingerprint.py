@@ -17,7 +17,7 @@ import os
 import struct
 import sys
 
-SCHEMA = 4
+SCHEMA = 5
 
 MODEL_EXTS = (".safetensors", ".sft", ".gguf", ".ckpt", ".pt", ".bin")
 
@@ -404,6 +404,16 @@ def detect_diffusion(v: View):
             "blocks": v.count_prefix("blocks."),
         }
 
+    # Qwen 2.1 also has img_in/transformer_blocks, but uses a different
+    # encoder and a 64-channel RGBA VAE. Test it before the older family.
+    if all(v.has(k) for k in ("txt_in.text_norm.weight", "modulation.1.weight",
+                              "transformer_blocks.0.attn.norm_q.weight",
+                              "img_in.weight", "proj_out.weight")):
+        return "qwen_image21", {
+            "in_ch": v.dim("img_in.weight", 1),
+            "blocks": v.count_prefix("transformer_blocks."),
+        }
+
     # --- Qwen-Image (diffusers-style transformer_blocks) -------------------
     if v.has("img_in.weight") and v.count_prefix("transformer_blocks.") > 0:
         return "qwen_image", {
@@ -493,6 +503,10 @@ def detect_vae(header: Header):
     if not any(k.startswith(("encoder.", "decoder.")) or k in ("conv1.weight",) for k in keys):
         return None, {}
     n = len(keys)
+    head = header.shape("decoder.head.2.weight")
+    if (header.any("decoder.upsamples.0.upsamples.0.residual.2.weight")
+            and head and len(head) == 5 and head[0] == 4 and head[2] == 1):
+        return "qwen_image21", {"latent_channels": 64, "tensors": n}
     if header.any("conv1.weight", "conv2.weight") or n == 194:
         return "wan21", {"latent_channels": 16, "tensors": n}
     if header.any("bn.running_mean") or header.any("quant_conv.weight") and n > 245:

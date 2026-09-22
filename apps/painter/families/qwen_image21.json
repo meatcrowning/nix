@@ -1,0 +1,31 @@
+{
+  "id": "qwen_image21",
+  "label": "Qwen-Image 2.1",
+  "detect": "qwen_image21",
+  "graph": "universal.json",
+  "loader_shape": "unet",
+  "loader_class": "UNETLoader",
+  "prompt_transform": "none",
+  "optional_edit_image": true,
+  "supports_patches": false,
+  "toggles": {"negpip": false, "model_sampling": false},
+  "defaults": {
+    "steps": 25, "cfg": 1.0, "sampler_name": "euler",
+    "scheduler": "simple", "denoise": 1.0, "add_noise": true
+  },
+  "resolution": {"megapixels": 1.0, "multiple": 32, "aspect": "1:1"},
+  "edit": {
+    "graph": "universal.json", "sampling_controls": true,
+    "max_images": 16, "megapixels": 1.0
+  },
+  "text_encoder": {
+    "te_model": "QWEN3VL", "hidden": 4096,
+    "clip_type": "qwen_image", "clip_type_significant": true,
+    "require_hidden": true
+  },
+  "vae": {
+    "arch": "qwen_image21",
+    "prefer": ["qwen_image_2.1_vae_bf16.safetensors"]
+  },
+  "lora": {"aliases": {}, "loader": "LoraLoaderModelOnly"}
+}
