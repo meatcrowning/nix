@@ -115,7 +115,7 @@ Item {
              : key === "video" ? (App.isVideo && !App.isEdit)
              : key === "resolution" ? !App.isEdit
              : key === "sampling" ? (!App.isEdit || App.editSampling)
-             : key === "patches" ? (!App.isVideo && !App.isEdit && App.supportsPatches)
+             : key === "patches" ? (!App.isVideo && (!App.isEdit || App.editPatches) && App.supportsPatches)
              : key === "lora" ? App.supportsLoras
              : true
     }

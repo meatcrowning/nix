@@ -564,14 +564,29 @@ class Registry:
 
     def _build_qwen21(self, entry, fam, g, p, pairing, object_info, edit):
         """Native joint conditioning; keep Painter's sampler and saved controls."""
-        g.remove("negpip")
-        g.remove("model_sampling")
-        p = dict(p, toggles={"negpip": False, "model_sampling": False})
-        p.pop("model_sampling", None)
+        toggles = {**fam.get("toggles", {}), **p.get("toggles", {})}
+        if toggles.get("negpip"):
+            g.set_class("negpip", "PainterQwen21NegPip")
+        else:
+            g.remove("negpip")
+        p = dict(p, toggles=toggles)
+        if toggles.get("model_sampling"):
+            g.set_class("model_sampling", "PainterQwen21ModelSampling")
+            ms = {**fam.get("model_sampling", {}), **p.get("model_sampling", {})}
+            g.set_inputs("model_sampling", ms)
+            p["model_sampling"] = ms
+        else:
+            g.remove("model_sampling")
+            p.pop("model_sampling", None)
         pos, neg = p.get("positive", ""), p.get("negative", "")
+        boxes = {"positive": pos, "negative": neg}
+        if toggles.get("negpip") and neg.strip():
+            pos = pos.strip().rstrip(",")
+            pos = ((pos + ", ") if pos else "") + "(%s:-1)" % neg.strip().rstrip(",")
+            neg = ""
         cond = g.id_of("encode_pos")
         g.set_class("encode_pos", "TextEncodeQwenImage21", drop=("text",), inputs={
-            "clip": [g.id_of("clip"), 0], "vae": [g.id_of("vae"), 0],
+            "vae": [g.id_of("vae"), 0],
             "prompt": pos, "negative_prompt": neg, "resolution": 1024})
         g.set_input("sampler", "negative", [cond, 1])
         g.drop("encode_neg")
@@ -615,7 +630,7 @@ class Registry:
             problems = G.validate(prompt, object_info)
             if problems:
                 raise G.ValidationError(problems)
-        p["prompt_boxes"] = {"positive": pos, "negative": neg}
+        p.update(positive=pos, negative=neg, prompt_boxes=boxes)
         return {"prompt": prompt, "pairing": pairing, "params": p}
 
     def _build_llada(self, entry, fam, g, p, pairing, object_info, edit):

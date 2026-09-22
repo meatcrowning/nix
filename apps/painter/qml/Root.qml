@@ -366,6 +366,10 @@ Item {
                 editParams.scheduler = g.scheduler
                 editParams.denoise = g.denoise
             }
+            if (App.editPatches) {
+                editParams.toggles = {negpip: g.negpip, model_sampling: g.modelSampling}
+                editParams.model_sampling = g.ms
+            }
             App.generate(editParams, g.count)
             return
         }

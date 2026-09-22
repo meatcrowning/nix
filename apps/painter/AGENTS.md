@@ -1074,7 +1074,15 @@ conditioning for generation and up to 16 ordered edit references. Reference 1
 sizes the edit canvas; no-scaling rounds to multiples of 32. Generation and
 editing retain the per-model sampler, scheduler, CFG, steps, negative prompt,
 and seed. The optional source-image well selects editing, as with LLaDA.
-Legacy NegPip/model-sampling patches are disabled for this family.
+Both patch controls are available in generation and editing, defaulting off.
+Model sampling uses multiplier 1 and a starting rational shift of exp(0.69),
+matching the native Flux-style shift's scale. `PainterQwen21NegPip` in
+`comfy_nodes/painter_qwen21.py` applies signed token weights to attention values
+through native hooks, preserving Q/K and neutral reference-image tokens. The
+encoder adapter mirrors native system/vision trimming; negative-box text folds
+into the positive prompt while metadata retains both editor values. Attention
+hooks disable native prefix caching. This is a Qwen-specific adapter: ppm's
+`CLIPNegPip` does not support this encoder/model and silently skips them.
 
 Install on top with `python3 apps/painter/tools/install-qwen21.py /home/lam/comfy`.
 The installer applies the native upstream support commit
@@ -1085,6 +1093,8 @@ is `tools/qwen21-models.json`. Book uses top's existing model mount and backend.
 It neither restarts the backend nor generates images. Before a future upstream
 rebase, account for `tools/qwen21-backend.patch`, which upstream already includes.
 `tools/qwen21-test.py` checks detection and graph wiring without inference.
+Run `tools/qwen21-patches-test.py` inside Comfy's `nix-shell` for CPU-only
+tokenizer, attention-weight, sampler-scale, and native node-contract checks.
 
 ## The backend is NOT packaged
 

@@ -58,7 +58,8 @@ def main():
                 node = lambda role: built["prompt"][roles[role]]["inputs"]
                 assert built["prompt"][roles["loader"]]["class_type"] == "UNETLoader"
                 assert node("clip")["type"] == "qwen_image"
-                assert node("encode_pos")["negative_prompt"] == "blur"
+                assert node("encode_pos")["negative_prompt"] == ""
+                assert node("encode_pos")["prompt"] == "a red cube, (blur:-1)"
                 assert "text" not in node("encode_pos")
                 assert node("sampler")["noise_seed"] == p["seed"]
                 assert node("sampler")["cfg"] == p["cfg"]

@@ -7,15 +7,20 @@
   "loader_class": "UNETLoader",
   "prompt_transform": "none",
   "optional_edit_image": true,
-  "supports_patches": false,
+  "supports_patches": true,
   "toggles": {"negpip": false, "model_sampling": false},
+  "model_sampling": {
+    "shift_start": 1.9937155332, "shift_end": 1.9937155332,
+    "start_percent": 0.0, "end_percent": 1.0,
+    "curve": "linear", "outside_window": "hold", "multiplier": 1.0
+  },
   "defaults": {
     "steps": 25, "cfg": 1.0, "sampler_name": "euler",
     "scheduler": "simple", "denoise": 1.0, "add_noise": true
   },
   "resolution": {"megapixels": 1.0, "multiple": 32, "aspect": "1:1"},
   "edit": {
-    "graph": "universal.json", "sampling_controls": true,
+    "graph": "universal.json", "sampling_controls": true, "patch_controls": true,
     "max_images": 16, "megapixels": 1.0
   },
   "text_encoder": {
