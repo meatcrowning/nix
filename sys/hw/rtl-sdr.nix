@@ -14,5 +14,7 @@
     sdrpp        # waterfall/tuning GUI
     rtl_433      # 315/433/915 MHz sensors, meters, TPMS
     dump1090-fa  # ADS-B 1090 MHz
+    gqrx         # simpler tuning GUI
+    (callPackage ../../lib/ais-catcher.nix { })  # ship AIS, web map
   ];
 }
