@@ -31,20 +31,10 @@ Panel {
         label: "MP"
         visible: !root.gen.editNoScale
         hint: "Target megapixels. The dropped image is scaled to this many pixels, keeping its aspect."
-        Row {
-            spacing: 6
-            Spin {
-                width: 60
-                value: root.gen.editMegapixels; from: 0.1; to: 8; step: 0.1; decimals: 1
-                onEdited: function (v) { root.set("editMegapixels", v) }
-            }
-            // Where the size comes from, spelled out rather than left to the
-            // badge alone (docs/DESIGN.md §10) — the aspect is the image's own.
-            PixelText {
-                text: "= the dropped image, at this budget"
-                color: Theme.textDim
-                anchors.verticalCenter: parent.verticalCenter
-            }
+        Spin {
+            width: 60
+            value: root.gen.editMegapixels; from: 0.1; to: 8; step: 0.1; decimals: 1
+            onEdited: function (v) { root.set("editMegapixels", v) }
         }
     }
 }
