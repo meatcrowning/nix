@@ -7,7 +7,7 @@ case "$action" in build|boot|switch) ;; *) echo 'usage: deploy-pad.sh build|boot
 [[ $(cat /proc/sys/kernel/hostname) == top ]] || { echo 'run this on top; pad should not evaluate its own system' >&2; exit 1; }
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo"
-if [[ -n $(git status --porcelain) ]]; then
+if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
   echo 'commit or finish repository changes first; deployment builds committed HEAD' >&2
   exit 1
 fi
