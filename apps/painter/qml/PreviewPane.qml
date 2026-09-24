@@ -1,5 +1,6 @@
 import QtQuick
 import QtMultimedia
+import "../../qmlcommon"
 
 // WHATEVER IS SELECTED — which, while a job runs, is the job.
 //
@@ -76,6 +77,13 @@ Item {
     // anywhere else.
     property string source: ""
     property bool sourceIsVideo: false
+    property bool compare: true
+    property bool winActive: true
+    readonly property string beforePath: (pane.open && !pane.showLive
+        && pane.source !== "" && !pane.sourceIsVideo)
+        ? App.compareSource(pane.source) : ""
+    readonly property bool canCompare: pane.beforePath !== ""
+    readonly property bool comparing: pane.compare && pane.canCompare
 
     // ------------------------------------------------------------ zoom + pan
     //
@@ -250,6 +258,20 @@ Item {
                                      }
                 }
 
+                // Reuse the same reveal as View, inside the preview's zoom/pan
+                // transform. Keep the still underneath while the pair decodes.
+                Loader {
+                    id: comparison
+                    anchors.fill: parent
+                    active: pane.comparing
+                    sourceComponent: CompareView {
+                        beforePath: pane.beforePath
+                        afterPath: pane.source
+                        winActive: pane.winActive
+                        onAfterPathChanged: tracked = false
+                    }
+                }
+
                 // (2b) the finished clip — looped, and muted on purpose (see the
                 // file header). The player itself is not a visual item and sits
                 // outside this transform; only its output is drawn here.
@@ -318,16 +340,23 @@ Item {
                 objectName: "previewMouse"
                 acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                 preventStealing: true
-                hoverEnabled: false
+                hoverEnabled: pane.comparing
                 cursorShape: panning ? Qt.ClosedHandCursor
                            : (pane.sourceIsVideo && !pane.showLive) ? Qt.PointingHandCursor
-                           : Qt.ArrowCursor
+                           : pane.comparing ? Qt.SizeHorCursor : Qt.ArrowCursor
                 property bool panning: false
                 property real fromX: 0
                 property real fromY: 0
                 property real startPanX: 0
                 property real startPanY: 0
                 property bool moved: false
+
+                function trackCompare(x, y) {
+                    if (!comparison.item) return
+                    var pt = viewMa.mapToItem(comparison.item, x, y)
+                    comparison.item.tracked = true
+                    comparison.item.trackX = pt.x
+                }
 
                 // THE DESKTOP'S OWN WHEEL MATHS, not a second reading of the
                 // same hardware: viewer's `ImageViewer` and reader's `PdfView`
@@ -357,11 +386,13 @@ Item {
                         pane.panX += dx
                         pane.panY += dy
                         pane.clampPan()
+                        viewMa.trackCompare(w.x, w.y)
                         w.accepted = true
                         return
                     }
                     var d = (px !== 0 || py !== 0) ? py * 3 : ad
                     if (d !== 0) pane.zoomAt(Math.exp(Math.log(1.2) / 120 * d), w.x, w.y)
+                    viewMa.trackCompare(w.x, w.y)
                     w.accepted = true
                 }
                 onPressed: function (m) {
@@ -372,12 +403,14 @@ Item {
                     viewMa.startPanX = pane.panX; viewMa.startPanY = pane.panY
                 }
                 onPositionChanged: function (m) {
-                    if (!viewMa.panning) return
-                    var dx = m.x - viewMa.fromX, dy = m.y - viewMa.fromY
-                    if (Math.abs(dx) + Math.abs(dy) > 2) viewMa.moved = true
-                    pane.panX = viewMa.startPanX + dx
-                    pane.panY = viewMa.startPanY + dy
-                    pane.clampPan()
+                    if (viewMa.panning) {
+                        var dx = m.x - viewMa.fromX, dy = m.y - viewMa.fromY
+                        if (Math.abs(dx) + Math.abs(dy) > 2) viewMa.moved = true
+                        pane.panX = viewMa.startPanX + dx
+                        pane.panY = viewMa.startPanY + dy
+                        pane.clampPan()
+                    }
+                    viewMa.trackCompare(m.x, m.y)
                 }
                 onReleased: function (m) {
                     if (m.button !== Qt.MiddleButton) return

@@ -47,6 +47,7 @@ Item {
     // view, so the app's zoom rows have something to call.
     property alias gallery: galleryView
     property alias output: outputView
+    property alias preview: preview
 
     // Browse or View — Gwenview's two states, decided by the app because the
     // menus, the shortcuts and Escape all reach it there.
@@ -65,6 +66,8 @@ Item {
 
     PreviewPane {
         id: preview
+        compare: root.app ? root.app.showCompare : true
+        winActive: root.winActive
         // WHAT IS SELECTED, which is what this pane now shows. One output: a
         // set has no single thing to draw, and neither has none.
         selPath: galleryView.selection.length === 1 ? galleryView.selection[0] : ""

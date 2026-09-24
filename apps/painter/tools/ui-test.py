@@ -2692,6 +2692,54 @@ def test_compare_and_columns(win, ctl, tmp):
           "1x1" not in str(APP.property("statusRight")),
           APP.property("statusRight"))
 
+    # Browse's preview shares the comparison switch and retains zoom/pan.
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtTest import QTest
+    preview = find(content, "PreviewPane")
+    gallery_view = find(content, "GalleryView")
+    APP.setProperty("showPreview", True)
+    invoke_str(gallery_view, "selectSingle", edit)
+    spin(250)
+    preview_compare = find(preview, "CompareView")
+    check("Browse preview compares Qwen edits and offers Compare",
+          preview.property("comparing") and preview.property("beforePath") == before
+          and preview_compare is not None and preview_compare.isVisible()
+          and has_compare())
+    mouse = next(it for it in walk(preview) if it.objectName() == "previewMouse")
+    def hover_compare(x, y):
+        pt = mouse.mapToScene(QPointF(x, y))
+        QTest.mouseMove(win, QPoint(round(pt.x()), round(pt.y())))
+        spin(80)
+        expected = mouse.mapToItem(preview_compare, QPointF(x, y)).x()
+        check("preview reveal follows the pointer through zoom/pan",
+              preview_compare.property("tracked")
+              and abs(preview_compare.property("trackX") - expected) < 2)
+    hover_compare(70, 55)
+    wheel(win, mouse, 70, 55, 3)
+    check("comparison preview still zooms", preview.property("zoom") > 1.4)
+    drag(win, mouse, 90, 70, 115, 85, Qt.MiddleButton)
+    hover_compare(130, 65)
+    APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "compare"))
+    spin(80)
+    check("Compare can be turned off in Browse without hiding its action",
+          not preview.property("comparing") and has_compare()
+          and find(preview, "CompareView") is None)
+    APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "compare"))
+    spin(80)
+    check("Compare turns back on in Browse", preview.property("comparing"))
+    invoke_str(gallery_view, "selectSingle", plain)
+    spin(80)
+    check("ordinary Browse previews do not compare",
+          not preview.property("canCompare") and not has_compare()
+          and find(preview, "CompareView") is None)
+    invoke_str(gallery_view, "selectSingle", edit)
+    spin(80)
+    APP.setProperty("showPreview", False)
+    spin(80)
+    check("closing Browse preview releases comparison images and action",
+          not preview.property("canCompare") and not has_compare()
+          and find(preview, "CompareView") is None)
+
     # --- the column count ---------------------------------------------------
     auto = grid.property("cols")
     APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "cols3"))
