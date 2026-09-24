@@ -1122,6 +1122,12 @@ def test_video(win, ctl, tmp):
 # krea2 files on purpose: `prefer` names the raw one exactly, and a mode that
 # quietly landed on turbo would generate at 8 steps for ever without saying so.
 MODE_FAKES = {
+    "unet/qwen_image_2.1_test.safetensors": {
+        "txt_in.text_norm.weight": [4096], "modulation.1.weight": [24576, 4096],
+        "transformer_blocks.0.attn.norm_q.weight": [128],
+        "img_in.weight": [4096, 64], "proj_out.weight": [64, 4096],
+        "transformer_blocks.0.img_mlp.gate_up.weight": [24576, 4096]},
+
     "unet/anima-base-v1.0.safetensors": {
         "llm_adapter.blocks.0.cross_attn.q_proj.weight": [16, 1024],
         "x_embedder.proj.1.weight": [16, 16],
@@ -1399,7 +1405,7 @@ def test_llada(win, ctl, tmp):
     check("LLaDA Base defaults are 50 steps and CFG 5", ctl.modelDefaults()["steps"] == 50 and ctl.modelDefaults()["cfg"] == 5)
     check("LLaDA offers experimental sampling and optional single-image editing", not ctl.fixedSampling and ctl.optionalEditImage and ctl.editSampling and not ctl.supportsLoras and not ctl.editMultipleImages)
     modes = {m["id"]: m for m in ctl.modes()}
-    check("Edit offers selected LLaDA even without Klein", modes["edit"]["available"] and modes["edit"]["model"] == ctl.selectedName)
+    check("Edit does not substitute LLaDA for a missing Qwen model", not modes["edit"]["available"])
     pane = find(win.contentItem(), "ParamsPane")
     check("The image chooser is forwarded through the parameter pane", hasattr_qml(pane, "importImage"))
     from PySide6.QtCore import QMetaObject, Qt, Q_RETURN_ARG
@@ -1418,7 +1424,7 @@ def test_llada(win, ctl, tmp):
     check("Adding a source automatically selects editing without a mode switch", ctl.isEdit and ctl.mode == "")
     ctl.setMode("edit")
     spin(150)
-    check("Edit preserves the selected LLaDA model", ctl.isEdit and ctl.selectedName == "llada-base.safetensors")
+    check("Unavailable Edit leaves LLaDA source editing intact", ctl.isEdit and ctl.mode == "" and ctl.selectedName == "llada-base.safetensors")
     check("LLaDA editing keeps sampling and image controls, not resolution or duplicate seed", visible("sampling") and visible("edit") and not visible("resolution") and not visible("editseed"))
     calls = []
     original = ctl.generate
@@ -1470,9 +1476,9 @@ def test_modes(win, ctl, tmp):
           modes["anime"])
     check("real is krea 2 RAW, not the turbo beside it",
           modes["real"]["model"] == "krea2_raw_fp8_scaled.safetensors", modes["real"])
-    check("edit finds Klein by name even when the file is not the one in the table",
+    check("edit finds Qwen 2.1 even when its file is renamed",
           modes["edit"]["available"]
-          and "klein" in modes["edit"]["model"], modes["edit"])
+          and "qwen_image_2.1" in modes["edit"]["model"], modes["edit"])
     check("video has no model here, and says so rather than vanishing",
           modes["video"]["available"] is False and "minimax" in modes["video"]["tip"],
           modes["video"])
@@ -1522,7 +1528,18 @@ def test_modes(win, ctl, tmp):
     # --- edit: an image well and a prompt, and nothing else ------------------
     ctl.setMode("edit")
     spin(200)
-    check("edit selects Klein and switches the pipeline",
+    check("edit selects Qwen 2.1",
+          ctl.property("mode") == "edit"
+          and "qwen_image_2.1" in ctl.property("selectedName"))
+    ctl.selectModelByName("flux-2-klein-4b-test.safetensors")
+    ctl.setMode("edit")
+    check("edit replaces a previously selected Klein model",
+          "qwen_image_2.1" in ctl.property("selectedName"))
+
+    # Keep the existing Klein pipeline coverage independent of the shortcut.
+    ctl.selectModelByName("flux-2-klein-4b-test.safetensors")
+    spin(200)
+    check("Klein still supports the edit pipeline",
           ctl.property("mode") == "edit" and ctl.property("isEdit") is True
           and "klein" in ctl.property("selectedName"),
           (ctl.property("mode"), ctl.property("selectedName")))
@@ -1592,10 +1609,25 @@ def test_modes(win, ctl, tmp):
           sent.get("_submitted") is None, sent)
 
     src = os.path.join(tmp, "to-edit.png")
-    with open(src, "wb") as fh:
-        fh.write(b"not really a png")
+    fake_png(src, {})
     ctl._input_image = src
     ctl._uploaded = (src, "painter/to-edit.png")   # already uploaded: no network
+    ctl.inputImageChanged.emit()
+    spin(100)
+    add = find(edit_panel, "FrameWell", pred=lambda it: it.property("compact"))
+    check("additional references use a compact plus target",
+          add is not None and add.isVisible() and add.height() < 50
+          and find(add, "TextButton").property("label") == "+")
+    from PySide6.QtCore import QMimeData, QUrl
+    from PySide6.QtGui import QGuiApplication
+    offer = QMimeData()
+    offer.setUrls([QUrl.fromLocalFile(src)])
+    QGuiApplication.clipboard().setMimeData(offer)
+    find(add, "TextButton").metaObject().invokeMethod(find(add, "TextButton"), "clicked")
+    spin(100)
+    check("clicking plus pastes a new reference image", list(ctl.editExtraImages) == [src])
+    ctl.clearEditImages()
+    spin(100)
     sent.clear()
     APP.metaObject().invokeMethod(APP, "submit")
     spin(250)
@@ -2597,6 +2629,7 @@ def test_compare_and_columns(win, ctl, tmp):
     im.save(before)
     edit = fake_png(os.path.join(tmp, "out", "painter-edit_00001_.png"),
                     {"positive": "make it night", "edit": True, "kind": "edit",
+                     "model": "qwen_image_2.1_int8_convrot.safetensors",
                      "input_image_local": before, "steps": 8})
     plain = fake_png(os.path.join(tmp, "out", "plain_00001_.png"),
                      {"positive": "a plain output", "steps": 9})
@@ -2628,7 +2661,7 @@ def test_compare_and_columns(win, ctl, tmp):
     # --- the compare row is only offered where it can do something ---------
     APP.metaObject().invokeMethod(APP, "enterView", Q_ARG("QVariant", edit))
     spin(250)
-    check("an edit output can be compared",
+    check("a Qwen 2.1 edit output can be compared",
           APP.property("canCompare") is True
           and out.property("beforePath") == before
           and out.property("comparing") is True,
@@ -4722,10 +4755,12 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("seed", "preview", "live", "llada", "modes"):
+    if only in ("seed", "preview", "live", "llada", "modes", "compare"):
         print("== %s ==" % only)
         if only == "llada":
             test_llada(win, ctl, tmp)
+        elif only == "compare":
+            test_compare_and_columns(win, ctl, tmp)
         elif only == "modes":
             test_modes(win, ctl, tmp)
         elif only == "seed":

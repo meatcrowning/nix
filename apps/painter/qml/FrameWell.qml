@@ -16,6 +16,7 @@ Item {
     property string path: ""
     property string url: ""
     property bool active: false
+    property bool compact: false
     property string emptyText: "drag or paste an image here"
     // NEVER decode a uri-list in QML (docs/DESIGN.md §13) — QUrl does it once,
     // in python, so `accepts` is handed the raw url and answers whether painter
@@ -32,16 +33,16 @@ Item {
     property bool winActive: true
 
     width: parent ? parent.width : 0
-    height: active ? 92 : 0
+    height: active ? (compact ? Theme.lineHeight + 9 : 92) : 0
     visible: active
     clip: true
 
     Rectangle {
         anchors.fill: parent
         anchors.topMargin: 4
-        color: Theme.bg
+        color: root_well.compact ? (drop.containsDrag ? Theme.highlight : "transparent") : Theme.bg
         radius: Theme.rounding
-        border.width: Theme.ctrlBorder
+        border.width: root_well.compact ? 0 : Theme.ctrlBorder
         border.color: drop.containsDrag ? Theme.accent : Theme.border
 
         Image {
@@ -60,6 +61,7 @@ Item {
         }
 
         PixelText {
+            visible: !root_well.compact
             anchors.left: shot.visible ? shot.right : parent.left
             anchors.leftMargin: 8
             anchors.right: pasteBtn.left
@@ -80,12 +82,19 @@ Item {
         TextButton {
             id: pasteBtn
             anchors.right: parent.right
-            anchors.rightMargin: 6
+            anchors.rightMargin: root_well.compact ? 0 : 6
+            width: root_well.compact ? parent.width : implicitWidth
             anchors.verticalCenter: parent.verticalCenter
-            label: "[ Paste ]"
+            label: root_well.compact ? "+" : "[ Paste ]"
             tone: Theme.textDim
             winActive: root_well.winActive
             onClicked: root_well.paste()
+        }
+
+        ToolTipArea {
+            anchors.fill: parent
+            enabled: root_well.compact
+            text: "Drop another image here, or click to paste"
         }
 
         // Passive: it takes no press, so the drop target and the button below

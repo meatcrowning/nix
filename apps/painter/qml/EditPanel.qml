@@ -10,7 +10,7 @@ import QtQuick
 //
 // Flux 2 Klein takes MULTIPLE reference images (comfy attaches each as a
 // reference latent, chained), so the primary well is joined by a stack of
-// extra wells and one empty "add another" well. The primary is the SAME slot as
+// extra wells and a compact add target. The primary is the SAME slot as
 // the video first frame (App.inputImage) on purpose: painter holds one dropped
 // picture, so a frame dropped for a clip is still there if you switch to edit,
 // and it is remembered across launches by the prefs key that already existed.
@@ -85,9 +85,9 @@ Panel {
         }
     }
 
-    // Always-empty "add another reference image" well — only once there is a
-    // primary, since a reference with nothing to size against makes no sense.
+    // Add references below the last used well without reserving a preview.
     FrameWell {
+        compact: true
         active: App.editMultipleImages && App.inputImage !== ""
         path: ""
         url: ""

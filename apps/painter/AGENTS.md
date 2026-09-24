@@ -124,11 +124,9 @@ a two-way binding loop. tools/ui-test.py covers these paths.
 
 ## The four modes are shortcuts to four models
 
-Above the model list, [his] *"there should be a switcher for anime (selects
-anima base model), real (selects krea 2), edition (…Klein…), and then one for
-video (selects minimax h3)"*. `ModeSwitcher.qml` draws them; **the table of
-which file each one means is `registry.MODES`**, painter answers it through
-`App.modes()`, and nothing in QML decides it.
+`ModeSwitcher.qml` offers anime (Anima), real (Krea 2), edit (Qwen 2.1), and
+video (MiniMax H3). `registry.MODES` owns their model choices; `App.modes()`
+exposes them, and nothing in QML decides them.
 
 - **A mode is a selection, not a fifth kind of model.** Turning one on selects
   its file and greys the list (`enabled: false` *and* dimmed — docs/DESIGN.md
@@ -143,8 +141,7 @@ which file each one means is `registry.MODES`**, painter answers it through
   itself rather than greying a list it no longer overrides.
 - The mode is remembered (`Prefs` key `mode`) and applied when the rows land —
   after the remembered model name, which it outranks.
-- Edit preserves the selected model when its family supports editing; otherwise
-  it selects the canonical Klein model. `_mode_entry()` owns this exception.
+- Edit selects Qwen Image 2.1, including when restoring an older Klein preset.
 
 ## Editing is a different pipeline, not a flag on the image one
 
@@ -221,8 +218,9 @@ be a box to drop the image in and a prompt box"*:
   primary sizes the output** (`GetImageSize` still feeds the latent and the
   scheduler off image #1); the rest are references. The extras are their own
   list (`App.editExtraImages`, kept separate from `inputImage` so the video path
-  is untouched); the UI is a stack of wells under the primary plus an empty "add
-  another" well. `submit()` passes `input_images` (primary first);
+  is untouched); the UI is a stack of used wells under the primary plus a compact
+  `+` target for dropping or pasting another reference. `submit()` passes
+  `input_images` (primary first);
   `input_image` stays as `input_images[0]` for the single-image case.
 - **LoRAs work here too.** The one panel edit mode keeps below the prompt (the
   drop wells and prompt box aside) is the LoRA stack: an edit model takes a LoRA

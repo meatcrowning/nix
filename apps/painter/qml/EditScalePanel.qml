@@ -47,13 +47,4 @@ Panel {
             }
         }
     }
-
-    PixelText {
-        text: root.gen.editNoScale
-              ? "  the result keeps the dropped image's width and height"
-              : "  the result is the dropped image, scaled to the megapixels above"
-        color: Theme.dim
-        width: parent.width
-        wrapMode: Text.Wrap
-    }
 }
