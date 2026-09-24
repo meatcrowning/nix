@@ -116,6 +116,14 @@ import paths. seed-drift.sh --pre-switch reports expected reconciliation.
 | Hyprland, hyprvtb, sandbox | home/prog/AGENTS.md |
 | Plugin ABI/pins | home/prog/hyprvtb/PORTING.md |
 
+- flake.nix also defines standalone nixosConfigurations.pad in hosts/pad/.
+  Pad imports neither sys/ nor home/ and needs no private-config input. Keep
+  its small system and desktop modules under hosts/pad/; use nixpkgs' Hyprland.
+  Evaluate pad with plain nix eval/build. Run tools/deploy-pad.sh on top to
+  build committed HEAD and optionally activate over key-only root SSH. Pad's
+  deployment key is provisioned in /etc/ssh/authorized_keys.d/root at install.
+  Do not run rebuild-top on pad. Disk labels in its hardware module are an
+  installation contract, not a description of the existing Arch partitions.
 - flake.nix defines top and homeConfigurations.air. hosts/top/ and sys/ are
   NixOS-only; lam.nix imports shared home/. Recursive umport imports only .nix
   files. Keep system changes in sys/, user changes in home/, and use focused
