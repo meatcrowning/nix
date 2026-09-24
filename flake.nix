@@ -95,6 +95,11 @@
       air-oxygen = airOffload.oxygen;
     };
     nixosConfigurations = {
+      # Deliberately standalone: sys/ and home/ import top's complete desktop.
+      pad = nixpkgs.lib.nixosSystem {
+        specialArgs = { inherit user; };
+        modules = [ ./hosts/pad/configuration.nix ];
+      };
       top = nixpkgs.lib.nixosSystem {
         specialArgs = {
           inherit inputs user privateConfig;
