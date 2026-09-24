@@ -1370,8 +1370,7 @@ class Painter(QObject):
             # modelChanged -> applyDefaults() and overwriting the
             # just-restored video sampling settings (steps, sampler,
             # scheduler) with that other checkpoint's defaults.
-            in_family = (entry is not None and (entry.family == spec.get("family")
-                         or (want_mode == "edit" and (self.reg.family_of(entry) or {}).get("edit")))
+            in_family = (entry is not None and entry.family == spec.get("family")
                          and (spec.get("needs") != "edit"
                               or (self.reg.family_of(entry) or {}).get("edit")))
             if in_family:
@@ -1482,8 +1481,6 @@ class Painter(QObject):
     def _mode_entry(self, mode_id):
         if not self.reg:
             return None
-        if mode_id == "edit" and self._selected_family().get("edit"):
-            return self.models.entry_at(self._selected)
         return self.reg.mode_model(mode_id)
 
     @Slot(result="QVariantList")
