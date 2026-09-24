@@ -336,6 +336,12 @@ Above the history, off by default, toggled from the titlebar's `pv` cell
 as `preview.h`). **It shows WHAT IS SELECTED — and the running job is one of the
 things that can be selected.**
 
+Finished edits with a resolvable source use the shared CompareView in Browse
+as well as View. Both follow `showCompare`; the Compare action is available
+for whichever visible pane can compare. Preview comparison stays inside its
+zoom/pan transform, with pointer coordinates mapped through that transform.
+Closed previews, live sampler frames and clips do not load comparison images.
+
 It was the running job and nothing else until 2026-08-28, deliberately: [his]
 *"it should only show the preview frames of the generating image or video and
 when complete should just show that image or video, no clicking on other outputs

@@ -53,15 +53,16 @@ Item {
     readonly property bool selIsVideo: root.selOne !== ""
         && Gallery.isVideoAt(Gallery.indexOf(root.selOne))
     readonly property bool canZoom: root.inView && !root.selIsVideo
-    // The before/after slider in the single-output view. On by default, and off
+    // The before/after slider in View and Browse preview. On by default, and off
     // is per-session-remembered like the other view toggles.
     property bool showCompare: true
     // HOW MANY COLUMNS THE GRID LAYS OUT: 0 is automatic (whole columns of a
     // cell near 210px, the width-driven default), 1..6 a fixed count. See the
     // `cols*` rows in `actions` and `GalleryView.columns`.
     property int gridColumns: 0
-    readonly property bool canCompare: root.inView && !root.selIsVideo
-        && root.selOne !== "" && App.compareSource(root.selOne) !== ""
+    readonly property bool canCompare: root.inView
+        ? (!root.selIsVideo && root.selOne !== "" && App.compareSource(root.selOne) !== "")
+        : results.preview.canCompare
     readonly property bool canStep: Gallery.count > 1
 
     function enterView(path) {
@@ -760,7 +761,7 @@ Item {
         { id: "zoom100", tip: "Actual Size", menu: "view", icon: "zoom-original",
           shortcut: "Ctrl+Shift+0", state: root.canZoom ? 0 : 2 },
         "-",
-        // ONLY WHERE THERE IS SOMETHING TO COMPARE — an edit output, in View,
+        // ONLY WHERE THERE IS SOMETHING TO COMPARE — an edit output in View or Browse,
         // whose before-image this machine can find. [his] "the compare button
         // should only show when the output viewed is an edit". Everywhere else
         // it is a switch for a thing that cannot happen, which is worse than no
