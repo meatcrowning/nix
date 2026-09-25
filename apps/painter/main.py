@@ -520,8 +520,9 @@ class _RegistryScanJob(QRunnable):
             for entry in reg.base_models():
                 pairing = reg.pair(entry)
                 fam = pairing["family"]
-                if fam and pairing["encoder"]:
-                    desc = f"{pairing['encoder'].name}  +  {pairing['vae'].name}"
+                if fam and fam.get("loader_shape") != "checkpoint":
+                    desc = (f"{getattr(pairing['encoder'], 'name', 'missing encoder')}  +  "
+                            f"{getattr(pairing['vae'], 'name', 'missing VAE')}")
                 elif fam:
                     desc = "encoder and VAE bundled in the checkpoint"
                 else:
@@ -872,6 +873,9 @@ class Painter(QObject):
     selectedIndex = Property(int, lambda self: self._selected, notify=modelChanged)
     encoderName = Property(str, lambda self: self._enc_name, notify=modelChanged)
     vaeName = Property(str, lambda self: self._vae_name, notify=modelChanged)
+    separatePairing = Property(bool, lambda self: bool(self._selected_family()) and
+                               self._selected_family().get("loader_shape") != "checkpoint",
+                               notify=modelChanged)
     familyLabel = Property(str, lambda self: self._fam_label, notify=modelChanged)
     # The selected model's own name. The model panel collapses now, and collapsed
     # its header badge is the only thing left saying what will be generated with.
@@ -1336,6 +1340,9 @@ class Painter(QObject):
                 self.rescan()
             return
 
+        previous = self.models.entry_at(self._selected)
+        if previous is not None and not getattr(self, "_want_model", ""):
+            self._want_model = previous.name
         self.reg = reg
         self.models.set_rows(rows)
         want = getattr(self, "_want_model", "")
@@ -1604,11 +1611,11 @@ class Painter(QObject):
             self.reg.overrides.set_file(entry.path, vae=name)
             self.rescan()
 
-    @Slot(result="QStringList")
+    @Property("QStringList", notify=modelChanged)
     def encoderNames(self):
         return [e.name for e in self.reg.encoders()] if self.reg else []
 
-    @Slot(result="QStringList")
+    @Property("QStringList", notify=modelChanged)
     def vaeNames(self):
         return [v.name for v in self.reg.vaes()] if self.reg else []
 
