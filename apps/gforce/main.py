@@ -268,7 +268,7 @@ class Window(QMainWindow):
     # Every dial persists in dials.json, in the units the panel shows (trail
     # half-life in frames, fade in 1/255ths). It is written on each change and
     # re-read when edited by hand. Without it, engine dials start from .G-Force.
-    DEFAULTS={'forceConnect':False,'waveResponse':0.,'trailFill':1.,'trailSharpness':1.,'persist':math.log(.5)/math.log(31/32),'fadeBias':.5,'widthScale':1.,'minWidth':1.,'softness':1.,
+    DEFAULTS={'forceConnect':False,'forcePoints':False,'waveResponse':0.,'trailFill':1.,'trailSharpness':1.,'persist':math.log(.5)/math.log(31/32),'fadeBias':.5,'widthScale':1.,'minWidth':1.,'softness':1.,
               'grid':640,'sensitivity':1.,'steps':200,'transitionLo':4,'transitionHi':18,'rate':1.,
               'particles':True,'normalize':False,'audioOnly':False,'fps':30,
               'masterSpeed':1.,'flowSpeed':1.,'waveSpeed':1.,'particleSpeed':1.,'colourSpeed':1.,
@@ -325,6 +325,7 @@ class Window(QMainWindow):
     def values(self):
         data={k:round(d.get(),4) for k,d in self.dials.items()}
         data['forceConnect']=self.force_connect.isChecked()
+        data['forcePoints']=self.force_points.isChecked()
         data['particles']=self.particles.isChecked()
         data['normalize']=self.normalize.isChecked()
         data['audioOnly']=self.audio_only.isChecked()
@@ -392,6 +393,7 @@ class Window(QMainWindow):
         for name in self.dials:
             self.dials[name].set(float(d[name]),notify=True)
         self.force_connect.setChecked(bool(d['forceConnect'])); self.view.set_dial('forceConnect',int(bool(d['forceConnect'])))
+        self.force_points.setChecked(bool(d['forcePoints'])); self.view.set_dial('forcePoints',int(bool(d['forcePoints'])))
         self.particles.setChecked(bool(d['particles'])); self.view.set_dial('particles',int(bool(d['particles'])))
         self.normalize.setChecked(bool(d['normalize'])); self.view.set_dial('normalize',int(bool(d['normalize'])))
         self.audio_only.setChecked(bool(d['audioOnly'])); self.view.set_dial('audioOnly',int(bool(d['audioOnly'])))
@@ -495,6 +497,11 @@ class Window(QMainWindow):
         self.force_connect.setToolTip('connect consecutive points in every wave and particle preset; off restores each preset’s normal behavior')
         self.force_connect.toggled.connect(lambda on:(v('forceConnect',int(on)),self.changed()))
         g.addWidget(self.force_connect,10,0,1,2)
+        self.force_points=QCheckBox('force point count')
+        self.force_points.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.force_points.setToolTip('use the wave detail dial’s point count for every wave and particle, including both waves during transitions; off restores preset point counts')
+        self.force_points.toggled.connect(lambda on:(v('forcePoints',int(on)),self.changed()))
+        g.addWidget(self.force_points,11,0,1,2)
 
         g,_=self.section(col,'distortion')
         self.dial(g,0,'grid','map resolution',128,2048,lambda x: f'{round(x/32)*32:.0f}',
@@ -764,7 +771,7 @@ class Window(QMainWindow):
         preset={'name':f"{pretty('W')} · {pretty('D')} · {pretty('C')}",
                 'saved':time.strftime('%Y-%m-%dT%H:%M:%S'),
                 'components':comps,
-                'dials':{**{k:round(self.dials[k].get(),4) for k in LOOK_DIALS},'forceConnect':self.force_connect.isChecked()}}
+                'dials':{**{k:round(self.dials[k].get(),4) for k in LOOK_DIALS},'forceConnect':self.force_connect.isChecked(),'forcePoints':self.force_points.isChecked()}}
         self.load_presets()   # pick up edits from elsewhere before appending
         self.presets.append(preset)
         try:
@@ -785,6 +792,7 @@ class Window(QMainWindow):
             if not lib.gf_preset_recall(ord(kind),name.encode(),int(seed),1):
                 missing.append(name)
         self.force_connect.setChecked(bool(p.get('dials',{}).get('forceConnect',False)))
+        self.force_points.setChecked(bool(p.get('dials',{}).get('forcePoints',False)))
         self.ease_look({k:float(v) for k,v in self.migrate_scales(p.get('dials',{})).items() if k in self.dials})
         # A recalled look should stay put: pause automatic changes (Space resumes).
         self.view.set_dial('paused',1)

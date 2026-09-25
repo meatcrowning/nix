@@ -38,4 +38,23 @@ try:
     set_('forceConnect',1);frame();assert lib.gf_get(b'particleLength')>0
     set_('forceConnect',0);frame();assert lib.gf_get(b'particleLength')==0
     print('PASS: particle presets also obey the reversible override')
+    normal_particles=lib.gf_get(b'particleSegments')
+    assert lib.gf_preset_recall(ord('W'),b'DT_-_SineDot',77,0)
+    frame();normal_wave=lib.gf_get(b'waveSegments')
+    assert lib.gf_get(b'forcePoints')==0
+    set_('forcePoints',1)
+    for points in (16,200,550):
+        set_('steps',points);frame()
+        assert lib.gf_get(b'waveSegments')==3*points
+        assert lib.gf_get(b'particleSegments')==2*points
+    set_('forcePoints',0);frame()
+    assert lib.gf_get(b'waveSegments')==normal_wave
+    assert lib.gf_get(b'particleSegments')==normal_particles
+    set_('forcePoints',1);set_('steps',200)
+    assert lib.gf_preset_recall(ord('W'),b'Simple_Horizontal',77,1)
+    for _ in range(4):
+        frame()
+        assert lib.gf_get(b'waveSegments') in (3*200,3*199)
+        assert lib.gf_get(b'particleSegments')==2*200
+    print('PASS: exact dial counts across wave subshapes, particles and morphs; off restores presets')
 finally:lib.gf_close();lib.gf_headless_close()

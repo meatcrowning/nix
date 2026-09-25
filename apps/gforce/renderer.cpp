@@ -473,6 +473,7 @@ struct Renderer {
     float trailSharpness=1.f;
     int trailFill=1;
     bool forceConnect=false;
+    bool forcePoints=false;
     float waveResponse=0.f;
     std::vector<size_t> waveIndices;
     std::vector<Segment> previousWave;
@@ -724,6 +725,7 @@ bool gpu_smooth_wave(float* samples,int count) {
 }
 bool gpu_active() { return active!=nullptr; }
 bool gpu_force_connect() { return active && active->forceConnect; }
+long gpu_forced_points() { return active && active->forcePoints ? long(active->engine->setting("steps")) : 0; }
 bool gpu_capture_line(float sx,float sy,float ex,float ey,float a,float b,float width) {
     if(!active||!active->capturing) return false;
     // Transform each layer before drawing; the shared trail history and
@@ -797,6 +799,7 @@ extern "C" int gf_set(const char *name,double v) {
         std::string n(name); auto &r=*active;
         if(n=="persist") r.persist=std::clamp(float(v),0.f,1.f);
         else if(n=="forceConnect") r.forceConnect=v!=0;
+        else if(n=="forcePoints") r.forcePoints=v!=0;
         else if(n=="waveResponse") r.waveResponse=std::clamp(float(v),0.f,250.f);
         else if(n=="trailFill") r.trailFill=int(std::lround(std::clamp(v,1.,8.)));
         else if(n=="trailSharpness") r.trailSharpness=std::clamp(float(v),0.f,1.f);
@@ -828,6 +831,9 @@ extern "C" double gf_get(const char *name) {
     std::string n(name); auto &r=*active;
     if(n=="persist") return r.persist;
     if(n=="forceConnect") return r.forceConnect;
+    if(n=="forcePoints") return r.forcePoints;
+    if(n=="waveSegments") return r.waveIndices.size();
+    if(n=="particleSegments") return r.segments.size()-r.waveIndices.size();
     if(n=="waveResponse") return r.waveResponse;
     if(n=="trailFill") return r.trailFill;
     if(n=="trailSharpness") return r.trailSharpness;

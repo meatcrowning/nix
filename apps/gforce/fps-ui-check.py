@@ -121,6 +121,21 @@ with tempfile.TemporaryDirectory(prefix='gforce-ui-') as tmp:
     window.recall_preset(len(window.presets)-1)
     assert not window.force_connect.isChecked(),'old presets retain normal connections'
     print('PASS: connection override persists in settings and saved looks')
+    window.force_points.setChecked(True)
+    window.save()
+    assert window.read()['forcePoints'] is True
+    window.force_points.setChecked(False)
+    window.apply(window.read())
+    assert window.force_points.isChecked() and ns['lib'].settings['forcePoints']==1
+    window.save_preset()
+    assert window.presets[-1]['dials']['forcePoints'] is True
+    window.force_points.setChecked(False)
+    window.recall_preset(len(window.presets)-1)
+    assert window.force_points.isChecked()
+    del window.presets[-1]['dials']['forcePoints']
+    window.recall_preset(len(window.presets)-1)
+    assert not window.force_points.isChecked()
+    print('PASS: point override persists in settings and looks; old looks default off')
     window.shared.directory.mkdir()
     window.shared.host='top'
     window.dials['grid'].set(2048,notify=True)

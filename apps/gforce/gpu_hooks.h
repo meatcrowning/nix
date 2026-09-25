@@ -20,3 +20,5 @@ void gpu_particle_layer(bool particles);
 
 // A live override; preset connection flags remain unchanged when disabled.
 bool gpu_force_connect();
+// Zero preserves preset counts; otherwise every shape uses the detail dial.
+long gpu_forced_points();
