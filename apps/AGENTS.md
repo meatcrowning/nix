@@ -13,6 +13,7 @@ details.
 | filer/ | file browser | home/prog/filer.nix |
 | viewer/ | image/video viewer | home/prog/viewer.nix |
 | player/ | music player | home/prog/player.nix |
+| gforce/ | classic audio visualizer | home/prog/gforce.nix |
 | painter/ | ComfyUI image front end | home/prog/painter.nix |
 | surfer/ | QtWebEngine browser | home/prog/surfer.nix |
 | askpass/ | sudo -A password dialog | home/prog/askpass.nix |

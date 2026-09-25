@@ -1,0 +1,458 @@
+--- a/libvisual-plugins/plugins/actor/G-Force/GForceCommon/WaveShape.cpp
++++ b/libvisual-plugins/plugins/actor/G-Force/GForceCommon/WaveShape.cpp
+@@ -1,8 +1,10 @@
+ #include <stdio.h>
++#include <cstring>
+ 
+ #include "G-Force_Proj.h"
+ 
+ #include "WaveShape.h"
++#include "gpu_hooks.h"
+ 
+ #include <math.h>
+ #include <stdlib.h>
+@@ -14,8 +16,8 @@
+ #include "PixPort.h"
+ 
+ 
+-long		WaveShape::sXY[ 2 * MAX_WAVES_PER_SHAPE ];
+-long		WaveShape::sStartXY[ 2 * MAX_WAVES_PER_SHAPE ];
++float		WaveShape::sXY[ 2 * MAX_WAVES_PER_SHAPE ];
++float		WaveShape::sStartXY[ 2 * MAX_WAVES_PER_SHAPE ];
+ float		WaveShape::sS;
+ 
+ 
+@@ -25,6 +27,7 @@
+ 	mNumWaves = 0;
+ 	mMouseX = 0;
+ 	mMouseY = 0;
++	mShapeTrans = 0;
+ 
+ 	mNumFFTBins = 255;
+ 	
+@@ -61,7 +64,7 @@
+ 	UtilStr str;
+ 	
+ 	// Mix up the rnd seed
+-	srand( clock() );
++	// Seeded by GForce::load*() through gpu_load_seed(), so presets recall exactly.
+ 
+ 	// Calculate mNumSampleBins -- How many pieces we chop the 0-1 s interval into
+ 	inArgs.GetArg( 'Stps', str );
+@@ -164,7 +167,8 @@
+ 
+ 
+ void WaveShape::Draw( long inNumSteps, PixPort& inDest, float inFader, WaveShape* inWave2, float inMorphPct ) {
+-	long i, x, y;
++	long i;
++	float x, y;
+ 	long xoff = inDest.GetX() >> 1;
+ 	long yoff = inDest.GetY() >> 1;
+ 	long maxWaves, w2Waves, clr;
+@@ -182,7 +186,11 @@
+ 			yscale = xscale;
+ 	}
+ 				
+-	// See if this shape has an overriding number of s steps
++	// See if this shape has an overriding number of s steps. The morph
++	// weight must be this frame's before it blends the two step counts: a
++	// shape's first morph as the source otherwise reads an unset weight.
++	if ( inWave2 )
++		mShapeTrans = pow( inMorphPct, SHAPE_MORPH_ALPHA );
+ 	CalcNumS_Steps( inWave2, inNumSteps );
+ 	
+ 	// Setup default step size--inv of how many bins are available
+@@ -292,7 +300,7 @@
+ 			x = xoff + tx;
+ 			y = yoff - ty;
+ 				
+-			if ( mConnectBins ) {
++			if ( mConnectBins || gpu_force_connect() ) {
+ 				if ( sS > 0 )
+ 					inDest.Line( sXY[ 2 * i ], sXY[ 2 * i + 1 ], x, y, rgbPrev, rgb );
+ 				else {
+@@ -314,7 +322,9 @@
+ 	}	
+ 	
+ 	// Make sure we restore a random seed (one of the virtual machines could be seeding to the same value)
+-	srand( *((long*) mTPtr) );
++	unsigned seed;
++	std::memcpy(&seed, mTPtr, sizeof(seed));
++	srand(seed);
+ 
+ }
+ 
+@@ -332,4 +342,3 @@
+ 	__weightBOL( mConnectBins )
+ 	__weightBOL( mConnectFirstLast )
+ }
+-
+--- a/libvisual-plugins/plugins/actor/G-Force/GForceCommon/GF_Palette.cpp
++++ b/libvisual-plugins/plugins/actor/G-Force/GForceCommon/GF_Palette.cpp
+@@ -22,7 +22,7 @@
+ 	UtilStr str;
+ 
+ 	// Mix up the rnd seed
+-	srand( clock() );
++	// Seeded by GForce::load*() through gpu_load_seed(), so presets recall exactly.
+ 
+ 	// Compile and link the temp exprs.  By spec, A-vars are evaluated now
+ 	mAVars.Compile( inArgs, 'A', mDict );
+--- a/libvisual-plugins/plugins/actor/G-Force/GForceCommon/DeltaField.cpp
++++ b/libvisual-plugins/plugins/actor/G-Force/GForceCommon/DeltaField.cpp
+@@ -1,6 +1,9 @@
+ // DeltaField.cpp
+ 
+ #include "DeltaField.h"
++#include "gpu_hooks.h"
++#include <cmath>
++#include <cstdint>
+ 
+ #include "ArgList.h"
+ #include <math.h>
+@@ -42,6 +45,7 @@
+ 			EgOSUtils::ShowCursor();
+ 		}
+ 		
++        gpu_capture_field(mWidth,mHeight,mGpuUV.data());
+ 		return &mFieldData;
+ 	}
+ 	
+@@ -99,6 +103,7 @@
+ 		// Each pixel needs 4 bytes of info per pixel (max) plus 4 shorts, 2 bytes per row (max)
+ 		mCurrentRow = mGradBuf.Dim( 4 * mWidth * mHeight + 10 * mHeight + 64 );
+ 		mFieldData.mField = mCurrentRow;
++        mGpuUV.resize(size_t(mWidth)*mHeight*2);
+ 		
+ 		mXScale = 2.0 / ( (float) mWidth );
+ 		mYScale = 2.0 / ( (float) mHeight );
+@@ -131,7 +136,8 @@
+ 	if ( mCurrentY >= 0 && mCurrentY < mHeight ) {
+ 	
+ 		// Calc the y we're currently at
+-		mY_Cord = 0.5 * mYScale * ( mHeight - 2 * mCurrentY );
++        float sceneScale=gpu_scene_scale();
++		mY_Cord = 0.5 * mYScale * ( mHeight - 2 * mCurrentY ) / sceneScale;
+ 
+ 		// Save some cycles by pre-computing indep stuff
+ 		xscale2 = ( (float) ( 1 << DEC_SIZE ) ) / mXScale;
+@@ -142,7 +148,7 @@
+ 				
+ 		// Calc the mCurrentY row of the grad field
+ 		for ( px = 0; px < mWidth; px++ ) {
+-			mX_Cord = 0.5 * mXScale * ( 2 * px - mWidth ); 
++			mX_Cord = 0.5 * mXScale * ( 2 * px - mWidth ) / sceneScale; 
+ 							
+ 			// Calculate R and THETA only if the field uses it (don't burn cycles on sqrt() and atan())
+ 			if ( mHasRTerm )
+@@ -161,6 +167,17 @@
+ 				fx = r * cos( fy );
+ 				fy = r * sin( fy );
+ 			}
++            // Keep the equation's full source coordinates for the GPU. The
++            // CPU's packed displacement cannot represent off-canvas samples
++            // or jumps larger than about 127 field cells.
++            size_t at=(size_t(mCurrentY)*mWidth+px)*2;
++            float u=(fx*sceneScale/mXScale+mWidth*.5f+.5f)/mWidth;
++            float v=(mHeight*.5f-fy*sceneScale/mYScale+.5f)/mHeight;
++            mGpuUV[at]=std::isfinite(u)?u:(px+.5f)/mWidth;
++            mGpuUV[at+1]=std::isfinite(v)?v:(mCurrentY+.5f)/mHeight;
++            // No packed map is needed for the GPU path. Avoid float-to-long
++            // overflow in extreme equations and 64-bit stores into 4-byte cells.
++            if(gpu_active()) { *reinterpret_cast<uint32_t*>(g)=0; g+=4; continue; }
+ 			sx = xscale2 * ( fx - mX_Cord );
+ 			sy = yscale2 * ( mY_Cord - fy );
+ 			
+@@ -183,13 +200,13 @@
+ 				
+ 			// If this cord is in bounds then encode it, otherwise signal PixPort::Fade()
+ 			if ( outOfBounds )
+-				*( ( unsigned long* ) g ) = 0xFFFFFFFF; 
++				*( ( uint32_t* ) g ) = 0xFFFFFFFF; 
+ 			else {
+ 				
+ 				// Precompute the address of the souce quad-pixel fence
+ 				addrOffset = ( sx >> 8 ) + px + ( sy >> 8 ) * mRowSize;
+ 				
+-				*( ( unsigned long* ) g )	= ( addrOffset << 14 ) |
++				*( ( uint32_t* ) g )	= ( addrOffset << 14 ) |
+ 											  ( ( sx & 0x00FE ) << 6 ) |
+ 											  ( ( sy & 0x00FE ) >> 1 );
+ 			}
+--- a/libvisual-plugins/plugins/actor/G-Force/GForceCommon/ParticleGroup.cpp
++++ b/libvisual-plugins/plugins/actor/G-Force/GForceCommon/ParticleGroup.cpp
+@@ -1,6 +1,7 @@
+ #include "G-Force_Proj.h"
+ 
+ #include "ParticleGroup.h"
++#include "gpu_hooks.h"
+ 
+ #include "ArgList.h"
+ #include "EgOSUtils.h"
+@@ -11,7 +12,7 @@
+ #endif
+ 
+ ParticleGroup::ParticleGroup( float* inTPtr, ExprUserFcn** inMagFcn ) :
+-	WaveShape( inTPtr ) {
++	WaveShape( gpu_clock('P', inTPtr) ) {
+ 	
+ 	SetMagFcn( inMagFcn );
+ 	
+@@ -19,7 +20,8 @@
+ 	mDict.AddVar( "NUM", &mNumInstances );
+ 	mDict.AddVar( "END_TIME", &mEndTime );
+ 	
+-	mTPtr = inTPtr;
++	// T and END_TIME must use the same clock (many presets subtract them).
++	mTPtr = gpu_clock('P', inTPtr);
+ }
+ 
+ 
+--- a/libvisual-plugins/plugins/actor/G-Force/GForceCommon/G-Force.cpp
++++ b/libvisual-plugins/plugins/actor/G-Force/GForceCommon/G-Force.cpp
+@@ -1,10 +1,12 @@
+ #include <config.h>
++#include "gpu_hooks.h"
+ 
+ #include <stdio.h>
+ #include <gettext.h>
+ 
+ #include "G-Force_Proj.h"
+ #include "G-Force.h"
++#include <stdlib.h>
+ #include "XFloatList.h"
+ 
+ #ifdef UNIX_X
+@@ -36,10 +38,10 @@
+ #if defined(UNIX_X)
+ 	mPrefs( ".G-Force", true ),
+ #endif
+-	mWave1( &mT ),
+-	mWave2( &mT ),
+-	mPal1( &mT, &mIntensityParam ),
+-	mPal2( &mT, &mIntensityParam ),
++	mWave1( gpu_clock('W', &mT) ),
++	mWave2( gpu_clock('W', &mT) ),
++	mPal1( gpu_clock('C', &mT), &mIntensityParam ),
++	mPal2( gpu_clock('C', &mT), &mIntensityParam ),
+ 	mConsoleLines( cDuplicatesAllowed, cOrderImportant ),
+ 	mLineExpireTimes( cOrderImportant ),
+ 	mParticles		( cNoDuplicates_CaseInsensitive, cSortLowToHigh ),
+@@ -867,7 +869,8 @@
+ 		fcn -> mFcn[ i ] = inSound[ i ] * inScale;
+ 	}
+ 	
+-	XFloatList::GaussSmooth( 1.3, inNumBins, fcn -> mFcn );
++	if (!gpu_smooth_wave(fcn -> mFcn, inNumBins))
++		XFloatList::GaussSmooth( 1.3, inNumBins, fcn -> mFcn );
+ 	
+ 	// Flatten the ends of the sample...
+ 	n = inNumBins / 20 + 1;
+@@ -928,7 +931,9 @@
+         /* This redraws the image */
+ 
+ 	// Draw all the current particles
++    gpu_particle_layer(true);
+ 	DrawParticles( *mCurPort );
++    gpu_particle_layer(false);
+ 	
+ 	// Draw the current wave shape for the current music sample playing
+ 	// If there's a morph going, drawing is a mix of both waves
+@@ -1021,6 +1026,7 @@
+ }
+ 
+ void GForce::DrawFrame() {
++	if (gpu_active()) return;
+ 
+ 
+ 	__setupPort
+@@ -1116,6 +1122,8 @@
+ 
+ 	
+ void GForce::loadColorMap( long inColorMapNum, bool inAllowMorph ) {
++	long loadSeed = gpu_load_seed( 'C' );
++	srand( (unsigned) loadSeed );
+ 	const CEgFileSpec* spec;
+ 	int ok = false, vers;
+ 	ArgList args;
+@@ -1160,6 +1168,8 @@
+ 
+ 		// Calculate how long this transition/morph will be
+ 		mColorTransTime	= EgOSUtils::Rnd( mTransitionLo * 1000, mTransitionHi * 1000 );
++		// A zero blend would never end (the swap waits for a time > 0).
++		if ( mColorTransTime < 1 ) mColorTransTime = 1;
+ 		mColorTransEnd	= mT_MS + mColorTransTime;
+ 	}
+ }
+@@ -1171,6 +1181,8 @@
+ #define DEC_SIZE 6
+ 
+ void GForce::loadDeltaField( long inFieldNum ) {
++	long loadSeed = gpu_load_seed( 'D' );
++	srand( (unsigned) loadSeed );
+ 	const CEgFileSpec* spec;
+ 	int ok = false, vers;
+ 	ArgList args;
+@@ -1207,6 +1219,8 @@
+ 
+ 
+ void GForce::loadWaveShape( long inShapeNum, bool inAllowMorph ) {
++	long loadSeed = gpu_load_seed( 'W' );
++	srand( (unsigned) loadSeed );
+ 	const CEgFileSpec* spec;
+ 	int ok = false, vers;
+ 	ArgList	args;
+@@ -1253,6 +1267,8 @@
+ 		
+ 		// Calculate how long this transition/morph will take
+ 		mShapeTransTime	= EgOSUtils::Rnd( mTransitionLo * 1000, mTransitionHi * 1000 );
++		// A zero blend would never end (the swap waits for a time > 0).
++		if ( mShapeTransTime < 1 ) mShapeTransTime = 1;
+ 		mShapeTransEnd	= mT_MS + mShapeTransTime;
+ 	}
+ 
+@@ -1264,6 +1280,8 @@
+ 
+ 
+ void GForce::loadParticle( long inParticleNum ) {
++	long loadSeed = gpu_load_seed( 'P' );
++	srand( (unsigned) loadSeed );
+ 	const CEgFileSpec* spec;
+ 	int ok = false, vers;
+ 	ArgList args;
+@@ -1303,6 +1321,7 @@
+ 
+ 		// Add the new particle to the group that gets executed each frame
+ 		newParticle -> mTitle.Assign( name ); 
++		newParticle -> mSeed = loadSeed;
+ 		mRunningParticlePool.addToHead( newParticle );
+ 		
+ 		// The GF particle probability fcn has access to these variables
+@@ -1530,4 +1549,3 @@
+ void GForce::GetWinRect( Rect& outRect ) {
+ 	SetRect( &outRect, 0, 0, 0, 0 );
+ }
+-
+--- a/libvisual-plugins/plugins/actor/G-Force/GForceCommon/Headers/ParticleGroup.h
++++ b/libvisual-plugins/plugins/actor/G-Force/GForceCommon/Headers/ParticleGroup.h
+@@ -19,6 +19,7 @@
+ 		void					DrawGroup( PixPort& inDest );
+ 
+ 		UtilStr					mTitle;
++		long					mSeed = 0;		// gpu_load_seed() used to load it
+ 
+ 	protected:
+ 		const float*			mTPtr;
+--- a/libvisual-plugins/plugins/actor/G-Force/GForceCommon/Headers/DeltaField.h
++++ b/libvisual-plugins/plugins/actor/G-Force/GForceCommon/Headers/DeltaField.h
+@@ -6,6 +6,7 @@
+ #include "ExprArray.h"
+ #include "TempMem.h"
+ #include "PixPort.h"
++#include <vector>
+ 
+ 
+ 
+@@ -53,6 +54,7 @@
+ 		//TempMem				mYExtentsBuf;
+ 		//long					mNegYExtents;
+ 		DeltaFieldData			mFieldData;
++        std::vector<float> mGpuUV;
+ 
+ 		char*					mCurrentRow;
+ };
+--- a/libvisual-plugins/plugins/actor/G-Force/GForceCommon/Headers/WaveShape.h
++++ b/libvisual-plugins/plugins/actor/G-Force/GForceCommon/Headers/WaveShape.h
+@@ -58,8 +58,8 @@
+ 		void					SetupFrame( WaveShape* inDest, float inW );
+ 		
+ 		static float			sS;
+-		static long				sXY[ 2 * MAX_WAVES_PER_SHAPE ];
+-		static long				sStartXY[ 2 * MAX_WAVES_PER_SHAPE ];
++		static float				sXY[ 2 * MAX_WAVES_PER_SHAPE ];
++		static float				sStartXY[ 2 * MAX_WAVES_PER_SHAPE ];
+ 	
+ 		void					CalcNumS_Steps( WaveShape* inWave2, long inDefaultNumBins );
+ };
+--- a/libvisual-plugins/plugins/actor/G-Force/Common/UI/PixPort.cpp
++++ b/libvisual-plugins/plugins/actor/G-Force/Common/UI/PixPort.cpp
+@@ -1,4 +1,5 @@
+ #include "PixPort.h"
++#include "gpu_hooks.h"
+ 
+ #include <math.h>
+ #include "RectUtils.h"
+@@ -539,7 +540,8 @@
+ 	}
+ }
+ 
+-void PixPort::Line( int sx, int sy, int ex, int ey, int32_t inColor ) {
++void PixPort::Line( float sx, float sy, float ex, float ey, int32_t inColor ) {
++	if (gpu_capture_line(sx, sy, ex, ey, inColor / 255.f, inColor / 255.f, mLineWidth)) return;
+ 	
+ 	if ( mBytesPerPix == 2 ) 
+ 		Line16( sx, sy, ex, ey, inColor );
+@@ -553,7 +555,8 @@
+ #define __ABS( n )  ( ( n > 0 ) ? (n) : (-n) )
+ #define CLR_LINE_THR	520
+ 
+-void PixPort::Line( int sx, int sy, int ex, int ey, const RGBColor& inS, const RGBColor& inE ) {
++void PixPort::Line( float sx, float sy, float ex, float ey, const RGBColor& inS, const RGBColor& inE ) {
++	if (gpu_capture_line(sx, sy, ex, ey, inS.red / 65535.f, inE.red / 65535.f, mLineWidth)) return;
+ 	int32_t R, G, B, dR, dG, dB;
+ 	
+ 	R = inS.red;
+@@ -892,6 +895,7 @@
+ 
+ #include <stdio.h>
+ void PixPort::Fade( const char* inSrce, char* inDest, int32_t inBytesPerRow, int32_t inX, int32_t inY, uint32_t* grad ) {
++	if (gpu_capture_fade(inX, inY, grad)) return;
+ 	uint32_t x, y, u, v, u1, v1, P1, P2, P3, P4, p;
+ 	const char* srceMap;
+ 	const char* srce;
+@@ -953,4 +957,3 @@
+ 	}
+ }
+ 
+-
+--- a/libvisual-plugins/plugins/actor/G-Force/Common/math/Expression.cpp
++++ b/libvisual-plugins/plugins/actor/G-Force/Common/math/Expression.cpp
+@@ -129,7 +129,8 @@
+ 				// Translate the string of the fcn to a (one byte) sub op code number
+ 				fcnCall = *((int32_t*) inStr);
+ 				#if EG_WIN || (defined(UNIX_X) && !defined(WORDS_BIGENDIAN))
+-				fcnCall = EgOSUtils::RevBytes( fcnCall );
++				// Function tags contain four bytes even on LP64 hosts.
++				fcnCall = static_cast<uint32_t>(EgOSUtils::RevBytes( fcnCall ));
+ 				#endif
+ 				switch ( fcnCall ) {
+ 					case 'SQRT':	fcnCall = cSQRT;		break;
+@@ -517,4 +518,3 @@
+ 
+ 	return mIsCompiled;
+ }
+-
+--- a/libvisual-plugins/plugins/actor/G-Force/Common/io/Prefs.cpp
++++ b/libvisual-plugins/plugins/actor/G-Force/Common/io/Prefs.cpp
+@@ -49,7 +49,7 @@
+ 
+ 	#ifdef UNIX_X
+ 	UtilStr prefPath;
+-	prefPath.Assign( getenv("HOME") );
++	prefPath.Assign( getenv("GF_ENGINE_STATE_DIR") ? getenv("GF_ENGINE_STATE_DIR") : GF_DEMO_STATE_DIR );
+ 	prefPath.Append( '/' );
+ 	prefPath.Append( mPrefName );
+ 	mFileSpec.Assign( prefPath.getCStr(), 0 );
+--- a/libvisual-plugins/plugins/actor/G-Force/Common/UI/Headers/PixPort.h
++++ b/libvisual-plugins/plugins/actor/G-Force/Common/UI/Headers/PixPort.h
+@@ -119,8 +119,8 @@
+ 		void					SetLineWidth( int32_t inWidth );
+ 		
+ 		//	Draw a line.  Use GetPortColor() to get a device color for a RGB
+-		void					Line( int sx, int sy, int ex, int ey, int32_t inColor );
+-		void					Line( int sx, int sy, int ex, int ey, const RGBColor& inS, const RGBColor& inE );
++		void					Line( float sx, float sy, float ex, float ey, int32_t inColor );
++		void					Line( float sx, float sy, float ex, float ey, const RGBColor& inS, const RGBColor& inE );
+ 
+ 		//	Sets the clip rgn for all drawing operations.  0 for the cliprect means to remove all clipping.
+ 		void					SetClipRect( const Rect* inRect = 0 );
