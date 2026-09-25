@@ -42,6 +42,7 @@ sg_require_offscreen
 gforce-qtenv python3 apps/gforce/connections-check.py
 gforce-qtenv python3 apps/gforce/motion-check.py
 gforce-qtenv python3 apps/gforce/field-cache-check.py
+gforce-qtenv python3 apps/gforce/seam-check.py
 ```
 
 The renderer harnesses use surfaceless EGL and synthetic audio. They write

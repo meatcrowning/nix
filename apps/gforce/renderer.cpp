@@ -941,6 +941,14 @@ extern "C" int gf_headless(int w,int h) {
 }
 extern "C" void gf_read(unsigned char *pixels,int w,int h) { glReadPixels(0,0,w,h,GL_RGBA,GL_UNSIGNED_BYTE,pixels); }
 extern "C" void gf_finish() { glFinish(); }
+extern "C" int gf_headless_wave_endpoints(float* values) {
+    if(!active || active->waveIndices.empty() || testDisplay==EGL_NO_DISPLAY || eglGetCurrentContext()!=testContext) return 0;
+    const auto &first=active->segments[active->waveIndices.front()];
+    const auto &last=active->segments[active->waveIndices.back()];
+    const float endpoints[]={first.sx,first.sy,first.ex,first.ey,last.sx,last.sy,last.ex,last.ey};
+    std::copy(endpoints,endpoints+8,values);
+    return 1;
+}
 extern "C" int gf_headless_fill(float value) {
     if(!active || testDisplay==EGL_NO_DISPLAY || eglGetCurrentContext()!=testContext) return 0;
     glDisable(GL_SCISSOR_TEST);

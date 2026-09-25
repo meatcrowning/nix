@@ -68,18 +68,19 @@
  	
  	// Setup default step size--inv of how many bins are available
  	if ( mNumSampleBins > 1 )
-@@ -247,7 +259,9 @@
+@@ -247,7 +259,10 @@
  	}
  					
  	// Step thru s (the xy exprs will give us the cords)
 -	for ( sS = 0; sS <= 1.0; sS += stepSize ) {
-+	sS = 0;
-+	for ( long sample = 0; forced ? sample < forced : sS <= 1.0;
-+	      ++sample, sS = forced ? sample * stepSize : sS + stepSize ) {
++	// Integer iteration includes both endpoints without accumulated roundoff.
++	const long sampleCount = mNumSampleBins >= 2 ? long(mNumSampleBins) : 2;
++	for ( long sample = 0; sample < sampleCount; ++sample ) {
++		sS = float(sample) / float(sampleCount - 1);
  	
  		// Evaluate the expressions dependent on 's'
  		mC.Evaluate();	
-@@ -292,7 +306,7 @@
+@@ -292,7 +307,7 @@
  			x = xoff + tx;
  			y = yoff - ty;
  				
@@ -88,7 +89,7 @@
  				if ( sS > 0 )
  					inDest.Line( sXY[ 2 * i ], sXY[ 2 * i + 1 ], x, y, rgbPrev, rgb );
  				else {
-@@ -314,7 +328,9 @@
+@@ -314,7 +329,9 @@
  	}	
  	
  	// Make sure we restore a random seed (one of the virtual machines could be seeding to the same value)
@@ -99,7 +100,7 @@
  
  }
  
-@@ -332,4 +348,3 @@
+@@ -332,4 +349,3 @@
  	__weightBOL( mConnectBins )
  	__weightBOL( mConnectFirstLast )
  }
@@ -265,7 +266,19 @@
  	
  	// Flatten the ends of the sample...
  	n = inNumBins / 20 + 1;
-@@ -928,7 +931,9 @@
+@@ -873,7 +876,10 @@
+ 	n = inNumBins / 20 + 1;
+ 	if ( n <= inNumBins ) {
+ 		for ( i = 0; i < n; i++ ) {
+-			mag = sin( .5 * 3.1 * i / n );
++			// A flat slope at both ends avoids a cusp when mag(s) wraps a circle.
++			// Keep the original taper span and the untouched middle of the sample.
++			float edge = float(i) / n;
++			mag = edge * edge * edge * (10 + edge * (-15 + 6 * edge));
+ 			fcn -> mFcn[ i ] *= mag;
+ 			fcn -> mFcn[ inNumBins - i - 1 ] *= mag;
+ 		}
+@@ -928,7 +934,9 @@
          /* This redraws the image */
  
  	// Draw all the current particles
