@@ -169,6 +169,28 @@ with tempfile.TemporaryDirectory(prefix='gforce-ui-') as tmp:
     assert peer.read({})['trailFill']==2,'local hand edits must update shared dials'
     assert 'panel' not in window.shared.records('top')
     print('PASS: shared tuning propagates through panel save/load and local hand edits')
+    window.dials['steps'].set(550,notify=True)
+    window.force_points.setChecked(True)
+    window.update_title(False)
+    window.compare_button.setChecked(True)
+    original=window.comparison[0]
+    stored=ns['DIALS'].read_bytes()
+    shared=(window.shared.directory/'top.json').read_bytes()
+    assert window.paused and not window.reset_button.isEnabled()
+    assert window.dials['steps'].get()==window.DEFAULTS['steps']
+    assert not window.force_points.isChecked()
+    window.dials['steps'].set(42,notify=True)
+    window.save();window.reset();window.reload()
+    assert ns['DIALS'].read_bytes()==stored
+    assert (window.shared.directory/'top.json').read_bytes()==shared
+    window.compare_button.setChecked(False)
+    assert window.values()==original and not window.paused
+    assert window.reset_button.isEnabled()
+    window.update_title(True)
+    window.compare_button.setChecked(True)
     window.view.cleanup()
+    assert window.comparison is None and window.values()==original and window.paused
+    assert ns['DIALS'].read_bytes()==stored
+    print('PASS: defaults preview restores settings and pause state; temporary edits never save or sync, including on exit')
     window.deleteLater()
 print('PASS: FPS controls, selector activation/sync, particle toggles while paused, new settings persistence, every advertised hotkey in menus')
