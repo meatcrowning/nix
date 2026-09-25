@@ -14,7 +14,7 @@ float* gpu_clock(char kind, float* fallback);
 bool gpu_smooth_wave(float* samples, int count);
 
 float gpu_scene_scale();
-void gpu_capture_field(int width, int height, const float* uv);
+void gpu_capture_field(int width, int height, const float* uv, const void* identity, uint64_t revision);
 
 void gpu_particle_layer(bool particles);
 

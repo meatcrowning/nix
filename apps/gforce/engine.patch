@@ -131,7 +131,7 @@
  			EgOSUtils::ShowCursor();
  		}
  		
-+        gpu_capture_field(mWidth,mHeight,mGpuUV.data());
++        gpu_capture_field(mWidth,mHeight,mGpuUV.data(),this,mGpuRevision);
  		return &mFieldData;
  	}
  	
@@ -139,7 +139,7 @@
  		// Each pixel needs 4 bytes of info per pixel (max) plus 4 shorts, 2 bytes per row (max)
  		mCurrentRow = mGradBuf.Dim( 4 * mWidth * mHeight + 10 * mHeight + 64 );
  		mFieldData.mField = mCurrentRow;
-+        mGpuUV.resize(size_t(mWidth)*mHeight*2);
++        mGpuUV.resize(size_t(mWidth)*mHeight*2); ++mGpuRevision;
  		
  		mXScale = 2.0 / ( (float) mWidth );
  		mYScale = 2.0 / ( (float) mHeight );
@@ -374,7 +374,7 @@
  		//TempMem				mYExtentsBuf;
  		//long					mNegYExtents;
  		DeltaFieldData			mFieldData;
-+        std::vector<float> mGpuUV;
++        std::vector<float> mGpuUV; unsigned long long mGpuRevision=0;
  
  		char*					mCurrentRow;
  };
