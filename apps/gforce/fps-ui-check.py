@@ -64,9 +64,8 @@ with tempfile.TemporaryDirectory(prefix='gforce-ui-') as tmp:
     assert window.components['W'].currentData()=='first','automatic/hotkey changes must update dropdowns'
     window.set_particles(False)
     assert ns['lib'].settings['particles']==0 and not window.particles.isChecked()
-    assert window.particle_visibility.currentIndex()==0 and not window.particles_action.isChecked()
-    window.particle_visibility.setCurrentIndex(1)
-    window.particle_visibility.activated.emit(1)
+    assert not window.particles_action.isChecked()
+    window.particles.setChecked(True)
     assert ns['lib'].settings['particles']==1 and window.particles.isChecked()
     window.set_paused_ui(True)
     assert window.particles_box.isEnabled() and not window.dials['rate'].slider.isEnabled()
@@ -111,6 +110,8 @@ with tempfile.TemporaryDirectory(prefix='gforce-ui-') as tmp:
     window.apply(window.read())
     assert window.force_connect.isChecked() and ns['lib'].settings['forceConnect']==1
     window.save_preset()
+    for key in ('steps','sensitivity'):
+        assert window.presets[-1]['dials'][key]==round(window.dials[key].get(),4)
     assert window.presets[-1]['dials']['forceConnect'] is True
     window.view.sync_state=lambda:None
     window.ease_look=lambda _:None
@@ -136,6 +137,23 @@ with tempfile.TemporaryDirectory(prefix='gforce-ui-') as tmp:
     window.recall_preset(len(window.presets)-1)
     assert not window.force_points.isChecked()
     print('PASS: point override persists in settings and looks; old looks default off')
+    captured=[]
+    window.ease_look=lambda values:captured.append(values)
+    window.recall_preset(len(window.presets)-1)
+    assert all(k in captured[-1] for k in ('steps','sensitivity'))
+    for key in ('steps','sensitivity'):del window.presets[-1]['dials'][key]
+    window.recall_preset(len(window.presets)-1)
+    assert all(k not in captured[-1] for k in ('steps','sensitivity'))
+    fold_buttons=[b for b in window.findChildren(ns['QToolButton']) if b.isCheckable()]
+    assert len(fold_buttons)==6 and all(not b.isChecked() for b in fold_buttons)
+    for button in fold_buttons:
+        content=button.parentWidget().layout().itemAt(1).widget()
+        assert content.isHidden()
+        button.setChecked(True)
+        assert not content.isHidden()
+        button.setChecked(False)
+        assert content.isHidden()
+    print('PASS: new look dials round-trip, old looks leave them alone, advanced sections expand')
     window.shared.directory.mkdir()
     window.shared.host='top'
     window.dials['grid'].set(2048,notify=True)
