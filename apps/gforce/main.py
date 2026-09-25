@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt, QTimer, QSocketNotifier, QFileSystemWatcher
 from PySide6.QtGui import QAction, QSurfaceFormat, QKeySequence, QShortcut
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDockWidget, QGridLayout, QLabel, QMenu,
-                               QMainWindow, QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget)
+                               QMainWindow, QPushButton, QScrollArea, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 ROOT=Path(__file__).resolve().parent
 STATE=Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'gforce-vis'
@@ -23,7 +23,7 @@ STATE.mkdir(parents=True,exist_ok=True)
 DIALS=STATE/'dials.json'
 PRESETS=STATE/'presets.json'
 # Preset files carry the look; these are the dials that shape it.
-LOOK_DIALS=('waveResponse','trailFill','trailSharpness','persist','fadeBias','widthScale','minWidth','softness','grid','waveScale','particleScale','distortionScale','waveSmoothing','masterSpeed','flowSpeed','waveSpeed','particleSpeed','colourSpeed','hitHold')
+LOOK_DIALS=('steps','sensitivity','waveResponse','trailFill','trailSharpness','persist','fadeBias','widthScale','minWidth','softness','grid','waveScale','particleScale','distortionScale','waveSmoothing','masterSpeed','flowSpeed','waveSpeed','particleSpeed','colourSpeed','hitHold')
 FPS=30   # the original's frame rate; trail and flow dials are in its frames
 assert os.environ.get('QT_QPA_PLATFORM') == 'wayland'
 assert (Path(os.environ['XDG_RUNTIME_DIR'])/os.environ['WAYLAND_DISPLAY']).is_socket()
@@ -405,17 +405,28 @@ class Window(QMainWindow):
         self.loading=False
 
     # ---- panel ---------------------------------------------------------------
-    def section(self,layout,title):
+    def section(self,layout,title,collapsed=False):
         box=QWidget()
         inner=QVBoxLayout(box)
         inner.setContentsMargins(0,0,0,0)
-        label=QLabel(title)
+        label=QToolButton() if collapsed else QLabel(title)
+        if collapsed:
+            label.setText(title)
+            label.setCheckable(True)
+            label.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            label.setArrowType(Qt.ArrowType.RightArrow)
         font=label.font(); font.setBold(True); label.setFont(font)
         inner.addWidget(label)
-        grid=QGridLayout()
+        content=QWidget()
+        grid=QGridLayout(content)
+        grid.setContentsMargins(0,0,0,0)
         grid.setColumnStretch(0,1)
         grid.setVerticalSpacing(0)
-        inner.addLayout(grid)
+        inner.addWidget(content)
+        if collapsed:
+            content.hide()
+            label.toggled.connect(content.setVisible)
+            label.toggled.connect(lambda on:label.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow))
         layout.addWidget(box)
         return grid,box
 
@@ -430,12 +441,13 @@ class Window(QMainWindow):
         v=self.view.set_dial
         secs=lambda x: f'{x:.0f} s'
 
-        g,_=self.section(col,'not saved in presets')
+        g,_=self.section(col,'setup · not saved in presets',collapsed=True)
         global_controls=QVBoxLayout()
         g.addLayout(global_controls,0,0,1,2)
-        g,_=self.section(col,'saved in presets')
+        g,_=self.section(col,'look · saved in presets')
         preset_controls=QVBoxLayout()
         g.addLayout(preset_controls,0,0,1,2)
+        everyday,_=self.section(preset_controls,'everyday')
 
         g,_=self.section(global_controls,'display')
         self.dial(g,0,'fps','FPS limit',15,120,lambda x: f'{round(x)} fps',self.set_fps,steps=105)
@@ -447,22 +459,24 @@ class Window(QMainWindow):
         self.dial(g,4,'resolution','render scale',.5,2,lambda x: f'{x:.2f}×',lambda x:v('resolution',x),steps=6,live=False)
         self.dials['resolution'].slider.setToolTip('1× follows the window and display scaling; 2× smooths edges using up to four times the pixels')
 
-        g,_=self.section(preset_controls,'scale')
+        g,_=self.section(preset_controls,'advanced scale',collapsed=True)
         for row,(name,label) in enumerate((('waveScale','wave'),('particleScale','particles'),('distortionScale','distortion'))):
             self.dial(g,row*2,name,label,.25,3,lambda x:f'{x:.2f}×',lambda x,n=name:v(n,x),steps=110,live=name!='distortionScale')
         self.dials['waveScale'].slider.setToolTip('resize the main wave; existing trails fade naturally')
         self.dials['particleScale'].slider.setToolTip('resize secondary particles independently of the main wave')
         self.dials['distortionScale'].slider.setToolTip('resize the flow pattern while keeping it across the full window; applies on release')
 
-        g,_=self.section(preset_controls,'speed')
-        for row,(name,label) in enumerate((('masterSpeed','master'),('flowSpeed','trail flow'),
+        self.dial(everyday,4,'masterSpeed','master speed',0,4,lambda x:f'{x:.2f}×',lambda x:v('masterSpeed',x),steps=80)
+        g,_=self.section(preset_controls,'advanced speed',collapsed=True)
+        for row,(name,label) in enumerate((('flowSpeed','trail flow'),
                 ('waveSpeed','wave motion'),('particleSpeed','particle motion / lifetime'),('colourSpeed','colour motion'))):
             self.dial(g,row*2,name,label,0,4,lambda x:f'{x:.2f}×',lambda x,n=name:v(n,x),steps=80)
         note=QLabel('master includes change intervals and trail decay; sound stays live')
         note.setWordWrap(True)
         g.addWidget(note,10,0,1,2)
 
-        g,_=self.section(preset_controls,'components')
+        g,components_box=self.section(preset_controls,'components')
+        preset_controls.insertWidget(1,components_box)
         for row,(kind,label,key) in enumerate((('W','wave shape','W'),('D','distortion','C'),('C','colours','X'),('P','secondary / particles','N'))):
             g.addWidget(QLabel(f'{label} ({key})'),row*2,0,1,2)
             combo=QComboBox()
@@ -472,14 +486,12 @@ class Window(QMainWindow):
             combo.activated.connect(lambda i,k=kind:self.choose_component(k,i))
             g.addWidget(combo,row*2+1,0,1,2)
             self.components[kind]=combo
-        self.particle_visibility=QComboBox()
-        self.particle_visibility.addItems(['particles off','particles on'])
-        self.particle_visibility.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.particle_visibility.activated.connect(lambda i:self.set_particles(bool(i)))
 
-        g,_=self.section(preset_controls,'trails')
-        self.dial(g,0,'persist','trail length',3,240,lambda h: f'{h/FPS:.2f} s',lambda h: v('persist',.5**(1/h)),log=True)
+        g,_=self.section(preset_controls,'advanced trails',collapsed=True)
+        self.dial(everyday,6,'persist','trail length',3,240,lambda h: f'{h/FPS:.2f} s',lambda h: v('persist',.5**(1/h)),log=True)
+        self.dials['persist'].slider.setToolTip('time for trails to fade to half their brightness at normal master speed; fade to black adds extra darkening')
         self.dial(g,2,'fadeBias','fade to black',0,4,lambda x: f'{x:.1f}/255',lambda x: v('fadeBias',x/255))
+        self.dials['fadeBias'].slider.setToolTip('extra darkening on top of trail length; higher values erase faint trails sooner')
 
         self.dial(g,4,'hitHold','hit hold',0,250,lambda x:f'{round(x)} ms',lambda x:setattr(self.view,'hit_hold',x),steps=50)
         self.dials['hitHold'].slider.setToolTip('hold a brief loud audio shape long enough to leave a trail; 0 keeps the latest audio block')
@@ -488,12 +500,13 @@ class Window(QMainWindow):
         self.dial(g,8,'trailFill','trail fill',1,8,lambda x:f'{round(x)}×',lambda x:v('trailFill',round(x)),steps=7)
         self.dials['trailFill'].slider.setToolTip('extra wave impressions between flow steps fill gaps; higher values can brighten trails and use more GPU time')
 
-        g,_=self.section(preset_controls,'lines')
-        self.dial(g,0,'widthScale','width',.25,4,lambda x: f'x{x:.2f}',lambda x: v('widthScale',x),log=True)
+        g,_=self.section(preset_controls,'advanced lines',collapsed=True)
+        self.dial(everyday,8,'widthScale','line width',.25,4,lambda x: f'x{x:.2f}',lambda x: v('widthScale',x),log=True)
         self.dial(g,2,'minWidth','minimum width',1,8,lambda x: f'{x:.1f} px',lambda x: v('minWidth',x))
         self.dial(g,4,'softness','edge softness',.25,4,lambda x: f'{x:.2f} px',lambda x: v('softness',x),log=True)
+        self.dials['softness'].slider.setToolTip('soften the edges of drawn lines without changing their shape or motion')
 
-        self.dial(g,6,'waveSmoothing','wave smoothing',0,12,lambda x:f'{x:.1f}',lambda x:v('waveSmoothing',x),steps=120)
+        self.dial(everyday,10,'waveSmoothing','wave smoothing',0,12,lambda x:f'{x:.1f}',lambda x:v('waveSmoothing',x),steps=120)
         self.dials['waveSmoothing'].slider.setToolTip('smooth neighbouring waveform samples without lowering wave detail; edge softness smooths the drawn edges')
         self.dial(g,8,'waveResponse','wave response',0,250,lambda x:f'{round(x)} ms',lambda x:v('waveResponse',x),steps=50)
         self.dials['waveResponse'].slider.setToolTip('ease wave movement over time; 0 ms is immediate, higher values take longer to reach a new shape')
@@ -508,7 +521,7 @@ class Window(QMainWindow):
         self.force_points.toggled.connect(lambda on:(v('forcePoints',int(on)),self.changed()))
         g.addWidget(self.force_points,11,0,1,2)
 
-        g,_=self.section(preset_controls,'distortion')
+        g,_=self.section(preset_controls,'advanced distortion',collapsed=True)
         self.dial(g,0,'grid','map resolution',128,2048,lambda x: f'{round(x/32)*32:.0f}',
                   lambda x: v('grid',round(x/32)*32),steps=60,live=False)
         self.dials['grid'].slider.setToolTip('map points along the longer edge; higher values add flow detail but take more memory and time to calculate')
@@ -541,12 +554,10 @@ class Window(QMainWindow):
         g.addWidget(self.particles,0,0,1,2)
         self.interval_dials(g,1,'P','each particle','lasts')
         self.dial(g,6,'rate','spawn rate',.1,10,lambda x: f'x{x:.2f}',self.set_rate,log=True)
-        g.addWidget(QLabel('visibility (P)'),8,0)
-        g.addWidget(self.particle_visibility,8,1)
 
         g,_=self.section(global_controls,'audio')
-        self.dial(g,0,'sensitivity','sensitivity',.1,5,lambda x: f'{x*100:.0f}%',lambda x: v('sensitivity',x),log=True)
-        self.dial(g,2,'steps','wave detail',16,550,lambda x: f'{round(x)} points',lambda x: v('steps',round(x)),steps=534)
+        self.dial(everyday,2,'sensitivity','sensitivity',.1,5,lambda x: f'{x*100:.0f}%',lambda x: v('sensitivity',x),log=True)
+        self.dial(everyday,0,'steps','wave detail',16,550,lambda x: f'{round(x)} points',lambda x: v('steps',round(x)),steps=534)
         self.normalize=QCheckBox('normalise level')
         self.normalize.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.normalize.toggled.connect(lambda on: (v('normalize',1 if on else 0),self.changed()))
@@ -646,7 +657,6 @@ class Window(QMainWindow):
         self.particles.blockSignals(True)
         self.particles.setChecked(on)
         self.particles.blockSignals(False)
-        self.particle_visibility.setCurrentIndex(int(on))
         if hasattr(self,'particles_action'): self.particles_action.setChecked(on)
         self.changed()
 
@@ -668,7 +678,6 @@ class Window(QMainWindow):
         self.particles.blockSignals(True)
         self.particles.setChecked(on)
         self.particles.blockSignals(False)
-        self.particle_visibility.setCurrentIndex(int(on))
         self.particles_action.setChecked(on)
 
     def choose_component(self,kind,index):
