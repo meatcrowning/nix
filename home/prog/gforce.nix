@@ -1,25 +1,40 @@
-{ pkgs, ... }:
+{ pkgs, lib, host, ... }:
 
-# gforce — the G-Force (classic iTunes) visualizer prototype, on both hosts.
-# The engine source has unclear licensing, so it stays out of this public repo:
-# it lives in the private docs repo, and this wrapper only hands off to
-# docs/agents/gforce-install.sh, which builds it (nixpkgs toolchain on top,
-# Fedora's on book) on the first launch after an update and then runs it.
-# Details: docs/agents/player-visualizer-handoff.md.
+# Live frontend and renderer patches travel with nix-pull. The original engine
+# stays an upstream dependency, fetched by the rebuild rather than docs sync.
 let
+  engineArchive = pkgs.fetchurl {
+    url = "https://codeload.github.com/Libvisual/libvisual/tar.gz/f14b86f9987ca967491582a603b1cc6e8309626a";
+    hash = "sha256-YvCkWo/vG9hbPbXNK5IEgbL64l+V9rwPCca0Vm8EYvk=";
+  };
+  nativeLibs = pkgs.symlinkJoin {
+    name = "gforce-native-libs";
+    paths = [ pkgs.libGL pkgs.libGL.dev pkgs.fftwFloat pkgs.fftwFloat.dev ];
+  };
+  qtenv = pkgs.writeShellScriptBin "gforce-qtenv" ''
+    export GF_HOST=${host}
+    export GF_ENGINE_ARCHIVE=${engineArchive}
+    export GF_PATCH=${pkgs.gnupatch}/bin/patch
+    ${if host == "air" then ''
+      # Fedora's Python/Qt and graphics ABI stay together on book.
+      export PATH=/usr/bin:$PATH
+      unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH LD_LIBRARY_PATH
+      export CC=/usr/bin/gcc CXX=/usr/bin/g++
+      exec "$@"
+    '' else ''
+      export PATH=${lib.makeBinPath [ pkgs.pulseaudio pkgs.stdenv.cc ]}:$PATH
+      export CC=${pkgs.stdenv.cc}/bin/cc CXX=${pkgs.stdenv.cc}/bin/c++
+      export CPATH=${nativeLibs}/include LIBRARY_PATH=${nativeLibs}/lib
+      export LD_LIBRARY_PATH=/run/opengl-driver/lib:${nativeLibs}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+      exec player-qtenv "$@"
+    ''}
+  '';
   gforce = pkgs.writeShellScriptBin "gforce" ''
-    installer=/home/lam/nix/docs/agents/gforce-install.sh
-    if [ ! -x "$installer" ]; then
-      msg="needs the private docs repo at ~/nix/docs (nix-docs-sync)"
-      echo "gforce: $msg" >&2
-      command -v notify-send >/dev/null && notify-send -- gforce "$msg"
-      exit 1
-    fi
-    exec "$installer" --launch "$@"
+    exec ${qtenv}/bin/gforce-qtenv python3 /home/lam/nix/apps/gforce/launch.py "$@"
   '';
 in
 {
-  home.packages = [ gforce ];
+  home.packages = [ gforce qtenv ];
 
   home.file.".local/share/applications/gforce.desktop".text = ''
     [Desktop Entry]
