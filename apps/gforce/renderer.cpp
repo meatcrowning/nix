@@ -490,7 +490,11 @@ struct Renderer {
     std::mt19937 seeds{std::random_device{}()};
     long lastSeed[3]{};
     std::vector<std::pair<char,long>> queued;
-    std::vector<float> fieldCopy;
+    const void* fieldIdentity=nullptr;
+    uint64_t fieldRevision=0;
+    // Opt-in invariant check for isolated tests; normal rendering keeps no copy.
+    bool verifyField=std::getenv("GF_VERIFY_FIELD")!=nullptr;
+    std::vector<float> verifyFieldCopy;
     bool fieldAllocated=false;
     std::vector<Segment> segments;
     float spectrum[180]{},samples[550]{};
@@ -556,7 +560,7 @@ struct Renderer {
         if(ngw==gw&&ngh==gh&&fieldAllocated) return;
         gw=ngw; gh=ngh;
         engine->resize(gw,gh);
-        fieldCopy.clear();
+        fieldIdentity=nullptr;
         fieldAllocated=true;
         glBindTexture(GL_TEXTURE_2D,field);
         glTexImage2D(GL_TEXTURE_2D,0,GL_RG32F,gw,gh,0,GL_RG,GL_FLOAT,nullptr);
@@ -570,7 +574,7 @@ struct Renderer {
         if(distortionScale==value) return;
         distortionScale=value;
         engine->remapFields(gw,gh);
-        fieldCopy.clear();
+        fieldIdentity=nullptr;
     }
     // Compatibility for archived callers. The UI migrates saved sceneScale
     // into three independent settings and no longer calls this combined dial.
@@ -579,10 +583,18 @@ struct Renderer {
         waveScale=particleScale=value;
         set_distortion_scale(value);
     }
-    void upload_field(int w,int h,const float *uv) {
-        size_t size=size_t(w)*h*2;
-        if(fieldCopy.size()==size && std::memcmp(fieldCopy.data(),uv,size*sizeof(float))==0) return;
-        fieldCopy.assign(uv,uv+size);
+    void upload_field(int w,int h,const float *uv,const void* identity,uint64_t revision) {
+        if(verifyField) {
+            size_t size=size_t(w)*h*2;
+            if(fieldIdentity==identity && fieldRevision==revision &&
+               (verifyFieldCopy.size()!=size || std::memcmp(verifyFieldCopy.data(),uv,size*sizeof(float))!=0))
+                throw std::runtime_error("field revision missed content change");
+            verifyFieldCopy.assign(uv,uv+size);
+        }
+        // The engine alternates two field objects; revisions are local to each.
+        if(fieldIdentity==identity && fieldRevision==revision) return;
+        fieldIdentity=identity;
+        fieldRevision=revision;
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,field);
         glTexSubImage2D(GL_TEXTURE_2D,0,0,0,w,h,GL_RG,GL_FLOAT,uv);
     }
@@ -698,8 +710,8 @@ static Renderer *active=nullptr;
 static std::string error;
 float gpu_scene_scale() { return active?active->distortionScale:1.f; }
 void gpu_particle_layer(bool particles) { if(active) active->particleLayer=particles; }
-void gpu_capture_field(int w,int h,const float* uv) {
-    if(active && active->capturing) active->upload_field(w,h,uv);
+void gpu_capture_field(int w,int h,const float* uv,const void* identity,uint64_t revision) {
+    if(active && active->capturing) active->upload_field(w,h,uv,identity,revision);
 }
 float* gpu_clock(char kind,float* fallback) {
     if(!active) return fallback;
