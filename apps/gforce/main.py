@@ -250,6 +250,8 @@ class View(QOpenGLWidget):
     def cleanup(self):
         if self.closed:
             return
+        if self.window_.comparison is not None:
+            self.window_.compare_defaults(False)
         self.closed=True
         self.timer.stop()
         if self.capture:
@@ -289,6 +291,7 @@ class Window(QMainWindow):
         self.components={}
         self.summaries={}
         self.tween=None
+        self.comparison=None
         self.paused=False
         self.build_panel()
         self.presets=[]
@@ -334,10 +337,12 @@ class Window(QMainWindow):
         return data
 
     def changed(self):
-        if not self.loading:
+        if not self.loading and self.comparison is None:
             self.save_timer.start()
 
     def save(self):
+        if self.comparison is not None:
+            return
         values=self.values()
         text=json.dumps(values,indent=1)+'\n'
         try:
@@ -356,6 +361,8 @@ class Window(QMainWindow):
 
     def reload(self,_=None):
         """dials.json changed on disk: apply a hand edit live (ignore our own writes)."""
+        if self.comparison is not None:
+            return
         if DIALS.exists() and str(DIALS) not in self.watcher.files():
             self.watcher.addPath(str(DIALS))
         try:
@@ -568,10 +575,16 @@ class Window(QMainWindow):
         self.audio_only.toggled.connect(lambda on: (v('audioOnly',1 if on else 0),self.changed()))
         g.addWidget(self.audio_only,5,0,1,2)
 
-        reset=QPushButton('reset all')
-        reset.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        reset.clicked.connect(self.reset)
-        col.addWidget(reset)
+        self.compare_button=QPushButton('compare defaults')
+        self.compare_button.setCheckable(True)
+        self.compare_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.compare_button.setToolTip('preview the application defaults without saving; click again to restore your current settings')
+        self.compare_button.toggled.connect(self.compare_defaults)
+        col.addWidget(self.compare_button)
+        self.reset_button=QPushButton('reset all')
+        self.reset_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.reset_button.clicked.connect(self.reset)
+        col.addWidget(self.reset_button)
         col.addStretch(1)
 
         scroll=QScrollArea()
@@ -691,8 +704,38 @@ class Window(QMainWindow):
         self.view.setFocus()
 
     def reset(self):
+        if self.comparison is not None:
+            return
+        if self.tween:
+            self.tween.stop(); self.tween=None
         self.apply({'panel':self.dock.isVisible()})
         self.save()
+
+    def compare_defaults(self,on):
+        if on and self.comparison is None:
+            if self.tween:
+                self.tween.stop(); self.tween=None
+            self.save_timer.stop()
+            self.save()
+            self.comparison=(self.values(),self.paused)
+            self.view.set_dial('paused',1)
+            self.update_title(True)
+            self.apply({'panel':self.dock.isVisible()})
+            self.flash('previewing defaults · temporary adjustments are not saved')
+        elif not on and self.comparison is not None:
+            if self.tween:
+                self.tween.stop(); self.tween=None
+            values,paused=self.comparison
+            self.apply(values)
+            self.view.set_dial('paused',int(paused))
+            self.update_title(paused)
+            self.comparison=None
+            self.flash('restored your settings')
+        self.compare_button.blockSignals(True)
+        self.compare_button.setChecked(self.comparison is not None)
+        self.compare_button.blockSignals(False)
+        self.compare_button.setText('return to my settings' if self.comparison is not None else 'compare defaults')
+        self.reset_button.setEnabled(self.comparison is None)
 
     def toggle_panel(self):
         self.dock.setVisible(not self.dock.isVisible())
@@ -799,6 +842,8 @@ class Window(QMainWindow):
         self.flash(f'saved preset {len(self.presets)}: {preset["name"]}')
 
     def recall_preset(self,i):
+        if self.comparison is not None:
+            self.compare_defaults(False)
         p=self.presets[i]
         missing=[]
         lib.gf_preset_clear_particles()
