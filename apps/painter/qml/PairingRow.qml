@@ -5,6 +5,7 @@ import QtQuick
 Column {
     id: rowBox
     spacing: 4
+    visible: App.separatePairing
     property bool expanded: false
 
     Row {
@@ -20,7 +21,7 @@ Column {
         }
         PixelText {
             anchors.verticalCenter: parent.verticalCenter
-            text: App.encoderName === "" ? "Bundled Encoder and VAE" : "Auto-Paired"
+            text: "Encoder and VAE"
             color: Theme.textDim
         }
         TextButton {
@@ -34,24 +35,24 @@ Column {
     }
 
     Field {
-        visible: rowBox.expanded && App.encoderName !== ""
-            label: "Encoder"
+        visible: rowBox.expanded
+        label: "Encoder"
         hint: "Picked by matching this model's own dimensions against each encoder's hidden size."
         Picker {
             width: 250
-            options: App.encoderNames()
+            options: App.encoderNames
             value: App.encoderName
             onPicked: function (v) { App.overrideEncoder(App.selectedIndex, v) }
         }
     }
 
     Field {
-        visible: rowBox.expanded && App.vaeName !== ""
-            label: "VAE"
+        visible: rowBox.expanded
+        label: "VAE"
         hint: "Some VAEs are structurally identical, so this falls back to a hash and then to your choice."
         Picker {
             width: 250
-            options: App.vaeNames()
+            options: App.vaeNames
             value: App.vaeName
             onPicked: function (v) { App.overrideVae(App.selectedIndex, v) }
         }

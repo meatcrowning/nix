@@ -4791,6 +4791,45 @@ def test_preview_zoom(win, ctl, tmp):
     spin(150)
 
 
+def test_pairing(win, ctl, tmp):
+    ctl.assignFamily(ctl.models.index_of_name("alpha-model.safetensors"), "qwen_image21")
+    ctl.selectModel(ctl.models.index_of_name("alpha-model.safetensors"))
+    spin()
+    row = find(win.contentItem(), "PairingRow")
+    row.setProperty("expanded", True)
+    pickers = find_all(row, "Picker")
+    check("pairing has encoder and VAE pickers", len(pickers) == 2)
+    root = Path(os.environ["PAINTER_MODELS"])
+    vae = root / "vae" / "texture-fix.safetensors"
+    vae.parent.mkdir(exist_ok=True)
+    write_safetensors(str(vae), {
+        "conv1.weight": [128, 128, 1, 1, 1],
+        "decoder.head.2.weight": [4, 144, 1, 3, 3],
+        "decoder.upsamples.0.upsamples.0.residual.2.weight": [1152, 1152, 1, 3, 3]})
+    ctl.rescan()
+    spin()
+    check("rescan refreshes existing VAE picker", vae.name in prop(pickers[1], "options"))
+    check("unpaired encoder still offers override", pickers[0].parentItem().property("visible"))
+    encoder = root / "text_encoders" / "new-encoder.safetensors"
+    write_safetensors(str(encoder), {
+        "model.layers.0.post_attention_layernorm.weight": [4096],
+        "visual.deepstack_merger_list.0.norm.weight": [4608]})
+    ctl.rescan()
+    spin()
+    check("rescan refreshes existing encoder picker", encoder.name in prop(pickers[0], "options"))
+    name = ctl.selectedName
+    ctl.overrideVae(ctl.selectedIndex, vae.name)
+    spin()
+    check("override preserves selected model", ctl.selectedName == name)
+    check("override reaches pairing and picker", ctl.vaeName == vae.name and
+          prop(pickers[1], "value") == vae.name)
+    vae.unlink()
+    ctl.rescan()
+    spin()
+    check("missing VAE does not abort scan", ctl.vaeName == "")
+    check("removed VAE leaves picker on rescan", vae.name not in prop(pickers[1], "options"))
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -4803,9 +4842,11 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("seed", "preview", "live", "llada", "modes", "compare"):
+    if only in ("seed", "preview", "live", "llada", "modes", "compare", "pairing"):
         print("== %s ==" % only)
-        if only == "llada":
+        if only == "pairing":
+            test_pairing(win, ctl, tmp)
+        elif only == "llada":
             test_llada(win, ctl, tmp)
         elif only == "compare":
             test_compare_and_columns(win, ctl, tmp)
