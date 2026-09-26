@@ -29,15 +29,26 @@ fi
 # gqrx has no device flag; point the saved config at the forward.
 sed -i "s|^device=.*|device=\"$DEVICE\"|" "$CONF/default.conf"
 
+# Without a tty, killing this ssh does not signal the remote side, so rtl_tcp
+# would outlive the session and hold the dongle. The remote shell instead
+# waits on stdin (a never-writing pipe held here) and stops rtl_tcp at EOF,
+# which comes when this script exits for any reason. A stale rtl_tcp from a
+# lost link is replaced; a local SDR app on top is left alone.
+exec 4< <(exec sleep infinity)
+HOLD=$!
 "$SSH" -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 \
     -L "$PORT:127.0.0.1:1234" "$HOST" \
-    'pgrep -x "rtl_tcp|gqrx|sdrpp|rtl_433|dump1090" >/dev/null && { echo "dongle busy on top" >&2; exit 3; }
-     exec rtl_tcp -a 127.0.0.1 -p 1234' 2>"$LOG" >&2 &
+    'pgrep -x "gqrx|sdrpp|rtl_433|dump1090" >/dev/null && { echo "dongle busy on top" >&2; exit 3; }
+     pkill -x rtl_tcp && sleep 1
+     stdbuf -oL rtl_tcp -a 127.0.0.1 -p 1234 >&2 & p=$!
+     cat >/dev/null; kill $p' <&4 2>"$LOG" &
 TUNNEL=$!
-trap 'kill $TUNNEL 2>/dev/null' EXIT
+exec 4<&-
+trap 'kill $HOLD $TUNNEL 2>/dev/null' EXIT
 
 # The local end of the forward accepts before rtl_tcp listens, so wait for
 # rtl_tcp's own "listening..." line rather than probing the port.
+# (stdbuf: rtl_tcp block-buffers stdout without a tty.)
 for _ in $(seq 1 75); do
     grep -q listening "$LOG" && break
     kill -0 "$TUNNEL" 2>/dev/null || die "rtl_tcp on $HOST did not start: $(tail -1 "$LOG")"
