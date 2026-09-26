@@ -62,7 +62,10 @@ for plasma in (False,True):
         queue=page.findChild(QObject,'visualizerQueue')
         info=page.findChild(QObject,'visualizerInformation')
         assert surface.height()>0 and info.width()>0
-        assert info.x()>=queue.width()
+        assert queue.y()>=info.y()+info.height()+7
+        assert queue.width()==info.width()==page.width()
+        assert queue.height()>0
+        assert info.parentItem().y()>=surface.height()+7
         assert page.findChild(QObject,'visualizerInfoPane') is None
         assert page.findChild(QObject,'visualizerInformationScroll') is None
         art=page.findChild(QObject,'visualizerArt')
@@ -159,7 +162,39 @@ with tempfile.TemporaryDirectory(prefix='visualizer-root-') as tmp:
                DBUS_SESSION_BUS_ADDRESS='unix:path='+str(root/'no-bus'),PLAYER_VIEW='visualizer',
                PLAYER_MENUS='1',PLAYER_SKIP_NATIVE_CHROME='',LASTFM_CONFIG=str(root/'no-lastfm'))
     for key in ('DISPLAY','WAYLAND_DISPLAY','HYPRLAND_INSTANCE_SIGNATURE'):env.pop(key,None)
-    code=f"import sys;sys.path.insert(0,{str(HERE.parent)!r});import main;main.AutoScanner=lambda *args:None;main.main()"
+    code=f"""
+import sys
+sys.path.insert(0,{str(HERE.parent)!r})
+import main
+from PySide6.QtCore import QObject
+from PySide6.QtTest import QTest
+main.AutoScanner=lambda *args:None
+original=main._selftest
+def check_layout(app,shell,win,*args):
+    root=shell.root if shell is not None else win.property('contentItem').childItems()[0]
+    root.setProperty('view','visualizer')
+    QTest.qWait(100)
+    grid=root.findChild(QObject,'albumGrid')
+    surface=root.findChild(QObject,'visualizerSurface')
+    assert grid and grid.isVisible() and surface
+    gallery=grid.parentItem()
+    right=surface.parentItem().parentItem().parentItem()
+    assert abs(gallery.width()-right.width())<=1
+    assert gallery.x()==0 and right.x()==gallery.width()
+    assert gallery.height()==right.height()
+    root.openAlbum(0)
+    assert root.property('view')=='visualizer'
+    root.setProperty('view','albums')
+    QTest.qWait(50)
+    assert grid.width()==gallery.parentItem().width()
+    root.setProperty('view','visualizer')
+    QTest.qWait(50)
+    assert root.findChild(QObject,'albumGrid')==grid
+    assert grid.width()==int(gallery.parentItem().width()/2)
+    return original(app,shell,win,*args)
+main._selftest=check_layout
+main.main()
+"""
     for session in ('hypr','plasma'):
         env['DESK_SESSION']=session
         result=subprocess.run([sys.executable,'-c',code,'--selftest'],env=env,capture_output=True,text=True,timeout=40)
