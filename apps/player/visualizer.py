@@ -1,5 +1,6 @@
 """On-demand G-Force bridge. No subprocess, audio tap, or frame timer when hidden."""
 import json
+import mmap
 import os
 from pathlib import Path
 import signal
@@ -9,7 +10,7 @@ import sys
 from PySide6.QtCore import QEvent, QObject, Property, QProcess, QProcessEnvironment, QTimer, Signal, Slot, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtQml import qmlRegisterType
-from PySide6.QtQuick import QQuickPaintedItem
+from PySide6.QtQuick import QQuickItem, QQuickWindow, QSGImageNode, QSGTexture
 
 APPS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APPS))
@@ -28,6 +29,8 @@ class Visualizer(QObject):
         self.stream_name = stream_name
         self.worker_command = ["gforce-qtenv","python3",str(APPS/"gforce/embedded_worker.py"),stream_name]
         self.process = None
+        self.generation = 0
+        self.frame_pending = False
         self.window = None
         self.requested = False
         self.closed = False
@@ -97,7 +100,15 @@ class Visualizer(QObject):
         for name in ('DISPLAY','WAYLAND_DISPLAY','QT_QPA_PLATFORMTHEME'):
             env.remove(name)
         env.insert('QT_QPA_PLATFORM','offscreen')
+        # Linux memfd keeps pixels out of the pipe and off disk. The child
+        # opens this private descriptor through procfs, without inherited fds.
+        p.frame_fd = os.memfd_create('player-visualizer', os.MFD_CLOEXEC)
+        os.ftruncate(p.frame_fd,1920*1080*4)
+        p.frame_map = mmap.mmap(p.frame_fd,1920*1080*4)
+        env.insert('GF_PLAYER_FRAME_FILE',f'/proc/{os.getpid()}/fd/{p.frame_fd}')
         p.setProcessEnvironment(env)
+        self.generation += 1
+        self.frame_pending = False
         self.process = p
         self.buffer.clear()
         self.diagnostic = ''
@@ -131,6 +142,9 @@ class Visualizer(QObject):
             try: os.killpg(pid,signal.SIGKILL)
             except ProcessLookupError: pass
         self.process = None
+        self.frame_pending = False
+        process.frame_map.close()
+        os.close(process.frame_fd)
         self.buffer.clear()
         self.state = {**self.state,'ready':False,
                       'status':'' if stopping else 'visualizer stopped: '+(self.diagnostic.strip()[-400:] or process.errorString())}
@@ -191,7 +205,7 @@ class Visualizer(QObject):
         while len(self.buffer)>=5:
             kind = self.buffer[0]
             size = struct.unpack_from('!I',self.buffer,1)[0]
-            if kind not in (ord('J'),ord('F')) or size > 1920*1080*4+8:
+            if kind not in (ord('J'),ord('F'),ord('M')) or size > 1920*1080*4+8:
                 self.diagnostic = 'invalid renderer response'
                 p.protocol_failed = True
                 self.stop()
@@ -222,12 +236,23 @@ class Visualizer(QObject):
                 if state != self.state:
                     self.state = state
                     self.changed.emit()
-            elif kind==ord('F') and size>=8:
+            elif kind in (ord('F'),ord('M')) and size>=8:
                 w,h = struct.unpack_from('!II',data)
-                if w*h*4!=size-8 or not w or not h: continue
-                frame = QImage(data[8:],w,h,w*4,QImage.Format.Format_RGBA8888).copy()
+                shared = kind==ord('M')
+                if not (0<w<=1920 and 0<h<=1080): continue
+                if size != (8 if shared else 8+w*h*4): continue
+                pixels = p.frame_map if shared else data[8:]
+                frame = QImage(pixels,w,h,w*4,QImage.Format.Format_RGBA8888).copy()
+                self.frame_pending = True
                 self.frame.emit(frame)
-                self.command({'op':'ack'})
+
+    @Slot(int)
+    def acknowledge(self,generation):
+        # The scene graph, not receipt of bytes, releases the next frame.
+        # Ignore queued notifications from a worker that has since stopped.
+        if generation == self.generation and self.frame_pending:
+            self.frame_pending = False
+            self.command({'op':'ack'})
 
     @Slot('QVariantMap')
     def command(self, message):
@@ -248,15 +273,19 @@ class Visualizer(QObject):
         self.command({'op':'savePreset'} if key=='s' else {'op':'key','key':key})
 
 
-class VisualizerSurface(QQuickPaintedItem):
+class VisualizerSurface(QQuickItem):
     sourceChanged = Signal()
+    consumed = Signal(int)
 
     def __init__(self,parent=None):
         super().__init__(parent)
         self._source = None
-        self._image = QImage()
-        self.setFillColor(QColor('black'))
-        self.setOpaquePainting(True)
+        self._image = QImage(1,1,QImage.Format.Format_RGB32)
+        self._image.fill(QColor('black'))
+        self._dirty = True
+        self._generation = -1
+        self.consumed.connect(self.acknowledge, Qt.ConnectionType.QueuedConnection)
+        self.setFlag(QQuickItem.Flag.ItemHasContents)
 
     @Property(QObject,notify=sourceChanged)
     def source(self): return self._source
@@ -272,13 +301,36 @@ class VisualizerSurface(QQuickPaintedItem):
     @Slot(QImage)
     def receive(self,image):
         self._image = image
+        self._generation = self._source.generation if self._source else -1
+        self._dirty = True
         self.update()
 
-    def paint(self,painter):
-        if not self._image.isNull():
-            painter.translate(0,self.height())
-            painter.scale(1,-1)
-            painter.drawImage(self.boundingRect(),self._image)
+    @Slot(int)
+    def acknowledge(self,generation):
+        if self._source:
+            self._source.acknowledge(generation)
+
+    def updatePaintNode(self,node,data):
+        # Upload the original image once. QQuickPaintedItem first rescaled it
+        # into another full-size CPU image and then uploaded the scaled result.
+        # Qt calls this with the GUI thread blocked; all texture creation and
+        # destruction stay on the scene-graph thread.
+        if node is None:
+            node = self.window().createImageNode()
+            self._dirty = True
+        if self._dirty:
+            texture = self.window().createTextureFromImage(
+                self._image, QQuickWindow.CreateTextureOption.TextureIsOpaque)
+            node.setOwnsTexture(True)
+            node.setTexture(texture)
+            node.setFiltering(QSGTexture.Filtering.Nearest)
+            node.setTextureCoordinatesTransform(QSGImageNode.TextureCoordinatesTransformFlag.MirrorVertically)
+            self._dirty = False
+            if self._generation >= 0:
+                self.consumed.emit(self._generation)
+                self._generation = -1
+        node.setRect(self.boundingRect())
+        return node
 
 
 def register():
