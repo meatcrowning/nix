@@ -67,7 +67,7 @@ def make_db(paths):
     con = sqlite3.connect(os.environ["PLAYER_DB"])
     con.execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT, "
                 "title TEXT, artist TEXT, album TEXT, album_artist TEXT, "
-                "track INT, disc INT, year INT, size INT, mtime REAL, "
+                "track INT, disc INT, year INT, orig_year INT, size INT, mtime REAL, "
                 "has_art INT DEFAULT 0, album_id INT)")
     con.execute("CREATE TABLE albums (id INTEGER PRIMARY KEY, album TEXT, "
                 "album_artist TEXT, art_src TEXT, thumb TEXT, full_art TEXT)")
@@ -240,6 +240,28 @@ def main():
               for f in after["files"]),
           [(f["path"][-5:], f["tags"].get("genre"), f["tags"].get("mood"))
            for f in after["files"]])
+
+    # --- original date: the album view reads it as the player does ------
+    r = tagtool.run({"op": "set", "paths": paths, "apply": True,
+                     "tags": {"originaldate": "1982-05-12"}})
+    check("originaldate applied", r["ok"] and r["files_changed"] == 4, r)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "reorg_common", Path(__file__).resolve().parent / "reorg" / "common.py")
+    reorg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reorg)
+    years = [reorg.read_tags(p)["orig_year"] for p in paths]
+    check("the player's reader sees originaldate in every container",
+          years == [1982] * 4, list(zip([p[-5:] for p in paths], years)))
+    con = sqlite3.connect(os.environ["PLAYER_DB"])
+    got = [r[0] for r in con.execute("SELECT orig_year FROM tracks ORDER BY id")]
+    con.close()
+    check("originaldate updates orig_year in the db", got == [1982] * 4, got)
+    shown = tagtool.run({"op": "show", "paths": paths})
+    check("show reports originaldate under one name",
+          all(f["tags"].get("originaldate") == "1982-05-12" for f in shown["files"]),
+          [(f["path"][-5:], {k: v for k, v in f["tags"].items() if "orig" in k.lower()})
+           for f in shown["files"]])
 
     r = tagtool.run({"op": "list_undo"})
     check("undo manifests are listed", r["ok"] and len(r["undos"]) >= 3)

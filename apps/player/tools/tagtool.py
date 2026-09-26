@@ -241,7 +241,7 @@ def read_tags(path):
                 continue
             name = rev_mp4.get(k)
             if name is None and k.startswith("----:"):
-                name = k.split(":")[-1]
+                name = canon_key(k.split(":")[-1])
             elif name is None:
                 name = k
             try:
@@ -349,8 +349,17 @@ def _mp4_set(audio, key, value):
     if atom:
         audio[atom] = [str(value)]
         return
-    audio["----:com.apple.iTunes:" + key] = [
+    _mp4_del(audio, key)
+    audio["----:com.apple.iTunes:" + _mp4_freeform_name(key)] = [
         MP4FreeForm(str(value).encode("utf-8"))]
+
+
+def _mp4_freeform_name(key):
+    """The freeform atom name readers expect. Freeform names are
+    case-sensitive and the player (like Picard) reads ORIGINALDATE, ISRC,
+    LABEL..., so a mapped key uses its canonical upper-case spelling; an
+    arbitrary key keeps the spelling it was given."""
+    return KEYMAP.get(key, (None, None, None))[2] or key
 
 
 def _mp4_del(audio, key):
@@ -366,8 +375,11 @@ def _mp4_del(audio, key):
             audio[a] = [(int(n), 0)]
         return
     atom = KEYMAP.get(key, (None, None))[1]
-    for k in [atom, "----:com.apple.iTunes:" + key, key]:
-        if k:
+    free = {"----:com.apple.iTunes:" + key,
+            "----:com.apple.iTunes:" + _mp4_freeform_name(key)}
+    for k in list(audio.keys()):
+        if k == atom or k == key or (k in free) or (
+                k.startswith("----:com.apple.iTunes:") and canon_key(k.split(":")[-1]) == key):
             audio.pop(k, None)
 
 
@@ -930,6 +942,11 @@ def db_update(path, fields, has_art=None):
     if "date" in (fields or {}):
         m = re.search(r"\d{4}", str(fields.get("date") or ""))
         sets.append("year=?")
+        vals.append(int(m.group(0)) if m else None)
+    if "originaldate" in (fields or {}):
+        # the album view sorts and labels by COALESCE(orig_year, year)
+        m = re.search(r"\d{4}", str(fields.get("originaldate") or ""))
+        sets.append("orig_year=?")
         vals.append(int(m.group(0)) if m else None)
     if has_art is not None:
         sets.append("has_art=?")
