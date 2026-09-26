@@ -13,11 +13,12 @@ from kdetheme import is_plasma, read_ini
 
 # Compatibility names describe CONTENT. Chrome must use window/windowText,
 # buttons button/buttonText, and selections highlight/highlightedText.
+# Secondary labels are readable content, not placeholder or disabled text.
 ROLES = {
     "bg": QPalette.Base, "bgAlt": QPalette.AlternateBase,
     "border": QPalette.Mid, "accent": QPalette.Text,
     "dim": QPalette.PlaceholderText, "text": QPalette.Text,
-    "textDim": QPalette.PlaceholderText, "highlight": QPalette.Highlight,
+    "textDim": QPalette.Text, "highlight": QPalette.Highlight,
     "window": QPalette.Window, "windowText": QPalette.WindowText,
     "base": QPalette.Base, "alternateBase": QPalette.AlternateBase,
     "button": QPalette.Button, "buttonText": QPalette.ButtonText,

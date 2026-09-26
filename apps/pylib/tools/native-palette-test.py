@@ -31,6 +31,7 @@ with tempfile.TemporaryDirectory(prefix="native-palette-test-") as temporary:
     palette = QPalette()
     for role, color in ((QPalette.Window, "#351c19"), (QPalette.WindowText, "#ffffff"),
                         (QPalette.Base, "#e0c9c4"), (QPalette.AlternateBase, "#d8bdb7"),
+                        (QPalette.PlaceholderText, "#998877"),
                         (QPalette.Text, "#201514"), (QPalette.Button, "#50352f"),
                         (QPalette.ButtonText, "#fffafa"), (QPalette.Highlight, "#733020"),
                         (QPalette.HighlightedText, "#ffffff")):
@@ -47,6 +48,8 @@ with tempfile.TemporaryDirectory(prefix="native-palette-test-") as temporary:
     assert isinstance(native, NativePalette)
     assert native.bg == app.palette().base().color()
     assert native.text == app.palette().text().color()
+    assert native.textDim == native.text
+    assert native.dim == palette.placeholderText().color()
     assert native.windowText == app.palette().windowText().color()
     assert native.highlightedText == app.palette().highlightedText().color()
     assert native.inactive == app.palette().color(QPalette.Inactive, QPalette.Text)
@@ -84,6 +87,7 @@ with tempfile.TemporaryDirectory(prefix="native-palette-test-") as temporary:
     app.processEvents()
     for theme in themes:
         assert theme.property("text").name() == "#102030"
+        assert theme.property("textDim").name() == "#102030"
         assert theme.property("windowText").name() == "#ffffff"
     from kdeshell import content_palette, _group_palette
     assert _group_palette(QPalette.Inactive).color(QPalette.Disabled, QPalette.Text) == palette.color(QPalette.Disabled, QPalette.Text)
