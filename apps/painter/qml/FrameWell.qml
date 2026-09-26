@@ -25,6 +25,8 @@ Item {
     // Read the clipboard and take what is on it, reporting for itself. Same
     // shape as `accepts`: python owns the decision.
     property var paste: function () { return false }
+    property var clearAction: null
+    property string clearLabel: "[ Clear ]"
     // The pointer is over this well — Main.qml aims Ctrl+V with it.
     readonly property alias hovered: hoverH.hovered
     // Chrome greys with the titlebar when the window is unfocused, like every
@@ -64,7 +66,7 @@ Item {
             visible: !root_well.compact
             anchors.left: shot.visible ? shot.right : parent.left
             anchors.leftMargin: 8
-            anchors.right: pasteBtn.left
+            anchors.right: actions.left
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
             elide: Text.ElideMiddle
@@ -79,16 +81,28 @@ Item {
         // only knowable once the clipboard offer has reached a focused window,
         // so a disabled state here would grey a button that is about to work.
         // Nothing fails silently — an empty clipboard toasts (docs/DESIGN.md §10).
-        TextButton {
-            id: pasteBtn
+        Column {
+            id: actions
             anchors.right: parent.right
             anchors.rightMargin: root_well.compact ? 0 : 6
             width: root_well.compact ? parent.width : implicitWidth
             anchors.verticalCenter: parent.verticalCenter
-            label: root_well.compact ? "+" : "[ Paste ]"
-            tone: Theme.textDim
-            winActive: root_well.winActive
-            onClicked: root_well.paste()
+            spacing: 5
+
+            TextButton {
+                width: root_well.compact ? actions.width : implicitWidth
+                label: root_well.compact ? "+" : "[ Paste ]"
+                tone: Theme.textDim
+                winActive: root_well.winActive
+                onClicked: root_well.paste()
+            }
+            TextButton {
+                visible: root_well.path !== "" && root_well.clearAction !== null
+                label: root_well.clearLabel
+                tone: Theme.textDim
+                winActive: root_well.winActive
+                onClicked: root_well.clearAction()
+            }
         }
 
         ToolTipArea {

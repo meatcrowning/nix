@@ -1387,6 +1387,86 @@ def test_paste(win, ctl, tmp):
     spin(200)
 
 
+def test_source_actions(win, ctl, tmp):
+    """Removing an image stays inside its well, even in a narrow column."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QImage
+    models = os.environ["PAINTER_MODELS"]
+    for rel, keys in {**MODE_FAKES, **VIDEO_FAKES}.items():
+        write_safetensors(os.path.join(models, rel), keys)
+    write_safetensors(os.path.join(models, "checkpoints", "llada-source-test.safetensors"), {
+        "vae.decoder.conv_in.weight": [8, 16, 3, 3],
+        **{"model.diffusion_model." + k: [16, 16] for k in (
+            "all_x_embedder.1-1.weight", "noise_refiner.0.attention.to_q.weight",
+            "sigvq_refiner.0.attention.to_q.weight")}
+    }, {"config": json.dumps({"llada_image": {"variant": "base"}})})
+    ctl.rescan()
+    spin(150)
+    source = os.path.join(tmp, "source-actions.png")
+    image = QImage(64, 64, QImage.Format_RGB32)
+    image.fill(0xff336699)
+    image.save(source)
+
+    def action(well, label):
+        button = find(well, "TextButton", lambda b: b.property("label") == label)
+        check(label + " is visible inside the image well", button is not None and button.isVisible())
+        if button is not None:
+            pos = button.mapToItem(well, QPointF(0, 0))
+            check(label + " fits within the thumbnail's vertical extent",
+                  pos.x() >= 0 and pos.y() >= 0
+                  and pos.x() + button.width() <= well.width()
+                  and pos.y() + button.height() <= well.height())
+            button.clicked.emit()
+            spin(80)
+
+    for name in ("qwen_image_2.1_test.safetensors", "flux-2-klein-4b-test.safetensors",
+                 "llada-source-test.safetensors"):
+        ctl.setMode("edit")
+        ctl.selectModelByName(name)
+        spin(100)
+        check(name + " is selected", ctl.selectedName == name)
+        panel = find(win.contentItem(), "EditPanel")
+        panel.setProperty("width", 260)
+        panel.setProperty("collapsed", False)
+        for reopened in (False, True):
+            ctl.setInputImage(source)
+            ctl.addEditImage(source)
+            spin(100)
+            if reopened:
+                panel.setProperty("collapsed", True)
+                spin(60)
+                panel.setProperty("collapsed", False)
+                spin(60)
+            wells = find_all(panel, "FrameWell")
+            if ctl.editMultipleImages:
+                action(wells[1], "[ Remove ]")
+                check(name + " removes the extra reference only",
+                      not ctl.editExtraImages and ctl.inputImage == source)
+                ctl.addEditImage(source)
+                spin(60)
+            action(wells[0], "[ Clear ]")
+            check(name + " clears the source and references",
+                  not ctl.inputImage and not ctl.editExtraImages)
+
+    ctl.setMode("video")
+    spin(100)
+    g = prop(APP, "gen")
+    g.update(useInputImage=True, useLastFrame=True)
+    APP.setProperty("gen", g)
+    ctl.setInputImage(source)
+    ctl.setLastImage(source)
+    spin(100)
+    panel = find(win.contentItem(), "VideoPanel")
+    panel.setProperty("collapsed", False)
+    panel.setProperty("width", 260)
+    spin(60)
+    wells = find_all(panel, "FrameWell")
+    action(wells[0], "[ Clear ]")
+    check("first-frame Clear preserves the last frame", not ctl.inputImage and ctl.lastImage == source)
+    action(wells[1], "[ Clear ]")
+    check("last-frame Clear empties the last frame", not ctl.lastImage)
+
+
 def test_llada(win, ctl, tmp):
     """The same selected AIO drives text-to-image and single-reference edits."""
     root = os.environ["PAINTER_MODELS"]
@@ -4842,9 +4922,11 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("seed", "preview", "live", "llada", "modes", "compare", "pairing"):
+    if only in ("seed", "preview", "live", "llada", "modes", "compare", "pairing", "source"):
         print("== %s ==" % only)
-        if only == "pairing":
+        if only == "source":
+            test_source_actions(win, ctl, tmp)
+        elif only == "pairing":
             test_pairing(win, ctl, tmp)
         elif only == "llada":
             test_llada(win, ctl, tmp)
@@ -4902,6 +4984,7 @@ def main():
     print("== tag complete ==");       test_tag_complete(win, ctl, keep)
     print("== live row ==");           test_live_row(win, ctl, tmp)
     print("== preview zoom ==");       test_preview_zoom(win, ctl, tmp)
+    print("== source actions ==");     test_source_actions(win, ctl, tmp)
 
     real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
     for w in real:

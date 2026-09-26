@@ -29,6 +29,7 @@ Panel {
         winActive: root.winActive
         accepts: function (u) { return App.setInputImage(u) }
         paste: function () { return App.pasteInputImage() }
+        clearAction: function () { App.clearInputImage(); App.clearEditImages() }
         // Order-independent: moving straight from one well to the other must
         // not have the leave clear the target the enter just set.
         onHoveredChanged: {
@@ -37,29 +38,18 @@ Panel {
         }
     }
 
-    Row {
-        spacing: 8
-        visible: App.optionalEditImage || App.inputImage !== ""
-        TextButton {
-            label: "[ Choose image… ]"
-            visible: App.optionalEditImage
-            winActive: root.winActive
-            onClicked: root.importImage()
-        }
-        TextButton {
-            label: "[ Clear ]"
-            visible: App.inputImage !== ""
-            tone: Theme.textDim
-            winActive: root.winActive
-            onClicked: { App.clearInputImage(); App.clearEditImages() }
-        }
+    TextButton {
+        label: "[ Choose image… ]"
+        visible: App.optionalEditImage
+        winActive: root.winActive
+        onClicked: root.importImage()
     }
 
     // The additional reference images, each with its own remove.
     Repeater {
         model: App.editMultipleImages ? App.editExtraImages : []
         delegate: Column {
-            width: panel.width
+            width: parent.width
             required property int index
             required property string modelData
             FrameWell {
@@ -72,15 +62,8 @@ Panel {
                 // A filled reference well is not a drop target: use the add well.
                 accepts: function (u) { return false }
                 paste: function () { return false }
-            }
-            Row {
-                spacing: 8
-                TextButton {
-                    label: "[ Remove ]"
-                    tone: Theme.textDim
-                    winActive: root.winActive
-                    onClicked: App.removeEditImage(index)
-                }
+                clearLabel: "[ Remove ]"
+                clearAction: function () { App.removeEditImage(index) }
             }
         }
     }
