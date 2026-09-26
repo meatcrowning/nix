@@ -42,11 +42,46 @@ def timed(name):
     return decorate
 
 
+def reset_visualizer_frames():
+    if _monitor is not None:
+        _monitor.visualizer_frames.clear()
+
+
+def visualizer_frame(stage):
+    """Compare received and scene-graph upload cadence, including short skips.
+
+    Each stage has one caller. Qt blocks the GUI while synchronizing the scene
+    graph; only the bounded event deque is shared with the logging thread.
+    """
+    monitor = _monitor
+    if monitor is None:
+        return
+    now = time.monotonic()
+    sample = monitor.visualizer_frames.get(stage)
+    if sample is None:
+        monitor.visualizer_frames[stage] = [now, now, []]
+        return
+    started, last, gaps = sample
+    gaps.append((now-last)*1000)
+    sample[1] = now
+    if now-started >= 1:
+        ordered = sorted(gaps)
+        monitor.events.append({
+            "event": "visualizer_frames", "stage": stage, "at": time.time(),
+            "fps": round(len(gaps)/(now-started), 2),
+            "median_ms": round(ordered[len(ordered)//2], 2),
+            "p95_ms": round(ordered[min(len(ordered)-1,int(len(ordered)*.95))], 2),
+            "max_ms": round(ordered[-1], 2),
+            "gaps_over_25_ms": sum(gap>25 for gap in gaps)})
+        monitor.visualizer_frames[stage] = [now, now, []]
+
+
 class Monitor:
     def __init__(self, app, directory):
         from PySide6.QtCore import QTimer
         self.events = deque(maxlen=2048)
         self.active = {}
+        self.visualizer_frames = {}
         self.context = {}
         self.context_fn = lambda: {}
         self.last_beat = time.monotonic()
