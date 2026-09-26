@@ -124,7 +124,14 @@ Item {
     // The finder's text, out and in. The QML `searchInput` below stays the one
     // source of truth in both sessions; under Plasma main.py mirrors it onto a
     // real QLineEdit on the toolbar and back again.
+    readonly property bool albumSearchEditing: albumPage.item ? albumPage.item.searchEditing : false
+    readonly property bool searchEditing: searchInput.activeFocus || albumSearchEditing
     readonly property string searchText: searchInput.text
+    function filterAlbums(text) {
+        searching = false;
+        if (searchInput.text === text) Library.setAlbumFilter(text);
+        else searchInput.text = text;
+    }
     function setSearchText(t) {
         if (searchInput.text !== t)
             searchInput.text = t;
@@ -225,6 +232,11 @@ Item {
     }
 
     function openSearch() {
+        if ((view === "albums" || view === "visualizer") && albumPage.item) {
+            filterAlbums(searchText);
+            albumPage.item.focusSearch();
+            return;
+        }
         searchOpen = true;
         searchInput.forceActiveFocus();
         searchInput.selectAll();
@@ -477,6 +489,7 @@ Item {
                   right: parent.right; bottom: parent.bottom }
 
         Loader {
+            id: albumPage
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
             width: win.view === "visualizer" ? content.visualAlbumW : parent.width
             active: win.albumsLoaded
@@ -485,6 +498,8 @@ Item {
                     objectName: "albumGrid"
                     anchors.fill: parent
                     visible: win.view === "albums" || win.view === "visualizer"
+                    searchText: win.searchText
+                    onFilterRequested: text => win.filterAlbums(text)
                     filtered: searchInput.text !== ""
                     expandedAlbumId: win.openAlbumId
                     cols: win.albumCols
@@ -706,11 +721,14 @@ Item {
     MouseArea {
         anchors.fill: parent
         z: 100
-        visible: searchInput.activeFocus
+        visible: win.searchEditing
         onPressed: function(mouse) {
-            var p = mapToItem(searchBar, mouse.x, mouse.y);
-            if (p.x < 0 || p.y < 0 || p.x > searchBar.width || p.y > searchBar.height)
-                win.unfocusSearch();
+            const field = win.albumSearchEditing ? albumPage.item.searchField : searchBar;
+            const p = mapToItem(field, mouse.x, mouse.y);
+            if (p.x < 0 || p.y < 0 || p.x > field.width || p.y > field.height) {
+                if (win.albumSearchEditing) win.forceActiveFocus();
+                else win.unfocusSearch();
+            }
             mouse.accepted = false;
         }
     }
@@ -743,7 +761,7 @@ Item {
     // answers by firing NEITHER, so the key would simply stop working. The
     // shell also suspends the bare-key ones while its toolbar finder has the
     // keyboard (`kdeshell.guard_typing`), which is what the
-    // `!searchInput.activeFocus` guards do here.
+    // `!win.searchEditing` guards do here.
     //
     // Ctrl+F is the desktop's find key (docs/DESIGN.md §11.2). The titlebar cell
     // used to be labelled "/", which advertised a key that was never bound.
@@ -757,7 +775,7 @@ Item {
     // name box can never contain one.
     Shortcut {
         sequence: "Space"
-        enabled: !win.plasma && !searchInput.activeFocus && !playlists.modal
+        enabled: !win.plasma && !win.searchEditing && !playlists.modal
         onActivated: Player.toggle()
     }
     Shortcut { sequence: "Ctrl+Right"; enabled: !win.plasma; onActivated: Player.next() }
@@ -767,7 +785,7 @@ Item {
     // search field so typing an 'L' into a query never toggles a favourite.
     Shortcut {
         sequence: "L"
-        enabled: !win.plasma && !searchInput.activeFocus && !playlists.modal
+        enabled: !win.plasma && !win.searchEditing && !playlists.modal
         onActivated: if (Player.current && Player.current.id !== undefined)
                          Library.setFavorite(Player.current.id, !Player.current.favorite)
     }
@@ -777,7 +795,7 @@ Item {
             required property string modelData
             Shortcut {
                 sequence: modelData
-                enabled: !win.plasma && (win.view === "visualizer" || modelData === "F11") && !searchInput.activeFocus && !win.settingsOpen && !win.searching
+                enabled: !win.plasma && (win.view === "visualizer" || modelData === "F11") && !win.searchEditing && !win.settingsOpen && !win.searching
                 onActivated: {
                     if (modelData === "Tab") win.toggleVisualSidebar();
                     else if (modelData === "F11") Visualizer.toggleFullscreen();
@@ -790,7 +808,7 @@ Item {
     // QAction claims it, so there is nothing here for it to be ambiguous with.
     Shortcut {
         sequence: "Escape"
-        enabled: !searchInput.activeFocus
+        enabled: !win.searchEditing
         onActivated: {
             if (playlists.modal) playlists.closeModal();
             else if (win.settingsOpen) win.settingsOpen = false;
