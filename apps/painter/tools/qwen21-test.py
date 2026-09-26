@@ -69,12 +69,24 @@ def main():
                 assert node("scheduler")["scheduler"] == "linear_quadratic"
                 assert node("scheduler")["denoise"] == .8
                 if edit:
-                    assert "images.image_2" in node("encode_pos")
+                    assert node("encode_pos")["images.image_1"] == [roles["load_image_1"], 0]
+                    assert node("encode_pos")["images.image_2"] == [roles["load_image_2"], 0]
+                    assert node("load_image_1")["image"] == "first.png"
+                    assert node("load_image_2")["image"] == "second.png"
+                    assert node("sampler")["latent_image"] == [roles["encode_pos"], 2]
                     assert node("encode_pos")["resolution"] == (0 if no_scale else 1248)
                     assert "width" not in built["params"]
                 else:
                     assert node("latent")["width"] == 960
                 assert built["params"]["prompt_boxes"] == {"positive": "a red cube", "negative": "blur"}
+        for mp in (0.5, 2.0, 4.0):
+            built = reg.build(entry, {"edit": True, "input_images": ["first.png", "second.png"],
+                                      "editNoScale": False, "editMegapixels": mp})
+            roles = checks._roles_of(built["prompt"])
+            inputs = built["prompt"][roles["encode_pos"]]["inputs"]
+            assert inputs["resolution"] == round((mp * 1024 * 1024) ** .5 / 32) * 32
+            assert built["params"]["editMegapixels"] == mp
+            assert built["prompt"][roles["sampler"]]["inputs"]["latent_image"] == [roles["encode_pos"], 2]
         for images in ([], ["x"] * 17):
             try:
                 reg.build(entry, {"edit": True, "input_images": images})

@@ -1389,7 +1389,8 @@ def test_paste(win, ctl, tmp):
 
 def test_source_actions(win, ctl, tmp):
     """Removing an image stays inside its well, even in a narrow column."""
-    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import QPointF, QUrl
+    from PySide6.QtQml import QJSValue
     from PySide6.QtGui import QImage
     models = os.environ["PAINTER_MODELS"]
     for rel, keys in {**MODE_FAKES, **VIDEO_FAKES}.items():
@@ -1406,6 +1407,12 @@ def test_source_actions(win, ctl, tmp):
     image = QImage(64, 64, QImage.Format_RGB32)
     image.fill(0xff336699)
     image.save(source)
+    second = os.path.join(tmp, "second-reference.png")
+    third = os.path.join(tmp, "third-reference.png")
+    image.fill(0xff993366)
+    image.save(second)
+    image.fill(0xff669933)
+    image.save(third)
 
     def action(well, label):
         button = find(well, "TextButton", lambda b: b.property("label") == label)
@@ -1428,6 +1435,50 @@ def test_source_actions(win, ctl, tmp):
         panel = find(win.contentItem(), "EditPanel")
         panel.setProperty("width", 260)
         panel.setProperty("collapsed", False)
+        if ctl.editMultipleImages:
+            ctl.clearEditImages()
+            ctl.setInputImage(source)
+            spin(80)
+            add = find(panel, "FrameWell", lambda w: w.property("compact"))
+            accepted = add.property("accepts").call([QJSValue(QUrl.fromLocalFile(second).toString())])
+            spin(80)
+            check(name + " drops a distinct second reference", accepted.toBool()
+                  and ctl.inputImage == source and ctl.editExtraImages == [second])
+            original_offer = ctl._clipboard_offer
+            ctl._clipboard_offer = lambda: ("file", third)
+            try:
+                scroll_to(add)
+                click(win, find(add, "TextButton"))
+                spin(80)
+                check(name + " pastes a distinct third reference",
+                      ctl.editExtraImages == [second, third])
+                check(name + " displays each reference's own image",
+                      [w.property("url") for w in find_all(panel, "FrameWell")[:3]]
+                      == [QUrl.fromLocalFile(p).toString() for p in (source, second, third)])
+                well = find_all(panel, "FrameWell")[1]
+                accepted = well.property("accepts").call([QJSValue(QUrl.fromLocalFile(source).toString())])
+                spin(80)
+                check(name + " replaces a filled reference by drop", accepted.toBool()
+                      and ctl.editExtraImages == [source, third])
+                well = find_all(panel, "FrameWell")[1]
+                scroll_to(well)
+                click(win, find(well, "TextButton", lambda b: b.property("label") == "[ Paste ]"))
+                spin(80)
+                check(name + " replaces a filled reference by Paste",
+                      ctl.inputImage == source and ctl.editExtraImages == [third, third])
+                ctl._clipboard_offer = lambda: ("file", second)
+                APP.setProperty("hoveredWell", "edit:1")
+                APP.metaObject().invokeMethod(APP, "pasteImage")
+                spin(80)
+                check(name + " routes keyboard paste to the hovered reference",
+                      ctl.inputImage == source and ctl.editExtraImages == [third, second])
+            finally:
+                ctl._clipboard_offer = original_offer
+                APP.setProperty("hoveredWell", "")
+                ctl.clearEditImages()
+        scale = find(win.contentItem(), "EditScalePanel")
+        check(name + " labels shared reference scaling accurately",
+              (scale.property("title") == "Reference & Output Size") == ctl.editSharedImageSize)
         for reopened in (False, True):
             ctl.setInputImage(source)
             ctl.addEditImage(source)

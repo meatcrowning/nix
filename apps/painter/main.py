@@ -898,6 +898,7 @@ class Painter(QObject):
     editPatches = Property(bool, lambda self: bool((self._selected_family().get("edit") or {}).get("patch_controls")), notify=modelChanged)
     fixedSampling = Property(bool, lambda self: bool(self._selected_family().get("fixed_sampling")), notify=modelChanged)
     editSampling = Property(bool, lambda self: bool((self._selected_family().get("edit") or {}).get("sampling_controls")), notify=modelChanged)
+    editSharedImageSize = Property(bool, lambda self: bool((self._selected_family().get("edit") or {}).get("shared_image_size")), notify=modelChanged)
     editMultipleImages = Property(bool, lambda self: (self._selected_family().get("edit") or {}).get("max_images") != 1, notify=modelChanged)
     supportsLoras = Property(bool, lambda self: self._selected_family().get("supports_loras", True), notify=modelChanged)
     inputImage = Property(str, lambda self: self._input_image, notify=inputImageChanged)
@@ -1144,6 +1145,24 @@ class Painter(QObject):
             self._edit_extra.append(path)
             self.editExtraChanged.emit()
         return True
+
+    @Slot(int, str, result=bool)
+    def setEditImage(self, idx, url):
+        if not 0 <= idx < len(self._edit_extra):
+            return False
+        path = self._dropped_path(url)
+        if not path:
+            return False
+        self._edit_extra[idx] = path
+        self.editExtraChanged.emit()
+        return True
+
+    @Slot(int, result=bool)
+    def pasteEditImageAt(self, idx):
+        if not 0 <= idx < len(self._edit_extra):
+            return False
+        path = self._paste_target()
+        return self.setEditImage(idx, path) if path else False
 
     @Slot(int)
     def removeEditImage(self, idx):

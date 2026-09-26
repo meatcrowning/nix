@@ -1151,14 +1151,21 @@ Item {
         return App.inputImage === "" || App.lastImage !== "" ? "input" : "last"
     }
 
+    function pasteImage() {
+        var target = root.pasteWell()
+        if (target === "last") return App.pasteLastImage()
+        if (target === "editadd") return App.pasteEditImage()
+        if (target.indexOf("edit:") === 0) return App.pasteEditImageAt(Number(target.slice(5)))
+        if (target === "input") return App.pasteInputImage()
+        return false
+    }
+
     Shortcut {
         // Spelled out rather than StandardKey.Paste: the standard key resolves
         // to a set, and a Shortcut given one matched nothing here.
         sequences: ["Ctrl+V", "Shift+Ins"]
         enabled: !root.textFocused && root.pasteWell() !== ""
-        onActivated: root.pasteWell() === "last" ? App.pasteLastImage()
-                     : root.pasteWell() === "editadd" ? App.pasteEditImage()
-                     : App.pasteInputImage()
+        onActivated: root.pasteImage()
     }
 
     // ------------------------------------------------------- injecting params
