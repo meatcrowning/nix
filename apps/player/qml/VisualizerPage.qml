@@ -151,6 +151,10 @@ Item {
             }
         }
         MouseArea {
+            id: infoDivider
+            objectName: "visualizerInfoDivider"
+            hoverEnabled: true
+            preventStealing: true
             y: root.infoH; width: parent.width; height: 7
             cursorShape: Qt.SplitVCursor
             onPositionChanged: mouse => {
@@ -158,9 +162,18 @@ Item {
                     root.infoFrac=Math.max(.2,Math.min(.8,mapToItem(bottom,0,mouse.y).y/bottom.height));
             }
             onReleased: Prefs.set("visualizerInfoFrac",root.infoFrac)
+            Rectangle {
+                anchors.centerIn: parent
+                width: parent.width; height: 1
+                color: infoDivider.containsMouse || infoDivider.pressed ? root.fgAccent : Theme.border
+            }
         }
     }
     MouseArea {
+        id: topDivider
+        objectName: "visualizerTopDivider"
+        hoverEnabled: true
+        preventStealing: true
         y: root.topH; width: parent.width; height: 7
         cursorShape: Qt.SplitVCursor
         onPositionChanged: mouse => {
@@ -168,5 +181,10 @@ Item {
                 root.topFrac=Math.max(.2,Math.min(.85,mapToItem(root,0,mouse.y).y/root.height));
         }
         onReleased: Prefs.set("visualizerStackTopFrac",root.topFrac)
+        Rectangle {
+            anchors.centerIn: parent
+            width: parent.width; height: 1
+            color: topDivider.containsMouse || topDivider.pressed ? root.fgAccent : Theme.border
+        }
     }
 }

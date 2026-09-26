@@ -38,6 +38,7 @@ Item {
         var v = Prefs.get("view", "albums");
         return v === "detail" ? "albums" : v;
     }
+    property real visualAlbumFrac: Number(Prefs.get("visualizerAlbumFrac", .5)) || .5
     property bool visualSidebar: Prefs.get("visualizerSidebar", true) === true
     function toggleVisualSidebar() {
         visualSidebar = !visualSidebar;
@@ -470,12 +471,14 @@ Item {
     // ---- content views (the rest of the window) ----
     Item {
         id: content
+        readonly property real visualAlbumW: Math.round(Math.max(0, width-9)
+                                            * Math.max(.2, Math.min(.8, win.visualAlbumFrac)))
         anchors { top: menuBar.bottom; left: parent.left
                   right: parent.right; bottom: parent.bottom }
 
         Loader {
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-            width: win.view === "visualizer" ? Math.floor(parent.width / 2) : parent.width
+            width: win.view === "visualizer" ? content.visualAlbumW : parent.width
             active: win.albumsLoaded
             sourceComponent: Component {
                 AlbumGrid {
@@ -515,7 +518,7 @@ Item {
         Loader {
             id: visualPage
             anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
-            width: parent.width - Math.floor(parent.width / 2)
+            width: Math.max(0, parent.width-content.visualAlbumW-9)
             active: win.view === "visualizer" && typeof Visualizer !== "undefined"
             source: active ? "VisualizerPage.qml" : ""
             onLoaded: {
@@ -524,6 +527,26 @@ Item {
                 item.browseArtist.connect(win.browseArtist);
                 item.editAliases.connect(win.editArtistAliases);
                 item.toggleSidebar.connect(win.toggleVisualSidebar);
+            }
+        }
+        MouseArea {
+            id: visualDivider
+            objectName: "visualizerAlbumDivider"
+            visible: win.view === "visualizer"
+            x: content.visualAlbumW; width: 9; height: parent.height
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.SplitHCursor
+            onPositionChanged: mouse => {
+                if (pressed && content.width > width)
+                    win.visualAlbumFrac = Math.max(.2, Math.min(.8,
+                        (mapToItem(content, mouse.x, 0).x-width/2)/(content.width-width)));
+            }
+            onReleased: Prefs.set("visualizerAlbumFrac", win.visualAlbumFrac)
+            Rectangle {
+                anchors.centerIn: parent
+                width: 1; height: parent.height
+                color: visualDivider.containsMouse || visualDivider.pressed ? win.fgAccent : Theme.border
             }
         }
         QtObject {
