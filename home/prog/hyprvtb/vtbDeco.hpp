@@ -397,6 +397,7 @@ class CVtbDeco : public IHyprWindowDecoration {
     // title address editor
     bool                 titleEditEnabled();
     int                  titleTopEff();  // titleTop() + a reserved spinner slot while the page loads
+    double               titleEndLocal(double contentH);
     bool                 inTitleRegion(const Vector2D& localCoords);
     void                 enterEdit();
     void                 exitEdit(bool submit);

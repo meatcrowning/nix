@@ -1752,12 +1752,7 @@ void CVtbDeco::renderBar(PHLMONITOR pMonitor, float a) {
     // Where the title's run ends. Normally the bar's far edge; in compact mode
     // the title shares its column with the far-end app buttons, so it stops just
     // above them instead of running under them.
-    double       titleEnd = barLenOf(DECOBOX) - VTB_PAD;
-    if (Cfg::compact()) {
-        SVtbAppReg treg;
-        if (appReg(treg))
-            titleEnd = std::min(titleEnd, appGroupTopCompact(treg.buttons, barLenOf(DECOBOX)) - VTB_PAD);
-    }
+    const double titleEnd = titleEndLocal(barLenOf(DECOBOX));
     const double TITLELEN = std::max(0.0, titleEnd - TITLETOP);
     const int    RUNLEN = std::round(TITLELEN * SCALE);
     // The title's device box, from bar-local coords (titleTexX across,
@@ -2940,11 +2935,17 @@ int CVtbDeco::appCellAt(const Vector2D& c, const SVtbAppReg& reg) {
 bool CVtbDeco::playbarTrackLocal(const SVtbAppReg& reg, double contentH, double scale, CBox& out) {
     if (!reg.playbar)
         return false;
-    // The compact single-column bar has no lower inner column for a scrub track;
-    // its space is the title's. Returning false here disables the playbar draw
-    // AND every hit-test that funnels through this one helper.
-    if (Cfg::compact())
-        return false;
+    if (Cfg::compact()) {
+        // Reserve a short track immediately before the app controls. The title
+        // uses the rest; all edges share this along-bar geometry and hit box.
+        const double end = appGroupTopCompact(reg.buttons, contentH) - VTB_PAD;
+        const double available = end - titleTopEff();
+        if (available < VTB_PLAYBAR_MIN)
+            return false;
+        const double len = std::min(VTB_PLAYBAR_RESERVE, std::max(VTB_PLAYBAR_MIN, available * .4));
+        out = {(double)innerColX(), end - len, (double)cellSize(), len};
+        return true;
+    }
     double appBottom = VTB_PAD;
     walkAppLayout(reg.buttons, contentH, [&](size_t i, double y) {
         const auto& b = reg.buttons[i];
@@ -3008,7 +3009,9 @@ double CVtbDeco::playbarFrac(const SVtbAppReg& reg) {
 // slow, careful scrubbing do nothing at all.
 void CVtbDeco::playbarScrollBy(const SVtbAppReg& reg, const IPointer::SAxisEvent& e) {
     const double DETENTS = e.deltaDiscrete != 0 ? (double)e.deltaDiscrete / VTB_PLAYBAR_DETENT120 : e.delta / VTB_PLAYBAR_DETENT;
-    m_playbarScrollAcc += DETENTS * VTB_PLAYBAR_SCROLL;
+    // Wayland scroll-up is negative. On a horizontal timeline it advances
+    // playback; vertical tracks retain their down-the-track wheel direction.
+    m_playbarScrollAcc += (barVertical() ? DETENTS : -DETENTS) * VTB_PLAYBAR_SCROLL;
 
     // Accumulate against what the bar is actually SHOWING, which while a seek is
     // in flight is the pending value rather than the client's echoed position
@@ -3120,10 +3123,22 @@ int CVtbDeco::titleTopEff() {
     return titleTop() + (spin ? (cellSize() + VTB_CELL_GAP) : 0);
 }
 
+double CVtbDeco::titleEndLocal(double contentH) {
+    double end = contentH - VTB_PAD;
+    SVtbAppReg reg;
+    if (Cfg::compact() && appReg(reg)) {
+        end = std::min(end, appGroupTopCompact(reg.buttons, contentH) - VTB_PAD);
+        CBox track;
+        if (playbarTrackLocal(reg, contentH, 1.0, track))
+            end = std::min(end, track.y - VTB_CELL_GAP);
+    }
+    return std::max((double)titleTopEff(), end);
+}
+
 // The clickable address-bar region: the outer column band from the title top
 // down (where the stacked title texture is drawn).
 bool CVtbDeco::inTitleRegion(const Vector2D& c) {
-    return c.y >= titleTopEff() && c.x >= sysColX() && c.x <= sysColX() + cellSize();
+    return c.y >= titleTopEff() && c.y < titleEndLocal(barLenOf(effectiveBoxGlobal())) && c.x >= sysColX() && c.x <= sysColX() + cellSize();
 }
 
 void CVtbDeco::enterEdit() {
@@ -3295,7 +3310,7 @@ size_t CVtbDeco::editByteAtLocalY(double localY) {
 // px / line height), matching renderPass's RUNLEN / m_iEditLineH.
 int CVtbDeco::editVisibleRows() {
     const double scale = m_fLastScale > 0 ? m_fLastScale : 1.0;
-    const double avail = (barLenOf(effectiveBoxGlobal()) - titleTopEff() - VTB_PAD) * scale;
+    const double avail = (titleEndLocal(barLenOf(effectiveBoxGlobal())) - titleTopEff()) * scale;
     const double lineH = m_iEditLineH > 0 ? (double)m_iEditLineH
                                           : (Cfg::fontSize() * scale);
     return std::max(1, (int)std::floor(avail / std::max(1.0, lineH)));
