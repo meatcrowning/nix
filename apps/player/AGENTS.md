@@ -360,8 +360,12 @@ runs the shared renderer in a disposable surfaceless process via `gforce-qtenv`.
 Only the selected, visible view starts it; changing pages, covering it with an
 app overlay, hiding/minimizing the window, and quitting tear down its process
 group including audio capture. A renderer failure must never stop playback.
-The framed RGBA channel permits one unacknowledged frame and caps output at
-1920×1080; render scale remains the engine's supersampling control.
+A private Linux memfd carries RGBA pixels; the pipe carries only frame sizes
+and control state. One unacknowledged frame caps output at 1920×1080.
+The QSG image node acknowledges after taking the frame, not on IPC receipt,
+so Qt cannot coalesce unseen frames. Render scale remains supersampling.
+Textures are created and released on the scene-graph thread; do not put a
+QQuickPaintedItem/CPU scaling pass back between the frame and its texture.
 
 mpv's `audio-client-name` identifies this Player instance as `player-<pid>`.
 `apps/gforce/player_audio.py` creates passive, channel-matched links directly
@@ -373,6 +377,7 @@ Player preferences and native engine state uses `gforce-vis/player-engine/`.
 Tab toggles controls, Space controls playback, Shift+Space pauses visual changes,
 and W/C/X/N/P/R/S retain the visualizer actions only in that view.
 
-Verify with `tools/visualizer-test.py` and G-Force's `embedded-check.py` and
+Verify with `tools/visualizer-test.py`, `tools/visualizer-presentation-test.py`
+and G-Force's `embedded-check.py` and
 `player-audio-check.py`. The latter starts private PipeWire/WirePlumber with
 all hardware monitors disabled; never run its fixtures against the live graph.

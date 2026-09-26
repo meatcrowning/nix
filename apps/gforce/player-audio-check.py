@@ -82,10 +82,15 @@ with tempfile.TemporaryDirectory(prefix='player-audio-check-') as directory:
         subprocess.check_output = slow_dump
         try:
             ages = []
+            updates = set()
             deadline = time.monotonic()+2.8
             while time.monotonic() < deadline:
-                with tap.lock: ages.append(time.monotonic()-tap.last_audio)
+                with tap.lock:
+                    ages.append(time.monotonic()-tap.last_audio)
+                    updates.add(tap.last_audio)
                 time.sleep(.01)
+            print('PCM updates observed during 2.8s:',len(updates))
+            assert len(updates)>=180, 'audio refresh is too slow for a 60 Hz visualizer'
             assert max(ages) < .15, f'graph polling stalled capture for {max(ages):.3f}s'
             print('PASS slow graph inspection leaves PCM capture uninterrupted')
         finally:

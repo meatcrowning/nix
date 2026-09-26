@@ -1,13 +1,16 @@
-"""Player's disposable renderer process. stdin: JSON lines; stdout: framed RGBA/JSON.
+"""Player's disposable renderer process. stdin: JSON; stdout: framed size/state.
 
 A separate EGL context/process keeps renderer faults out of playback and works
 with both Qt Quick's native Plasma and Hyprland graphics backends. One frame
-in flight bounds memory and display latency; Player acknowledges receipt before the next frame is produced.
+in flight bounds memory and display latency; Player acknowledges scene-graph
+consumption before the next frame. Pixels use a private memfd when provided;
+inline RGBA remains compatible with already-running older Player instances.
 """
 import ctypes as C
 import json
 import io
 import math
+import mmap
 import os
 from pathlib import Path
 import select
@@ -78,7 +81,13 @@ class Engine:
         self.ready = True
         self.apply_all()
         self.width, self.height = 640, 360
-        self.pixels = (C.c_ubyte*(1920*1080*4))()
+        self.frame_map = None
+        frame_file = os.environ.get('GF_PLAYER_FRAME_FILE')
+        if frame_file:
+            with open(frame_file,'r+b') as file:
+                self.frame_map = mmap.mmap(file.fileno(),1920*1080*4)
+        pixel_type = C.c_ubyte*(1920*1080*4)
+        self.pixels = pixel_type.from_buffer(self.frame_map) if self.frame_map is not None else pixel_type()
         self.pcm = (C.c_float*550)()
         self.started = time.monotonic()
 
@@ -219,7 +228,8 @@ class Engine:
         self.require(self.lib.gf_resize(self.width, self.height))
         self.require(self.lib.gf_frame(self.pcm, round((now-self.started)*1000), 0))
         self.lib.gf_read(self.pixels, self.width, self.height)
-        return struct.pack('!II', self.width, self.height)+C.string_at(self.pixels,self.width*self.height*4)
+        header = struct.pack('!II', self.width, self.height)
+        return header if self.frame_map is not None else header+C.string_at(self.pixels,self.width*self.height*4)
 
     def close(self):
         try:
@@ -228,6 +238,10 @@ class Engine:
         finally:
             if self.ready: self.lib.gf_close()
             self.lib.gf_headless_close()
+            if self.frame_map is not None:
+                del self.pixels
+                self.frame_map.close()
+                self.frame_map = None
 
 
 def main():
@@ -291,7 +305,7 @@ def main():
                 send(b'J',state)
                 next_state = now+1.
             if ack and now >= next_frame:
-                send(b'F',engine.frame(audio))
+                send(b'M' if engine.frame_map is not None else b'F',engine.frame(audio))
                 ack = False
                 report_frames += 1
                 interval = 1/max(15,engine.values['fps'])

@@ -60,7 +60,8 @@ Player's disposable `embedded_worker.py`. `player_audio.py` taps only the
 identified Player stream; the standalone frontend's desktop monitor is not
 used by the embedded view. Player owns visibility, keyboard routing, layout
 and the worker lifecycle (see `../player/AGENTS.md`). Both top and book require
-PipeWire's `pw-dump`, `pw-record` and `pw-link` (`pipewire-utils` on Fedora).
+PipeWire's `pw-dump`, `pw-record` and `pw-link` (`pipewire-utils` on Fedora),
+plus native coreutils `stdbuf` to prevent the raw recorder batching PCM.
 
 `embedded-check.py` uses the isolated renderer library/cache above, synthetic
 PCM, temporary settings and the actual framed process protocol.

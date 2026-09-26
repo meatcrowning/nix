@@ -105,9 +105,14 @@ class PlayerAudio:
     def run(self):
         capture = None
         try:
+            # pw-record's raw writer uses buffered stdio. Without stdbuf,
+            # stereo float PCM arrives in 4096-byte / 23 ms bursts even when
+            # PipeWire supplies smaller buffers: visibly stale at 60 Hz.
             capture = subprocess.Popen([
-                'pw-record', '--target=0', '--raw', '--format=f32', '--rate=22050',
-                '--channels=2', '--channel-map=FL,FR', '--latency=25ms',
+                'stdbuf', '-o0', 'pw-record', '--target=0', '--raw', '--format=f32', '--rate=22050',
+                # Match standalone's 5 ms capture so a 60/120 Hz renderer
+                # does not repeatedly reuse 25 ms batches of audio.
+                '--channels=2', '--channel-map=FL,FR', '--latency=5ms',
                 '--properties='+json.dumps({'node.name': self.recorder_name,
                     'node.autoconnect': False, 'node.dont-reconnect': True,
                     'node.dont-fallback': True, 'node.passive': True}), '-'],

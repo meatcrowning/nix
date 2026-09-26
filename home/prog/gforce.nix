@@ -22,7 +22,7 @@ let
       export CC=/usr/bin/gcc CXX=/usr/bin/g++
       exec "$@"
     '' else ''
-      export PATH=${lib.makeBinPath [ pkgs.pulseaudio pkgs.pipewire pkgs.stdenv.cc ]}:$PATH
+      export PATH=${lib.makeBinPath [ pkgs.pulseaudio pkgs.pipewire pkgs.coreutils pkgs.stdenv.cc ]}:$PATH
       export CC=${pkgs.stdenv.cc}/bin/cc CXX=${pkgs.stdenv.cc}/bin/c++
       export CPATH=${nativeLibs}/include LIBRARY_PATH=${nativeLibs}/lib
       export LD_LIBRARY_PATH=/run/opengl-driver/lib:${nativeLibs}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}

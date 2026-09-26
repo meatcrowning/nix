@@ -52,6 +52,9 @@ with tempfile.TemporaryDirectory(prefix='gforce-embedded-') as directory:
     # Exercise the exact process protocol with synthetic audio; even a mistaken
     # capture call can reach only a nonexistent server, never the live graph.
     env=dict(os.environ, PIPEWIRE_REMOTE="/dev/null", PULSE_SERVER="unix:"+str(root/"no-pulse"))
+    frame_file=root/'frame.rgba'
+    with frame_file.open('wb') as file: file.truncate(1920*1080*4)
+    env['GF_PLAYER_FRAME_FILE']=str(frame_file)
     code="""import sys, time
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
@@ -85,28 +88,29 @@ worker.main()
             command({'op':'size','width':320,'height':180})
             while True:
                 kind,data=message()
-                if kind==b'F':break
+                if kind==b'M':break
                 assert kind==b'J' and json.loads(data)['ready']
             assert struct.unpack('!II',data[:8])==(320,180)
-            assert len(data)==8+320*180*4
+            assert len(data)==8, 'pixel data escaped into the control pipe'
+            assert any(frame_file.read_bytes()[:320*180*4]), 'renderer did not fill shared pixels'
             # No ACK: no second frame is allowed to accumulate.
             deadline=time.monotonic()+.3
             while time.monotonic()<deadline:
                 if select.select([proc.stdout],[],[],.05)[0]:
-                    kind,_=message();assert kind!=b'F'
+                    kind,_=message();assert kind!=b'M'
             command({'op':'ack'})
-            while message()[0]!=b'F':pass
+            while message()[0]!=b'M':pass
             print('PASS framed process output, resize and bounded one-frame backpressure')
             command({'op':'dial','name':'fps','value':15})
             command({'op':'ack'})
-            while message()[0]!=b'F':pass
+            while message()[0]!=b'M':pass
             latencies=[]
             for _ in range(6):
                 # ACK after the next deadline, but before the one after it.
                 time.sleep(.085)
                 started=time.monotonic()
                 command({'op':'ack'})
-                while message()[0]!=b'F':pass
+                while message()[0]!=b'M':pass
                 latencies.append(time.monotonic()-started)
             assert sum(latencies)/len(latencies)<.025, latencies
             print('PASS late ACK renders promptly:',round(sum(latencies)*1000/len(latencies),1),'ms average')
