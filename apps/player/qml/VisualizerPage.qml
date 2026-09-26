@@ -23,6 +23,28 @@ Item {
     readonly property real infoW: Math.round(Math.max(0, bottom.width-7)
                                             * Math.max(.2, Math.min(.8, infoFrac)))
 
+    Motion { id: motion }
+    property bool trackNoticeReady: false
+    property var lastTrackId: null
+    Component.onCompleted: {
+        lastTrackId = cur.id === undefined ? null : cur.id;
+        trackNoticeReady = true;
+    }
+    onCurChanged: {
+        const id = cur.id === undefined ? null : cur.id;
+        if (!trackNoticeReady || id === lastTrackId) return;
+        lastTrackId = id;
+        if (bottomCollapsed && id !== null) trackNoticeTimer.restart();
+        else trackNoticeTimer.stop();
+    }
+    onBottomCollapsedChanged: if (!bottomCollapsed) trackNoticeTimer.stop()
+    Timer {
+        id: trackNoticeTimer
+        objectName: "visualizerTrackNoticeTimer"
+        // Reading time, independent of the desktop's animation speed.
+        interval: 5000
+    }
+
     Item {
         id: upper
         width: parent.width; height: root.topH
@@ -37,6 +59,41 @@ Item {
             onWidthChanged: resize()
             onHeightChanged: resize()
             Component.onCompleted: resize()
+        }
+        Rectangle {
+            id: trackNotice
+            objectName: "visualizerTrackNotice"
+            parent: surface
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: sidebarButton.height+12
+            width: Math.max(0, Math.min(380, parent.width-24))
+            height: Math.max(80, noticeText.height+16)
+            visible: opacity > 0 && root.bottomCollapsed && root.cur.id !== undefined
+            opacity: trackNoticeTimer.running ? 1 : 0
+            color: Theme.plasmaPalette ? WalPalette.toolTipBase : Theme.bg
+            border.color: Theme.border
+            clip: true
+            readonly property color ink: Theme.plasmaPalette ? WalPalette.toolTipText : Theme.text
+            Behavior on opacity { NumberAnimation {
+                duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing
+            } }
+            Image {
+                id: noticeArt
+                x: 8; anchors.verticalCenter: parent.verticalCenter
+                width: 64; height: 64
+                source: root.cur.artPath ? "file://"+root.cur.artPath : ""
+                sourceSize.width: 128; sourceSize.height: 128
+                asynchronous: true; fillMode: Image.PreserveAspectFit
+            }
+            Column {
+                id: noticeText
+                anchors { left: noticeArt.right; right: parent.right; margins: 8; verticalCenter: parent.verticalCenter }
+                spacing: 3
+                PixelText { width: parent.width; text: root.cur.title || ""; color: trackNotice.ink; elide: Text.ElideRight }
+                PixelText { width: parent.width; text: root.cur.artist || ""; color: trackNotice.ink; elide: Text.ElideRight }
+                PixelText { width: parent.width; text: root.cur.year || ""; color: trackNotice.ink; elide: Text.ElideRight }
+            }
         }
         HeaderButton {
             id: sidebarButton

@@ -247,6 +247,7 @@ An app with no standing status fact calls `allow_statusbar(False)` before
 binding chrome; this prevents a `QStatusBar` from being attached at all and
 also removes the meaningless Show Statusbar action.
 Do not connect footerChanged to set_status; the footer is the hyprvtb badge.
+Use barStretchBefore on a main-toolbar action to right-align its trailing group.
 Use barText/bar_labels() for labeled toolbars, setIconText for mnemonic
 underlines, and guard_typing() to suspend bare-key actions while editing.
 bind_chrome refreshes from buttonsChanged; no-vtb apps pass bind_chrome(None)

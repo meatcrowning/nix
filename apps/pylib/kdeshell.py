@@ -705,6 +705,7 @@ def _build_shell_class():
             self._dialogs = {}      # ident -> (QDialog, view, bg, item, comp)
             self._hooks = {}        # button id -> a python answer to it
             self._about_box = None  # kept: a dialog owned by the stack crashes
+            self._bar_stretches = {}    # action id -> persistent leading stretch
             self._bar_buttons = {}      # id -> QToolButton, for `barText` rows
             self._mnemo = {}            # id -> the Alt-letter its bar row wears
             self._menu_letters = set()  # the menubar's own, which it may not take
@@ -1127,6 +1128,15 @@ def _build_shell_class():
                     continue
                 if self._bar_of(e) != "main":
                     continue
+                if e.get("barStretchBefore"):
+                    from PySide6.QtWidgets import QWidget, QSizePolicy
+                    bid = str(e.get("id", ""))
+                    spacer = self._bar_stretches.get(bid)
+                    if spacer is None:
+                        spacer = QWidget(tb)
+                        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                        self._bar_stretches[bid] = spacer
+                    self._append_widget(tb, spacer)
                 act = self._action_for(e)
                 # `barText` puts the NAME beside the icon for ONE button and
                 # `barIconOnly` hides it. The style is toolbar-wide, so either

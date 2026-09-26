@@ -332,7 +332,7 @@ Item {
               bar: true, group: "view" },
             { id: "visualR", label: "R", state: Visualizer.stateInfo.ready ? 0 : 2,
               menuText: "Randomize", menu: "visualizer", tip: "randomize (R)",
-              icon: "view-refresh", bar: true, shortcut: "R" },
+              icon: "view-refresh", bar: true, barStretchBefore: true, shortcut: "R" },
             "-",
             // The full word, not the titlebar's two-character cell — a toolbar
             // has the room a titlebar cell never did (§7.6, and `barText` puts
