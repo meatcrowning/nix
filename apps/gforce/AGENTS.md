@@ -52,3 +52,19 @@ pure Python audio-window-check.py and shared-dials-check.py open no devices.
 The remaining *-check.py harnesses cover presets, scales, trails and response.
 Never point their GF_ENGINE_STATE_DIR at the user's configuration. Keep fixture
 outputs under GF_BUILD_CACHE, not this source directory.
+
+## Player embedding
+
+`settings.py` and `native.py` share dial defaults and the renderer ABI with
+Player's disposable `embedded_worker.py`. `player_audio.py` taps only the
+identified Player stream; the standalone frontend's desktop monitor is not
+used by the embedded view. Player owns visibility, keyboard routing, layout
+and the worker lifecycle (see `../player/AGENTS.md`). Both top and book require
+PipeWire's `pw-dump`, `pw-record` and `pw-link` (`pipewire-utils` on Fedora).
+
+`embedded-check.py` uses the isolated renderer library/cache above, synthetic
+PCM, temporary settings and the actual framed process protocol.
+`player-audio-check.py` creates its own private audio server and session bus,
+disables every hardware monitor, and verifies unrelated audio exclusion,
+stream replacement and tap teardown. It requires `pipewire`, `wireplumber`
+and `dbus-daemon`; it never changes the live graph.

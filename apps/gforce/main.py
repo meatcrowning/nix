@@ -23,7 +23,7 @@ STATE.mkdir(parents=True,exist_ok=True)
 DIALS=STATE/'dials.json'
 PRESETS=STATE/'presets.json'
 # Preset files carry the look; these are the dials that shape it.
-LOOK_DIALS=('steps','sensitivity','waveResponse','trailFill','trailSharpness','persist','fadeBias','widthScale','minWidth','softness','grid','waveScale','particleScale','distortionScale','waveSmoothing','masterSpeed','flowSpeed','waveSpeed','particleSpeed','colourSpeed','hitHold')
+from settings import LOOK_DIALS, DEFAULTS
 FPS=30   # the original's frame rate; trail and flow dials are in its frames
 assert os.environ.get('QT_QPA_PLATFORM') == 'wayland'
 assert (Path(os.environ['XDG_RUNTIME_DIR'])/os.environ['WAYLAND_DISPLAY']).is_socket()
@@ -36,30 +36,8 @@ fmt.setStencilBufferSize(0)
 QSurfaceFormat.setDefaultFormat(fmt)
 app=QApplication(sys.argv)
 assert app.platformName()=='wayland'
-lib=C.CDLL(os.environ['GF_RENDERER_PATH'])
-lib.gf_error.restype=C.c_char_p
-lib.gf_init.argtypes=[C.c_int,C.c_int]
-lib.gf_resize.argtypes=[C.c_int,C.c_int]
-lib.gf_frame.argtypes=[C.POINTER(C.c_float),C.c_long,C.c_uint]
-lib.gf_key.argtypes=[C.c_int]
-lib.gf_control_state.argtypes=[C.POINTER(C.c_long)]
-lib.gf_control_state.restype=None
-lib.gf_key.restype=lib.gf_close.restype=None
-lib.gf_set.argtypes=[C.c_char_p,C.c_double]
-lib.gf_get.argtypes=[C.c_char_p]
-lib.gf_get.restype=C.c_double
-lib.gf_get_interval.argtypes=[C.c_int]
-lib.gf_get_interval.restype=C.c_char_p
-lib.gf_set_interval.argtypes=[C.c_int,C.c_char_p]
-lib.gf_set_interval.restype=None
-lib.gf_choices.argtypes=[C.c_int]
-lib.gf_choices.restype=C.c_char_p
-lib.gf_selection.argtypes=[C.c_int]
-lib.gf_selection.restype=C.c_char_p
-lib.gf_select.argtypes=[C.c_int,C.c_char_p]
-lib.gf_preset_capture.restype=C.c_char_p
-lib.gf_preset_recall.argtypes=[C.c_int,C.c_char_p,C.c_long,C.c_int]
-lib.gf_preset_clear_particles.restype=None
+from native import load_renderer
+lib=load_renderer(os.environ['GF_RENDERER_PATH'])
 
 PARTICLE_RATE='.09/((NUM_PARTICLES+1)^1.66)'
 INTERVAL=re.compile(r'^\s*([\d.]+)\s*\+\s*rnd\s*\(\s*([\d.]+)\s*\)\s*$',re.I)
@@ -270,12 +248,7 @@ class Window(QMainWindow):
     # Every dial persists in dials.json, in the units the panel shows (trail
     # half-life in frames, fade in 1/255ths). It is written on each change and
     # re-read when edited by hand. Without it, engine dials start from .G-Force.
-    DEFAULTS={'forceConnect':False,'forcePoints':False,'waveResponse':0.,'trailFill':1.,'trailSharpness':1.,'persist':math.log(.5)/math.log(31/32),'fadeBias':.5,'widthScale':1.,'minWidth':1.,'softness':1.,
-              'grid':640,'sensitivity':1.,'steps':200,'transitionLo':4,'transitionHi':18,'rate':1.,
-              'particles':True,'normalize':False,'audioOnly':False,'fps':30,
-              'masterSpeed':1.,'flowSpeed':1.,'waveSpeed':1.,'particleSpeed':1.,'colourSpeed':1.,
-              'waveSmoothing':1.3,'resolution':1.,'waveScale':1.,'particleScale':1.,'distortionScale':1.,'hitHold':0.,
-              'intervals':{'W':[10,15],'D':[18,15],'C':[10,15],'P':[8,15]}}
+    DEFAULTS=DEFAULTS
     ENGINE=('sensitivity','steps','transitionLo','transitionHi')
 
     def __init__(self):

@@ -351,3 +351,28 @@ not a CI suite:
 Atomic-write probes operate on copies and hash decoded audio only
 (`ffmpeg -map 0:a -f s16le`), because cover-art streams can make whole-file
 conversion hashes misleading. Never point write-capable probes at the library.
+
+## Embedded visualizer
+
+`visualizer.py`, `qml/VisualizerPage.qml` and `qml/VisualizerControls.qml` own
+Player's Visualizer view on both desktop faces. `apps/gforce/embedded_worker.py`
+runs the shared renderer in a disposable surfaceless process via `gforce-qtenv`.
+Only the selected, visible view starts it; changing pages, covering it with an
+app overlay, hiding/minimizing the window, and quitting tear down its process
+group including audio capture. A renderer failure must never stop playback.
+The framed RGBA channel permits one unacknowledged frame and caps output at
+1920×1080; render scale remains the engine's supersampling control.
+
+mpv's `audio-client-name` identifies this Player instance as `player-<pid>`.
+`apps/gforce/player_audio.py` creates passive, channel-matched links directly
+from that stream's output ports, upstream of EasyEffects and any sink mix.
+The recorder cannot autoconnect or fall back to a desktop monitor. Do not
+replace this with the standalone G-Force sink monitor or change playback links.
+Dials and saved looks share G-Force's settings; Player's sidebar/splits use
+Player preferences and native engine state uses `gforce-vis/player-engine/`.
+Tab toggles controls, Space controls playback, Shift+Space pauses visual changes,
+and W/C/X/N/P/R/S retain the visualizer actions only in that view.
+
+Verify with `tools/visualizer-test.py` and G-Force's `embedded-check.py` and
+`player-audio-check.py`. The latter starts private PipeWire/WirePlumber with
+all hardware monitors disabled; never run its fixtures against the live graph.
