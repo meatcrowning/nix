@@ -206,6 +206,53 @@ def check_layout(app,shell,win,*args):
     target=shell.view if shell is not None else win
     target.show()
     QTest.qWait(50)
+    search=root.findChild(QObject,'albumSearch')
+    toolbar=root.findChild(QObject,'albumToolbar')
+    choice=root.findChild(QObject,'albumSortChoice')
+    direction=root.findChild(QObject,'albumSortDirection')
+    index=root.findChild(QObject,'albumIndex')
+    listing=root.findChild(QObject,'albumList')
+    assert search.isVisible() and search.width()>0
+    assert toolbar.y()==index.property('indexHeight')
+    assert listing.y()==index.height()
+    assert choice.mapToScene(QPointF()).x()<search.mapToScene(QPointF()).x()
+    if shell is None:
+        point=choice.mapToScene(QPointF(choice.width()/2,choice.height()/2)).toPoint()
+        QTest.mouseClick(target,Qt.LeftButton,Qt.NoModifier,point)
+        QTest.qWait(20)
+        menu=root.findChild(QObject,'albumCtxMenu')
+        assert menu.isVisible(), 'sort menu did not open'
+        menu.close()
+    choice.chose.emit('artist')
+    assert root.property('sortMode')=='artist'
+    direction.clicked.emit()
+    assert root.property('sortDescending')
+    choice.chose.emit('orig_year')
+    direction.clicked.emit()
+    grid.focusSearch()
+    QTest.qWait(20)
+    assert root.property('albumSearchEditing')
+    sidebar=root.property('visualSidebar')
+    triggered=[]
+    if shell is not None:
+        for action in shell._actions.values():
+            action.triggered.connect(lambda *args: triggered.append(True))
+    for key in (Qt.Key_W,Qt.Key_Space,Qt.Key_L,Qt.Key_R):
+        QTest.keyClick(target,key)
+    QTest.qWait(20)
+    assert root.property('searchText').lower()=='w lr',root.property('searchText')
+    assert not root.property('searching')
+    assert root.property('visualSidebar')==sidebar and not triggered
+    QTest.keyClick(target,Qt.Key_Escape)
+    QTest.qWait(20)
+    assert root.property('searchText')=='' and search.isVisible()
+    assert not root.property('albumSearchEditing')
+    grid.focusSearch()
+    QTest.qWait(20)
+    point=surface.mapToScene(QPointF(surface.width()/2,surface.height()/2)).toPoint()
+    QTest.mouseClick(target,Qt.LeftButton,Qt.NoModifier,point)
+    QTest.qWait(20)
+    assert not root.property('albumSearchEditing'), 'click outside search did not release shortcuts'
     for name, owner, prop, delta in (
         ('visualizerAlbumDivider',root,'visualAlbumFrac',QPoint(30,0)),
         ('visualizerTopDivider',surface.parentItem().parentItem(),'topFrac',QPoint(0,-20)),

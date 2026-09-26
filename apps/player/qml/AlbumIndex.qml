@@ -5,8 +5,15 @@ import "../../qmlcommon"
 // over one decade opens its individual years, and wheel down returns out.
 Item {
     id: root
-    height: plasma ? Math.max(Theme.lineHeight + 2, sortControls.implicitHeight + 4)
-                   : Theme.lineHeight + 2
+    objectName: "albumIndex"
+    readonly property real indexHeight: Theme.lineHeight + 2
+    height: indexHeight + toolbar.height
+    readonly property Item searchField: searchScope
+    property string searchText: ""
+    readonly property bool searchEditing: searchScope.activeFocus
+    signal filterRequested(string text)
+    signal sortMenuRequested(real sceneX, real sceneY, var items)
+    function focusSearch() { albumSearch.focusInput(); albumSearch.selectAll(); }
 
     Motion { id: motion }
 
@@ -82,9 +89,8 @@ Item {
 
     Item {
         id: indexArea
-        anchors { top: parent.top; bottom: parent.bottom; left: parent.left
-                  right: sortControls.visible ? sortControls.left : parent.right }
-        anchors.rightMargin: sortControls.visible ? 6 : 0
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: root.indexHeight
         clip: true
 
     Row {
@@ -95,7 +101,7 @@ Item {
             delegate: Item {
                 required property var modelData
                 width: indexArea.width / Math.max(1, root.displayEntries.length)
-                height: root.height
+                height: indexArea.height
 
                 PixelText {
                     anchors.centerIn: parent
@@ -125,48 +131,80 @@ Item {
     }
     }
 
-    Row {
-        id: sortControls
-        visible: root.plasma
-        anchors { right: parent.right; rightMargin: 3; verticalCenter: parent.verticalCenter }
-        spacing: 2
+    Item {
+        id: toolbar
+        objectName: "albumToolbar"
+        y: root.indexHeight; width: parent.width
+        height: Math.max(sortControls.height, albumSearch.implicitHeight) + 8
 
-        PixelText {
-            anchors.verticalCenter: parent.verticalCenter
-            text: "sort by"
-            color: root.fgDim
+        Row {
+            id: sortControls
+            anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
+            spacing: 4
+
+            PixelText {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.width >= 440
+                text: "sort by"
+                color: root.fgDim
+            }
+            SelectButton {
+                id: sortChoice
+                objectName: "albumSortChoice"
+                width: Math.min(112, Math.max(64, root.width*.3))
+                label: root.sortLabel
+                fgText: root.fgText
+                fgDim: root.fgDim
+                fgAccent: root.fgAccent
+                options: [
+                    { label: "year", value: "orig_year" },
+                    { label: "artist", value: "artist" },
+                    { label: "album title", value: "album" },
+                    { label: "date added", value: "added" },
+                    { label: "play count", value: "plays" },
+                    { label: "rating", value: "rating" }
+                ]
+                onPicked: (x,y,items) => root.sortMenuRequested(x,y,items)
+                onChose: function(mode) { root.sortRequested(mode); }
+            }
+            HeaderButton {
+                objectName: "albumSortDirection"
+                width: implicitWidth
+                height: sortChoice.height
+                label: root.sortDescending ? "dn" : "up"
+                plainLabel: root.sortDescending ? "descending" : "ascending"
+                iconName: root.sortDescending ? "view-sort-descending" : "view-sort-ascending"
+                iconOnly: true
+                fgText: root.fgText
+                fgDim: root.fgDim
+                fgAccent: root.fgAccent
+                onClicked: root.sortDirectionRequested(!root.sortDescending)
+            }
         }
-        SelectButton {
-            id: sortChoice
-            width: 112
-            label: root.sortLabel
-            fgText: root.fgText
-            fgDim: root.fgDim
-            fgAccent: root.fgAccent
-            options: [
-                { label: "year", value: "orig_year" },
-                { label: "artist", value: "artist" },
-                { label: "album title", value: "album" },
-                { label: "date added", value: "added" },
-                { label: "play count", value: "plays" },
-                { label: "rating", value: "rating" }
-            ]
-            onChose: function(mode) { root.sortRequested(mode); }
-        }
-        HeaderButton {
-            width: implicitWidth
-            height: sortChoice.height
-            label: root.sortDescending ? "dn" : "up"
-            plainLabel: root.sortDescending ? "descending" : "ascending"
-            iconName: root.sortDescending ? "view-sort-descending" : "view-sort-ascending"
-            iconOnly: true
-            fgText: root.fgText
-            fgDim: root.fgDim
-            fgAccent: root.fgAccent
-            onClicked: root.sortDirectionRequested(!root.sortDescending)
+
+        FocusScope {
+            id: searchScope
+            // Native QAction shortcuts must leave text and navigation keys to the field.
+            Keys.onShortcutOverride: event => {
+                if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)))
+                    event.accepted = true;
+            }
+            anchors { left: sortControls.right; right: parent.right; margins: 8
+                      verticalCenter: parent.verticalCenter }
+            height: albumSearch.implicitHeight
+            EditField {
+                id: albumSearch
+                objectName: "albumSearch"
+                anchors.fill: parent
+                text: root.searchText
+                placeholderText: "search albums..."
+                fgText: root.fgText; fgAccent: root.fgAccent
+                onTextEdited: root.filterRequested(text)
+                onAccepted: root.filterRequested(text)
+                onEscaped: { root.filterRequested(""); root.forceActiveFocus(); }
+            }
         }
     }
-
 
     SequentialAnimation {
         id: swap

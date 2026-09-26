@@ -47,6 +47,11 @@ Item {
     // True while a search filter narrows the grid: the browse position is only
     // remembered for the UNFILTERED grid, so clearing the search puts the user
     // back where they were browsing rather than at the filtered view's top.
+    readonly property Item searchField: albumIndex.searchField
+    property string searchText: ""
+    readonly property bool searchEditing: visible && albumIndex.searchEditing
+    signal filterRequested(string text)
+    function focusSearch() { albumIndex.focusSearch(); }
     property bool filtered: false
     onFilteredChanged: if (!filtered) list.requestRestore()
 
@@ -531,6 +536,12 @@ Item {
 
     AlbumIndex {
         id: albumIndex
+        searchText: root.searchText
+        onFilterRequested: text => root.filterRequested(text)
+        onSortMenuRequested: (x,y,items) => {
+            const p = ctxMenu.mapFromItem(null,x,y);
+            ctxMenu.open(p.x,p.y,items);
+        }
         anchors { top: parent.top; left: parent.left; right: parent.right }
         sortMode: root.sortMode
         sortDescending: root.sortDescending
