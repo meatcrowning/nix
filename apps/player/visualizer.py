@@ -278,13 +278,25 @@ class VisualizerSurface(QQuickItem):
     consumed = Signal(int)
 
     def __init__(self,parent=None):
-        super().__init__(parent)
+        super().__init__()
         self._source = None
         self._image = QImage(1,1,QImage.Format.Format_RGB32)
         self._image.fill(QColor('black'))
         self._dirty = True
         self._generation = -1
+        self._window = None
+        self.windowChanged.connect(self._set_window)
         self.setFlag(QQuickItem.Flag.ItemHasContents)
+        if parent is not None:
+            self.setParent(parent)
+            self.setParentItem(parent)
+
+    @Slot(QQuickWindow)
+    def _set_window(self, window):
+        # QQuickItem.window() makes PySide tie the returned window wrapper to
+        # this disposable item. Unloading the page then invalidates Player's
+        # window reference too. The signal supplies it without that ownership.
+        self._window = window
 
     @Property(QObject,notify=sourceChanged)
     def source(self): return self._source
@@ -310,10 +322,10 @@ class VisualizerSurface(QQuickItem):
         # Qt calls this with the GUI thread blocked; all texture creation and
         # destruction stay on the scene-graph thread.
         if node is None:
-            node = self.window().createImageNode()
+            node = self._window.createImageNode()
             self._dirty = True
         if self._dirty:
-            texture = self.window().createTextureFromImage(
+            texture = self._window.createTextureFromImage(
                 self._image, QQuickWindow.CreateTextureOption.TextureIsOpaque)
             node.setOwnsTexture(True)
             node.setTexture(texture)
