@@ -15,8 +15,10 @@ Item {
     property real fgArt: 1
     readonly property var cur: Player.current || ({})
     property real topFrac: Number(Prefs.get("visualizerStackTopFrac", .5)) || .5
+    property bool bottomCollapsed: Prefs.get("visualizerBottomCollapsed", false) === true
     property real infoFrac: Number(Prefs.get("visualizerInfoWidthFrac", .5)) || .5
-    readonly property real topH: Math.max(0, Math.min(Math.max(0, height-107), Math.max(80, height*topFrac)))
+    readonly property real topH: bottomCollapsed ? Math.max(0, height-7)
+                                : Math.max(0, Math.min(Math.max(0, height-107), Math.max(80, height*topFrac)))
     readonly property real infoW: Math.round(Math.max(0, bottom.width-7)
                                             * Math.max(.2, Math.min(.8, infoFrac)))
 
@@ -66,6 +68,8 @@ Item {
 
     Item {
         id: bottom
+        visible: !root.bottomCollapsed
+        clip: true
         y: root.topH+7; width: parent.width; height: Math.max(0,parent.height-y)
         Item {
             id: queue
@@ -182,10 +186,16 @@ Item {
         y: root.topH; width: parent.width; height: 7
         cursorShape: Qt.SplitVCursor
         onPositionChanged: mouse => {
-            if (pressed && root.height>0)
-                root.topFrac=Math.max(.2,Math.min(1,mapToItem(root,0,mouse.y).y/root.height));
+            if (!pressed || root.height<=0) return;
+            const y = mapToItem(root,0,mouse.y).y;
+            root.bottomCollapsed = y >= root.height-14;
+            if (!root.bottomCollapsed)
+                root.topFrac=Math.max(.2,Math.min(1,y/root.height));
         }
-        onReleased: Prefs.set("visualizerStackTopFrac",root.topFrac)
+        onReleased: {
+            Prefs.set("visualizerStackTopFrac",root.topFrac);
+            Prefs.set("visualizerBottomCollapsed",root.bottomCollapsed);
+        }
         Rectangle {
             anchors.centerIn: parent
             width: parent.width; height: 1

@@ -189,6 +189,8 @@ def check_layout(app,shell,win,*args):
     root.setProperty('view','visualizer')
     root.setProperty('visualAlbumFrac',.5)
     QTest.qWait(100)
+    root.findChild(QObject,'visualizerSurface').parentItem().parentItem().setProperty('bottomCollapsed',False)
+    QTest.qWait(20)
     grid=root.findChild(QObject,'albumGrid')
     surface=root.findChild(QObject,'visualizerSurface')
     assert grid and grid.isVisible() and surface
@@ -217,6 +219,24 @@ def check_layout(app,shell,win,*args):
         QTest.mouseRelease(target,Qt.LeftButton,Qt.NoModifier,point+delta)
         QTest.qWait(20)
         assert abs(owner.property(prop)-before)>.001, name+' did not drag'
+    page=surface.parentItem().parentItem()
+    handle=root.findChild(QObject,'visualizerTopDivider')
+    queue=root.findChild(QObject,'visualizerQueue')
+    for collapse in (True,False,True):
+        point=handle.mapToScene(QPointF(handle.width()/2,handle.height()/2)).toPoint()
+        end=page.mapToScene(QPointF(page.width()/2,page.height()-(2 if collapse else 150))).toPoint()
+        QTest.mousePress(target,Qt.LeftButton,Qt.NoModifier,point)
+        QTest.mouseMove(target,end,20)
+        QTest.mouseRelease(target,Qt.LeftButton,Qt.NoModifier,end)
+        QTest.qWait(20)
+        assert page.property('bottomCollapsed')==collapse
+        assert queue.isVisible()!=collapse
+        assert handle.y()+handle.height()<=page.height()
+        if collapse:
+            assert queue.height()==0 and handle.y()+handle.height()==page.height()
+            assert surface.height()==page.height()-handle.height()
+        else:
+            assert queue.height()>=100
     root.setProperty('visualAlbumFrac',.65)
     QTest.qWait(50)
     assert gallery.width()>right.width()
@@ -231,6 +251,8 @@ def check_layout(app,shell,win,*args):
     root.setProperty('view','visualizer')
     QTest.qWait(50)
     assert root.findChild(QObject,'albumGrid')==grid
+    assert root.findChild(QObject,'visualizerSurface').parentItem().parentItem().property('bottomCollapsed')
+    assert not root.findChild(QObject,'visualizerQueue').isVisible()
     assert abs(grid.width()-(gallery.parentItem().width()-divider.width())*.65)<=1
     return original(app,shell,win,*args)
 main._selftest=check_layout
