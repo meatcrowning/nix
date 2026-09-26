@@ -120,7 +120,7 @@
     <datalist id="paths"></datalist>
     <button type="button" id="home">Overview</button>
   </form>
-  <div class="help">Drag to orbit · right-drag to pan · scroll to zoom · move close to a page to read it · click a page to pull it forward with everything bridged to it · <kbd>/</kbd> find · <kbd>M</kbd> menu</div>
+  <div class="help"><kbd>WASD</kbd> fly · <kbd>Q</kbd>/<kbd>E</kbd> down/up · <kbd>Shift</kbd> faster · drag to look · right-drag to slide · scroll to glide · move close to a page to read it · click a page to pull it forward with everything bridged to it · <kbd>/</kbd> find · <kbd>M</kbd> menu</div>
 </section>
 
 <button type="button" id="menu-on" title="Show menu (M)">Menu</button>
@@ -128,7 +128,6 @@
 <div id="tip" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 const DATA = /*XANADU_DATA*/null;
 
@@ -187,9 +186,31 @@ stage.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x060a13, 0.0065);
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 2000);
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; controls.dampingFactor = 0.09;
-controls.screenSpacePanning = true; controls.maxDistance = 700; controls.minDistance = 1.5;
+// Fly camera: WASD move, Q/E down/up, Shift faster, drag to look, right-drag to slide.
+camera.rotation.order = "YXZ";
+const fly = { yaw: 0, pitch: 0, vel: new THREE.Vector3(), keys: new Set() };
+const FLY_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "Space", "KeyC", "ShiftLeft", "ShiftRight"]);
+function lookAt(target, from = camera.position) {
+  const d = target.clone().sub(from).normalize();
+  return { yaw: Math.atan2(-d.x, -d.z), pitch: Math.asin(Math.max(-1, Math.min(1, d.y))) };
+}
+function applyLook() { camera.rotation.set(fly.pitch, fly.yaw, 0); }
+function stepFly(dt) {
+  const k = fly.keys, want = new THREE.Vector3(
+    (k.has("KeyD") ? 1 : 0) - (k.has("KeyA") ? 1 : 0),
+    (k.has("KeyE") || k.has("Space") ? 1 : 0) - (k.has("KeyQ") || k.has("KeyC") ? 1 : 0),
+    (k.has("KeyS") ? 1 : 0) - (k.has("KeyW") ? 1 : 0));
+  if (want.lengthSq()) {
+    tween = null;
+    const fast = k.has("ShiftLeft") || k.has("ShiftRight");
+    want.normalize().multiplyScalar(fast ? 70 : 18);
+    const up = want.y; want.y = 0;
+    want.applyQuaternion(camera.quaternion); want.y += up;   // WASD follow the gaze, Q/E stay vertical
+  }
+  fly.vel.lerp(want, 1 - Math.exp(-dt * (want.lengthSq() ? 8 : 5)));
+  if (fly.vel.lengthSq() < 1e-6) fly.vel.set(0, 0, 0);
+  camera.position.addScaledVector(fly.vel, dt);
+}
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 const MAX_TEX = Math.min(renderer.capabilities.maxTextureSize, 8192);
 
@@ -213,7 +234,7 @@ function tokenize(line, md) {
   }
   push("", ""); return out;
 }
-const TK = { "": "#2a354c", c: "#6e8a74", s: "#a0602a", k: "#2f55b8", h: "#101828" };
+const TK = { "": "#b9c5d8", c: "#6b8a77", s: "#e2a56a", k: "#8fb0ff", h: "#f0f4fa" };
 
 function lineMarks(p) {
   const m = new Map();
@@ -228,10 +249,10 @@ function paintPage(p, { lp, width, real, start = 0, count = p.lines.length, head
   const rowsN = Math.max(count, 1) + head;
   const cv = document.createElement("canvas"); cv.width = width; cv.height = Math.round(rowsN * lp);
   const g = cv.getContext("2d");
-  g.fillStyle = "#e4eaf2"; g.fillRect(0, 0, cv.width, cv.height);
+  g.fillStyle = "#101828"; g.fillRect(0, 0, cv.width, cv.height);
   const y0 = head * lp, inRange = ln => ln > start && ln <= start + count;
   for (const [ln, k] of lineMarks(p)) if (inRange(ln)) {
-    g.globalAlpha = 0.42; g.fillStyle = KINDS[k].color; g.fillRect(0, y0 + (ln - 1 - start) * lp, cv.width, lp);
+    g.globalAlpha = 0.26; g.fillStyle = KINDS[k].color; g.fillRect(0, y0 + (ln - 1 - start) * lp, cv.width, lp);
   }
   g.globalAlpha = 1;
   for (const [ln, host] of p.hosts) if (inRange(ln)) {
@@ -239,12 +260,12 @@ function paintPage(p, { lp, width, real, start = 0, count = p.lines.length, head
   }
   const pad = Math.max(4, lp * 0.9), cols = 100, cw = (cv.width - pad * 1.5) / cols;
   if (head) {
-    g.fillStyle = "#c3cedc"; g.fillRect(0, 0, cv.width, y0);
+    g.fillStyle = "#1c2840"; g.fillRect(0, 0, cv.width, y0);
     g.textBaseline = "middle";
-    g.font = `600 ${lp * 0.95}px "JetBrains Mono", monospace`; g.fillStyle = "#101828";
+    g.font = `600 ${lp * 0.95}px "JetBrains Mono", monospace`; g.fillStyle = "#e8eef8";
     g.fillText(p.path, pad, y0 / 2);
     const sub = count >= p.lines.length ? `${p.lines.length} lines` : `${start + 1}–${start + count} of ${p.lines.length}`;
-    g.font = `400 ${lp * 0.7}px "JetBrains Mono", monospace`; g.fillStyle = "#4a5670";
+    g.font = `400 ${lp * 0.7}px "JetBrains Mono", monospace`; g.fillStyle = "#7d8aa3";
     g.textAlign = "right"; g.fillText(sub, cv.width - pad, y0 / 2); g.textAlign = "left";
   }
   if (real) {
@@ -260,6 +281,9 @@ function paintPage(p, { lp, width, real, start = 0, count = p.lines.length, head
       col += t.length; if (col > cols) break;
     }
   }
+  // a dark page on a dark void needs its own edge
+  g.strokeStyle = "#3b4d70"; g.lineWidth = Math.max(2, lp * 0.15);
+  g.strokeRect(g.lineWidth / 2, g.lineWidth / 2, cv.width - g.lineWidth, cv.height - g.lineWidth);
   const tex = new THREE.CanvasTexture(cv);
   tex.encoding = THREE.sRGBEncoding; tex.anisotropy = MAX_ANISO;
   return tex;
@@ -337,7 +361,7 @@ function buildPages() {
     mesh.position.set(p.x, p.y0 - p.h / 2, p.z); mesh.userData.page = p; mesh.renderOrder = 1;
     p.mesh = mesh; scene.add(mesh); pageMeshes.push(mesh);
     mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry),
-      new THREE.LineBasicMaterial({ color: 0x9fb4d6, transparent: true, opacity: 0.35 })));
+      new THREE.LineBasicMaterial({ color: 0x6f86b0, transparent: true, opacity: 0.55 })));
     const base = p.path.split("/").pop(), dir = p.path.slice(0, -base.length) || "./";
     p.label = new THREE.Mesh(new THREE.PlaneGeometry(W, W / 8),
       new THREE.MeshBasicMaterial({ map: labelTexture(base, dir + " · " + p.lines.length + " lines", 512, 64), transparent: true, depthWrite: false }));
@@ -460,7 +484,7 @@ function enter(p, scroll = 0) {
     veil.position.set(0, 0, -D - 3); veil.scale.set(400, 400, 1); veil.renderOrder = 10; veil.frustumCulled = false;
     rig.add(veil);
     R = { rig, veil, items: new Map(), history: [], zoom: 1, pan: 0, panT: 0, veilT: 0.88, bridges: null, leaving: false };
-    controls.enabled = false; tip.hidden = true;
+    fly.keys.clear(); fly.vel.set(0, 0, 0); tip.hidden = true;
     document.body.classList.add("reading");
   }
   if (R.focus !== p) R.pan = R.panT = 0;
@@ -610,7 +634,7 @@ function stepReading(now) {
   }
   if (R.leaving && !busy && R.items.size === 0) {
     scene.remove(R.rig); R.veil.geometry.dispose(); R.veil.material.dispose();
-    R = null; controls.enabled = true;
+    R = null;
     if (pendingOverview) { pendingOverview = false; flyTo(...overviewPose()); }
   }
 }
@@ -627,8 +651,13 @@ function esc(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", 
 // ---- camera moves (field only) ----
 let tween = null, pendingOverview = false;
 function flyTo(target, position) {
-  if (reduceMotion) { controls.target.copy(target); camera.position.copy(position); return; }
-  tween = { t0: performance.now(), dur: 850, fromT: controls.target.clone(), fromP: camera.position.clone(), toT: target, toP: position };
+  const to = lookAt(target, position);
+  if (reduceMotion) { camera.position.copy(position); Object.assign(fly, to); applyLook(); return; }
+  let dyaw = (to.yaw - fly.yaw) % (2 * Math.PI);
+  if (dyaw > Math.PI) dyaw -= 2 * Math.PI; if (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+  fly.vel.set(0, 0, 0);
+  tween = { t0: performance.now(), dur: 850, fromP: camera.position.clone(), toP: position,
+            yaw0: fly.yaw, dyaw, pitch0: fly.pitch, pitch1: to.pitch };
 }
 function overviewPose() {
   const last = rows[rows.length - 1];
@@ -673,8 +702,8 @@ document.getElementById("menu-on").onclick = () => setMenu(true);
 
 // Z held turns the wheel into zoom while reading
 let zHeld = false;
-addEventListener("keyup", e => { if (e.key === "z" || e.key === "Z") zHeld = false; });
-addEventListener("blur", () => { zHeld = false; });
+addEventListener("keyup", e => { if (e.key === "z" || e.key === "Z") zHeld = false; fly.keys.delete(e.code); });
+addEventListener("blur", () => { zHeld = false; fly.keys.clear(); });
 
 // positive d moves the pages right (the view travels left)
 function panBy(d) {
@@ -687,7 +716,11 @@ addEventListener("keydown", e => {
   if (e.key === "/") { e.preventDefault(); q.focus(); return; }
   if (e.key === "z" || e.key === "Z") { zHeld = true; return; }
   if ((e.key === "m" || e.key === "M") && !e.ctrlKey && !e.metaKey && !e.altKey) { setMenu(document.body.classList.contains("menu-off")); return; }
-  if (!R || R.leaving) return;
+  if (!R) {
+    if (FLY_KEYS.has(e.code) && !e.ctrlKey && !e.metaKey && !e.altKey) { fly.keys.add(e.code); if (e.code === "Space") e.preventDefault(); }
+    return;
+  }
+  if (R.leaving) return;
   const n = R.focus.lines.length, page = Math.max(3, Math.floor(visibleLines() * 0.8));
   const k = { Escape: () => back(), Backspace: () => back(),
     ArrowDown: () => R.scrollT += 3, ArrowUp: () => R.scrollT -= 3,
@@ -732,8 +765,8 @@ function followFrom(h) {
 
 let down = null;
 renderer.domElement.addEventListener("pointerdown", e => {
-  down = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false };
-  if (R) renderer.domElement.setPointerCapture(e.pointerId);
+  down = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, button: e.button };
+  renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener("pointerup", e => {
   const d = down; down = null;
@@ -750,6 +783,18 @@ renderer.domElement.addEventListener("pointermove", e => {
     panBy((e.clientX - down.sx) / (innerHeight / v.Hv)); R.pan = R.panT;
     R.scroll = R.scrollT; down.sx = e.clientX; down.sy = e.clientY; return;
   }
+  if (!R && down && down.moved) {
+    const dx = e.clientX - down.sx, dy = e.clientY - down.sy;
+    down.sx = e.clientX; down.sy = e.clientY; tween = null;
+    if (down.button === 2) {
+      const s = 0.06;
+      camera.position.add(new THREE.Vector3(-dx * s, dy * s, 0).applyQuaternion(camera.quaternion));
+    } else {
+      fly.yaw -= dx * 0.0032;
+      fly.pitch = Math.max(-1.5, Math.min(1.5, fly.pitch - dy * 0.0032));
+    }
+    return;
+  }
   if (hoverRaf || e.buttons) return;
   hoverRaf = requestAnimationFrame(() => {
     hoverRaf = 0;
@@ -757,16 +802,31 @@ renderer.domElement.addEventListener("pointermove", e => {
     const live = h && (!R || h.it.role !== "focus" || h.p.out.some(l => on[l.k] && l.al === h.line) || h.p.inc.some(l => on[l.k] && l.bl === h.line && l.bl > 1));
     renderer.domElement.style.cursor = live ? "pointer" : "";
     if (!h || !h.line) { tip.hidden = true; return; }
-    const ln = h.p.lines[h.line - 1].trim();
-    tip.textContent = `${h.p.path}:${h.line}  ${ln.length > 60 ? ln.slice(0, 60) + "…" : ln}`;
+    if (R) {
+      const names = [...new Set([
+        ...h.p.out.filter(l => on[l.k] && l.al === h.line).map(l => pages[l.b].path),
+        ...h.p.inc.filter(l => on[l.k] && l.bl === h.line && l.bl > 1).map(l => pages[l.a].path)])];
+      if (!names.length) { tip.hidden = true; return; }
+      tip.textContent = names.join("  ·  ");
+    } else {
+      const ln = h.p.lines[h.line - 1].trim();
+      tip.textContent = `${h.p.path}:${h.line}  ${ln.length > 60 ? ln.slice(0, 60) + "…" : ln}`;
+    }
     tip.style.left = e.clientX + "px"; tip.style.top = e.clientY + "px"; tip.hidden = false;
   });
 });
 renderer.domElement.addEventListener("pointerleave", () => { tip.hidden = true; });
+renderer.domElement.addEventListener("contextmenu", e => e.preventDefault());
 renderer.domElement.addEventListener("wheel", e => {
-  if (!R || R.leaving) return;
-  e.preventDefault(); e.stopImmediatePropagation();
+  e.preventDefault();
   const m = e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? innerHeight : 1;
+  if (!R) {
+    tween = null;
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    fly.vel.addScaledVector(fwd, -e.deltaY * m * 0.35);
+    return;
+  }
+  if (R.leaving) return;
   let dy = e.deltaY * m, dx = e.deltaX * m;
   if (zHeld) { R.zoom = Math.max(0.5, Math.min(2.2, R.zoom * Math.exp(-dy * 0.002))); return; }
   if (e.shiftKey && !dx) { dx = dy; dy = 0; }
@@ -782,11 +842,12 @@ addEventListener("resize", () => {
 function frame(now) {
   if (tween) {
     const u = Math.min(1, (now - tween.t0) / tween.dur), e = ease(u);
-    controls.target.lerpVectors(tween.fromT, tween.toT, e);
     camera.position.lerpVectors(tween.fromP, tween.toP, e);
+    fly.yaw = tween.yaw0 + tween.dyaw * e; fly.pitch = tween.pitch0 + (tween.pitch1 - tween.pitch0) * e;
     if (u >= 1) tween = null;
   }
-  if (!R) { controls.update(); stepLOD(now); }
+  const dt = Math.min(0.05, (now - (frame.last || now)) / 1000); frame.last = now;
+  if (!R) { stepFly(dt); applyLook(); stepLOD(now); }
   else stepReading(now);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -798,7 +859,7 @@ Promise.race([
   new Promise(r => setTimeout(r, 2500)),
 ]).catch(() => {}).then(() => {
   buildPages(); buildBridges();
-  const [t, p] = overviewPose(); controls.target.copy(t); camera.position.copy(p);
+  const [t, p] = overviewPose(); camera.position.copy(p); Object.assign(fly, lookAt(t)); applyLook();
   if (/^#[\w./-]+$/.test(location.hash)) {
     const p0 = pages.find(p => p.path === location.hash.slice(1)); if (p0) go(p0, 0);
   }
