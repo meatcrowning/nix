@@ -21,7 +21,7 @@
   "resolution": {"megapixels": 1.0, "multiple": 32, "aspect": "1:1"},
   "edit": {
     "graph": "universal.json", "sampling_controls": true, "patch_controls": true,
-    "max_images": 16, "megapixels": 1.0
+    "max_images": 16, "megapixels": 1.0, "shared_image_size": true
   },
   "text_encoder": {
     "te_model": "QWEN3VL", "hidden": 4096,

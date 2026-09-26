@@ -59,9 +59,17 @@ Panel {
                 url: App.fileUrl(modelData)
                 emptyText: ""
                 winActive: root.winActive
-                // A filled reference well is not a drop target: use the add well.
-                accepts: function (u) { return false }
-                paste: function () { return false }
+                accepts: function (u) { return App.setEditImage(index, u) }
+                paste: function () { return App.pasteEditImageAt(index) }
+                property string pasteTarget: "edit:" + index
+                onHoveredChanged: {
+                    if (hovered) root.hoveredWell = pasteTarget
+                    else if (root.hoveredWell === pasteTarget) root.hoveredWell = ""
+                }
+                onPasteTargetChanged: if (hovered) root.hoveredWell = pasteTarget
+                Component.onDestruction: {
+                    if (root.hoveredWell === pasteTarget) root.hoveredWell = ""
+                }
                 clearLabel: "[ Remove ]"
                 clearAction: function () { App.removeEditImage(index) }
             }

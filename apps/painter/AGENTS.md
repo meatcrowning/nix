@@ -1075,9 +1075,12 @@ cap; never submit smoke jobs into the user's active Painter queue.
 
 `families/qwen_image21.json` uses native `TextEncodeQwenImage21` joint
 conditioning for generation and up to 16 ordered edit references. Reference 1
-sizes the edit canvas; no-scaling rounds to multiples of 32. Generation and
-editing retain the per-model sampler, scheduler, CFG, steps, negative prompt,
-and seed. The optional source-image well selects editing, as with LLaDA.
+sizes the edit canvas. The shared Reference & Output Size control sends one
+MP budget to every reference, preserving each aspect ratio; no-scaling keeps
+each original size rounded to multiples of 32. Filled reference wells replace
+their own image on drop, Paste, or hovered Ctrl+V; the compact add well appends.
+Generation and editing retain the per-model sampler, scheduler, CFG, steps,
+negative prompt, and seed. The optional source-image well selects editing, as with LLaDA.
 Both patch controls are available in generation and editing, defaulting off.
 Model sampling uses multiplier 1 and a starting rational shift of exp(0.69),
 matching the native Flux-style shift's scale. `PainterQwen21NegPip` in

@@ -14,14 +14,24 @@ import QtQuick
 // aligned by construction — see registry._build_edit and graphs/edit_flux2.json.
 Panel {
     id: panel
-    title: "Output Size"
+    title: App.editSharedImageSize ? "Reference & Output Size" : "Output Size"
     badge: root.gen.editNoScale ? "original size"
                                 : ((+root.gen.editMegapixels).toFixed(1) + "MP")
 
     Toggle {
-        label: "No Scaling (Keep the Original Size)"
+        label: App.editSharedImageSize ? "Keep Original Image Sizes" : "No Scaling (Keep the Original Size)"
         checked: root.gen.editNoScale
         onToggled: function (v) { root.set("editNoScale", v) }
+    }
+
+    PixelText {
+        visible: App.editSharedImageSize
+        width: parent.width
+        wrapMode: Text.Wrap
+        color: Theme.textDim
+        text: root.gen.editNoScale
+              ? "References keep their own sizes. The first sets the output size."
+              : "Each reference uses this MP budget, keeping its aspect. The first sets the output size."
     }
 
     // Only offered when scaling is on — a disabled field that does nothing would
@@ -30,7 +40,9 @@ Panel {
     Field {
         label: "MP"
         visible: !root.gen.editNoScale
-        hint: "Target megapixels. The dropped image is scaled to this many pixels, keeping its aspect."
+        hint: App.editSharedImageSize
+              ? "Megapixels per reference and for the output. Dimensions round to multiples of 32."
+              : "Target megapixels. The dropped image is scaled to this many pixels, keeping its aspect."
         Spin {
             width: 60
             value: root.gen.editMegapixels; from: 0.1; to: 8; step: 0.1; decimals: 1
