@@ -31,6 +31,9 @@ NON_MOVING_WAVES=frozenset({
     'Melt_O_Rama', 'Parkening_Power',
 })
 
+# Keep these basic line displays out of both manual selection and rotation.
+DISABLED_WAVES=NON_MOVING_WAVES | {'Example_Spectrum', 'Simple_Horizontal'}
+
 
 def prepare():
     archive=Path(os.environ['GF_ENGINE_ARCHIVE'])
@@ -69,7 +72,7 @@ def prepare():
                     dest=data/('GForce'+kind);dest.mkdir()
                     for preset in (src/('GForce'+kind)).iterdir():
                         if kind=='ColorMaps' and preset.name in LOW_COLOR_MAPS:continue
-                        if kind=='WaveShapes' and preset.name in NON_MOVING_WAVES:continue
+                        if kind=='WaveShapes' and preset.name in DISABLED_WAVES:continue
                         if preset.is_file() and preset.name!='Makefile.am':shutil.copy2(preset,dest/preset.name)
                 include=build/'include/libvisual';include.mkdir(parents=True)
                 shutil.copy2(ROOT/'libvisual.h',include/'libvisual.h')
