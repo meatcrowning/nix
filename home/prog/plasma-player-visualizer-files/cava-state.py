@@ -59,7 +59,7 @@ def player_owns_visualizer(runtime_dir: str) -> bool:
         with open(os.path.join(runtime_dir, "player-view.json"),
                   encoding="utf-8") as f:
             state = json.load(f)
-        return (state.get("view") == "now"
+        return (state.get("view") in ("now", "visualizer")
                 and time.time() - float(state.get("updated", 0)) < 3)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False

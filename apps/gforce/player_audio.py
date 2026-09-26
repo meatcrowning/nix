@@ -52,6 +52,8 @@ class PlayerAudio:
         self.lock = threading.Lock()
         self.audio = AudioWindow()
         self.last_audio = 0.
+        self.linked = None
+        self.router = None
         self.status = 'waiting for Player audio'
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
@@ -62,7 +64,43 @@ class PlayerAudio:
 
     def close(self):
         self.stop_event.set()
-        self.thread.join(timeout=3)
+        self.thread.join(timeout=6)
+        if self.router is not None:
+            self.router.join(timeout=6)
+
+    def route(self):
+        # Graph inspection can block for seconds. Never put it on the PCM
+        # reader: doing so starves the renderer at each polling interval.
+        while not self.stop_event.is_set():
+            try:
+                graph = json.loads(subprocess.check_output(['pw-dump'], timeout=2))
+                if self.stop_event.is_set():
+                    return
+                identity, pairs = tap_ports(graph, self.name, self.recorder_name)
+                nodes = {o['id']:props(o).get('node.name') for o in graph if o['type'].endswith(':Node')}
+                ports = {o['id']:str(nodes.get(int(props(o).get('node.id',-1))))+':'+str(props(o).get('port.name'))
+                         for o in graph if o['type'].endswith(':Port')}
+                present = {(ports.get(o['info'].get('output-port-id')), ports.get(o['info'].get('input-port-id')))
+                           for o in graph if o['type'].endswith(':Link')}
+                for output, input_ in pairs:
+                    if self.stop_event.is_set():
+                        return
+                    if (output, input_) not in present:
+                        subprocess.run(['pw-link', '-L', '-p', '{"link.passive":true}',
+                                        output, input_], check=True,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=2)
+                with self.lock:
+                    if identity != self.linked:
+                        self.audio = AudioWindow()
+                        self.last_audio = 0.
+                    self.linked = identity
+                self.status = '' if pairs else 'waiting for Player audio'
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                with self.lock:
+                    self.linked = None
+                    self.last_audio = 0.
+                self.status = f'Player audio unavailable: {exc}'
+            self.stop_event.wait(1.)
 
     def run(self):
         capture = None
@@ -75,30 +113,10 @@ class PlayerAudio:
                     'node.dont-fallback': True, 'node.passive': True}), '-'],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             os.set_blocking(capture.stdout.fileno(), False)
-            linked, pending, next_graph = None, bytearray(), 0.
+            pending = bytearray()
+            self.router = threading.Thread(target=self.route, daemon=True)
+            self.router.start()
             while not self.stop_event.is_set() and capture.poll() is None:
-                now = time.monotonic()
-                if now >= next_graph:
-                    graph = json.loads(subprocess.check_output(['pw-dump'], timeout=2))
-                    identity, pairs = tap_ports(graph, self.name, self.recorder_name)
-                    nodes = {o['id']:props(o).get('node.name') for o in graph if o['type'].endswith(':Node')}
-                    ports = {o['id']:str(nodes.get(int(props(o).get('node.id',-1))))+':'+str(props(o).get('port.name'))
-                             for o in graph if o['type'].endswith(':Port')}
-                    present = {(ports.get(o['info'].get('output-port-id')), ports.get(o['info'].get('input-port-id')))
-                               for o in graph if o['type'].endswith(':Link')}
-                    if identity != linked:
-                        with self.lock:
-                            self.audio = AudioWindow()
-                            self.last_audio = 0.
-                        pending.clear()
-                    for output, input_ in pairs:
-                        if (output, input_) not in present:
-                            subprocess.run(['pw-link', '-L', '-p', '{"link.passive":true}',
-                                            output, input_], check=True,
-                                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=2)
-                    linked = identity
-                    self.status = '' if pairs else 'waiting for Player audio'
-                    next_graph = now+1.
                 if not select.select([capture.stdout], [], [], .05)[0]:
                     continue
                 chunk = os.read(capture.stdout.fileno(), 65536)
@@ -108,16 +126,19 @@ class PlayerAudio:
                 count = len(pending)//8*8
                 stereo = array('f', pending[:count])
                 del pending[:count]
-                if linked and stereo:
+                if stereo:
                     mono = array('f', ((stereo[i]+stereo[i+1])*.5 for i in range(0,len(stereo),2)))
                     with self.lock:
-                        self.audio.feed(mono.tobytes(), now)
-                        self.last_audio = now
+                        if self.linked is not None:
+                            now = time.monotonic()
+                            self.audio.feed(mono.tobytes(), now)
+                            self.last_audio = now
             if not self.stop_event.is_set():
                 self.status = 'Player audio capture stopped; reopen Visualizer to retry'
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             self.status = f'Player audio unavailable: {exc}'
         finally:
+            self.stop_event.set()
             if capture:
                 if capture.poll() is None:
                     capture.terminate()

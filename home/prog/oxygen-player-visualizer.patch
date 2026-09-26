@@ -50,7 +50,7 @@
 +        QFile viewState(QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) + QStringLiteral("/player-view.json"));
 +        if (viewState.open(QIODevice::ReadOnly)) {
 +            const auto view = QJsonDocument::fromJson(viewState.readAll()).object();
-+            playerOwnsVisualizer = view.value(QStringLiteral("view")).toString() == QStringLiteral("now")
++            playerOwnsVisualizer = (view.value(QStringLiteral("view")).toString() == QStringLiteral("now") || view.value(QStringLiteral("view")).toString() == QStringLiteral("visualizer"))
 +                && QDateTime::currentSecsSinceEpoch() - qint64(view.value(QStringLiteral("updated")).toDouble()) < 3;
 +        }
 +    }

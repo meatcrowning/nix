@@ -44,7 +44,7 @@ PlasmoidItem {
         onNewData: (source, data) => {
             try {
                 const parsed = JSON.parse(data.stdout || "{}");
-                root.playerOwnsVisualizer = parsed.view === "now"
+                root.playerOwnsVisualizer = (parsed.view === "now" || parsed.view === "visualizer")
                     && Date.now() / 1000 - Number(parsed.updated || 0) < 3;
             } catch (_) {
                 root.playerOwnsVisualizer = false;

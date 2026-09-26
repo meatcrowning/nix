@@ -3,6 +3,7 @@
 import importlib.util
 import os
 import json
+import struct
 from pathlib import Path
 import sys
 
@@ -63,6 +64,17 @@ for plasma in (False,True):
         assert surface.height()>0 and info.width()>0
         assert info.x()>=queue.width()
         assert page.findChild(QObject,'visualizerInfoPane') is not None
+        scroll=page.findChild(QObject,'visualizerInformationScroll')
+        assert scroll.property('contentHeight') >= scroll.height()
+        if height == 320:
+            assert scroll.property('contentHeight') > scroll.height()
+            scroll.setProperty('contentY',40.)
+            assert scroll.property('contentY') == 40.
+            scroll.setProperty('contentY',0.)
+        stars=page.findChild(QObject,'visualizerStars')
+        heart=page.findChild(QObject,'visualizerFavorite')
+        assert abs(stars.y()+stars.height()/2-heart.y()-heart.height()/2)<.5
+        assert stars.x()+stars.width() <= heart.x()
         before=surface.width();page.setProperty('sidebar',False);QTest.qWait(10)
         assert surface.width()>before
         page.setProperty('sidebar',True)
@@ -97,6 +109,25 @@ assert visual.process is not None
 visual.shutdown()
 assert visual.process is None
 print('PASS frames, state, hide, minimize, resume, shutdown release worker')
+probe=visualizer.Visualizer('isolated-statistics')
+class Snapshot:
+    def readAllStandardOutput(self):
+        data=json.dumps(self.state).encode()
+        return b'J'+struct.pack('!I',len(data))+data
+snapshot=Snapshot();probe.process=snapshot
+changes=[];statistics=[]
+probe.changed.connect(lambda:changes.append(True))
+probe.statisticsChanged.connect(lambda:statistics.append(True))
+snapshot.state={**probe.state,'actualFps':60,'renderWidth':640,'renderHeight':360}
+probe.read_output(snapshot)
+snapshot.state['actualFps']=59
+probe.read_output(snapshot)
+assert len(statistics)==2 and not changes,'statistics refreshed all controls'
+snapshot.state['paused']=True
+probe.read_output(snapshot)
+assert len(changes)==1
+probe.process=None
+print('PASS statistics do not invalidate unchanged controls')
 # Destroy QML before its context objects.
 for obj in reversed(keep):
     if isinstance(obj,QQmlApplicationEngine): obj.deleteLater()
@@ -137,3 +168,18 @@ with tempfile.TemporaryDirectory(prefix='visualizer-root-') as tmp:
             assert 'Pause or Resume Changes  Shift+Space' in result.stdout
             assert 'Play  Space' in result.stdout
         print('PASS full Player view and keyboard ownership',session)
+
+
+# Titlebar ownership uses only a fresh Player lease, in either visualizer view.
+import runpy
+import time
+cava=runpy.run_path(str(HERE.parents[2]/'home/prog/plasma-player-visualizer-files/cava-state.py'))
+with tempfile.TemporaryDirectory(prefix='visualizer-lease-') as tmp:
+    lease=Path(tmp)/'player-view.json'
+    for view,age,expected in [('now',0,True),('visualizer',0,True),
+                              ('albums',0,False),('visualizer',5,False)]:
+        lease.write_text(json.dumps({'view':view,'updated':time.time()-age}))
+        assert cava['player_owns_visualizer'](tmp)==expected
+    lease.write_text('{')
+    assert not cava['player_owns_visualizer'](tmp)
+print('PASS titlebar Cava suppression and expired lease fallback')

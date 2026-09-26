@@ -28,8 +28,8 @@ Item {
             PixelText {
                 width: parent.width
                 color: Theme.textDim
-                text: Number(root.settingsState.actualFps || 0).toFixed(1)+" fps · "
-                      +(root.settingsState.renderWidth || 0)+" × "+(root.settingsState.renderHeight || 0)
+                text: Number(Visualizer.statistics.actualFps || 0).toFixed(1)+" fps · "
+                      +(Visualizer.statistics.renderWidth || 0)+" × "+(Visualizer.statistics.renderHeight || 0)
             }
             Flow {
                 width: parent.width; spacing: 4

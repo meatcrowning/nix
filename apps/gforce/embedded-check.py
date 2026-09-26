@@ -97,6 +97,19 @@ worker.main()
             command({'op':'ack'})
             while message()[0]!=b'F':pass
             print('PASS framed process output, resize and bounded one-frame backpressure')
+            command({'op':'dial','name':'fps','value':15})
+            command({'op':'ack'})
+            while message()[0]!=b'F':pass
+            latencies=[]
+            for _ in range(6):
+                # ACK after the next deadline, but before the one after it.
+                time.sleep(.085)
+                started=time.monotonic()
+                command({'op':'ack'})
+                while message()[0]!=b'F':pass
+                latencies.append(time.monotonic()-started)
+            assert sum(latencies)/len(latencies)<.025, latencies
+            print('PASS late ACK renders promptly:',round(sum(latencies)*1000/len(latencies),1),'ms average')
         finally:
             os.killpg(proc.pid,signal.SIGTERM)
             try:proc.wait(timeout=5)
