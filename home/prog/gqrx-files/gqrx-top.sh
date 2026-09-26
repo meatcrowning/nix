@@ -26,8 +26,10 @@ if [ "${1:-}" = --sync ] || [ ! -e "$CONF/default.conf" ]; then
     done
 fi
 
-# gqrx has no device flag; point the saved config at the forward.
-sed -i "s|^device=.*|device=\"$DEVICE\"|" "$CONF/default.conf"
+# gqrx has no device flag; point the saved config at the forward. A dropped
+# link kills gqrx uncleanly, which sets crashed=true and turns the next
+# launch into a "Crash Detected" prompt; clear it.
+sed -i -e "s|^device=.*|device=\"$DEVICE\"|" -e "s|^crashed=true|crashed=false|" "$CONF/default.conf"
 
 # Without a tty, killing this ssh does not signal the remote side, so rtl_tcp
 # would outlive the session and hold the dongle. The remote shell instead
