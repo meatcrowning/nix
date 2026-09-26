@@ -28,7 +28,8 @@
         "CM_SYNC_REMOTE=${privateConfig.repositories.xanadu or ""}"
         "CM_SYNC_LOG=%h/.cache/xanadu-sync.log"
         "CM_SYNC_SEED=%h/.config/scripts/xanadu-seed-none"
-        "CM_SYNC_PATHS=*.xu README.md times"
+        # quoted: systemd splits an unquoted Environment= value on spaces
+        "\"CM_SYNC_PATHS=*.xu README.md times\""
         "CM_SYNC_LABEL=document"
         "CM_SYNC_MAX_MB=25"
       ];
