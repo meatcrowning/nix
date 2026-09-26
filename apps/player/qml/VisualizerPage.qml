@@ -53,6 +53,9 @@ Item {
             objectName: "visualizerSurface"
             source: Visualizer
             HoverHandler { id: surfaceHover }
+            contrastRect: surfaceHover.hovered
+                ? Qt.rect(sidebarButton.x, sidebarButton.y, sidebarButton.width, sidebarButton.height)
+                : Qt.rect(0, 0, 0, 0)
             width: Math.max(1, parent.width-(root.sidebar ? controls.width+6 : 0))
             height: parent.height
             function resize() { Visualizer.setSize(Math.round(width), Math.round(height)); }
@@ -70,7 +73,7 @@ Item {
             width: Math.max(0, Math.min(380, parent.width-16))
             height: Math.max(64, noticeText.height)
             visible: opacity > 0 && root.bottomCollapsed && root.cur.id !== undefined
-            opacity: trackNoticeTimer.running ? 1 : 0
+            opacity: trackNoticeTimer.running || surfaceHover.hovered ? 1 : 0
             clip: true
             Behavior on opacity { NumberAnimation {
                 // Track announcements deliberately fade more gently than controls.
@@ -106,19 +109,33 @@ Item {
                 }
             }
         }
-        HeaderButton {
+        Item {
             id: sidebarButton
             objectName: "visualizerSidebarButton"
             parent: surface
-            visible: surfaceHover.hovered
-            anchors {
-                right: parent.right
-                bottom: parent.bottom
-                margins: 6
+            visible: opacity > 0
+            opacity: surfaceHover.hovered ? 1 : 0
+            width: sidebarText.implicitWidth+8
+            height: sidebarText.implicitHeight+8
+            anchors { right: parent.right; bottom: parent.bottom; margins: 6 }
+            Behavior on opacity { NumberAnimation {
+                duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing
+            } }
+            PixelText {
+                id: sidebarText
+                objectName: "visualizerSidebarText"
+                anchors.centerIn: parent
+                text: root.sidebar ? "hide controls (Tab)" : "show controls (Tab)"
+                color: surface.backgroundLight ? "black" : "white"
+                style: Text.Outline
+                styleColor: surface.backgroundLight ? "white" : "black"
             }
-            label: root.sidebar ? "hide controls (Tab)" : "show controls (Tab)"
-            iconName: "sidebar-show"
-            onClicked: root.toggleSidebar()
+            MouseArea {
+                anchors.fill: parent
+                enabled: surfaceHover.hovered
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleSidebar()
+            }
         }
         HeaderButton {
             anchors { left: parent.left; top: parent.top; margins: 6 }
