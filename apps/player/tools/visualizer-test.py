@@ -69,6 +69,7 @@ for plasma in (False,True):
         assert info.width()+7+queue.width()==page.width()
         assert queue.height()>0
         for name,cursor in (('visualizerInfoDivider',Qt.SplitHCursor),
+                            ('visualizerControlsDivider',Qt.SplitHCursor),
                             ('visualizerTopDivider',Qt.SplitVCursor)):
             divider=page.findChild(QObject,name)
             assert divider.property('cursorShape')==cursor
@@ -191,6 +192,7 @@ def check_layout(app,shell,win,*args):
     root=shell.root if shell is not None else win.property('contentItem').childItems()[0]
     root.setProperty('browserView','albums')
     root.setProperty('visualAlbumFrac',.5)
+    root.setProperty('visualSidebar',True)
     QTest.qWait(100)
     root.findChild(QObject,'visualizerSurface').parentItem().parentItem().setProperty('bottomCollapsed',False)
     QTest.qWait(20)
@@ -209,6 +211,20 @@ def check_layout(app,shell,win,*args):
     target=shell.view if shell is not None else win
     target.show()
     QTest.qWait(50)
+    controls=root.findChild(QObject,'visualizerControls')
+    handle=root.findChild(QObject,'visualizerControlsDivider')
+    assert abs(handle.x()-surface.width())<1 and abs(controls.x()-handle.x()-handle.width())<1
+    controls.parentItem().parentItem().setProperty('controlsWidth',220)
+    QTest.qWait(20)
+    previous_width=controls.width()
+    handle_point=handle.mapToScene(QPointF(handle.width()/2,handle.height()/2)).toPoint()
+    QTest.mousePress(target,Qt.LeftButton,Qt.NoModifier,handle_point)
+    QTest.mouseMove(target,handle_point-QPoint(40,0),30)
+    QTest.mouseRelease(target,Qt.LeftButton,Qt.NoModifier,handle_point-QPoint(40,0))
+    QTest.qWait(30)
+    assert controls.width()>previous_width+20, (previous_width,controls.width())
+    prefs=qmlEngine(root).rootContext().contextProperty('Prefs')
+    assert abs(float(prefs.get('visualizerControlsWidth',0))-controls.width())<1
     visual=qmlEngine(root).rootContext().contextProperty('Visualizer')
     commands=[]
     visual.command=lambda message: commands.append(message)

@@ -308,7 +308,8 @@ Item {
             // speed of a window rolling out beside it.
             Behavior on panelH { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
 
-            width: list.width
+            // The expanded album panel shares the covers' scrollbar gutter.
+            width: root.gridW
             height: root.cellW + panelH
             clip: true
 

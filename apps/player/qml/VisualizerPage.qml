@@ -10,6 +10,7 @@ Item {
     signal toggleSidebar()
     property bool plasma: false
     property bool sidebar: true
+    property real controlsWidth: Number(Prefs.get("visualizerControlsWidth", 300)) || 300
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
     property color fgAccent: Theme.accent
@@ -57,7 +58,7 @@ Item {
             contrastRect: surfaceHover.hovered
                 ? Qt.rect(sidebarButton.x, sidebarButton.y, sidebarButton.width, sidebarButton.height)
                 : Qt.rect(0, 0, 0, 0)
-            width: Math.max(1, parent.width-(root.sidebar ? controls.width+6 : 0))
+            width: Math.max(1, parent.width-(root.sidebar ? controls.width+7 : 0))
             height: parent.height
             function resize() { Visualizer.setSize(Math.round(width), Math.round(height)); }
             onWidthChanged: resize()
@@ -154,11 +155,31 @@ Item {
             wrapMode: Text.Wrap
             visible: text !== ""
         }
+        MouseArea {
+            id: controlsDivider
+            objectName: "visualizerControlsDivider"
+            visible: root.sidebar
+            x: surface.width; width: 7; height: parent.height
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.SplitHCursor
+            onPositionChanged: mouse => {
+                if (pressed)
+                    root.controlsWidth = Math.max(140, Math.min(upper.width*.7,
+                        upper.width-mapToItem(upper,mouse.x,0).x-width/2));
+            }
+            onReleased: Prefs.set("visualizerControlsWidth",root.controlsWidth)
+            Rectangle {
+                anchors.centerIn: parent
+                width: 1; height: parent.height
+                color: controlsDivider.containsMouse || controlsDivider.pressed ? root.fgAccent : Theme.border
+            }
+        }
         VisualizerControls {
             id: controls
             objectName: "visualizerControls"
             anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
-            width: Math.min(300, parent.width*.42)
+            width: Math.max(0, Math.min(root.controlsWidth, parent.width*.7))
             visible: root.sidebar
         }
     }
