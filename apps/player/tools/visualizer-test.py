@@ -12,7 +12,7 @@ assert not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY')
 HERE=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('fixture',HERE/'now-allinone-test.py')
 f=importlib.util.module_from_spec(spec); spec.loader.exec_module(f)
-from PySide6.QtCore import QObject, QUrl, qInstallMessageHandler
+from PySide6.QtCore import QObject, QUrl, Qt, qInstallMessageHandler
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlFileSelector
 from PySide6.QtQuick import QQuickWindow
@@ -65,6 +65,10 @@ for plasma in (False,True):
         assert queue.y()>=info.y()+info.height()+7
         assert queue.width()==info.width()==page.width()
         assert queue.height()>0
+        for name in ('visualizerInfoDivider','visualizerTopDivider'):
+            divider=page.findChild(QObject,name)
+            assert divider.property('cursorShape')==Qt.SplitVCursor
+            assert divider.property('hoverEnabled') and divider.height()>=7
         assert info.parentItem().y()>=surface.height()+7
         assert page.findChild(QObject,'visualizerInfoPane') is None
         assert page.findChild(QObject,'visualizerInformationScroll') is None
@@ -166,13 +170,14 @@ with tempfile.TemporaryDirectory(prefix='visualizer-root-') as tmp:
 import sys
 sys.path.insert(0,{str(HERE.parent)!r})
 import main
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
 main.AutoScanner=lambda *args:None
 original=main._selftest
 def check_layout(app,shell,win,*args):
     root=shell.root if shell is not None else win.property('contentItem').childItems()[0]
     root.setProperty('view','visualizer')
+    root.setProperty('visualAlbumFrac',.5)
     QTest.qWait(100)
     grid=root.findChild(QObject,'albumGrid')
     surface=root.findChild(QObject,'visualizerSurface')
@@ -180,7 +185,33 @@ def check_layout(app,shell,win,*args):
     gallery=grid.parentItem()
     right=surface.parentItem().parentItem().parentItem()
     assert abs(gallery.width()-right.width())<=1
-    assert gallery.x()==0 and right.x()==gallery.width()
+    divider=root.findChild(QObject,'visualizerAlbumDivider')
+    assert divider.isVisible() and divider.width()>=9
+    assert divider.property('cursorShape')==Qt.SplitHCursor
+    assert divider.property('hoverEnabled')
+    assert gallery.x()==0 and right.x()==gallery.width()+divider.width()
+    assert divider.x()==gallery.width()
+    target=shell.view if shell is not None else win
+    target.show()
+    QTest.qWait(50)
+    for name, owner, prop, delta in (
+        ('visualizerAlbumDivider',root,'visualAlbumFrac',QPoint(30,0)),
+        ('visualizerTopDivider',surface.parentItem().parentItem(),'topFrac',QPoint(0,-20)),
+        ('visualizerInfoDivider',surface.parentItem().parentItem(),'infoFrac',QPoint(0,20))):
+        handle=root.findChild(QObject,name)
+        point=handle.mapToScene(QPointF(handle.width()/2,handle.height()/2)).toPoint()
+        before=owner.property(prop)
+        QTest.mouseMove(target,point)
+        QTest.mousePress(target,Qt.LeftButton,Qt.NoModifier,point)
+        QTest.mouseMove(target,point+delta,20)
+        QTest.mouseRelease(target,Qt.LeftButton,Qt.NoModifier,point+delta)
+        QTest.qWait(20)
+        assert abs(owner.property(prop)-before)>.001, name+' did not drag'
+    root.setProperty('visualAlbumFrac',.65)
+    QTest.qWait(50)
+    assert gallery.width()>right.width()
+    assert right.x()==gallery.width()+divider.width()
+    assert gallery.width()+divider.width()+right.width()==gallery.parentItem().width()
     assert gallery.height()==right.height()
     root.openAlbum(0)
     assert root.property('view')=='visualizer'
@@ -190,7 +221,7 @@ def check_layout(app,shell,win,*args):
     root.setProperty('view','visualizer')
     QTest.qWait(50)
     assert root.findChild(QObject,'albumGrid')==grid
-    assert grid.width()==int(gallery.parentItem().width()/2)
+    assert abs(grid.width()-(gallery.parentItem().width()-divider.width())*.65)<=1
     return original(app,shell,win,*args)
 main._selftest=check_layout
 main.main()
