@@ -49,7 +49,7 @@ Item {
     // visited it stays resident, so changing pages still preserves browsing
     // position and the open inline album section for this session.
     property bool albumsLoaded: false
-    onViewChanged: if (view === "albums") albumsLoaded = true
+    onViewChanged: if (view === "albums" || view === "visualizer") albumsLoaded = true
     // The album whose inline section is open in the gallery (0 = none).
     property int openAlbumId: 0
     property bool searching: false          // full results overlay
@@ -175,16 +175,16 @@ Item {
     }
 
     // Open (or, with 0, close) an album's inline section in the gallery. Always
-    // lands on the gallery, so it works from now-playing too.
+    // uses the visible gallery, including the visualizer’s left column.
     function openAlbum(albumId) {
-        _navigate({ view: "albums", albumId: albumId });
+        _navigate({ view: view === "visualizer" ? "visualizer" : "albums", albumId: albumId });
     }
 
     // "show me this artist": land on the gallery with the search bar open and
     // carrying their name — the same state typing it would produce, so the
     // grid is filtered to that artist's albums and Escape clears it as usual.
     function browseArtist(artist) {
-        if (view !== "albums")
+        if (view !== "albums" && view !== "visualizer")
             setView("albums");
         searching = false;          // results overlay off: this filters the grid
         openSearch();
@@ -246,7 +246,7 @@ Item {
     }
 
     Component.onCompleted: {
-        albumsLoaded = view === "albums";
+        albumsLoaded = view === "albums" || view === "visualizer";
         Library.setSort(sortMode);
         Library.setSortDescending(sortDescending);
         // opt in to the footer sitting below the scrub track (hyprvtb >= 2.72);
@@ -474,13 +474,14 @@ Item {
                   right: parent.right; bottom: parent.bottom }
 
         Loader {
-            anchors.fill: parent
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+            width: win.view === "visualizer" ? Math.floor(parent.width / 2) : parent.width
             active: win.albumsLoaded
             sourceComponent: Component {
                 AlbumGrid {
                     objectName: "albumGrid"
                     anchors.fill: parent
-                    visible: win.view === "albums"
+                    visible: win.view === "albums" || win.view === "visualizer"
                     filtered: searchInput.text !== ""
                     expandedAlbumId: win.openAlbumId
                     cols: win.albumCols
@@ -513,7 +514,8 @@ Item {
         }
         Loader {
             id: visualPage
-            anchors.fill: parent
+            anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
+            width: parent.width - Math.floor(parent.width / 2)
             active: win.view === "visualizer" && typeof Visualizer !== "undefined"
             source: active ? "VisualizerPage.qml" : ""
             onLoaded: {

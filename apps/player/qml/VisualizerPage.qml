@@ -14,10 +14,11 @@ Item {
     property color fgAccent: Theme.accent
     property real fgArt: 1
     readonly property var cur: Player.current || ({})
-    property real topFrac: Number(Prefs.get("visualizerTopFrac", .65)) || .65
-    property real queueFrac: Number(Prefs.get("visualizerQueueFrac", .44)) || .44
-    readonly property real topH: Math.max(80, Math.min(height-120, height*topFrac))
-    readonly property real queueW: Math.max(120, Math.min(width-240, width*queueFrac))
+    property real topFrac: Number(Prefs.get("visualizerStackTopFrac", .5)) || .5
+    property real infoFrac: Number(Prefs.get("visualizerInfoFrac", .5)) || .5
+    readonly property real topH: Math.max(0, Math.min(Math.max(0, height-207), Math.max(80, height*topFrac)))
+    readonly property real infoH: Math.max(0, Math.min(Math.max(0, bottom.height-67),
+                                                       Math.max(120, bottom.height*infoFrac)))
 
     Item {
         id: upper
@@ -69,7 +70,7 @@ Item {
         Item {
             id: queue
             objectName: "visualizerQueue"
-            width: root.queueW; height: parent.height
+            y: root.infoH+7; width: parent.width; height: Math.max(0,parent.height-y)
             PixelText { id: queueHead; x: 8; y: 4
                 text: "queue  ("+Player.queueLength+")"; color: root.fgDim }
             TrackList {
@@ -88,7 +89,7 @@ Item {
             id: information
             clip: true
             objectName: "visualizerInformation"
-            x: root.queueW+7; width: Math.max(0,parent.width-x); height: parent.height
+            width: parent.width; height: root.infoH
             Image {
                 id: art
                 objectName: "visualizerArt"
@@ -150,13 +151,13 @@ Item {
             }
         }
         MouseArea {
-            x: root.queueW; width: 7; height: parent.height
-            cursorShape: Qt.SplitHCursor
+            y: root.infoH; width: parent.width; height: 7
+            cursorShape: Qt.SplitVCursor
             onPositionChanged: mouse => {
-                if (pressed && bottom.width>0)
-                    root.queueFrac=Math.max(.2,Math.min(.7,mapToItem(bottom,mouse.x,0).x/bottom.width));
+                if (pressed && bottom.height>0)
+                    root.infoFrac=Math.max(.2,Math.min(.8,mapToItem(bottom,0,mouse.y).y/bottom.height));
             }
-            onReleased: Prefs.set("visualizerQueueFrac",root.queueFrac)
+            onReleased: Prefs.set("visualizerInfoFrac",root.infoFrac)
         }
     }
     MouseArea {
@@ -166,6 +167,6 @@ Item {
             if (pressed && root.height>0)
                 root.topFrac=Math.max(.2,Math.min(.85,mapToItem(root,0,mouse.y).y/root.height));
         }
-        onReleased: Prefs.set("visualizerTopFrac",root.topFrac)
+        onReleased: Prefs.set("visualizerStackTopFrac",root.topFrac)
     }
 }
