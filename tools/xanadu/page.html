@@ -1,0 +1,547 @@
+<title>Xanadu ~/nix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --void: #060a13;
+    --void-2: #0d1526;
+    --paper: #dfe6ee;
+    --ink: #d6deea;
+    --ink-dim: #7d8aa3;
+    --line: #1c2740;
+    --panel: rgba(9, 14, 26, 0.86);
+    --path: #f5a524;
+    --option: #5fe3b0;
+    --unit: #8ea2ff;
+    --file: #ff6fae;
+    --overlay: #c38bff;
+    --top: #4fb3ff;
+    --air: #ffcf5c;
+    --ui: "Chivo", "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 30%, var(--void-2), var(--void) 70%);
+    color: var(--ink); font: 13px/1.45 var(--ui);
+  }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+
+  .hud {
+    position: fixed; left: 16px; top: calc(16px + env(safe-area-inset-top, 0px));
+    width: min(300px, calc(100vw - 32px));
+    display: grid; gap: 12px; padding: 14px 16px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    backdrop-filter: blur(6px);
+  }
+  .hud h1 {
+    margin: 0; font: 800 20px/1.1 var(--ui); letter-spacing: 0.01em;
+  }
+  .hud h1 span { font: 400 13px var(--mono); color: var(--ink-dim); margin-left: 6px; }
+  .hud .meta { color: var(--ink-dim); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+  .kinds { display: grid; gap: 4px; }
+  .kind {
+    display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center;
+    padding: 3px 6px; margin: 0 -6px; border-radius: 4px; cursor: pointer; user-select: none;
+  }
+  .kind:hover { background: rgba(255, 255, 255, 0.05); }
+  .kind input { position: absolute; opacity: 0; pointer-events: none; }
+  .kind .sw { width: 14px; height: 6px; border-radius: 2px; background: var(--c); box-shadow: 0 0 8px var(--c); }
+  .kind:has(input:not(:checked)) { opacity: 0.4; }
+  .kind:has(input:not(:checked)) .sw { box-shadow: none; }
+  .kind:has(input:focus-visible) { outline: 1px solid var(--ink-dim); }
+  .kind b { font-weight: 600; }
+  .kind small { color: var(--ink-dim); font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+  .hosts { display: flex; gap: 14px; color: var(--ink-dim); font-size: 12px; }
+  .hosts i { display: inline-block; width: 4px; height: 12px; vertical-align: -2px; margin-right: 6px; background: var(--c); }
+  .find { display: flex; gap: 6px; }
+  .find input {
+    flex: 1; min-width: 0; padding: 6px 8px; border-radius: 4px;
+    border: 1px solid var(--line); background: rgba(0, 0, 0, 0.35); color: var(--ink);
+    font: 12px var(--mono);
+  }
+  .find input:focus { outline: none; border-color: var(--ink-dim); }
+  button {
+    font: 600 12px var(--ui); color: var(--ink); background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; cursor: pointer;
+  }
+  button:hover { background: rgba(255, 255, 255, 0.12); }
+  button:focus-visible { outline: 1px solid var(--ink-dim); }
+  .help { color: var(--ink-dim); font-size: 11.5px; line-height: 1.5; }
+  .help kbd { font: 11px var(--mono); color: var(--ink); }
+
+  #tip {
+    position: fixed; pointer-events: none; padding: 3px 7px; border-radius: 3px;
+    background: rgba(4, 7, 14, 0.92); border: 1px solid var(--line);
+    font: 11.5px var(--mono); color: var(--ink); white-space: nowrap; transform: translate(12px, 12px);
+  }
+
+  #pane {
+    position: fixed; right: 0; top: 0; bottom: 0; width: min(560px, 44vw);
+    display: grid; grid-template-rows: auto auto 1fr;
+    background: var(--panel); border-left: 1px solid var(--line); backdrop-filter: blur(8px);
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  #pane header {
+    display: flex; align-items: baseline; gap: 10px; padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  #pane header h2 { margin: 0; flex: 1; min-width: 0; font: 600 14px var(--mono); overflow-wrap: anywhere; }
+  #pane header h2 span { color: var(--ink-dim); font-weight: 400; }
+  #named { padding: 8px 16px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #named:empty { display: none; }
+  #named .lbl { color: var(--ink-dim); font-size: 11.5px; margin-right: 2px; }
+  #code { overflow: auto; font: 12px/1.55 var(--mono); padding: 8px 0 32px; }
+  .ln { display: grid; grid-template-columns: 44px 1fr; padding-right: 12px; border-left: 3px solid transparent; }
+  .ln .no { color: #4a5670; text-align: right; padding-right: 12px; user-select: none; font-variant-numeric: tabular-nums; }
+  .ln .tx { white-space: pre-wrap; overflow-wrap: anywhere; color: #c9d3e2; }
+  .ln.host-top { border-left-color: var(--top); }
+  .ln.host-air { border-left-color: var(--air); }
+  .ln.linked { background: color-mix(in srgb, var(--c) 13%, transparent); }
+  .ln.flash { animation: flash 1.4s ease-out; }
+  @keyframes flash { from { background: color-mix(in srgb, var(--c, #fff) 45%, transparent); } }
+  .chips { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0 4px; }
+  .chip {
+    font: 11px var(--mono); padding: 1px 7px; border-radius: 10px; cursor: pointer;
+    color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
+    background: color-mix(in srgb, var(--c) 10%, transparent);
+  }
+  .chip:hover { background: color-mix(in srgb, var(--c) 25%, transparent); }
+  .tk-c { color: #7f9a86; }
+  .tk-s { color: #e2a86b; }
+  .tk-k { color: #93b4ff; }
+  .tk-h { color: #f0f4fa; font-weight: 600; }
+
+  @media (max-width: 760px) {
+    #pane { top: auto; width: 100%; height: 52%; border-left: 0; border-top: 1px solid var(--line); padding-top: 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
+    .hud { gap: 8px; padding: 10px 12px; }
+    .hud .help { display: none; }
+    body.reading .hud .kinds, body.reading .hud .hosts { display: none; }
+  }
+</style>
+
+<div id="stage"></div>
+
+<section class="hud" aria-label="Controls">
+  <h1>Xanadu <span>~/nix</span></h1>
+  <div class="meta" id="meta"></div>
+  <div class="kinds" id="kinds"></div>
+  <div class="hosts">
+    <span><i style="--c: var(--top)"></i>top guard</span>
+    <span><i style="--c: var(--air)"></i>air / aarch64 guard</span>
+  </div>
+  <form class="find" id="find">
+    <input id="q" list="paths" placeholder="jump to file…" autocomplete="off" aria-label="Jump to file">
+    <datalist id="paths"></datalist>
+    <button type="button" id="home">Overview</button>
+  </form>
+  <div class="help">Drag to orbit · right-drag to pan · scroll to zoom · click a page to read it and light its bridges · <kbd>Esc</kbd> back · <kbd>/</kbd> find</div>
+</section>
+
+<aside id="pane" hidden aria-label="Page text">
+  <header><h2 id="ptitle"></h2><button type="button" id="close">Close</button></header>
+  <div id="named"></div>
+  <div id="code" tabindex="0"></div>
+</aside>
+<div id="tip" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const DATA = /*XANADU_DATA*/null;
+
+const KINDS = {
+  path:    { name: "path",    what: "names another file",       css: "--path" },
+  option:  { name: "option",  what: "declares ↔ reads option",  css: "--option" },
+  unit:    { name: "unit",    what: "systemd unit it defines",  css: "--unit" },
+  file:    { name: "file",    what: "file it deploys",          css: "--file" },
+  overlay: { name: "overlay", what: "package it overrides",     css: "--overlay" },
+};
+const css = getComputedStyle(document.documentElement);
+for (const k in KINDS) KINDS[k].color = css.getPropertyValue(KINDS[k].css).trim();
+const HOSTC = { top: css.getPropertyValue("--top").trim(), air: css.getPropertyValue("--air").trim() };
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---- geometry constants (world units) ----
+const W = 4, GAP = 1.5, LH = 0.055, PER_ROW = 16, ROW_DZ = 16, ROW_DY = 4.5;
+const PX_PER_UNIT_LINE = W / LH;           // texture width per pixel-of-line-height
+const GROUP_ORDER = ["/", "hosts/", "sys/", "lib/", "overlays/", "home/", "home/prog/", "home/srvs/", "home/pkgs/", "apps/"];
+
+const pages = DATA.pages.map((p, i) => ({ ...p, i, lines: p.text.split("\n"), out: [], inc: [] }));
+const links = DATA.links;
+links.forEach((l, i) => { l.i = i; pages[l.a].out.push(l); pages[l.b].inc.push(l); });
+
+// ---- layout: groups become rows receding in depth, stepping up like tiers ----
+const groups = [...new Set(pages.map(p => p.group))]
+  .sort((a, b) => (GROUP_ORDER.indexOf(a) + 1 || 99) - (GROUP_ORDER.indexOf(b) + 1 || 99));
+const rows = [];
+for (const g of groups) {
+  const ps = pages.filter(p => p.group === g);
+  for (let s = 0; s < ps.length; s += PER_ROW) rows.push({ group: g, first: s === 0, pages: ps.slice(s, s + PER_ROW) });
+}
+rows.forEach((row, r) => {
+  const n = row.pages.length;
+  row.y = r * ROW_DY; row.z = -r * ROW_DZ;
+  row.pages.forEach((p, j) => {
+    p.x = (j - (n - 1) / 2) * (W + GAP);
+    p.y0 = row.y; p.z = row.z;
+    p.h = Math.max(p.lines.length, 3) * LH;
+  });
+  row.x0 = row.pages[0].x - W / 2;
+});
+const yOf = (p, line) => p.y0 - (Math.min(line, p.lines.length) - 0.5) * LH;
+
+// ---- renderer ----
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x060a13, 0.0065);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 2000);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.09;
+controls.screenSpacePanning = true; controls.maxDistance = 700; controls.minDistance = 1.5;
+const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
+const MAX_TEX = Math.min(renderer.capabilities.maxTextureSize, 8192);
+
+// ---- text painting ----
+const isMd = p => p.path.endsWith(".md");
+function tokenize(line, md) {
+  if (md) return /^\s*#/.test(line) ? [[line, "h"]] : /^\s*(~~~|```)/.test(line) ? [[line, "c"]] : [[line, ""]];
+  const out = []; let i = 0, buf = "";
+  const push = (t, c) => { if (buf) { out.push([buf, ""]); buf = ""; } if (t) out.push([t, c]); };
+  const km = line.match(/^(\s*)([A-Za-z_][\w.'"-]*)(\s*=)(?!=)/);
+  if (km) { out.push([km[1], ""], [km[2], "k"]); buf = km[3]; i = km[0].length; }
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === "#") { push(line.slice(i), "c"); return out; }
+    if (ch === '"') {
+      let j = i + 1; while (j < line.length && line[j] !== '"') j += line[j] === "\\" ? 2 : 1;
+      push(line.slice(i, j + 1), "s"); i = j + 1; continue;
+    }
+    if (ch === "'" && line[i + 1] === "'") { push("''", "s"); i += 2; continue; }
+    buf += ch; i++;
+  }
+  push("", ""); return out;
+}
+const TK = { "": "#2a354c", c: "#6e8a74", s: "#a0602a", k: "#2f55b8", h: "#101828" };
+
+function lineMarks(p) {
+  const m = new Map();
+  for (const l of p.out) if (on[l.k]) m.set(l.al, l.k);
+  for (const l of p.inc) if (on[l.k] && l.bl > 1) m.set(l.bl, l.k);
+  return m;
+}
+
+function paintPage(p, lp, real) {
+  const n = p.lines.length;
+  const w = Math.round(PX_PER_UNIT_LINE * lp), h = Math.max(n, 3) * lp;
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  const g = cv.getContext("2d");
+  g.fillStyle = "#e4eaf2"; g.fillRect(0, 0, w, h);
+  const marks = lineMarks(p);
+  for (const [ln, k] of marks) { g.globalAlpha = 0.42; g.fillStyle = KINDS[k].color; g.fillRect(0, (ln - 1) * lp, w, lp); }
+  g.globalAlpha = 1;
+  for (const [ln, host] of p.hosts) { g.fillStyle = HOSTC[host]; g.fillRect(0, (ln - 1) * lp, Math.max(3, lp * 0.4), lp); }
+  const pad = Math.max(4, lp * 0.9), cols = 110, cw = (w - pad * 1.5) / cols;
+  const md = isMd(p);
+  if (real) {
+    const fs = Math.min(lp * 0.82, cw / 0.6);
+    g.font = `${fs}px "JetBrains Mono", monospace`; g.textBaseline = "middle";
+  }
+  p.lines.forEach((line, li) => {
+    let col = 0; const yc = li * lp + lp / 2;
+    for (const [t, c] of tokenize(line, md)) {
+      g.fillStyle = TK[c];
+      if (real) g.fillText(t, pad + col * cw, yc);
+      else {
+        for (const m of t.matchAll(/\S+/g)) {
+          g.fillRect(pad + (col + m.index) * cw, yc - lp * 0.26, m[0].length * cw, lp * 0.52);
+        }
+      }
+      col += t.length; if (col > cols) break;
+    }
+  });
+  const tex = new THREE.CanvasTexture(cv);
+  tex.encoding = THREE.sRGBEncoding; tex.anisotropy = MAX_ANISO;
+  return tex;
+}
+
+function labelTexture(text, sub, w, h, big) {
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  const g = cv.getContext("2d");
+  g.textBaseline = "middle";
+  if (big) {
+    g.font = `800 ${h * 0.62}px Chivo, sans-serif`; g.fillStyle = "#e8eef8"; g.fillText(text, 4, h / 2);
+  } else {
+    g.font = `600 ${h * 0.5}px "JetBrains Mono", monospace`; g.fillStyle = "#e8eef8";
+    g.fillText(text, 2, h * 0.36);
+    g.font = `400 ${h * 0.3}px "JetBrains Mono", monospace`; g.fillStyle = "#7d8aa3";
+    g.fillText(sub, 2, h * 0.8);
+  }
+  const t = new THREE.CanvasTexture(cv); t.encoding = THREE.sRGBEncoding; t.anisotropy = MAX_ANISO;
+  return t;
+}
+
+// ---- build pages ----
+const on = Object.fromEntries(Object.keys(KINDS).map(k => [k, true]));
+const pageMeshes = [];
+function lowTex(p) { return paintPage(p, Math.min(4, MAX_TEX / Math.max(p.lines.length, 3)), false); }
+function hiTex(p) { return paintPage(p, Math.max(8, Math.min(22, Math.floor(MAX_TEX / Math.max(p.lines.length, 3)))), true); }
+
+function buildPages() {
+  for (const p of pages) {
+    p.low = lowTex(p);
+    const mat = new THREE.MeshBasicMaterial({ map: p.low, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, p.h), mat);
+    mesh.position.set(p.x, p.y0 - p.h / 2, p.z); mesh.userData.page = p; mesh.renderOrder = 1;
+    p.mesh = mesh; scene.add(mesh); pageMeshes.push(mesh);
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry),
+      new THREE.LineBasicMaterial({ color: 0x9fb4d6, transparent: true, opacity: 0.35 }));
+    mesh.add(edge);
+    const base = p.path.split("/").pop(), dir = p.path.slice(0, -base.length) || "./";
+    const lab = new THREE.Mesh(new THREE.PlaneGeometry(W, W / 8),
+      new THREE.MeshBasicMaterial({ map: labelTexture(base, dir + " · " + p.lines.length + " lines", 512, 64), transparent: true, depthWrite: false }));
+    lab.position.set(p.x, p.y0 + W / 16 + 0.08, p.z); scene.add(lab);
+  }
+  for (const row of rows) if (row.first) {
+    const lab = new THREE.Mesh(new THREE.PlaneGeometry(W * 3, W * 3 / 8),
+      new THREE.MeshBasicMaterial({ map: labelTexture(row.group === "/" ? "flake root" : row.group, "", 1024, 128, true), transparent: true, depthWrite: false }));
+    lab.position.set(row.x0 + W * 1.5, row.y + 1.4, row.z); scene.add(lab);
+  }
+}
+
+// ---- bridges: translucent ribbons from span to span ----
+let bridgeMesh = null, focusMesh = null;
+function ribbonGeometry(list, gain) {
+  const pos = [], col = [], idx = [];
+  const SEG = 28, tmp = new THREE.Color();
+  for (const l of list) {
+    const A = pages[l.a], B = pages[l.b];
+    const sA = Math.sign(B.x - A.x) || 1, sB = Math.sign(A.x - B.x) || sA;
+    const p0 = new THREE.Vector3(A.x + sA * W / 2, yOf(A, l.al), A.z);
+    const p3 = new THREE.Vector3(B.x + sB * W / 2, l.bl > 1 ? yOf(B, l.bl) : B.y0 - Math.min(B.h, 0.6) / 2, B.z);
+    const d = Math.max(1.6, p0.distanceTo(p3) * 0.28);
+    const p1 = p0.clone().add(new THREE.Vector3(sA * d, 0, 0));
+    const p2 = p3.clone().add(new THREE.Vector3(sB * d, 0, 0));
+    const curve = new THREE.CubicBezierCurve3(p0, p1, p2, p3);
+    const ta = LH * 1.4, tb = l.bl > 1 ? LH * 1.4 : Math.min(B.h, 0.6);
+    tmp.set(KINDS[l.k].color);
+    const base = pos.length / 3;
+    for (let s = 0; s <= SEG; s++) {
+      const u = s / SEG, pt = curve.getPoint(u), t = ta + (tb - ta) * u;
+      pos.push(pt.x, pt.y + t / 2, pt.z, pt.x, pt.y - t / 2, pt.z);
+      const f = gain * (0.35 + 0.65 * Math.pow(Math.abs(2 * u - 1), 2));
+      col.push(tmp.r * f, tmp.g * f, tmp.b * f, tmp.r * f, tmp.g * f, tmp.b * f);
+      if (s < SEG) { const v = base + s * 2; idx.push(v, v + 1, v + 2, v + 1, v + 3, v + 2); }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  geo.setIndex(idx);
+  return geo;
+}
+const bridgeMat = () => new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+function buildBridges() {
+  if (bridgeMesh) { scene.remove(bridgeMesh); bridgeMesh.geometry.dispose(); }
+  bridgeMesh = new THREE.Mesh(ribbonGeometry(links.filter(l => on[l.k]), 1), bridgeMat());
+  bridgeMesh.material.opacity = focused ? 0.18 : 0.75; bridgeMesh.renderOrder = 2;
+  scene.add(bridgeMesh);
+  buildFocusBridges();
+}
+function buildFocusBridges() {
+  if (focusMesh) { scene.remove(focusMesh); focusMesh.geometry.dispose(); focusMesh = null; }
+  if (!focused) return;
+  const list = [...focused.out, ...focused.inc].filter(l => on[l.k]);
+  focusMesh = new THREE.Mesh(ribbonGeometry(list, 1.6), bridgeMat());
+  focusMesh.renderOrder = 3; scene.add(focusMesh);
+}
+
+// ---- hi-res texture cache for pages being read ----
+const hiCache = [];
+function upgrade(p) {
+  if (!p.hi) { p.hi = hiTex(p); hiCache.push(p); }
+  p.mesh.material.map = p.hi; p.mesh.material.needsUpdate = true;
+  while (hiCache.length > 10) {
+    const old = hiCache.shift();
+    if (old === focused) { hiCache.push(old); continue; }
+    old.mesh.material.map = old.low; old.mesh.material.needsUpdate = true; old.hi.dispose(); old.hi = null;
+  }
+}
+function repaintAll() {
+  for (const p of pages) {
+    p.low.dispose(); p.low = lowTex(p);
+    if (p.hi) { p.hi.dispose(); p.hi = hiTex(p); }
+    p.mesh.material.map = p.hi || p.low; p.mesh.material.needsUpdate = true;
+  }
+}
+
+// ---- camera moves ----
+let tween = null;
+function flyTo(target, position) {
+  if (reduceMotion) { controls.target.copy(target); camera.position.copy(position); return; }
+  tween = { t0: performance.now(), dur: 850, fromT: controls.target.clone(), fromP: camera.position.clone(), toT: target, toP: position };
+}
+function overviewPose() {
+  const last = rows[rows.length - 1];
+  const t = new THREE.Vector3(0, last.y * 0.45, last.z * 0.4);
+  return [t, new THREE.Vector3(-18, last.y * 0.45 + 16, 78)];
+}
+
+// ---- reading pane ----
+const pane = document.getElementById("pane"), code = document.getElementById("code");
+let focused = null;
+function esc(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]); }
+function chip(l, dir) {
+  const other = dir === "out" ? pages[l.b] : pages[l.a], line = dir === "out" ? l.bl : l.al;
+  const label = dir === "out" ? `→ ${other.path}${line > 1 ? ":" + line : ""}` : `← ${other.path}:${line}`;
+  return `<span class="chip" role="button" tabindex="0" style="--c:${KINDS[l.k].color}" data-p="${other.i}" data-l="${line}" title="${l.k}: ${esc(l.t)}">${esc(label)}</span>`;
+}
+function renderPane(p) {
+  const dir = p.path.includes("/") ? p.path.slice(0, p.path.lastIndexOf("/") + 1) : "";
+  document.getElementById("ptitle").innerHTML = `<span>${esc(dir)}</span>${esc(p.path.slice(dir.length))}`;
+  const named = p.inc.filter(l => on[l.k] && l.bl <= 1);
+  const seen = new Set();
+  document.getElementById("named").innerHTML = named.length
+    ? `<span class="lbl">Named by</span>` + named.filter(l => !seen.has(l.a) && seen.add(l.a)).map(l => chip(l, "in")).join("")
+    : "";
+  const outBy = new Map(), inBy = new Map();
+  for (const l of p.out) if (on[l.k]) (outBy.get(l.al) || outBy.set(l.al, []).get(l.al)).push(l);
+  for (const l of p.inc) if (on[l.k] && l.bl > 1) (inBy.get(l.bl) || inBy.set(l.bl, []).get(l.bl)).push(l);
+  const hostAt = new Map(p.hosts.map(([n, h]) => [n, h]));
+  const md = isMd(p);
+  code.innerHTML = p.lines.map((line, i) => {
+    const n = i + 1, o = outBy.get(n) || [], inc = inBy.get(n) || [];
+    const k = (o[0] || inc[0] || {}).k;
+    const cls = ["ln", k ? "linked" : "", hostAt.has(n) ? "host-" + hostAt.get(n) : ""].join(" ");
+    const tx = tokenize(line, md).map(([t, c]) => c ? `<span class="tk-${c}">${esc(t)}</span>` : esc(t)).join("");
+    const chips = o.length + inc.length ? `<div class="chips">${o.map(l => chip(l, "out")).join("")}${inc.map(l => chip(l, "in")).join("")}</div>` : "";
+    return `<div class="${cls}" id="L${n}" style="${k ? "--c:" + KINDS[k].color : ""}"><span class="no">${n}</span><span class="tx">${tx || " "}</span>${chips}</div>`;
+  }).join("");
+}
+function focusPage(p, line) {
+  const prev = focused; focused = p;
+  document.body.classList.add("reading");
+  pane.hidden = false;
+  if (prev !== p) { renderPane(p); code.scrollTop = 0; }
+  upgrade(p);
+  for (const l of [...p.out, ...p.inc]) upgrade(pages[l.a === p.i ? l.b : l.a]);
+  bridgeMesh.material.opacity = 0.14;
+  buildFocusBridges();
+  for (const m of pageMeshes) m.material.opacity = m === p.mesh ? 1 : 0.55;
+  const y = line ? yOf(p, line) : p.y0 - Math.min(p.h, 9) / 2;
+  const dist = line ? 6.5 : Math.min(Math.max(p.h, 5) * 1.05, 11);
+  const shift = innerWidth > 760 ? dist * 0.28 : 0;     // keep the page clear of the pane
+  const t = new THREE.Vector3(p.x + shift, innerWidth > 760 ? y : y - dist * 0.2, p.z);
+  flyTo(t, new THREE.Vector3(p.x + shift, t.y + 0.4, p.z + dist));
+  if (line) {
+    const el = document.getElementById("L" + line);
+    if (el) { el.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+  }
+}
+function unfocus() {
+  focused = null; pane.hidden = true; document.body.classList.remove("reading");
+  for (const m of pageMeshes) m.material.opacity = 0.9;
+  bridgeMesh.material.opacity = 0.75; buildFocusBridges();
+  flyTo(...overviewPose());
+}
+pane.addEventListener("click", e => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  focusPage(pages[+c.dataset.p], +c.dataset.l > 1 ? +c.dataset.l : 0);
+});
+pane.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.classList.contains("chip")) e.target.click(); });
+document.getElementById("close").onclick = unfocus;
+document.getElementById("home").onclick = unfocus;
+
+// ---- HUD ----
+const counts = {}; for (const l of links) counts[l.k] = (counts[l.k] || 0) + 1;
+document.getElementById("meta").textContent =
+  `${pages.length} pages · ${pages.reduce((s, p) => s + p.lines.length, 0).toLocaleString()} lines · ${links.length} bridges · ${DATA.rev}`;
+document.getElementById("kinds").innerHTML = Object.entries(KINDS).map(([k, v]) =>
+  `<label class="kind" style="--c:${v.color}"><input type="checkbox" id="k-${k}" data-k="${k}" checked><span class="sw"></span><span><b>${v.name}</b> <span style="color:var(--ink-dim)">${v.what}</span></span><small>${counts[k] || 0}</small></label>`).join("");
+document.getElementById("kinds").addEventListener("change", e => {
+  on[e.target.dataset.k] = e.target.checked;
+  buildBridges(); repaintAll(); if (focused) renderPane(focused);
+});
+document.getElementById("paths").innerHTML = pages.map(p => `<option value="${esc(p.path)}"></option>`).join("");
+const q = document.getElementById("q");
+function jump() {
+  const v = q.value.trim().toLowerCase(); if (!v) return;
+  const p = pages.find(p => p.path.toLowerCase() === v) || pages.find(p => p.path.toLowerCase().includes(v));
+  if (p) { focusPage(p); q.blur(); }
+}
+document.getElementById("find").addEventListener("submit", e => { e.preventDefault(); jump(); });
+q.addEventListener("change", jump);
+addEventListener("keydown", e => {
+  if (e.target === q) { if (e.key === "Escape") q.blur(); return; }
+  if (e.key === "Escape") unfocus();
+  if (e.key === "/") { e.preventDefault(); q.focus(); }
+});
+
+// ---- picking ----
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), tip = document.getElementById("tip");
+function pick(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(pageMeshes, false)[0];
+  if (!hit) return null;
+  const p = hit.object.userData.page;
+  return { p, line: Math.max(1, Math.min(p.lines.length, Math.ceil((p.y0 - hit.point.y) / LH))) };
+}
+let down = null;
+renderer.domElement.addEventListener("pointerdown", e => { down = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener("pointerup", e => {
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || e.button !== 0) return;
+  const h = pick(e); if (!h) return;
+  focusPage(h.p, h.p === focused ? h.line : 0);
+});
+let hoverRaf = 0;
+renderer.domElement.addEventListener("pointermove", e => {
+  if (hoverRaf || e.buttons) return;
+  hoverRaf = requestAnimationFrame(() => {
+    hoverRaf = 0;
+    const h = pick(e);
+    renderer.domElement.style.cursor = h ? "pointer" : "";
+    if (!h) { tip.hidden = true; return; }
+    const ln = h.p.lines[h.line - 1].trim();
+    tip.textContent = `${h.p.path}:${h.line}  ${ln.length > 60 ? ln.slice(0, 60) + "…" : ln}`;
+    tip.style.left = e.clientX + "px"; tip.style.top = e.clientY + "px"; tip.hidden = false;
+  });
+});
+renderer.domElement.addEventListener("pointerleave", () => { tip.hidden = true; });
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
+});
+
+function frame(now) {
+  if (tween) {
+    const u = Math.min(1, (now - tween.t0) / tween.dur), e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+    controls.target.lerpVectors(tween.fromT, tween.toT, e);
+    camera.position.lerpVectors(tween.fromP, tween.toP, e);
+    if (u >= 1) tween = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+// fonts must be ready before any canvas text is painted
+Promise.race([
+  Promise.all([document.fonts.load('600 32px "JetBrains Mono"'), document.fonts.load('400 12px "JetBrains Mono"'), document.fonts.load("800 64px Chivo")]),
+  new Promise(r => setTimeout(r, 2500)),
+]).catch(() => {}).then(() => {
+  buildPages(); buildBridges();
+  const [t, p] = overviewPose(); controls.target.copy(t); camera.position.copy(p);
+  requestAnimationFrame(frame);
+});
+</script>
