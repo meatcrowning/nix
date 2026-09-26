@@ -77,7 +77,16 @@ git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REMOTE"
 [ "$(git remote get-url origin)" = "$REMOTE" ] || git remote set-url origin "$REMOTE"
 
 # ---- 1. commit whatever this machine changed --------------------------------
-git add -A
+# CM_SYNC_PATHS narrows what a tick commits, for a repo that also takes
+# hand-made commits (~/xanadu's tool/): only these pathspecs sync on their own.
+if [ -n "$CM_SYNC_PATHS" ]; then
+  set -f
+  # shellcheck disable=SC2086  # a pathspec list, split on purpose, never globbed
+  git add -A -- $CM_SYNC_PATHS
+  set +f
+else
+  git add -A
+fi
 
 # Backstop for a DENYLIST caller (see ~/.claude): `git add -A` is indiscriminate
 # and a denylist can widen by accident. If a tick stages far more than it
