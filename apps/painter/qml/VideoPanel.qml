@@ -54,22 +54,12 @@ Panel {
         winActive: root.winActive
         accepts: function (u) { return App.setInputImage(u) }
         paste: function () { return App.pasteInputImage() }
+        clearAction: function () { App.clearInputImage() }
         // Order-independent: moving straight from one well to the other must
         // not have the leave clear the target the enter just set.
         onHoveredChanged: {
             if (hovered) root.hoveredWell = "input"
             else if (root.hoveredWell === "input") root.hoveredWell = ""
-        }
-    }
-
-    Row {
-        spacing: 8
-        visible: root.gen.useInputImage && App.inputImage !== ""
-        TextButton {
-            label: "[ Clear ]"
-            tone: Theme.textDim
-            winActive: root.winActive
-            onClicked: App.clearInputImage()
         }
     }
 
@@ -87,22 +77,12 @@ Panel {
         winActive: root.winActive
         accepts: function (u) { return App.setLastImage(u) }
         paste: function () { return App.pasteLastImage() }
+        clearAction: function () { App.clearLastImage() }
         // Order-independent: moving straight from one well to the other must
         // not have the leave clear the target the enter just set.
         onHoveredChanged: {
             if (hovered) root.hoveredWell = "last"
             else if (root.hoveredWell === "last") root.hoveredWell = ""
-        }
-    }
-
-    Row {
-        spacing: 8
-        visible: root.gen.useLastFrame && App.lastImage !== ""
-        TextButton {
-            label: "[ Clear ]"
-            tone: Theme.textDim
-            winActive: root.winActive
-            onClicked: App.clearLastImage()
         }
     }
 
