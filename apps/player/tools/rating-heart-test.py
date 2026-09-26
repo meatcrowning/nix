@@ -11,13 +11,18 @@ HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('fixture', HERE/'now-allinone-test.py')
 f = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(f)
-from PySide6.QtCore import QObject, QPointF, Qt, QUrl
+from PySide6.QtCore import QObject, QPointF, Qt, QUrl, Property
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlFileSelector
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
 sys.path.insert(0, str(HERE.parent))
 import visualizer
+
+class AnimatedStyle(f.StubStyle):
+    @Property(bool, constant=True)
+    def reduceMotion(self): return False
+
 
 app = QGuiApplication([])
 assert app.platformName() == 'offscreen'
@@ -73,7 +78,7 @@ try:
             keep.append(selector)
         ctx = engine.rootContext()
         for name, obj in {'Prefs': prefs, 'Library': bridge, 'Player': player,
-                          'Visualizer': visual, 'DeskStyle': f.StubStyle(),
+                          'Visualizer': visual, 'DeskStyle': AnimatedStyle(),
                           'WalPalette': f.StubPalette(), 'Lyrics': f.StubLyrics(),
                           'QueueModel': bridge.queueModel}.items():
             keep.append(obj)
@@ -137,17 +142,32 @@ try:
         assert not timer.property('running'), 'same-track metadata must not announce'
         player._index = 2
         player.currentChanged.emit()
-        QTest.qWait(350)
+        QTest.qWait(150)
+        fade_in = notice.opacity()
+        assert 0 < fade_in < 1, fade_in
+        QTest.qWait(200)
+        assert fade_in < notice.opacity() < 1, notice.opacity()
+        QTest.qWait(550)
+        assert notice.opacity() == 1
         assert timer.property('running') and notice.isVisible()
-        assert notice.x() == 0 and notice.y() >= 0
+        assert notice.x() == 8 and notice.y() >= 0
         cover = page.findChild(QObject, 'visualizerNoticeArt')
         assert cover.x() == 0
-        assert abs(notice.y()+cover.y()+cover.height()-notice.parentItem().height()) < 1
+        assert abs(notice.y()+cover.y()+cover.height()-notice.parentItem().height()+8) < 1
         assert notice.x()+notice.width() <= notice.parentItem().width()
-        QTest.qWait(4400)
+        QTest.qWait(3600)
         player.currentChanged.emit()
-        QTest.qWait(650)
-        assert not timer.property('running') and not notice.isVisible(), 'metadata restarted dwell'
+        for _ in range(100):
+            if not timer.property('running'): break
+            QTest.qWait(10)
+        assert not timer.property('running'), 'metadata restarted dwell'
+        QTest.qWait(150)
+        fade_out = notice.opacity()
+        assert 0 < fade_out < 1 and notice.isVisible(), fade_out
+        QTest.qWait(200)
+        assert 0 < notice.opacity() < fade_out, notice.opacity()
+        QTest.qWait(550)
+        assert not notice.isVisible() and notice.opacity() == 0
         player._index = 0
         player.currentChanged.emit()
         assert timer.property('running')

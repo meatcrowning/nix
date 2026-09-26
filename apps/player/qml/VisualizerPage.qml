@@ -66,13 +66,15 @@ Item {
             parent: surface
             anchors.left: parent.left
             anchors.bottom: parent.bottom
-            width: Math.min(380, parent.width)
+            anchors.margins: 8
+            width: Math.max(0, Math.min(380, parent.width-16))
             height: Math.max(64, noticeText.height)
             visible: opacity > 0 && root.bottomCollapsed && root.cur.id !== undefined
             opacity: trackNoticeTimer.running ? 1 : 0
             clip: true
             Behavior on opacity { NumberAnimation {
-                duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing
+                // Track announcements deliberately fade more gently than controls.
+                duration: motion.ms(800); easing.type: Easing.InOutSine
             } }
             Image {
                 id: noticeArt
