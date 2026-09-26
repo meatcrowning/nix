@@ -6,8 +6,9 @@ from pathlib import Path
 import signal
 import struct
 import sys
+import time
 
-from PySide6.QtCore import QEvent, QObject, Property, QProcess, QProcessEnvironment, QTimer, Signal, Slot, Qt
+from PySide6.QtCore import QEvent, QObject, Property, QProcess, QProcessEnvironment, QTimer, Signal, Slot, Qt, QRectF
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtQml import qmlRegisterType
 from PySide6.QtQuick import QQuickItem, QQuickWindow, QSGImageNode, QSGTexture
@@ -302,12 +303,16 @@ class Visualizer(QObject):
 
 
 class VisualizerSurface(QQuickItem):
+    contrastChanged = Signal()
     sourceChanged = Signal()
     consumed = Signal(int)
 
     def __init__(self,parent=None):
         super().__init__()
         self._source = None
+        self._contrast_rect = QRectF()
+        self._light = False
+        self._contrast_at = 0.0
         self._image = QImage(1,1,QImage.Format.Format_RGB32)
         self._image.fill(QColor('black'))
         self._dirty = True
@@ -337,9 +342,49 @@ class VisualizerSurface(QQuickItem):
         if value: value.frame.connect(self.receive)
         self.sourceChanged.emit()
 
+    @Property(QRectF, notify=contrastChanged)
+    def contrastRect(self): return self._contrast_rect
+
+    @contrastRect.setter
+    def contrastRect(self, value):
+        if value == self._contrast_rect: return
+        self._contrast_rect = value
+        self._sample_contrast(force=True)
+        self.contrastChanged.emit()
+
+    @Property(bool, notify=contrastChanged)
+    def backgroundLight(self): return self._light
+
+    def _sample_contrast(self, force=False):
+        rect = self._contrast_rect
+        if rect.isEmpty() or self._image.isNull() or self.width() <= 0 or self.height() <= 0:
+            return
+        now = time.monotonic()
+        if not force and now-self._contrast_at < .25: return
+        self._contrast_at = now
+        # Only 32 pixels beneath the hovered label, no image copies or timer.
+        # The uploaded texture is vertically mirrored, so invert sample Y too.
+        total = 0.0
+        for row in range(4):
+            y = rect.y()+rect.height()*(row+.5)/4
+            iy = max(0, min(self._image.height()-1,
+                           int((1-y/self.height())*self._image.height())))
+            for col in range(8):
+                x = rect.x()+rect.width()*(col+.5)/8
+                ix = max(0, min(self._image.width()-1,
+                               int(x/self.width()*self._image.width())))
+                c = self._image.pixelColor(ix, iy)
+                total += .2126*c.redF()+.7152*c.greenF()+.0722*c.blueF()
+        # Hysteresis prevents flickering between white and black near mid-grey.
+        light = total/32 > (.42 if self._light else .58)
+        if light != self._light:
+            self._light = light
+            self.contrastChanged.emit()
+
     @Slot(QImage)
     def receive(self,image):
         self._image = image
+        self._sample_contrast()
         self._generation = self._source.generation if self._source else -1
         self._dirty = True
         self.update()

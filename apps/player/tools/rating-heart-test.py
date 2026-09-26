@@ -12,7 +12,7 @@ spec = importlib.util.spec_from_file_location('fixture', HERE/'now-allinone-test
 f = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(f)
 from PySide6.QtCore import QObject, QPointF, Qt, QUrl, Property
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QImage, QColor, QPainter
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlFileSelector
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
@@ -137,6 +137,7 @@ try:
         notice = page.findChild(QObject, 'visualizerTrackNotice')
         timer = page.findChild(QObject, 'visualizerTrackNoticeTimer')
         assert not timer.property('running'), 'startup must not announce the track'
+        QTest.mouseMove(scene, QPointF(-10, -10).toPoint())
         page.setProperty('bottomCollapsed', True)
         player.currentChanged.emit()
         assert not timer.property('running'), 'same-track metadata must not announce'
@@ -168,6 +169,32 @@ try:
         assert 0 < notice.opacity() < fade_out, notice.opacity()
         QTest.qWait(550)
         assert not notice.isVisible() and notice.opacity() == 0
+        surface = page.findChild(QObject, 'visualizerSurface')
+        QTest.mouseMove(scene, surface.mapToScene(QPointF(surface.width()/2, surface.height()/2)).toPoint())
+        QTest.qWait(150)
+        assert 0 < notice.opacity() < 1 and not timer.property('running')
+        QTest.qWait(750)
+        assert notice.opacity() == 1
+        # Source rows are inverted on screen: white at the source top lies
+        # behind the bottom-right label, while the screen top stays black.
+        frame = QImage(64, 64, QImage.Format.Format_RGB32)
+        frame.fill(QColor('white'))
+        painter = QPainter(frame)
+        painter.fillRect(0, 32, 64, 32, QColor('black'))
+        painter.end()
+        surface.receive(frame)
+        label = page.findChild(QObject, 'visualizerSidebarText')
+        assert surface.backgroundLight and label.property('color') == QColor('black')
+        QTest.qWait(270)
+        frame.fill(QColor('black'))
+        surface.receive(frame)
+        assert not surface.backgroundLight and label.property('color') == QColor('white')
+        QTest.mouseMove(scene, QPointF(-10, -10).toPoint())
+        QTest.qWait(150)
+        assert 0 < notice.opacity() < 1
+        assert surface.contrastRect.isEmpty(), 'hidden labels must not sample frames'
+        QTest.qWait(750)
+        assert not notice.isVisible()
         player._index = 0
         player.currentChanged.emit()
         assert timer.property('running')
