@@ -106,6 +106,7 @@ for plasma in (False,True):
 
 window=QQuickWindow();window.show();QTest.qWait(20)
 visual.bind_window(window)
+visual.setPlaying(True)
 assert visual.process is None
 visual.setShown(True);QTest.qWait(200)
 assert visual.process is not None
