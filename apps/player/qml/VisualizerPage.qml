@@ -41,13 +41,11 @@ Item {
         HeaderButton {
             id: sidebarButton
             objectName: "visualizerSidebarButton"
-            parent: root.plasma ? upper : surface
-            visible: root.plasma || surfaceHover.hovered
+            parent: surface
+            visible: surfaceHover.hovered
             anchors {
-                left: root.plasma ? parent.left : undefined
-                top: root.plasma ? parent.top : undefined
-                right: root.plasma ? undefined : parent.right
-                bottom: root.plasma ? undefined : parent.bottom
+                right: parent.right
+                bottom: parent.bottom
                 margins: 6
             }
             label: root.sidebar ? "hide controls (Tab)" : "show controls (Tab)"
@@ -55,8 +53,7 @@ Item {
             onClicked: root.toggleSidebar()
         }
         HeaderButton {
-            anchors { left: parent.left; top: parent.top; margins: 6
-                      leftMargin: root.plasma ? sidebarButton.width+12 : 6 }
+            anchors { left: parent.left; top: parent.top; margins: 6 }
             label: "retry"
             visible: (Visualizer.stateInfo.status || "").indexOf("stopped") >= 0
                      || (Visualizer.stateInfo.status || "").indexOf("unavailable") >= 0

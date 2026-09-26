@@ -214,27 +214,26 @@ def check_layout(app,shell,win,*args):
                     and b.get('id','').startswith('visual') and b['id']!='visualizer']
     if shell is None:
         assert not visual_actions, visual_actions
-        assert toggle.parentItem()==surface
-        assert abs(toggle.x()+toggle.width()+6-surface.width())<1
-        assert abs(toggle.y()+toggle.height()+6-surface.height())<1
-        QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
-        QTest.qWait(30)
-        assert not toggle.isVisible()
-        QTest.mouseMove(target,surface.mapToScene(QPointF(surface.width()/2,surface.height()/2)).toPoint())
-        QTest.qWait(30)
-        assert toggle.isVisible()
-        before=root.property('visualSidebar')
-        QTest.mouseClick(target,Qt.LeftButton,Qt.NoModifier,
-                         toggle.mapToScene(QPointF(toggle.width()/2,toggle.height()/2)).toPoint())
-        QTest.qWait(30)
-        assert root.property('visualSidebar')!=before
-        root.setProperty('visualSidebar',before)
-        QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
-        QTest.qWait(30)
-        assert not toggle.isVisible()
     else:
         assert 'visualSidebar' in visual_actions and 'visualW' in visual_actions
-        assert toggle.isVisible() and toggle.x()==6 and toggle.y()==6
+    assert toggle.parentItem()==surface
+    assert abs(toggle.x()+toggle.width()+6-surface.width())<1
+    assert abs(toggle.y()+toggle.height()+6-surface.height())<1
+    QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
+    QTest.qWait(30)
+    assert not toggle.isVisible()
+    QTest.mouseMove(target,surface.mapToScene(QPointF(surface.width()/2,surface.height()/2)).toPoint())
+    QTest.qWait(30)
+    assert toggle.isVisible()
+    before=root.property('visualSidebar')
+    QTest.mouseClick(target,Qt.LeftButton,Qt.NoModifier,
+                     toggle.mapToScene(QPointF(toggle.width()/2,toggle.height()/2)).toPoint())
+    QTest.qWait(30)
+    assert root.property('visualSidebar')!=before
+    root.setProperty('visualSidebar',before)
+    QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
+    QTest.qWait(30)
+    assert not toggle.isVisible()
     search=root.findChild(QObject,'albumSearch')
     toolbar=root.findChild(QObject,'albumToolbar')
     choice=root.findChild(QObject,'albumSortChoice')
