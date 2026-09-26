@@ -24,6 +24,7 @@ Item {
                                             * Math.max(.2, Math.min(.8, infoFrac)))
 
     Motion { id: motion }
+    function overlayFadeMs(showing) { return motion.ms(showing ? 600 : 800); }
     property bool trackNoticeReady: false
     property var lastTrackId: null
     Component.onCompleted: {
@@ -76,13 +77,13 @@ Item {
             opacity: trackNoticeTimer.running || surfaceHover.hovered ? 1 : 0
             clip: true
             Behavior on opacity { NumberAnimation {
-                // Track announcements deliberately fade more gently than controls.
-                duration: motion.ms(800); easing.type: Easing.InOutSine
+                duration: root.overlayFadeMs(trackNoticeTimer.running || surfaceHover.hovered)
+                easing.type: Easing.InOutSine
             } }
             Image {
                 id: noticeArt
                 objectName: "visualizerNoticeArt"
-                anchors { left: parent.left; bottom: parent.bottom }
+                anchors { left: parent.left; verticalCenter: parent.verticalCenter }
                 width: 64; height: 64
                 source: root.cur.artPath ? "file://"+root.cur.artPath : ""
                 sourceSize.width: 128; sourceSize.height: 128
@@ -90,7 +91,8 @@ Item {
             }
             Column {
                 id: noticeText
-                anchors { left: noticeArt.right; right: parent.right; leftMargin: 8; bottom: parent.bottom }
+                objectName: "visualizerNoticeText"
+                anchors { left: noticeArt.right; right: parent.right; leftMargin: 8; verticalCenter: noticeArt.verticalCenter }
                 spacing: 3
                 PixelText {
                     width: parent.width; text: root.cur.title || ""
@@ -119,7 +121,8 @@ Item {
             height: sidebarText.implicitHeight+8
             anchors { right: parent.right; bottom: parent.bottom; margins: 6 }
             Behavior on opacity { NumberAnimation {
-                duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing
+                duration: root.overlayFadeMs(surfaceHover.hovered)
+                easing.type: Easing.InOutSine
             } }
             PixelText {
                 id: sidebarText
