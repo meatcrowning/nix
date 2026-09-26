@@ -16,7 +16,7 @@ Item {
     readonly property var cur: Player.current || ({})
     property real topFrac: Number(Prefs.get("visualizerStackTopFrac", .5)) || .5
     property real infoFrac: Number(Prefs.get("visualizerInfoWidthFrac", .5)) || .5
-    readonly property real topH: Math.max(0, Math.min(Math.max(0, height-207), Math.max(80, height*topFrac)))
+    readonly property real topH: Math.max(0, Math.min(Math.max(0, height-107), Math.max(80, height*topFrac)))
     readonly property real infoW: Math.round(Math.max(0, bottom.width-7)
                                             * Math.max(.2, Math.min(.8, infoFrac)))
 
@@ -109,12 +109,16 @@ Item {
             Column {
                 id: details
                 anchors { left: art.right; right: parent.right; top: parent.top; margins: 8 }
-                spacing: 3
+                anchors.topMargin: Math.min(8, Math.max(0, parent.height-height))
+                spacing: Math.max(0, Math.min(3, (parent.height-8
+                         -title.height-artist.height-album.height-rating.height)/3))
                 PixelText {
+                    id: title
                     width: parent.width; text: root.cur.title || "nothing playing"
                     color: root.fgText; elide: Text.ElideRight
                 }
                 PixelText {
+                    id: artist
                     width: parent.width; text: root.cur.artist || ""
                     color: root.fgDim; elide: Text.ElideRight
                 }
@@ -179,7 +183,7 @@ Item {
         cursorShape: Qt.SplitVCursor
         onPositionChanged: mouse => {
             if (pressed && root.height>0)
-                root.topFrac=Math.max(.2,Math.min(.85,mapToItem(root,0,mouse.y).y/root.height));
+                root.topFrac=Math.max(.2,Math.min(1,mapToItem(root,0,mouse.y).y/root.height));
         }
         onReleased: Prefs.set("visualizerStackTopFrac",root.topFrac)
         Rectangle {

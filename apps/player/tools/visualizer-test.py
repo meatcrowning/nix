@@ -81,7 +81,7 @@ for plasma in (False,True):
         assert art.width()==art.height() and 0<art.height()<=info.height()
         assert art.height()==min(info.height(),info.width()-max(120,rating.width())-16)
         assert rating.y()>=album.y()+album.height()
-        assert rating.parentItem().y()+rating.y()+rating.height()<=info.height()
+        assert rating.parentItem().y()+rating.y()+rating.height()<=info.height(), (rating.parentItem().y(),rating.y(),rating.height(),info.height())
         assert rating.width()<=rating.parentItem().width()
         stars=page.findChild(QObject,'visualizerStars')
         heart=page.findChild(QObject,'visualizerFavorite')
@@ -90,6 +90,14 @@ for plasma in (False,True):
         before=surface.width();page.setProperty('sidebar',False);QTest.qWait(10)
         assert surface.width()>before
         page.setProperty('sidebar',True)
+        page.setProperty('topFrac',1)
+        QTest.qWait(20)
+        assert info.height()==queue.height()==100, 'lower section cannot shrink to half its old floor'
+        assert art.width()==art.height() and 0<art.height()<=100
+        if width>=960:
+            assert art.height()==100, 'cover did not scale down with the pane'
+        assert rating.parentItem().y()+rating.y()+rating.height()<=info.height(), (rating.parentItem().y(),rating.y(),rating.height(),info.height())
+        page.setProperty('topFrac',.5)
     assert not f.QML_MSGS, f.QML_MSGS
     scene.hide()
     assert visual.process is None,'page construction started worker without visibility authorization'
