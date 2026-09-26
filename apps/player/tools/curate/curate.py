@@ -4,7 +4,7 @@
     scan     walk the library, read tags + audio quality -> ~/.cache/library-curate/scan.json
     dupes    find same-track copies (same normalized artist+title, matching
              duration) anywhere in the library; keep the best-quality copy,
-             MOVE the rest to ~/Music-removed/duplicates/. Real work; not a
+             MOVE the rest to aud-removed/duplicates/. Real work; not a
              dry run (there is no confirmation step downstream of this repo).
     groups   detect album-directory groups that are really ONE album split
              across several directories (same album, different folder — a

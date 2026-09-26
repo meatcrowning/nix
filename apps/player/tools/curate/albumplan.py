@@ -198,10 +198,28 @@ def load_library():
     return albums, tracks
 
 
+def doubled_tracks(ts):
+    """(keep, drop) pairs: two files in one album holding the same slot, the
+    same title and the same length (+-2s). Two nights of the same song on a
+    live album share a title but not a length, and are not duplicates."""
+    slots = collections.defaultdict(list)
+    for t in ts:
+        if t["track"]:
+            slots[((t["disc"] or 1), t["track"], track_key(t["title"]))].append(t)
+    pairs = []
+    for same in slots.values():
+        while len(same) > 1:
+            a = same.pop(0)
+            twin = next((b for b in same if abs((a["duration"] or 0) - (b["duration"] or 0)) <= 2), None)
+            if twin:
+                same.remove(twin)
+                pairs.append((a, twin))
+    return pairs
+
+
 def describe_album(a, ts, damaged):
     codecs = collections.Counter(t["codec"] for t in ts)
     ll = sum(1 for t in ts if (t["codec"] or "") in LOSSLESS_CODECS)
-    slots = collections.Counter(((t["disc"] or 1), t["track"]) for t in ts if t["track"])
     return {
         "album_id": a["id"], "album": a["album"], "album_artist": a["album_artist"],
         "dir": os.path.dirname(ts[0]["path"]).split("/aud/", 1)[-1] if ts else None,
@@ -210,7 +228,7 @@ def describe_album(a, ts, damaged):
         "lossless_frac": round(ll / len(ts), 3) if ts else 0,
         "max_bitdepth": max((t["bitdepth"] or 0) for t in ts) if ts else 0,
         "max_samplerate": max((t["samplerate"] or 0) for t in ts) if ts else 0,
-        "doubled_slots": sum(n - 1 for n in slots.values() if n > 1),
+        "doubled_slots": len(doubled_tracks(ts)),
         "orig_year": a["orig_year"], "year": a["year"],
         "art_src": a["art_src"],
         "plays": sum((t["play_count"] or 0) for t in ts),
@@ -280,6 +298,30 @@ def mb_search_rg(artist, title):
             continue
         return g["id"]
     return None
+
+
+def rg_agrees(rg, album_artist, album):
+    """Does this release group plausibly BE the library album? Titles must
+    match (edition noise aside) and some credited name must share a word with
+    his album artist. File tags are not proof: BADBADNOTGOOD's "IV" carried
+    the ids of Persona La Ave's "IV", a Cosmo's Midnight album those of a
+    compilation."""
+    if not rg:
+        return False
+    want_t, got_t = bare_title(album), bare_title(rg.get("title"))
+    if not (want_t and got_t) or (
+            difflib.SequenceMatcher(None, want_t, got_t).ratio() < 0.8
+            and want_t not in got_t and got_t not in want_t):
+        return False
+    credit = rg.get("artist-credit") or []
+    names = " ".join(fold(c.get("name", "")) + " " + fold(c.get("artist", {}).get("name", ""))
+                     + " " + fold(c.get("artist", {}).get("sort-name", "")) for c in credit)
+    if is_va(album_artist):
+        return any(is_va(c.get("name")) for c in credit)
+    if any(is_va(c.get("name")) for c in credit):
+        return False
+    words = {w for w in re.split(r"\W+", fold(album_artist)) if len(w) > 1}
+    return bool(words & set(re.split(r"\W+", names))) or fold(album_artist) in names or non_latin(album_artist)
 
 
 def romanized(artist_id, name, lib_spellings=(), credited=()):
@@ -383,6 +425,15 @@ def match_tracks(lib_tracks, std_tracks):
     return have, missing
 
 
+def unmatched(src, dst):
+    """Titles in src with no same-titled, same-length (+-3s) track in dst."""
+    have = collections.defaultdict(list)
+    for t in dst:
+        have[track_key(t["title"])].append(t["duration"] or 0)
+    return [t["title"] for t in src
+            if not any(abs((t["duration"] or 0) - d) <= 3 for d in have.get(track_key(t["title"]), []))]
+
+
 def score_copy(d):
     return (d["complete"], d["lossless_frac"] >= 1, d["remaster"], d["tracks"] - d["doubled_slots"],
             d["lossless_frac"], d["plays"])
@@ -421,8 +472,10 @@ def plan_group(key, members, rg, releases, lib_artist_id, lib_spellings=()):
             lib_spellings, credited)
         entry["want_album_artist"] = want_artist
 
+    tracks_of = {}
     for m in members:
         m_tracks = m.pop("_tracks")
+        tracks_of[m["album_id"]] = m_tracks
         broken = set(m["damaged"])
         m_tracks = [t for t in m_tracks if os.path.basename(t["path"]) not in broken]
         if std_tracks:
@@ -439,6 +492,13 @@ def plan_group(key, members, rg, releases, lib_artist_id, lib_spellings=()):
     keep = members[0]
     entry["keep"] = keep["album_id"]
     for other in members[1:]:
+        extra = unmatched(tracks_of[other["album_id"]], tracks_of[keep["album_id"]])
+        if extra:
+            # "Ted (Demos & Alternate Versions)" shares a release group with
+            # "Ted" but holds other recordings: not a duplicate
+            entry["notes"].append(f'`{other["dir"]}` shares this album but has {len(extra)} '
+                                  f'track(s) the kept copy lacks — kept (e.g. {extra[0]})')
+            continue
         entry["actions"].append({"do": "remove_copy", "album_id": other["album_id"],
                                  "dir": other["dir"], "tracks": other["tracks"],
                                  "plays": other["plays"], "rated": other["rated"]})
@@ -446,6 +506,13 @@ def plan_group(key, members, rg, releases, lib_artist_id, lib_spellings=()):
         entry["actions"].append({"do": "dedupe_tracks", "album_id": keep["album_id"],
                                  "n": keep["doubled_slots"]})
     need_full = keep["complete"] is False or keep["lossless_frac"] < 1
+    have_frac = 1 - len(keep["missing"]) / len(std_tracks) if std_tracks else 1
+    if need_full and have_frac < 0.5 and not keep["damaged"]:
+        # one track of a 30-track compilation is not an album to complete
+        # automatically; he decides these separately
+        entry["actions"].append({"do": "partial", "have": len(std_tracks) - len(keep["missing"]),
+                                 "of": len(std_tracks), "type": entry.get("type")})
+        need_full = False
     if need_full and (rg or keep["damaged"]):
         why = []
         if keep["damaged"]:
@@ -508,6 +575,7 @@ def cmd_plan(args):
     groups = collections.defaultdict(list)
     artist_of = {}
     resolved = []
+    bad_tags = []
     t0 = time.time()
     for i, a in enumerate(sorted(todo, key=lambda a: fold(a["album_artist"]))):
         ts = tracks[a["id"]]
@@ -527,6 +595,9 @@ def cmd_plan(args):
             r = mb_release(rels.most_common(1)[0][0])
             rgid = (r or {}).get("release-group", {}).get("id")
         how = "tag" if rgid else None
+        if rgid and not rg_agrees(mb_rg(rgid), a["album_artist"], a["album"]):
+            bad_tags.append((a["album_artist"], a["album"], rgid))
+            rgid, how = None, None
         if not rgid and not is_va(a["album_artist"]):
             rgid = mb_search_rg(a["album_artist"] or ts[0]["artist"] or "", a["album"] or "")
             how = "search" if rgid else None
@@ -553,7 +624,8 @@ def cmd_plan(args):
             known = lib_artist_ids.get(fold(a["album_artist"]))
             first = (rg.get("first-release-date") or "")[:4]
             mine = a.get("orig_year") or a.get("year")
-            if (known and not ids & set(known)) or (first and mine and int(first) > int(mine) + 1):
+            if ((known and not ids & set(known)) or (first and mine and int(first) > int(mine) + 1)
+                    or not rg_agrees(rg, a["album_artist"], a["album"])):
                 d.setdefault("notes", []).append(f"rejected search match {rgid} ({first})")
                 rgid = None
         key = rgid or f'lib:{fold(a["album_artist"])}|{bare_title(a["album"])}'
@@ -585,6 +657,7 @@ def cmd_plan(args):
         plan.append(plan_group(key, members, rg, releases or [], aid, lib_sp))
         if (j + 1) % 50 == 0:
             print(f"  planned {j+1}/{len(groups)} ({time.time()-t0:.0f}s)", flush=True)
+    (OUT / "bad-mb-tags.json").write_text(json.dumps(bad_tags, ensure_ascii=False, indent=1))
     PLAN_JSON.write_text(json.dumps(plan, ensure_ascii=False, indent=1))
     print(f"wrote {PLAN_JSON} ({len(plan)} album groups)")
     cmd_report(args)
@@ -628,6 +701,8 @@ def cmd_report(_args):
                     lines.append(f'  - set {k} = {v} (was {a["was"]})')
                 elif a["do"] == "art":
                     lines.append(f'  - cover: fetch ({a["have_px"]}px now)')
+                elif a["do"] == "partial":
+                    lines.append(f'  - only {a["have"]} of {a["of"]} tracks here — not completed automatically')
                 elif a["do"] == "dedupe_tracks":
                     lines.append(f'  - remove {a["n"]} doubled track(s) inside the album')
             for n in e["notes"]:

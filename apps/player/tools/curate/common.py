@@ -36,10 +36,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "pylib"))
 import trackmatch  # noqa: E402
 
 ROOT = reorg.ROOT
-# Everything this pipeline removes from the library goes here, never deleted.
-# Chosen name: a sibling of ~/Music that makes clear it holds material pulled
-# OUT of the library, not a second library.
-REMOVED = Path.home() / "Music-removed"
+# Everything this pipeline removes from the library goes here, never deleted:
+# a sibling of aud/ on the library drive (his choice, 2026-09-26), so a removal
+# is a rename and never fills the root NVMe.
+REMOVED = Path(reorg.ROOT).parent / "aud-removed"
 STATE = Path.home() / ".cache" / "library-curate"
 STATE.mkdir(parents=True, exist_ok=True)
 SCAN_JSON = STATE / "scan.json"
@@ -116,10 +116,9 @@ _audit_rows = []
 
 
 def move_to_removed(path, category, reason):
-    """MOVE (never delete) a library file out to ~/Music-removed/<category>/
+    """MOVE (never delete) a library file out to aud-removed/<category>/
     <relpath-under-aud>, preserving the relative path so it can be found
-    again. Cross-filesystem (exFAT SSD -> home), so this is copy+unlink, not
-    a rename."""
+    again. Same drive as the library, so this is a rename."""
     path = str(path)
     rel = os.path.relpath(path, ROOT)
     dest = REMOVED / category / rel
