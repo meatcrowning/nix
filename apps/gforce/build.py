@@ -13,6 +13,18 @@ ROOT=Path(__file__).resolve().parent
 UPSTREAM_SHA256='62f0a45a8fef1bd85b3db5cd2b920481b2fae25f95f6bc0f09c6b4566f0462f9'
 BUILD_FILES=('build.py','renderer.cpp','gpu_hooks.h','config.h','libvisual.h','engine.patch')
 
+# Omit palettes limited to one or two simultaneous visible hue families,
+# including those that cycle a single hue over time.
+LOW_COLOR_MAPS=frozenset({
+    'Acid_Gap', 'Aqua', 'Bizarro_Mystery_Unveiled', 'Blood',
+    'DT_-_November_Rain', 'DT_-_Silver_Machine', 'Green', 'Hero', 'Lust',
+    'Mystery_Unveiled', 'Mystery_Unveiled_-_Dim',
+    'Mystery_Unveiled_-_Jellyfish', 'Punkin_', 'SolarWinds', 'Teal',
+    'Bizarro-ColorWheel', 'ColorWheel', 'DT_-_Glows', 'DT_-_Plastic',
+    'DT_-_Antarctis', 'DT_-_GreenPoison', 'DT_-_Lake_of_Fire',
+    'DT_-_Wild_West_End', 'Firestorm', 'Purple_N_Blues', 'Purple_N_Blues_II',
+})
+
 
 def prepare():
     archive=Path(os.environ['GF_ENGINE_ARCHIVE'])
@@ -50,6 +62,7 @@ def prepare():
                 for kind in ('ColorMaps','DeltaFields','Particles','WaveShapes'):
                     dest=data/('GForce'+kind);dest.mkdir()
                     for preset in (src/('GForce'+kind)).iterdir():
+                        if kind=='ColorMaps' and preset.name in LOW_COLOR_MAPS:continue
                         if preset.is_file() and preset.name!='Makefile.am':shutil.copy2(preset,dest/preset.name)
                 include=build/'include/libvisual';include.mkdir(parents=True)
                 shutil.copy2(ROOT/'libvisual.h',include/'libvisual.h')
