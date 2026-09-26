@@ -15,10 +15,10 @@ Item {
     property real fgArt: 1
     readonly property var cur: Player.current || ({})
     property real topFrac: Number(Prefs.get("visualizerStackTopFrac", .5)) || .5
-    property real infoFrac: Number(Prefs.get("visualizerInfoFrac", .5)) || .5
+    property real infoFrac: Number(Prefs.get("visualizerInfoWidthFrac", .5)) || .5
     readonly property real topH: Math.max(0, Math.min(Math.max(0, height-207), Math.max(80, height*topFrac)))
-    readonly property real infoH: Math.max(0, Math.min(Math.max(0, bottom.height-67),
-                                                       Math.max(120, bottom.height*infoFrac)))
+    readonly property real infoW: Math.round(Math.max(0, bottom.width-7)
+                                            * Math.max(.2, Math.min(.8, infoFrac)))
 
     Item {
         id: upper
@@ -70,7 +70,7 @@ Item {
         Item {
             id: queue
             objectName: "visualizerQueue"
-            y: root.infoH+7; width: parent.width; height: Math.max(0,parent.height-y)
+            x: root.infoW+7; width: Math.max(0,parent.width-x); height: parent.height
             PixelText { id: queueHead; x: 8; y: 4
                 text: "queue  ("+Player.queueLength+")"; color: root.fgDim }
             TrackList {
@@ -89,7 +89,7 @@ Item {
             id: information
             clip: true
             objectName: "visualizerInformation"
-            width: parent.width; height: root.infoH
+            width: root.infoW; height: parent.height
             Image {
                 id: art
                 objectName: "visualizerArt"
@@ -155,16 +155,17 @@ Item {
             objectName: "visualizerInfoDivider"
             hoverEnabled: true
             preventStealing: true
-            y: root.infoH; width: parent.width; height: 7
-            cursorShape: Qt.SplitVCursor
+            x: root.infoW; width: 7; height: parent.height
+            cursorShape: Qt.SplitHCursor
             onPositionChanged: mouse => {
-                if (pressed && bottom.height>0)
-                    root.infoFrac=Math.max(.2,Math.min(.8,mapToItem(bottom,0,mouse.y).y/bottom.height));
+                if (pressed && bottom.width>width)
+                    root.infoFrac=Math.max(.2,Math.min(.8,
+                        (mapToItem(bottom,mouse.x,0).x-width/2)/(bottom.width-width)));
             }
-            onReleased: Prefs.set("visualizerInfoFrac",root.infoFrac)
+            onReleased: Prefs.set("visualizerInfoWidthFrac",root.infoFrac)
             Rectangle {
                 anchors.centerIn: parent
-                width: parent.width; height: 1
+                width: 1; height: parent.height
                 color: infoDivider.containsMouse || infoDivider.pressed ? root.fgAccent : Theme.border
             }
         }

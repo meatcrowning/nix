@@ -62,12 +62,15 @@ for plasma in (False,True):
         queue=page.findChild(QObject,'visualizerQueue')
         info=page.findChild(QObject,'visualizerInformation')
         assert surface.height()>0 and info.width()>0
-        assert queue.y()>=info.y()+info.height()+7
-        assert queue.width()==info.width()==page.width()
+        assert queue.x()==info.x()+info.width()+7
+        assert queue.y()==info.y()==0
+        assert queue.height()==info.height()
+        assert info.width()+7+queue.width()==page.width()
         assert queue.height()>0
-        for name in ('visualizerInfoDivider','visualizerTopDivider'):
+        for name,cursor in (('visualizerInfoDivider',Qt.SplitHCursor),
+                            ('visualizerTopDivider',Qt.SplitVCursor)):
             divider=page.findChild(QObject,name)
-            assert divider.property('cursorShape')==Qt.SplitVCursor
+            assert divider.property('cursorShape')==cursor
             assert divider.property('hoverEnabled') and divider.height()>=7
         assert info.parentItem().y()>=surface.height()+7
         assert page.findChild(QObject,'visualizerInfoPane') is None
@@ -76,8 +79,7 @@ for plasma in (False,True):
         album=page.findChild(QObject,'visualizerAlbumYear')
         rating=page.findChild(QObject,'visualizerRating')
         assert art.width()==art.height() and 0<art.height()<=info.height()
-        if width>=960:
-            assert art.height()==info.height(), 'cover does not follow pane height'
+        assert art.height()==min(info.height(),info.width()-max(120,rating.width())-16)
         assert rating.y()>=album.y()+album.height()
         assert rating.parentItem().y()+rating.y()+rating.height()<=info.height()
         assert rating.width()<=rating.parentItem().width()
@@ -197,7 +199,7 @@ def check_layout(app,shell,win,*args):
     for name, owner, prop, delta in (
         ('visualizerAlbumDivider',root,'visualAlbumFrac',QPoint(30,0)),
         ('visualizerTopDivider',surface.parentItem().parentItem(),'topFrac',QPoint(0,-20)),
-        ('visualizerInfoDivider',surface.parentItem().parentItem(),'infoFrac',QPoint(0,20))):
+        ('visualizerInfoDivider',surface.parentItem().parentItem(),'infoFrac',QPoint(20,0))):
         handle=root.findChild(QObject,name)
         point=handle.mapToScene(QPointF(handle.width()/2,handle.height()/2)).toPoint()
         before=owner.property(prop)
