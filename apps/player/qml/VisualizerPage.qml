@@ -60,27 +60,24 @@ Item {
             onHeightChanged: resize()
             Component.onCompleted: resize()
         }
-        Rectangle {
+        Item {
             id: trackNotice
             objectName: "visualizerTrackNotice"
             parent: surface
-            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.left: parent.left
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: sidebarButton.height+12
-            width: Math.max(0, Math.min(380, parent.width-24))
-            height: Math.max(80, noticeText.height+16)
+            width: Math.min(380, parent.width)
+            height: Math.max(64, noticeText.height)
             visible: opacity > 0 && root.bottomCollapsed && root.cur.id !== undefined
             opacity: trackNoticeTimer.running ? 1 : 0
-            color: Theme.plasmaPalette ? WalPalette.toolTipBase : Theme.bg
-            border.color: Theme.border
             clip: true
-            readonly property color ink: Theme.plasmaPalette ? WalPalette.toolTipText : Theme.text
             Behavior on opacity { NumberAnimation {
                 duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing
             } }
             Image {
                 id: noticeArt
-                x: 8; anchors.verticalCenter: parent.verticalCenter
+                objectName: "visualizerNoticeArt"
+                anchors { left: parent.left; bottom: parent.bottom }
                 width: 64; height: 64
                 source: root.cur.artPath ? "file://"+root.cur.artPath : ""
                 sourceSize.width: 128; sourceSize.height: 128
@@ -88,11 +85,23 @@ Item {
             }
             Column {
                 id: noticeText
-                anchors { left: noticeArt.right; right: parent.right; margins: 8; verticalCenter: parent.verticalCenter }
+                anchors { left: noticeArt.right; right: parent.right; leftMargin: 8; bottom: parent.bottom }
                 spacing: 3
-                PixelText { width: parent.width; text: root.cur.title || ""; color: trackNotice.ink; elide: Text.ElideRight }
-                PixelText { width: parent.width; text: root.cur.artist || ""; color: trackNotice.ink; elide: Text.ElideRight }
-                PixelText { width: parent.width; text: root.cur.year || ""; color: trackNotice.ink; elide: Text.ElideRight }
+                PixelText {
+                    width: parent.width; text: root.cur.title || ""
+                    color: "white"; style: Text.Outline; styleColor: "black"
+                    horizontalAlignment: Text.AlignLeft; elide: Text.ElideRight
+                }
+                PixelText {
+                    width: parent.width; text: root.cur.artist || ""
+                    color: "white"; style: Text.Outline; styleColor: "black"
+                    horizontalAlignment: Text.AlignLeft; elide: Text.ElideRight
+                }
+                PixelText {
+                    width: parent.width; text: root.cur.year || ""
+                    color: "white"; style: Text.Outline; styleColor: "black"
+                    horizontalAlignment: Text.AlignLeft; elide: Text.ElideRight
+                }
             }
         }
         HeaderButton {
