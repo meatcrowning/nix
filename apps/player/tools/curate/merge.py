@@ -11,7 +11,7 @@ Per group:
   - the directory with the most tracks is PRIMARY.
   - every other directory's tracks either fill a gap (moved in, nothing lost)
     or duplicate a track already in PRIMARY (the worse-quality copy is moved
-    to ~/Music-removed/consolidated-dupes/, never deleted).
+    to aud-removed/consolidated-dupes/, never deleted).
   - leftover non-audio files (cover art, .nfo) move into PRIMARY too.
   - emptied source directories are rmdir'd (never force-removed - if one is
     not empty after the merge, it is left in place and logged).
