@@ -139,7 +139,10 @@ try:
         player.currentChanged.emit()
         QTest.qWait(350)
         assert timer.property('running') and notice.isVisible()
-        assert notice.x() >= 0 and notice.y() >= 0
+        assert notice.x() == 0 and notice.y() >= 0
+        cover = page.findChild(QObject, 'visualizerNoticeArt')
+        assert cover.x() == 0
+        assert abs(notice.y()+cover.y()+cover.height()-notice.parentItem().height()) < 1
         assert notice.x()+notice.width() <= notice.parentItem().width()
         QTest.qWait(4400)
         player.currentChanged.emit()
