@@ -129,6 +129,33 @@ try:
         bridge.setFavorite(1, True)
         verify(None, True)
         assert heart.property('lit')
+        notice = page.findChild(QObject, 'visualizerTrackNotice')
+        timer = page.findChild(QObject, 'visualizerTrackNoticeTimer')
+        assert not timer.property('running'), 'startup must not announce the track'
+        page.setProperty('bottomCollapsed', True)
+        player.currentChanged.emit()
+        assert not timer.property('running'), 'same-track metadata must not announce'
+        player._index = 2
+        player.currentChanged.emit()
+        QTest.qWait(350)
+        assert timer.property('running') and notice.isVisible()
+        assert notice.x() >= 0 and notice.y() >= 0
+        assert notice.x()+notice.width() <= notice.parentItem().width()
+        QTest.qWait(4400)
+        player.currentChanged.emit()
+        QTest.qWait(650)
+        assert not timer.property('running') and not notice.isVisible(), 'metadata restarted dwell'
+        player._index = 0
+        player.currentChanged.emit()
+        assert timer.property('running')
+        page.setProperty('bottomCollapsed', False)
+        assert not timer.property('running') and not notice.isVisible()
+        player._index = 2
+        player.currentChanged.emit()
+        assert not timer.property('running'), 'expanded pane must not announce'
+        player._index = 0
+        player.currentChanged.emit()
+        print('PASS collapsed track notice, dwell, metadata filtering and expansion:', plasma)
         scene.hide()
         print('PASS actual heart/star clicks, five ratings, clearing, duplicate rows and rapid toggles:',
               'Plasma' if plasma else 'Hyprland')

@@ -221,6 +221,16 @@ def check_layout(app,shell,win,*args):
     assert commands==[{{'op':'key','key':'r'}}],commands
     commands.clear()
     if shell is not None:
+        bar=shell._toolbar
+        for width in (960, 1400, 960):
+            shell.window.resize(width, 700)
+            QTest.qWait(30)
+            random=bar.actionGeometry(shell._actions['visualR'])
+            playlists=bar.actionGeometry(shell._actions['playlists'])
+            assert random.left()>playlists.right()+100, (random,playlists)
+            timing=shell.window.findChild(QObject,'visualizerTiming')
+            assert bar.width()-(timing.x()+timing.width())<20, (bar.width(),timing.geometry())
+        commands.clear()
         shell._actions['visualR'].trigger()
     else:
         root.tbAction('visualR')
