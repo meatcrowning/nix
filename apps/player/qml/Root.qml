@@ -372,7 +372,7 @@ Item {
             { id: "settings",  label: "st", state: win.settingsOpen ? 1 : 0, tip: "settings",
               bottom: true, menu: "settings", menuText: "Configure player…",
               icon: "configure" },
-        ].concat(view === "visualizer" ? [
+        ].concat(win.plasma && view === "visualizer" ? [
             { id: "visualSidebar", label: "vc", state: visualSidebar ? 1 : 0,
               tip: "visualizer controls", menu: "settings", menuText: "Show Visualizer Controls", shortcut: "Tab" },
             { id: "visualPause", label: "vp", state: 0, tip: "pause visual changes",
@@ -384,7 +384,7 @@ Item {
             { id: "visualP", label: "P", menuText: "Toggle Particles", menu: "visualizer", tip: "toggle particles", shortcut: "P" },
             { id: "visualR", label: "R", menuText: "Randomise", menu: "visualizer", tip: "randomise", shortcut: "R" },
             { id: "visualS", label: "S", menuText: "Save Look", menu: "visualizer", tip: "save look", shortcut: "S" }
-        ] : []);
+        ] : []).filter(button => win.plasma || button.id !== "visualFullscreen");
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
@@ -537,6 +537,7 @@ Item {
             active: win.view === "visualizer" && typeof Visualizer !== "undefined"
             source: active ? "VisualizerPage.qml" : ""
             onLoaded: {
+                item.plasma = Qt.binding(function() { return win.plasma; });
                 item.sidebar = Qt.binding(function() { return win.visualSidebar; });
                 item.openAlbum.connect(win.openAlbum);
                 item.browseArtist.connect(win.browseArtist);
