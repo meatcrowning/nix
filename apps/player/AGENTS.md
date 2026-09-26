@@ -392,9 +392,10 @@ Tab toggles controls, Space controls playback, Shift+Space pauses visual changes
 and W/C/X/N/P/R/S retain the visualizer actions only in that view.
 
 Verify with `tools/visualizer-test.py`, `tools/visualizer-presentation-test.py`,
-`tools/visualizer-ack-test.py`, and G-Force's `embedded-check.py` and
-`player-audio-check.py`. The latter starts private PipeWire/WirePlumber with
-all hardware monitors disabled; never run its fixtures against the live graph.
+`tools/visualizer-tab-test.py`, `tools/visualizer-ack-test.py`, and G-Force's
+`embedded-check.py` and `player-audio-check.py`. The latter starts private
+PipeWire/WirePlumber with all hardware monitors disabled; never run its fixtures
+against the live graph.
 `bash tools/visualizer-cadence-test.sh` requires KWin and Oxygen and measures
 native transport updates on a private virtual output with synthetic frames,
 its own D-Bus session, and no audio. Offscreen rendering cannot expose swaps
