@@ -2,8 +2,9 @@
 
 A separate EGL context/process keeps renderer faults out of playback and works
 with both Qt Quick's native Plasma and Hyprland graphics backends. One frame
-in flight bounds memory and display latency; Player acknowledges scene-graph
-consumption before the next frame. Pixels use a private memfd when provided;
+in flight bounds memory and display latency; Player acknowledges its private
+image copy before repaint, letting the renderer keep its own cadence.
+Pixels use a private memfd when provided;
 inline RGBA remains compatible with already-running older Player instances.
 """
 import ctypes as C

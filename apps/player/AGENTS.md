@@ -311,6 +311,9 @@ half or reinterpret menu disabled colors as focus state.
 `perftrace.py` starts only in normal app launches and writes
 `$XDG_STATE_HOME/player/performance.jsonl` (default `~/.local/state/player/`).
 It retains a 2 MiB log and three rotated copies. `PLAYER_PERF_LOG=0` disables it.
+Visualizer frame summaries distinguish receipt from scene-graph upload,
+including sub-250 ms gaps, once per second while frames arrive. These use the
+same background writer and stop with the visualizer.
 A 50 ms GUI heartbeat records gaps over 250 ms; a background watchdog captures
 Python stacks during stalls at most once a second. Timed queue/metadata work
 logs durations over 25 ms, with queue size/index and 10-second CPU samples.
@@ -362,8 +365,11 @@ app overlay, hiding/minimizing the window, and quitting tear down its process
 group including audio capture. A renderer failure must never stop playback.
 A private Linux memfd carries RGBA pixels; the pipe carries only frame sizes
 and control state. One unacknowledged frame caps output at 1920×1080.
-The QSG image node acknowledges after taking the frame, not on IPC receipt,
-so Qt cannot coalesce unseen frames. Render scale remains supersampling.
+A private image copy acknowledges the shared buffer immediately; the QSG
+image node takes the newest complete copy when Qt repaints. Never gate the
+producer on repaint: coupling the clocks amplifies missed refreshes. Keep
+only the newest pending image, with no queue to replay after a stall.
+Render scale remains supersampling.
 Textures are created and released on the scene-graph thread; do not put a
 QQuickPaintedItem/CPU scaling pass back between the frame and its texture.
 

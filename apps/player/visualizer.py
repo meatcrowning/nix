@@ -12,6 +12,8 @@ from PySide6.QtGui import QColor, QImage
 from PySide6.QtQml import qmlRegisterType
 from PySide6.QtQuick import QQuickItem, QQuickWindow, QSGImageNode, QSGTexture
 
+import perftrace
+
 APPS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APPS))
 from gforce.settings import DEFAULTS, DIALS, TOGGLES
@@ -30,7 +32,6 @@ class Visualizer(QObject):
         self.worker_command = ["gforce-qtenv","python3",str(APPS/"gforce/embedded_worker.py"),stream_name]
         self.process = None
         self.generation = 0
-        self.frame_pending = False
         self.window = None
         self.requested = False
         self.closed = False
@@ -108,7 +109,7 @@ class Visualizer(QObject):
         env.insert('GF_PLAYER_FRAME_FILE',f'/proc/{os.getpid()}/fd/{p.frame_fd}')
         p.setProcessEnvironment(env)
         self.generation += 1
-        self.frame_pending = False
+        perftrace.reset_visualizer_frames()
         self.process = p
         self.buffer.clear()
         self.diagnostic = ''
@@ -142,7 +143,6 @@ class Visualizer(QObject):
             try: os.killpg(pid,signal.SIGKILL)
             except ProcessLookupError: pass
         self.process = None
-        self.frame_pending = False
         process.frame_map.close()
         os.close(process.frame_fd)
         self.buffer.clear()
@@ -243,16 +243,12 @@ class Visualizer(QObject):
                 if size != (8 if shared else 8+w*h*4): continue
                 pixels = p.frame_map if shared else data[8:]
                 frame = QImage(pixels,w,h,w*4,QImage.Format.Format_RGBA8888).copy()
-                self.frame_pending = True
+                # The copy owns its pixels now. Release shared storage before
+                # waiting for a repaint: the producer and display clocks must
+                # not lock-step or a missed refresh also delays the next render.
+                self.command({'op':'ack'})
+                perftrace.visualizer_frame('received')
                 self.frame.emit(frame)
-
-    @Slot(int)
-    def acknowledge(self,generation):
-        # The scene graph, not receipt of bytes, releases the next frame.
-        # Ignore queued notifications from a worker that has since stopped.
-        if generation == self.generation and self.frame_pending:
-            self.frame_pending = False
-            self.command({'op':'ack'})
 
     @Slot('QVariantMap')
     def command(self, message):
@@ -284,7 +280,6 @@ class VisualizerSurface(QQuickItem):
         self._image.fill(QColor('black'))
         self._dirty = True
         self._generation = -1
-        self.consumed.connect(self.acknowledge, Qt.ConnectionType.QueuedConnection)
         self.setFlag(QQuickItem.Flag.ItemHasContents)
 
     @Property(QObject,notify=sourceChanged)
@@ -305,11 +300,6 @@ class VisualizerSurface(QQuickItem):
         self._dirty = True
         self.update()
 
-    @Slot(int)
-    def acknowledge(self,generation):
-        if self._source:
-            self._source.acknowledge(generation)
-
     def updatePaintNode(self,node,data):
         # Upload the original image once. QQuickPaintedItem first rescaled it
         # into another full-size CPU image and then uploaded the scaled result.
@@ -327,6 +317,7 @@ class VisualizerSurface(QQuickItem):
             node.setTextureCoordinatesTransform(QSGImageNode.TextureCoordinatesTransformFlag.MirrorVertically)
             self._dirty = False
             if self._generation >= 0:
+                perftrace.visualizer_frame('uploaded')
                 self.consumed.emit(self._generation)
                 self._generation = -1
         node.setRect(self.boundingRect())
