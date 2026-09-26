@@ -165,6 +165,10 @@ import paths. seed-drift.sh --pre-switch reports expected reconciliation.
   private syncs. Edit seeded sources, not deployed copies; their services are
   claude-state-sync.service and oracle-skills-sync.service. Do not reuse the
   ~/.claude denylist for other trees.
+- tools/xanadu/build.py renders the read-only 3D view of this tree;
+  tools/xanadu/serve.py serves it with an editor over the working tree
+  (loopback + per-run token, hash-checked all-or-nothing saves, renames use
+  git add -N, never commits). Test it with --root on a scratch clone.
 
 ## Git and documentation
 

@@ -17,6 +17,7 @@
     --overlay: #c38bff;
     --top: #4fb3ff;
     --air: #ffcf5c;
+    --error: #ff5c5c;
     --ui: "Chivo", "Helvetica Neue", Arial, sans-serif;
     --mono: "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace;
   }
@@ -101,6 +102,53 @@
   #cap b { font: 600 12.5px var(--mono); color: var(--ink); }
   #cap .n { font: 12px var(--mono); font-variant-numeric: tabular-nums; }
 
+  /* editor (serve.py only) */
+  #ed { position: fixed; display: grid; grid-template-rows: 32px 1fr; z-index: 5; box-sizing: border-box; }
+  #edhead {
+    display: flex; align-items: center; gap: 6px; padding: 0 8px; min-width: 0;
+    background: #1c2840; border: 1px solid #3b4d70; border-bottom: 0; font: 12px var(--ui);
+  }
+  #edhead b { font: 600 12.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #edhead .sp { flex: 1; }
+  #edhead button { padding: 3px 9px; }
+  #edhead button:disabled { opacity: 0.4; cursor: default; }
+  #eddirty { color: var(--air); }
+  #edrename { flex: 1 1 14em; min-width: 8em; font: 12px var(--mono); padding: 3px 6px; background: #0a111f; color: var(--ink); border: 1px solid #3b4d70; border-radius: 3px; }
+  #edcm { min-height: 0; border: 1px solid #3b4d70; background: #101828; }
+  #edcm .CodeMirror { height: 100%; background: #101828; color: #b9c5d8; font-family: "JetBrains Mono", monospace; font-size: var(--fs); line-height: var(--row); }
+  #edcm .CodeMirror-lines { padding: 0; }
+  #edcm .CodeMirror pre.CodeMirror-line, #edcm .CodeMirror pre.CodeMirror-line-like { padding: 0 calc(var(--pad) * 0.5) 0 var(--pad); line-height: var(--row); }
+  #edcm .CodeMirror-cursor { border-left: 2px solid var(--air); }
+  #edcm .CodeMirror-selected, #edcm .CodeMirror-focused .CodeMirror-selected { background: #2a3d63; }
+  #edcm .cm-comment { color: #6b8a77; } #edcm .cm-string { color: #e2a56a; } #edcm .cm-interp { color: #ff9e64; }
+  #edcm .cm-keyword { color: #c792ea; } #edcm .cm-builtin { color: #82aaff; } #edcm .cm-atom, #edcm .cm-number { color: #f78c6c; }
+  #edcm .cm-attribute { color: #7fd1c7; } #edcm .cm-path { color: #c3e88d; } #edcm .cm-operator, #edcm .cm-bracket { color: #7d8aa3; }
+  #edcm .cm-variable { color: #b9c5d8; } #edcm .cm-header { color: #f0f4fa; font-weight: 700; } #edcm .cm-strong { color: #eef3fa; font-weight: 600; }
+  #edcm .xl { background: color-mix(in srgb, var(--c) 17%, transparent); }
+  #edcm .xl-path { --c: var(--path); } #edcm .xl-option { --c: var(--option); } #edcm .xl-unit { --c: var(--unit); }
+  #edcm .xl-file { --c: var(--file); } #edcm .xl-overlay { --c: var(--overlay); } #edcm .xl-error { --c: var(--error); }
+  #edcm .cm-link, #edcm .cm-url { color: #8fb0ff; } #edcm .cm-quote { color: #8c9ab3; } #edcm .cm-em { font-style: italic; }
+  .bar {
+    position: fixed; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); box-sizing: border-box;
+    display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: center;
+    padding: 8px 14px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); z-index: 6;
+  }
+  #pend { top: calc(12px + env(safe-area-inset-top, 0px)); border-color: color-mix(in srgb, var(--air) 55%, transparent); }
+  #flash { bottom: calc(66px + env(safe-area-inset-bottom, 0px)); pointer-events: none; }
+  #flash.bad { border-color: var(--error); color: #ffd6d6; }
+  #chk {
+    position: fixed; right: 16px; bottom: calc(66px + env(safe-area-inset-bottom, 0px)); width: min(360px, calc(100vw - 32px));
+    box-sizing: border-box; padding: 10px 14px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); z-index: 6;
+  }
+  #chk.ok { border-color: #5fe3b0; } #chk.bad { border-color: var(--error); }
+  #chk b { font-weight: 600; } #chk .n { color: var(--ink-dim); font: 12px var(--mono); }
+  #chk button { float: right; padding: 2px 8px; }
+  #chk .sub { color: var(--ink-dim); font: 11.5px var(--mono); margin-top: 6px; overflow-wrap: anywhere; }
+  #chk ul { margin: 6px 0 0; padding-left: 18px; font: 12px var(--mono); }
+  #chk a { color: #ffb3b3; }
+  .unsaved { display: flex; gap: 8px; align-items: center; color: var(--air); font-size: 12px; }
+  .unsaved button { margin-left: auto; }
+
   @media (max-width: 760px) {
     .hud { gap: 8px; padding: 10px 12px; }
     .hud .help { display: none; }
@@ -124,17 +172,31 @@
     <datalist id="paths"></datalist>
     <button type="button" id="home">Overview</button>
   </form>
+  <div class="unsaved" id="unsaved" hidden><span id="unsavedn"></span><button type="button" id="reload" hidden>Reload changed</button><button type="button" id="unsavedsave">Save all</button></div>
   <div class="help"><kbd>WASD</kbd> fly · <kbd>Q</kbd>/<kbd>E</kbd> down/up · <kbd>Shift</kbd> faster · drag to look · right-drag to slide · scroll to glide · move close to a page to read it · click a page to pull it forward with everything bridged to it · <kbd>/</kbd> find · <kbd>M</kbd> menu</div>
 </section>
 
 <button type="button" id="menu-on" title="Show menu (M)">Menu</button>
 <div id="cap" hidden></div>
+<div id="ed" hidden>
+  <div id="edhead"><b id="edpath"></b><span id="eddirty" hidden title="Unsaved changes">●</span><span class="sp"></span>
+    <input id="edrename" hidden spellcheck="false" aria-label="New path for this file">
+    <button type="button" id="edsave" title="Save every changed file (Ctrl+S)">Save</button>
+    <button type="button" id="edcheck" title="Evaluate the whole config">Check</button>
+    <button type="button" id="edren" title="Move this file; references follow">Rename</button>
+    <button type="button" id="eddone" title="Stop editing (Esc)">Done</button></div>
+  <div id="edcm"></div>
+</div>
+<div id="pend" class="bar" hidden><span id="pendmsg"></span><button type="button" id="pendkeep">Keep</button><button type="button" id="pendundo">Undo</button></div>
+<div id="flash" class="bar" hidden></div>
+<div id="chk" hidden></div>
 <div id="tip" hidden></div>
 <div id="lost" hidden>The graphics context was lost — restoring. Reload the page if it stays blank.</div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script>
 const DATA = /*XANADU_DATA*/null;
+const EDIT = /*XANADU_EDIT*/null;      // {token} when served by tools/xanadu/serve.py
 
 const KINDS = {
   path:    { name: "path",    what: "names another file",       css: "--path" },
@@ -143,6 +205,7 @@ const KINDS = {
   file:    { name: "file",    what: "file it deploys",          css: "--file" },
   overlay: { name: "overlay", what: "package it overrides",     css: "--overlay" },
 };
+if (EDIT) KINDS.error = { name: "error", what: "config check failure", css: "--error" };
 const css = getComputedStyle(document.documentElement);
 for (const k in KINDS) KINDS[k].color = css.getPropertyValue(KINDS[k].css).trim();
 const HOSTC = { top: css.getPropertyValue("--top").trim(), air: css.getPropertyValue("--air").trim() };
@@ -156,9 +219,122 @@ const D = 10, RL = LH / W;        // RL: row height as a fraction of page width 
 const HEAD = 2;                   // header rows on a pulled-forward page
 const SIDE_LINES = 14, SIDE_MAX = 16, CHUNK = 240, TILT = 0.34, RLP = 22;
 
-const pages = DATA.pages.map((p, i) => ({ ...p, i, lines: p.text.split("\n"), out: [], inc: [] }));
-const links = DATA.links;
-links.forEach((l, i) => { l.i = i; pages[l.a].out.push(l); pages[l.b].inc.push(l); });
+// ---- page text and the links between pages ----
+function expandTabs(l) {
+  if (!l.includes("\t")) return l;
+  let o = "";
+  for (const ch of l) o += ch === "\t" ? " ".repeat(2 - (o.length % 2)) : ch;
+  return o;
+}
+// raw: the file as saved (tabs kept, final newline stripped); lines/text: display
+function setText(p, raw) { p.raw = raw; p.lines = raw.split("\n").map(expandTabs); p.text = p.lines.join("\n"); }
+
+const pages = DATA.pages.map((d, i) => {
+  const p = { path: d.path, group: d.group, eol: d.eol, hash: d.hash, i, out: [], inc: [], hosts: [] };
+  setText(p, d.text); p.saved = p.raw;
+  return p;
+});
+const DECL_KINDS = ["option", "unit", "file", "overlay"];
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const dirOf = path => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+function normPath(path) {
+  const out = [];
+  for (const s of path.split("/")) {
+    if (s === "" || s === ".") continue;
+    if (s === ".." && out.length && out[out.length - 1] !== "..") out.pop(); else out.push(s);
+  }
+  return out.join("/");
+}
+
+// The cross-file references that bind this config (umport imports everything,
+// so imports = [...] edges are nearly absent):
+//   path     a line naming another page (./rel, repo-relative, ~/nix/..., unique basename)
+//   option   an options.my.* declaration and every config.my.* read or my.* setting
+//   unit     a systemd unit defined in one page and named in another
+//   file     a home.file / xdg.configFile target deployed by one page, named in another
+//   overlay  a package an overlay replaces and the pages that use it
+function extractLinks() {
+  const idx = new Map(pages.map(p => [p.path, p.i])), byBase = new Map();
+  for (const p of pages) { const b = p.path.split("/").pop(); byBase.set(b, (byBase.get(b) || []).concat(p.path)); }
+  const found = new Map(), decls = new Map();
+  const link = (k, a, al, b, bl, t) => {
+    if (a === b) return;
+    const key = `${k}|${a}|${al}|${b}|${bl}`;
+    if (!found.has(key)) found.set(key, { k, a, al, b, bl, t });
+  };
+  const decl = (kind, name, label, p, line) => {
+    const key = kind + "\0" + name;
+    if (!decls.has(key)) decls.set(key, { kind, name, label, p, line });
+  };
+  const resolve = (src, tok) => {
+    const c = [];
+    for (const pre of ["/home/lam/nix/", "~/nix/"]) if (tok.startsWith(pre)) c.push(tok.slice(pre.length));
+    if (tok.startsWith("./") || tok.startsWith("../")) c.push(normPath(dirOf(src) + "/" + tok));
+    c.push(tok);
+    for (const x of c) for (const v of [x, x + ".nix", x.replace(/\/+$/, "") + "/default.nix"]) if (idx.has(v)) return idx.get(v);
+    const same = byBase.get(tok) || [];
+    if (tok.endsWith(".nix") && !tok.includes("/") && same.length === 1) return idx.get(same[0]);
+    return null;
+  };
+  const reOpt = /options\.(my\.[A-Za-z0-9_.]+?)\s*=/g;
+  const reUnit = /systemd\.(?:user\.)?(services|timers|paths|sockets)\."?([A-Za-z0-9_@-]+)"?\s*=/g;
+  const reFile = /(xdg\.configFile|home\.file|xdg\.dataFile)\."([^"]+)"/g;
+  const rePkg = /^\s*([A-Za-z0-9_-]+)\s*=\s*prev\./;
+  const sorted = pages.slice().sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  for (const p of sorted) p.lines.forEach((line, n) => {
+    const i = n + 1;
+    for (const m of line.matchAll(reOpt)) decl("option", m[1], m[1], p.i, i);
+    for (const m of line.matchAll(reUnit)) decl("unit", m[2], `${m[2]}.${m[1].slice(0, -1)}`, p.i, i);
+    for (const m of line.matchAll(reFile)) {
+      const t = m[1] === "xdg.configFile" ? ".config/" + m[2] : m[1] === "xdg.dataFile" ? ".local/share/" + m[2] : m[2];
+      if (t.length >= 10 && t.includes("/")) decl("file", t, "~/" + t, p.i, i);
+    }
+    if (p.path.startsWith("overlays/")) {
+      const m = rePkg.exec(line);
+      // a package-set scope (kdePackages) is "used" by every KDE page
+      if (m && !m[1].endsWith("Packages")) decl("overlay", m[1], m[1], p.i, i);
+    }
+  });
+  const ds = [...decls.values()];
+  const unitUses = ds.filter(d => d.kind === "unit" && d.name.length >= 4).map(d => [d, new RegExp(
+    `(?<![A-Za-z0-9_-])${reEsc(d.name)}\\.(service|timer|path|socket)\\b|(?:services|timers)\\."?${reEsc(d.name)}\\b`)]);
+  const pkgUses = ds.filter(d => d.kind === "overlay").map(d => [d, new RegExp(`pkgs\\.(?:kdePackages\\.)?${reEsc(d.name)}\\b`)]);
+  const optDecls = ds.filter(d => d.kind === "option"), fileDecls = ds.filter(d => d.kind === "file");
+  const tokenRe = /(?:~\/nix\/|\/home\/lam\/nix\/|\.\.?\/)?[A-Za-z0-9_@.+-]+(?:\/[A-Za-z0-9_@.+-]+)*/g;
+  const hostRe = /host\s*[!=]=\s*"(top|air)"|isx86_64|isAarch64|isDarwin/;
+  for (const p of sorted) {
+    p.hosts = [];
+    p.lines.forEach((line, n) => {
+      const i = n + 1;
+      const hm = hostRe.exec(line);
+      if (hm) p.hosts.push([i, hm[1] || (hm[0].includes("x86") ? "top" : "air")]);
+      for (const m of line.matchAll(tokenRe)) {
+        const tok = m[0].replace(/\.+$/, "");
+        if (!tok.includes("/") && !tok.endsWith(".nix")) continue;
+        const b = resolve(p.path, tok);
+        if (b !== null) link("path", p.i, i, b, 1, tok);
+      }
+      // reads (config.my.x) and settings (my.x.enable = true) both name the option
+      for (const m of line.matchAll(/(?<![A-Za-z0-9_.])(?:config\.)?(my\.[A-Za-z0-9_.]+)/g)) {
+        const u = m[1].replace(/\.+$/, "");
+        for (const d of optDecls) if (u === d.name || u.startsWith(d.name + ".") || d.name.startsWith(u + ".")) link("option", p.i, i, d.p, d.line, d.name);
+      }
+      for (const [d, rx] of unitUses) if (p.i !== d.p && rx.test(line)) link("unit", p.i, i, d.p, d.line, d.label);
+      for (const d of fileDecls) if (p.i !== d.p && line.includes(d.name)) link("file", p.i, i, d.p, d.line, d.label);
+      for (const [d, rx] of pkgUses) if (p.i !== d.p && rx.test(line)) link("overlay", p.i, i, d.p, d.line, d.label);
+    });
+  }
+  return { links: [...found.values()], decls };
+}
+let links = [], decls = new Map();
+function relink() {
+  const r = extractLinks();
+  decls = r.decls;
+  links = r.links.concat(EDIT && typeof ED_READY !== "undefined" ? checkLinks() : []);
+  for (const p of pages) { p.out = []; p.inc = []; }
+  links.forEach((l, i) => { l.i = i; pages[l.a].out.push(l); pages[l.b].inc.push(l); });
+}
+relink();
 const on = Object.fromEntries(Object.keys(KINDS).map(k => [k, true]));
 
 // ---- field layout: groups become rows receding in depth, stepping up like tiers ----
@@ -425,6 +601,7 @@ function lineMarks(p) {
   const m = new Map();
   for (const l of p.out) if (on[l.k]) m.set(l.al, l.k);
   for (const l of p.inc) if (on[l.k] && l.bl > 1) m.set(l.bl, l.k);
+  if (p.errLines && on.error) for (const ln of p.errLines.keys()) m.set(ln, "error");
   return m;
 }
 
@@ -435,7 +612,7 @@ function paintPage(p, { lp, width, real, start = 0, count = p.rowsN, head = 0 })
   const g = cv.getContext("2d"), end = start + count, y0 = head * lp;
   const Y = off => y0 + (off - start) * lp;
   g.fillStyle = "#101828"; g.fillRect(0, 0, cv.width, cv.height);
-  const pad = Math.max(4, lp * 0.9), cw = (cv.width - pad * 1.5) / COLS, fs = cw / 0.6;
+  const pad = Math.max(4, lp * 0.9), cw = (cv.width - pad * 1.5) / COLS, fs = cw / 0.6;   // (used by every layer below)
   const r0 = p.rows.length ? firstRow(p, start) : 0;
   for (let ri = r0; ri < p.rows.length && p.rows[ri].y < end; ri++) {
     const r = p.rows[ri];
@@ -449,6 +626,12 @@ function paintPage(p, { lp, width, real, start = 0, count = p.rowsN, head = 0 })
     g.globalAlpha = 0.26; g.fillStyle = KINDS[k].color; g.fillRect(0, Y(a), cv.width, hh * lp);
   }
   g.globalAlpha = 1;
+  if (p.pendingLines) for (const ln of p.pendingLines) {        // rewritten by a rename, not yet kept
+    const a = p.rowY[ln - 1], hh = p.lineH[ln - 1];
+    if (a === undefined || a >= end || a + hh <= start) continue;
+    g.setLineDash([lp * 0.4, lp * 0.25]); g.strokeStyle = HOSTC.air; g.lineWidth = Math.max(1.5, lp * 0.1);
+    g.strokeRect(pad * 0.4, Y(a) + 1, cv.width - pad * 0.8, hh * lp - 2); g.setLineDash([]);
+  }
   for (const [ln, host] of p.hosts) {
     const a = p.rowY[ln - 1], hh = p.lineH[ln - 1];
     if (a === undefined || a >= end || a + hh <= start) continue;
@@ -669,6 +852,7 @@ function itemMaterial(tex) {
 // Paint at the page's on-screen row height (times DPR), not a fixed size:
 // GPU memory, not paint time, is what takes the tab down.
 function setItemTexture(it) {
+  if (R && R.editing && it.role === "focus") return;     // the editor covers it
   if (it.tex) it.tex.dispose();
   const v = view(), rowPx = (it.role === "focus" ? v.lf : v.ls) * innerHeight / v.Hv * Math.min(devicePixelRatio || 1, 2);
   const lp = Math.max(8, Math.min(RLP, Math.ceil(rowPx * 1.1), Math.floor(MAX_TEX / (it.count + it.head))));
@@ -738,6 +922,7 @@ function enter(p, scroll = 0) {
 
 function leave() {
   if (!R || R.leaving) return;
+  if (ED.cm) stopEdit();
   const now = performance.now();
   for (const it of R.items.values()) if (!it.leaving) { it.from = readPose(it.mesh); it.t0 = now; it.leaving = true; }
   R.leaving = true; R.veilT = 0;
@@ -746,10 +931,12 @@ function leave() {
 }
 function back() {
   if (!R || R.leaving) return;
+  if (ED.cm) { stopEdit(); return; }
   const h = R.history.pop();
   if (h) enter(h.p, h.scroll); else leave();
 }
 function go(p, scroll) {
+  if (ED.cm && R && p !== R.focus) stopEdit();
   if (R && !R.leaving) { if (p === R.focus) { R.scrollT = scroll; return; } R.history.push({ p: R.focus, scroll: R.scroll }); }
   if (R && R.leaving) return;
   enter(p, scroll);
@@ -794,7 +981,8 @@ function stepReading(now) {
   if (Math.abs(R.panT - R.pan) < 0.0005) R.pan = R.panT;
   if (Math.abs(R.scrollT - R.scroll) < 0.002) R.scroll = R.scrollT;
   const f = R.items.get(R.focus.i);
-  if (f && !f.leaving && f.count < f.p.rowsN) {
+  if (R.editing && ED.cm) positionEditor();
+  else if (f && !f.leaving && f.count < f.p.rowsN) {
     const v = view(), visible = v.Hv / v.lf, n = f.p.rowsN;
     const need = R.scroll < f.start + 8 && f.start > 0 || R.scroll + visible > f.start + f.count - 8 && f.start + f.count < n;
     if (need && now - (f.painted || 0) > 150) {
@@ -861,7 +1049,8 @@ function updateCaption() {
   const cap = document.getElementById("cap"), p = R.focus;
   const nin = R.cols.left.length, nout = R.cols.right.length;
   cap.innerHTML = `<b>${esc(p.path)}</b><span class="n">${p.lines.length} lines · ${nin} bridged in · ${nout} out</span>` +
-    `<span class="keys">wheel to scroll · <kbd>shift</kbd>+wheel or drag to pan · <kbd>Z</kbd>+wheel to zoom · click a lit line or a side page to follow · <kbd>Esc</kbd> ${R.history.length ? "back" : "return to field"}</span>`;
+    (R.editing ? `<span class="keys"><kbd>Ctrl</kbd>+<kbd>S</kbd> save all · bridges update as you pause · <kbd>Esc</kbd> done editing</span>`
+      : `<span class="keys">wheel to scroll · <kbd>shift</kbd>+wheel or drag to pan · <kbd>Z</kbd>+wheel to zoom · click a lit line or a side page to follow${EDIT ? " · <kbd>E</kbd> or double-click to edit" : ""} · <kbd>Esc</kbd> ${R.history.length ? "back" : "return to field"}</span>`);
   cap.hidden = false;
 }
 function esc(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]); }
@@ -884,13 +1073,20 @@ function overviewPose() {
 }
 
 // ---- HUD ----
-const counts = {}; for (const l of links) counts[l.k] = (counts[l.k] || 0) + 1;
-document.getElementById("meta").textContent =
-  `${pages.length} pages · ${pages.reduce((s, p) => s + p.lines.length, 0).toLocaleString()} lines · ${links.length} bridges · ${DATA.rev}`;
-document.getElementById("kinds").innerHTML = Object.entries(KINDS).map(([k, v]) =>
-  `<label class="kind" style="--c:${v.color}"><input type="checkbox" id="k-${k}" data-k="${k}" checked><span class="sw"></span><span><b>${v.name}</b> <span style="color:var(--ink-dim)">${v.what}</span></span><small>${counts[k] || 0}</small></label>`).join("");
+function renderKinds() {
+  const counts = {}; for (const l of links) counts[l.k] = (counts[l.k] || 0) + 1;
+  document.getElementById("meta").textContent =
+    `${pages.length} pages · ${pages.reduce((s, p) => s + p.lines.length, 0).toLocaleString()} lines · ${links.length} bridges · ${DATA.rev}${EDIT ? " · editing" : ""}`;
+  const sig = Object.keys(KINDS).map(k => (counts[k] || 0) + (on[k] ? "" : "x")).join(",");
+  if (sig === renderKinds.sig) return;
+  renderKinds.sig = sig;
+  document.getElementById("kinds").innerHTML = Object.entries(KINDS).map(([k, v]) =>
+    `<label class="kind" style="--c:${v.color}"><input type="checkbox" id="k-${k}" data-k="${k}"${on[k] ? " checked" : ""}><span class="sw"></span><span><b>${v.name}</b> <span style="color:var(--ink-dim)">${v.what}</span></span><small>${counts[k] || 0}</small></label>`).join("");
+}
+renderKinds();
 document.getElementById("kinds").addEventListener("change", e => {
   on[e.target.dataset.k] = e.target.checked;
+  renderKinds.sig = ""; renderKinds();
   buildBridges();
   for (const p of pages) {
     p.low.dispose(); p.low = lowTex(p);
@@ -930,6 +1126,8 @@ function panBy(d) {
 }
 function visibleLines() { const v = view(); return v.Hv / v.lf; }
 addEventListener("keydown", e => {
+  if (EDIT && (e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) { e.preventDefault(); saveAll(); return; }
+  if (e.target.closest && e.target.closest("#ed, #pend, #chk")) return;      // the editor owns its keys
   if (e.target === q) { if (e.key === "Escape") q.blur(); return; }
   if (e.key === "/") { e.preventDefault(); q.focus(); return; }
   if (e.key === "z" || e.key === "Z") { zHeld = true; return; }
@@ -940,6 +1138,7 @@ addEventListener("keydown", e => {
   }
   if (R.leaving) return;
   const n = R.focus.rowsN, page = Math.max(3, Math.floor(visibleLines() * 0.8));
+  if (EDIT && (e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); startEdit(); return; }
   const k = { Escape: () => back(), Backspace: () => back(),
     ArrowDown: () => R.scrollT += 3, ArrowUp: () => R.scrollT -= 3,
     ArrowLeft: () => panBy(view().Wv * 0.12), ArrowRight: () => panBy(-view().Wv * 0.12),
@@ -998,7 +1197,8 @@ renderer.domElement.addEventListener("pointermove", e => {
   if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) down.moved = true;
   if (R && down && down.moved && !R.leaving) {
     const v = view(), px = innerHeight / v.Hv * v.lf;
-    R.scrollT = Math.max(0, Math.min(R.focus.rowsN - 3, R.scrollT - (e.clientY - down.sy) / px));
+    if (R.editing && ED.cm) ED.cm.scrollTo(null, ED.cm.getScrollInfo().top - (e.clientY - down.sy));
+    else R.scrollT = Math.max(0, Math.min(R.focus.rowsN - 3, R.scrollT - (e.clientY - down.sy) / px));
     panBy((e.clientX - down.sx) / (innerHeight / v.Hv)); R.pan = R.panT;
     R.scroll = R.scrollT; down.sx = e.clientX; down.sy = e.clientY; return;
   }
@@ -1051,6 +1251,7 @@ renderer.domElement.addEventListener("wheel", e => {
   if (e.shiftKey && !dx) { dx = dy; dy = 0; }
   if (dx) panBy(-dx / (innerHeight / view().Hv));
   if (!dy) return;
+  if (R.editing && ED.cm) { ED.cm.scrollTo(null, ED.cm.getScrollInfo().top + dy); return; }
   R.scrollT = Math.max(0, Math.min(R.focus.rowsN - 3, R.scrollT + dy * 0.05));
 }, { passive: false, capture: true });
 
@@ -1075,6 +1276,492 @@ function frameBody(now) {
   renderer.render(scene, camera);
 }
 
+// ---- editor: only when served by tools/xanadu/serve.py ----
+// A CodeMirror editor sits exactly over the focus page (which faces the camera
+// squarely, so on screen it is a plain rectangle) and owns scrolling while it
+// is open; bridges read their row positions from the editor's own layout.
+const ED = {
+  cm: null, p: null, loading: null, metrics: "", place: "", dirty: new Set(), timer: 0, silent: false,
+  origDecls: [], origRefs: [], orig: new Map(), pend: { decl: new Map(), file: new Map() }, titles: { decl: "", file: "" },
+  fileRen: null, checkSrc: null, checkErrors: [], checkJob: null,
+};
+const $ = id => document.getElementById(id);
+function flash(msg, bad) {
+  const f = $("flash"); f.textContent = msg; f.classList.toggle("bad", !!bad); f.hidden = false;
+  clearTimeout(flash.t); flash.t = setTimeout(() => { f.hidden = true; }, bad ? 9000 : 3500);
+}
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { "Content-Type": "application/json", "X-Xanadu-Token": EDIT.token },
+                                body: body ? JSON.stringify(body) : undefined });
+  let j = {}; try { j = await r.json(); } catch (_) {}
+  return { status: r.status, body: j };
+}
+function markDirty(p) {
+  if (p.raw !== p.saved || p.from) ED.dirty.add(p.i); else ED.dirty.delete(p.i);
+  updateUnsaved();
+}
+function updateUnsaved() {
+  const n = ED.dirty.size, u = $("unsaved");
+  u.hidden = !n; $("unsavedn").textContent = `${n} unsaved file${n === 1 ? "" : "s"}`;
+  if (ED.p) { $("eddirty").hidden = !ED.dirty.has(ED.p.i); $("edcheck").disabled = n > 0; }
+}
+const rowPx = () => { const v = view(); return v.lf * innerHeight / v.Hv; };
+
+function loadEditorLibs() {
+  if (ED.loading) return ED.loading;
+  const base = "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/";
+  const css = document.createElement("link"); css.rel = "stylesheet"; css.href = base + "codemirror.min.css";
+  document.head.insertBefore(css, document.head.firstChild);   // our #edcm rules stay later and win
+  const js = src => new Promise((ok, no) => {
+    const s = document.createElement("script"); s.src = base + src; s.onload = ok;
+    s.onerror = () => no(new Error("Could not load the editor (" + src + "); check the network"));
+    document.head.appendChild(s);
+  });
+  ED.loading = js("codemirror.min.js").then(() => js("mode/xml/xml.min.js")).then(() => js("mode/markdown/markdown.min.js"))
+    .then(defineNixMode).catch(e => { ED.loading = null; throw e; });
+  return ED.loading;
+}
+function defineNixMode() {
+  CodeMirror.defineMode("nixx", () => ({
+    startState: () => ({ st: ["code"], depth: [0] }),
+    copyState: s => ({ st: s.st.slice(), depth: s.depth.slice() }),
+    lineComment: "#",
+    token(stream, s) {
+      const m = s.st[s.st.length - 1];
+      const push = x => { s.st.push(x); s.depth.push(0); }, pop = () => { s.st.pop(); s.depth.pop(); };
+      if (m === "str") {
+        if (stream.match(/^\\./)) return "string";
+        if (stream.eat('"')) { pop(); return "string"; }
+        if (stream.match("${")) { push("code"); return "interp"; }
+        stream.next(); stream.eatWhile(/[^\\"$]/); return "string";
+      }
+      if (m === "istr") {
+        if (stream.match("'''") || stream.match("''$") || stream.match(/^''\\./)) return "string";
+        if (stream.match("''")) { pop(); return "string"; }
+        if (stream.match("${")) { push("code"); return "interp"; }
+        stream.next(); stream.eatWhile(/[^'$]/); return "string";
+      }
+      if (m === "bc") { if (stream.skipTo("*/")) { stream.match("*/"); pop(); } else stream.skipToEnd(); return "comment"; }
+      if (stream.eatSpace()) return null;
+      if (stream.match("#")) { stream.skipToEnd(); return "comment"; }
+      if (stream.match("/*")) { push("bc"); return "comment"; }
+      if (stream.eat('"')) { push("str"); return "string"; }
+      if (stream.match("''")) { push("istr"); return "string"; }
+      if (stream.match("${")) { push("code"); return "interp"; }
+      if (stream.eat("{")) { s.depth[s.depth.length - 1]++; return "bracket"; }
+      if (stream.eat("}")) {
+        if (s.depth[s.depth.length - 1] === 0 && s.st.length > 1) { pop(); return "interp"; }
+        s.depth[s.depth.length - 1]--; return "bracket";
+      }
+      const prev = stream.pos > 0 ? stream.string[stream.pos - 1] : "";
+      if (!/[A-Za-z0-9_'-]/.test(prev)) {
+        const mm = stream.match(/^(?:\.{1,2}\/|~\/|\/)[A-Za-z0-9._+\-/]+|^<[A-Za-z0-9._\-/]+>/);
+        if (mm && mm[0].length > 1) return "path";
+        if (mm) stream.backUp(mm[0].length);
+        if (stream.match(/^\d+(?:\.\d+)?/)) return "number";
+      }
+      const id = stream.match(/^[A-Za-z_][A-Za-z0-9_'-]*(?:\.(?:[A-Za-z_][A-Za-z0-9_'-]*|"[^"]*"))*/);
+      if (id) {
+        const t = id[0];
+        if (/^[ \t]*=(?!=)/.test(stream.string.slice(stream.pos))) return "attribute";
+        return NIX_KW.has(t) ? "keyword" : NIX_C.has(t) ? "atom" : NIX_B.has(t.split(".")[0]) ? "builtin" : "variable";
+      }
+      stream.next(); return "operator";
+    },
+  }));
+}
+
+async function startEdit(line) {
+  if (!EDIT || !R || R.leaving || ED.cm) return;
+  try { await loadEditorLibs(); } catch (e) { flash(e.message, true); return; }
+  if (!R || R.leaving || ED.cm) return;
+  const p = R.focus, f = R.items.get(p.i);
+  if (!f) return;
+  ED.p = p; R.editing = true;
+  $("ed").hidden = false; $("edpath").textContent = p.path;
+  ED.cm = CodeMirror($("edcm"), {
+    value: p.raw, mode: isMd(p) ? "markdown" : "nixx", lineWrapping: true, tabSize: 2, indentUnit: 2,
+    viewportMargin: 40, extraKeys: { "Ctrl-S": () => saveAll(), "Cmd-S": () => saveAll(), Esc: () => stopEdit() },
+  });
+  f.mesh.visible = false;
+  ED.metrics = ""; ED.place = "";
+  positionEditor();
+  ED.cm.on("scroll", () => { R.scroll = R.scrollT = ED.cm.getScrollInfo().top / rowPx(); });
+  ED.cm.on("changes", (cm, ch) => onEdit(ch));
+  ED.cm.on("update", measureSoon);
+  ED.cm.scrollTo(null, R.scroll * rowPx());
+  ED.cm.setCursor(Math.max(0, (line || lineAt(p, R.scroll + 3)) - 1), 0);
+  ED.cm.focus();
+  baseline(p);
+  measureRows(); markEditorLines();
+  updateUnsaved(); updateCaption();
+}
+function stopEdit() {
+  if (!ED.cm) return;
+  keepPending();
+  const p = ED.p, topLine = lineAt(p, R.scroll);
+  $("edcm").innerHTML = ""; $("ed").hidden = true; $("edrename").hidden = true;
+  ED.cm = null; ED.p = null; R.editing = false;
+  refit(p);
+  const f = R.items.get(p.i); if (f) f.mesh.visible = true;
+  R.repaint = true; enter(p, rowOf(p, topLine));
+  renderer.domElement.focus?.();
+}
+// Match the editor to the page texture: same 100 columns, row height and padding.
+function positionEditor() {
+  const v = view(), pxu = innerHeight / v.Hv, row = v.lf * pxu, width = v.Wf * pxu;
+  const left = innerWidth / 2 + (R.pan - v.Wf / 2) * pxu, top = innerHeight / 2 - v.yTop * pxu;
+  const pad = row * 0.9, fs = (width - pad * 1.5) / COLS / 0.6, head = 32;
+  const metrics = `${fs.toFixed(3)}|${row.toFixed(3)}|${width.toFixed(1)}`;
+  const place = `${left.toFixed(1)}|${top.toFixed(1)}|${innerHeight}`;
+  const box = $("ed");
+  if (metrics !== ED.metrics) {
+    box.style.setProperty("--fs", fs + "px"); box.style.setProperty("--row", row + "px"); box.style.setProperty("--pad", pad + "px");
+    box.style.width = width + "px";
+  }
+  if (place !== ED.place) {
+    box.style.left = left + "px"; box.style.top = (top - head) + "px";
+    box.style.height = Math.max(120, innerHeight - 70 - (top - head)) + "px";
+  }
+  if (metrics !== ED.metrics || place !== ED.place) {
+    const refresh = metrics !== ED.metrics;
+    ED.metrics = metrics; ED.place = place;
+    if (refresh) { ED.cm.refresh(); ED.cm.scrollTo(null, R.scroll * row); measureRows(); }
+  }
+}
+// Row offsets for bridges come from the editor while it is open.
+function measureRows() {
+  const cm = ED.cm, p = ED.p; if (!cm) return;
+  const row = rowPx(), n = cm.lineCount();
+  p.rowY = new Float64Array(n); p.lineH = new Float64Array(n);
+  for (let i = 0; i < n; i++) p.rowY[i] = cm.heightAtLine(i, "local") / row;
+  const total = Math.max(1, cm.getScrollInfo().height / row);
+  for (let i = 0; i < n; i++) p.lineH[i] = Math.max(0.5, (i + 1 < n ? p.rowY[i + 1] : total) - p.rowY[i]);
+  p.rowsN = total;
+  const f = R && R.items.get(p.i); if (f) { f.start = 0; f.count = p.rowsN; }
+}
+function measureSoon() {
+  if (measureSoon.raf) return;
+  measureSoon.raf = requestAnimationFrame(() => { measureSoon.raf = 0; measureRows(); });
+}
+function onEdit(changes) {
+  const p = ED.p;
+  if (!ED.silent) for (const ch of changes) {
+    const delta = ch.text.length - 1 - (ch.to.line - ch.from.line);
+    if (!delta) continue;
+    const first = ch.from.line + 1, last = ch.to.line + 1;
+    // lines below the change move with it, so bridges never lag behind the text
+    // a pure insertion at the very start of a line pushes that line down too
+    const pushesFirst = ch.from.ch === 0 && ch.from.line === ch.to.line && ch.from.ch === ch.to.ch;
+    const shift = L => L > last || (L === first && pushesFirst) ? L + delta : L > first ? first : L;
+    for (const l of p.out) l.al = shift(l.al);
+    for (const l of p.inc) if (l.bl > 1) l.bl = shift(l.bl);
+    for (const d of ED.origDecls) d.line = shift(d.line);
+    if (p.errLines) p.errLines = new Map([...p.errLines].map(([L, m]) => [shift(L), m]));
+  }
+  setText(p, ED.cm.getValue());
+  markDirty(p);
+  measureSoon();
+  clearTimeout(ED.timer); ED.timer = setTimeout(liveRelink, 280);
+}
+// Tint the editor lines that carry bridges, as the page texture does.
+function markEditorLines() {
+  const cm = ED.cm; if (!cm) return;
+  cm.operation(() => {
+    for (const [h, cls] of ED.marked || []) cm.removeLineClass(h, "background", cls);
+    ED.marked = [];
+    for (const [ln, k] of lineMarks(ED.p)) {
+      if (ln < 1 || ln > cm.lineCount()) continue;
+      const cls = "xl xl-" + k;
+      ED.marked.push([cm.addLineClass(ln - 1, "background", cls), cls]);
+    }
+  });
+}
+const declsOf = p => [...decls.values()].filter(d => d.p === p.i);
+function baseline(p) {
+  ED.origDecls = declsOf(p).map(d => ({ ...d }));
+  ED.origRefs = links.filter(l => l.b === p.i && DECL_KINDS.includes(l.k)).map(l => ({ pi: l.a, line: l.al, kind: l.k, label: l.t }));
+}
+function liveRelink() {
+  if (!EDIT) return;
+  relink();
+  if (ED.p) syncDeclRenames(ED.p);
+  relink();
+  refreshAfterRelink();
+}
+const markSig = q => JSON.stringify([...lineMarks(q)]) + "|" + [...(q.pendingLines || [])].join(",");
+function refreshAfterRelink() {
+  buildBridges(); renderKinds();
+  for (const q of pages) {
+    const sig = markSig(q) + "|" + q.raw.length;
+    if (sig !== q.sig) { q.sig = sig; if (q !== ED.p) refit(q); }
+  }
+  if (R && !R.leaving) {
+    R.repaint = true; enter(R.focus, R.scrollT);
+    if (ED.cm) { measureRows(); markEditorLines(); }
+  }
+}
+function refit(q) {
+  layout(q); q.h = Math.max(q.rowsN, 3) * LH;
+  q.mesh.geometry.dispose(); q.mesh.geometry = new THREE.PlaneGeometry(W, q.h);
+  q.mesh.children.forEach(c => { c.geometry.dispose(); c.geometry = new THREE.EdgesGeometry(q.mesh.geometry); });
+  q.mesh.position.y = q.y0 - q.h / 2;
+  q.low.dispose(); q.low = lowTex(q);
+  if (q.fhi) { q.fhi.dispose(); q.fhi = null; }
+  q.mesh.material.map = q.low; q.mesh.material.needsUpdate = true;
+}
+
+// ---- renames spread to the pages that refer to the renamed thing ----
+function rewriteDecl(text, o, n) {
+  if (o.kind === "option") return text.replace(/(?<![A-Za-z0-9_.])(config\.)?(my\.[A-Za-z0-9_.]*[A-Za-z0-9_])/g, (all, c = "", u) => {
+    if (u === o.name) return c + n.name;
+    if (u.startsWith(o.name + ".")) return c + n.name + u.slice(o.name.length);
+    if (o.name.startsWith(u + ".")) {
+      const rest = o.name.slice(u.length);
+      if (n.name.endsWith(rest)) return c + n.name.slice(0, -rest.length);
+    }
+    return all;
+  });
+  if (o.kind === "unit") return text
+    .replace(new RegExp(`(?<![A-Za-z0-9_-])${reEsc(o.name)}(?=\\.(service|timer|path|socket)\\b)`, "g"), n.name)
+    .replace(new RegExp(`((?:services|timers)\\."?)${reEsc(o.name)}\\b`, "g"), `$1${n.name}`);
+  if (o.kind === "file") return text.split(o.name).join(n.name);
+  if (o.kind === "overlay") return text.replace(new RegExp(`(pkgs\\.(?:kdePackages\\.)?)${reEsc(o.name)}\\b`, "g"), `$1${n.name}`);
+  return text;
+}
+// Compared against the declarations when editing began, so typing through an
+// in-between name (or an invalid one) never loses track of the references.
+function syncDeclRenames(p) {
+  const now = declsOf(p), pairs = [];
+  for (const o of ED.origDecls) {
+    if (now.some(d => d.kind === o.kind && d.name === o.name)) continue;
+    const n = now.find(d => d.kind === o.kind && d.line === o.line && !ED.origDecls.some(x => x.kind === d.kind && x.name === d.name));
+    if (n) pairs.push([o, n]);
+  }
+  const entries = new Map();
+  for (const [o, n] of pairs) for (const r of ED.origRefs) if (r.kind === o.kind && r.label === o.label) {
+    const key = r.pi + ":" + r.line, e = entries.get(key) || { pi: r.pi, line: r.line, fns: [] };
+    e.fns.push(t => rewriteDecl(t, o, n)); entries.set(key, e);
+  }
+  ED.pend.decl = entries;
+  ED.titles.decl = pairs.map(([o, n]) => `${o.kind} ${o.name} → ${n.name}`).join(", ");
+  applyPending();
+}
+function relPath(fromDir, to) {
+  const a = fromDir ? fromDir.split("/") : [], b = to.split("/");
+  let k = 0; while (k < a.length && k < b.length - 1 && a[k] === b[k]) k++;
+  return "../".repeat(a.length - k) + b.slice(k).join("/");
+}
+function newPathToken(tok, srcPath, oldPath, newPath) {
+  const pre = ["/home/lam/nix/", "~/nix/"].find(x => tok.startsWith(x)) || "";
+  const bare = tok.slice(pre.length);
+  let target = newPath;
+  if (oldPath.endsWith("/default.nix") && !/\.(nix|md)$/.test(bare) && newPath.endsWith("/default.nix")) target = newPath.slice(0, -12);
+  else if (!/\.(nix|md)$/.test(bare)) target = newPath.replace(/\.nix$/, "");
+  if (pre) return pre + target;
+  if (bare.startsWith("./") || bare.startsWith("../")) { const r = relPath(dirOf(srcPath), target); return r.startsWith("../") ? r : "./" + r; }
+  if (!bare.includes("/")) return target.split("/").pop();
+  return target;
+}
+function replaceTok(text, tok, to) {
+  return text.replace(new RegExp(`(?<![A-Za-z0-9_@.+/~-])${reEsc(tok)}(?![A-Za-z0-9_@+/-])`, "g"), to);
+}
+function renameFile(p, to) {
+  to = to.trim().replace(/^\.\//, "");
+  if (to === p.path) return true;
+  if (!/^[A-Za-z0-9_@.+\-/]+\.nix$/.test(to) || to.split("/").some(s => s === ".." || s === "") || /^(docs|sounds|\.git)\//.test(to))
+    return flash("A page path must be a repo-relative .nix path outside docs/ and sounds/", true), false;
+  if (pages.some(q => q !== p && (q.path === to || q.from === to))) return flash(to + " already exists", true), false;
+  if (!ED.fileRen) {
+    const refs = links.filter(l => l.k === "path" && l.b === p.i).map(l => ({ pi: l.a, line: l.al, tok: l.t }));
+    const own = links.filter(l => l.k === "path" && l.a === p.i && /^\.\.?\//.test(l.t)).map(l => ({ pi: p.i, line: l.al, tok: l.t, target: pages[l.b] }));
+    ED.fileRen = { p, from: p.from || p.path, refs, own };
+  }
+  p.from = ED.fileRen.from; p.path = to;
+  const entries = new Map(), add = (pi, line, fn) => {
+    const key = pi + ":" + line, e = entries.get(key) || { pi, line, fns: [] };
+    e.fns.push(fn); entries.set(key, e);
+  };
+  for (const r of ED.fileRen.refs) add(r.pi, r.line, t => replaceTok(t, r.tok, newPathToken(r.tok, pages[r.pi].path, ED.fileRen.from, to)));
+  for (const r of ED.fileRen.own) add(r.pi, r.line, t => {   // the moved file's own ./relative paths
+    const rel = relPath(dirOf(to), r.target.path.replace(/\.nix$/, r.tok.endsWith(".nix") ? ".nix" : ""));
+    return replaceTok(t, r.tok, rel.startsWith("../") ? rel : "./" + rel);
+  });
+  ED.pend.file = entries;
+  ED.titles.file = p.from === p.path ? "" : `moved ${p.from} → ${p.path}`;
+  if (p.from === p.path) { p.from = null; }
+  p.label.material.map.dispose();
+  const base = p.path.split("/").pop();
+  p.label.material.map = labelTexture(base, (p.path.slice(0, -base.length) || "./") + " · " + p.lines.length + " lines", 512, 64);
+  $("edpath").textContent = p.path;
+  markDirty(p);
+  applyPending(); relink(); refreshAfterRelink(); updateCaption();
+  return true;
+}
+function lineOf(q, line) { return q.raw.split("\n")[line - 1] ?? ""; }
+function setLine(q, line, text) {
+  if (ED.cm && ED.p === q) {
+    ED.silent = true;
+    ED.cm.replaceRange(text, { line: line - 1, ch: 0 }, { line: line - 1, ch: ED.cm.getLine(line - 1).length });
+    ED.silent = false;
+    return;
+  }
+  const arr = q.raw.split("\n"); arr[line - 1] = text; setText(q, arr.join("\n"));
+}
+// Pending rewrites are applied at once (the other pages show them, outlined)
+// and can still be undone; every recompute starts from the original line.
+function applyPending() {
+  const keys = new Set([...ED.pend.decl.keys(), ...ED.pend.file.keys(), ...ED.orig.keys()]);
+  for (const q of pages) q.pendingLines = new Set();
+  for (const key of keys) {
+    const e = ED.pend.decl.get(key) || ED.pend.file.get(key) || { pi: +key.split(":")[0], line: +key.split(":")[1], fns: [] };
+    const q = pages[e.pi];
+    if (!ED.orig.has(key)) ED.orig.set(key, lineOf(q, e.line));
+    const orig = ED.orig.get(key);
+    const fns = [...(ED.pend.decl.get(key)?.fns || []), ...(ED.pend.file.get(key)?.fns || [])];
+    const next = fns.reduce((t, f) => f(t), orig);
+    if (next !== lineOf(q, e.line)) { setLine(q, e.line, next); markDirty(q); }
+    if (next === orig) ED.orig.delete(key); else q.pendingLines.add(e.line);
+  }
+  const n = [...ED.orig.keys()].length, files = new Set([...ED.orig.keys()].map(k => k.split(":")[0])).size;
+  const title = [ED.titles.decl, ED.titles.file].filter(Boolean).join("; ");
+  $("pend").hidden = !title;
+  if (title) $("pendmsg").textContent = `${title[0].toUpperCase() + title.slice(1)} — ${n ? `updated ${n} reference${n === 1 ? "" : "s"} in ${files} file${files === 1 ? "" : "s"}, outlined` : "nothing refers to it"}`;
+}
+function keepPending() {
+  ED.orig.clear(); ED.pend = { decl: new Map(), file: new Map() }; ED.titles = { decl: "", file: "" }; ED.fileRen = null;
+  for (const q of pages) if (q.pendingLines?.size) { q.pendingLines = new Set(); q.sig = ""; }
+  $("pend").hidden = true;
+  if (ED.p) baseline(ED.p);
+  refreshAfterRelink();
+}
+function undoPending() {
+  ED.pend = { decl: new Map(), file: new Map() }; ED.titles = { decl: "", file: "" };
+  if (ED.fileRen) {
+    const p = ED.fileRen.p; p.path = ED.fileRen.from; p.from = null; ED.fileRen = null;
+    $("edpath").textContent = p.path; markDirty(p);
+  }
+  applyPending();
+  if (ED.p) baseline(ED.p);       // the declaration keeps its new name; its references keep the old
+  relink(); refreshAfterRelink(); updateCaption();
+}
+
+// ---- saving: one all-or-nothing request for every changed page ----
+async function saveAll() {
+  if (!EDIT) return;
+  if (ED.orig.size || ED.titles.decl || ED.titles.file) keepPending();
+  const dirty = [...ED.dirty].map(i => pages[i]);
+  if (!dirty.length) return flash("Nothing to save");
+  const files = dirty.map(p => ({ path: p.path, from: p.from || undefined, base: p.hash, text: p.raw + (p.eol ? "\n" : "") }));
+  let r;
+  try { r = await api("POST", "/api/save", { files }); } catch (e) { return flash("Save failed: the editor server is not reachable", true); }
+  for (const p of dirty) p.parseErr = null;
+  if (r.status === 200) {
+    for (const p of dirty) { p.hash = r.body.hashes[p.path] || p.hash; p.saved = p.raw; p.from = null; }
+    ED.dirty.clear(); updateUnsaved();
+    flash(`Saved ${dirty.length} file${dirty.length === 1 ? "" : "s"}`);
+  } else if (r.status === 409) {
+    flash(`Changed on disk since you opened ${r.body.conflicts.join(", ")} — nothing was saved. Reload ${r.body.conflicts.length === 1 ? "it" : "them"} from the Unsaved menu to continue.`, true);
+    ED.conflicts = r.body.conflicts; $("reload").hidden = false;
+  } else if (r.status === 422) {
+    const e = r.body.errors[0];
+    for (const x of r.body.errors) { const p = pages.find(q => q.path === x.path); if (p) p.parseErr = [x.line, x.msg]; }
+    flash(`Nothing was saved: ${e.path} line ${e.line}: ${e.msg}`, true);
+    if (ED.cm && ED.p.path === e.path) ED.cm.setCursor(e.line - 1, Math.max(0, e.col - 1));
+  } else flash(`Save refused: ${r.body.error || r.status}${r.body.paths ? " (" + r.body.paths.join(", ") + ")" : ""}`, true);
+  relink(); refreshAfterRelink();
+}
+async function reloadConflicts() {
+  for (const path of ED.conflicts || []) {
+    const r = await api("GET", "/api/file?path=" + encodeURIComponent(path));
+    const p = pages.find(q => (q.from || q.path) === path);
+    if (r.status !== 200 || !p) continue;
+    p.hash = r.body.hash; p.eol = r.body.eol; p.from = null; p.path = path;
+    if (ED.cm && ED.p === p) { ED.silent = true; ED.cm.setValue(r.body.text); ED.silent = false; }
+    setText(p, r.body.text); p.saved = p.raw; markDirty(p);
+  }
+  ED.conflicts = []; $("reload").hidden = true;
+  relink(); refreshAfterRelink();
+  flash("Reloaded from disk");
+}
+
+// ---- the full config check: a flake evaluation, errors become red bridges ----
+function checkLinks() {
+  const out = [];
+  for (const p of pages) p.errLines = new Map();
+  for (const e of ED.checkErrors) {
+    const b = pages.find(q => q.path === e.path); if (!b) continue;
+    b.errLines.set(e.line, e.msg);
+    const a = ED.checkSrc ?? b.i;
+    if (a !== b.i) out.push({ k: "error", a, al: 1, b: b.i, bl: Math.max(2, e.line), t: e.msg });
+  }
+  for (const p of pages) if (p.parseErr) p.errLines.set(p.parseErr[0], p.parseErr[1]);
+  return out;
+}
+async function runCheck() {
+  if (ED.dirty.size) return flash("Save first: the check evaluates what is on disk", true);
+  const r = await api("POST", "/api/check", {});
+  if (r.status !== 200) return flash("Could not start the check", true);
+  ED.checkSrc = R ? R.focus.i : null;
+  showCheck(r.body);
+  clearInterval(ED.checkPoll);
+  ED.checkPoll = setInterval(async () => {
+    const s = await api("GET", "/api/check");
+    showCheck(s.body);
+    if (s.body.state !== "running") {
+      clearInterval(ED.checkPoll);
+      ED.checkErrors = s.body.errors || [];
+      relink(); refreshAfterRelink();
+    }
+  }, 1500);
+}
+function showCheck(job) {
+  const c = $("chk"); c.hidden = false;
+  if (job.state === "running") {
+    c.className = ""; c.innerHTML = `<b>Checking the config…</b> <span class="n">${Math.round((Date.now() / 1000) - job.started)}s</span><div class="sub">${esc(job.attr)}</div>`;
+    return;
+  }
+  if (job.ok) { c.className = "ok"; c.innerHTML = `<b>Config evaluates</b> <span class="n">${job.took}s</span><button type="button" id="chkx">Dismiss</button>`; }
+  else {
+    c.className = "bad";
+    const rows = (job.errors || []).map(e => `<li><a href="#" data-p="${esc(e.path)}" data-l="${e.line}">${esc(e.path)}:${e.line}</a></li>`).join("");
+    c.innerHTML = `<b>Evaluation failed</b> <span class="n">${job.took}s</span><button type="button" id="chkx">Dismiss</button>` +
+      `<div class="sub">${esc((job.tail || "").split("\n").find(l => l.includes("error:")) || job.tail || "")}</div>` +
+      (rows ? `<ul>${rows}</ul>` : `<div class="sub">No location inside this repo was named.</div>`);
+  }
+}
+if (EDIT) {
+  $("chk").addEventListener("click", e => {
+    if (e.target.id === "chkx") { $("chk").hidden = true; ED.checkErrors = []; relink(); refreshAfterRelink(); return; }
+    const a = e.target.closest("a[data-p]"); if (!a) return;
+    e.preventDefault();
+    const p = pages.find(q => q.path === a.dataset.p);
+    if (p) go(p, Math.max(0, rowOf(p, +a.dataset.l) - 6));
+  });
+  $("edsave").onclick = () => saveAll();
+  $("unsavedsave").onclick = () => saveAll();
+  $("reload").onclick = () => reloadConflicts();
+  $("edcheck").onclick = () => runCheck();
+  $("eddone").onclick = () => stopEdit();
+  $("pendkeep").onclick = () => keepPending();
+  $("pendundo").onclick = () => undoPending();
+  $("edren").onclick = () => {
+    if (isMd(ED.p)) return flash("Guides keep their names here; rename them in the repo", true);
+    const i = $("edrename"); i.hidden = false; i.value = ED.p.path; i.focus(); i.select();
+  };
+  $("edrename").addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); if (renameFile(ED.p, e.target.value)) e.target.hidden = true; }
+    if (e.key === "Escape") { e.preventDefault(); e.target.hidden = true; ED.cm?.focus(); }
+  });
+  addEventListener("beforeunload", e => { if (ED.dirty.size) { e.preventDefault(); e.returnValue = ""; } });
+  renderer.domElement.addEventListener("dblclick", e => {
+    if (!R || R.leaving || ED.cm) return;
+    const h = pickRead(e);
+    if (h && h.it.role === "focus") startEdit(h.line || 0);
+  });
+}
+var ED_READY = true;
+
 // Prose is measured with Chivo; if it was not loaded yet the wrap widths are
 // wrong, so a late font load triggers one full relayout.
 let fontsAtBuild = true;
@@ -1086,15 +1773,8 @@ document.fonts.addEventListener("loadingdone", () => {
   if (fontsAtBuild || !pages[0].mesh || !fontsLoaded()) return;
   fontsAtBuild = true; mcache.clear();
   if (R) { R.items.forEach(it => { R.rig.remove(it.mesh); it.tex.dispose(); }); scene.remove(R.rig); R = null; document.body.classList.remove("reading"); document.getElementById("cap").hidden = true; field.visible = true; }
-  for (const p of pages) {
-    layout(p); p.h = Math.max(p.rowsN, 3) * LH;
-    p.mesh.geometry.dispose(); p.mesh.geometry = new THREE.PlaneGeometry(W, p.h);
-    p.mesh.children.forEach(c => { c.geometry.dispose(); c.geometry = new THREE.EdgesGeometry(p.mesh.geometry); });
-    p.mesh.position.y = p.y0 - p.h / 2; p.mesh.visible = p.label.visible = true;
-    p.low.dispose(); p.low = lowTex(p);
-    if (p.fhi) { p.fhi.dispose(); p.fhi = null; }
-    p.mesh.material.map = p.low; p.mesh.material.needsUpdate = true;
-  }
+  if (ED.cm) return;
+  for (const p of pages) { refit(p); p.mesh.visible = p.label.visible = true; }
   buildBridges();
 });
 
