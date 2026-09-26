@@ -345,7 +345,7 @@ not a CI suite:
 | Tag writes/import/gain | `atomic-write-test.py`, `tagtool-test.py`, `player-add-test.py`, `replaygain-test.py` |
 | Smart lists/search/Last.fm | `smartlist-test.py`, `smartlist-ui-test.py`, `lastfm-test.py`, `search-page-test.py`, `search-ui-test.py` |
 | Queue/path/socket | `queue-ops-test.py`, `album-playnext-test.py`, `open-path-test.py`, `queue-lyrics-test.py` |
-| Preference/metadata persistence | `state-write-test.py`, `metadata-worker-test.py` |
+| Preference/metadata persistence | `state-write-test.py`, `metadata-worker-test.py`, `rating-heart-test.py` |
 | Metadata/sync | `now-info-test.py`, `artist-info-test.py`, `album-prose-test.py`, `release-info-test.py`, `info-sync-test.py`, `library-ipc-test.py`, `test-dbsync.py` |
 | Album information UI | `album-info-ui-test.py`, `album-guest-ui-test.py` |
 | Now-playing composition | `now-allinone-test.py` |
