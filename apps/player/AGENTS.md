@@ -26,6 +26,7 @@ SMB setup and recovery live in `docs/agents/air-library-share.md`.
 | Artist facts and biography | `artistinfo.py`; `albuminfo.py` owns its stage and cache |
 | Album write-up parsing | `albumprose.py` (Last.fm and linked Bandcamp album pages) |
 | Last.fm integration | `scrobble.py`, shared `pylib/lastfm.py` |
+| Discovery and previews | `discovery.py`, `discoverybridge.py`, `discoveryacquire.py`, `discoverypreview.py`; `qml/DiscoverView.qml` |
 | Chatter recommendations | `recommend.py`; reads the library, bounded Last.fm history and Oracle feedback state |
 | Acquisition, repair, migration tools | `tools/`; private maintenance runbook |
 
@@ -264,8 +265,8 @@ favourited, otherwise an outline. `HeartIcon.qml` owns QML geometry;
 `kdeshell_icons.py` renders the matching player-heart icons for native actions.
 Keep click targets unchanged when changing the drawing size.
 
-`Root.qml` keeps `VisualizerPage.qml` loaded as the sole screen. Albums and
-Playlists switch only the left browser column (`browserView` in preferences);
+`Root.qml` keeps `VisualizerPage.qml` loaded as the sole screen. Albums,
+Playlists and Discover switch only the left browser column (`browserView` in preferences);
 the right visualizer, controls, artwork and queue retain their instances and
 splits. Legacy `view` preferences seed the browser choice once. Album search
 and full search results stay in the left column; the playlist rule editor is a
@@ -304,6 +305,31 @@ Use shared Kinetic views, Motion, and VScroll per the parent guide. Foreground
 and artwork tones are derived at the root and passed down; app-side inactive
 fading is retired because the compositor owns dimming. Do not resurrect one
 half or reinterpret menu disabled colors as focus state.
+
+## Discovery
+
+Discover caches external releases in host-local `discovery.json`, outside the
+playable library. Last.fm supplies similar artists; Apple supplies catalog
+records, tracklists, artwork and preview clips. Match artist names exactly and
+filter owned editions from indexed tracks even when storage is offline.
+Network requests and library reads run on the single discovery worker. Local
+settings/feedback have an atomic outbox and an applied sequence so shutdown
+cannot lose or double-apply edits behind slow requests.
+
+Previews use the existing mpv instance with transient negative track IDs. Keep
+the original queue, order, position, pause state and listening counters;
+restore on completion, End preview, library queue mutations and shutdown.
+Never count, scrobble, import or persist preview tracks. `path` observations
+identify a started preview; a bounded startup timeout restores failed opens.
+
+Acquisition is opt-in, runs only on top while Player is open, and shares the
+Soulseek pipeline's lock and receipts with `tools/soulseek-missing.py`.
+Require a complete matching folder, title/duration agreement, configured
+quality, weekly count/byte limits and storage headroom. Persist ambiguous POST
+outcomes before sending and never retry them automatically. `player-add.py`
+and AutoScanner own import and library refresh. Book supports discovery and
+previews but does not acquire a duplicate copy of top's shared library.
+Verify with `tools/discovery-test.py` and the queue/chrome harnesses.
 
 ## Temporary performance logging
 

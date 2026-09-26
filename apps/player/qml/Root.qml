@@ -32,8 +32,8 @@ Item {
                                    ? DeskStyle.plasma === true : false
 
     readonly property string view: "visualizer"
-    property string browserView: Prefs.get("browserView", Prefs.get("view", "albums")) === "playlists"
-                                 ? "playlists" : "albums"
+    property string browserView: validBrowser(Prefs.get("browserView", Prefs.get("view", "albums")))
+    function validBrowser(value) { return ["albums", "playlists", "discover"].indexOf(value) >= 0 ? value : "albums"; }
     property real visualAlbumFrac: Number(Prefs.get("visualizerAlbumFrac", .5)) || .5
     property bool visualSidebar: Prefs.get("visualizerSidebar", true) === true
     function toggleVisualSidebar() {
@@ -161,7 +161,7 @@ Item {
     function _here() { return { view: browserView, albumId: openAlbumId }; }
     function _apply(s) {
         openAlbumId = s.albumId;   // the AlbumPanel loads that album's tracks itself
-        browserView = s.view === "playlists" ? "playlists" : "albums";
+        browserView = validBrowser(s.view);
         Prefs.set("browserView", browserView);
     }
     function goBack() { navHist.back(); }
@@ -330,6 +330,12 @@ Item {
             { id: "playlists", label: "p", state: browserView === "playlists" ? 1 : 0, tip: "playlists",
               menu: "view", menuText: "Playlists", icon: "view-media-playlist",
               bar: true, group: "view" },
+            { id: "endPreview", label: "ep", state: Player.previewing === true ? 0 : 2,
+              tip: "end preview", menu: "playback", menuText: "End preview",
+              icon: "media-playback-stop", bar: Player.previewing === true },
+            { id: "discover", label: "d", state: browserView === "discover" ? 1 : 0, tip: "discover",
+              menu: "view", menuText: "Discover", icon: "edit-find",
+              bar: true, group: "view" },
             { id: "visualR", label: "R", state: Visualizer.stateInfo.ready ? 0 : 2,
               menuText: "Randomize", menu: "visualizer", tip: "randomize (R)",
               icon: "view-refresh", bar: true, barStretchBefore: true, shortcut: "R" },
@@ -429,6 +435,8 @@ Item {
                             Library.setFavorite(Player.current.id, !Player.current.favorite);
                           break;
         case "albums":    win.setView("albums");              break;
+        case "endPreview": Player.endPreview(); break;
+        case "discover": win.setView("discover"); break;
         case "playlists": win.setView("playlists");           break;
         case "sort":      win.cycleSort();                    break;
         case "search":    win.searchOpen ? win.closeSearch() : win.openSearch(); break;
@@ -531,6 +539,16 @@ Item {
             onOpenAlbumRequested: function(albumId) { win.openAlbum(albumId); }
             onBrowseArtistRequested: function(artist) { win.browseArtist(artist); }
             onEditAliasesRequested: function(artist) { win.editArtistAliases(artist); }
+        }
+        DiscoverView {
+            objectName: "discoveryBrowser"
+            overlayParent: win
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+            width: content.visualAlbumW
+            visible: win.browserView === "discover"
+            fgText: win.fgText
+            fgDim: win.fgDim
+            fgAccent: win.fgAccent
         }
         Loader {
             id: visualPage
