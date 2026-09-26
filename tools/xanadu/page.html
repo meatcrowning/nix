@@ -86,6 +86,10 @@
     background: rgba(4, 7, 14, 0.92); border: 1px solid var(--line);
     font: 11.5px var(--mono); color: var(--ink); white-space: nowrap; transform: translate(12px, 12px);
   }
+  #lost {
+    position: fixed; left: 50%; top: 40%; transform: translateX(-50%); max-width: calc(100vw - 32px);
+    padding: 10px 16px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+  }
   #cap {
     position: fixed; left: 50%; transform: translateX(-50%);
     bottom: calc(14px + env(safe-area-inset-bottom, 0px));
@@ -126,6 +130,7 @@
 <button type="button" id="menu-on" title="Show menu (M)">Menu</button>
 <div id="cap" hidden></div>
 <div id="tip" hidden></div>
+<div id="lost" hidden>The graphics context was lost — restoring. Reload the page if it stays blank.</div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script>
@@ -183,6 +188,13 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.outputEncoding = THREE.sRGBEncoding;
 stage.appendChild(renderer.domElement);
+renderer.domElement.addEventListener("webglcontextlost", e => {
+  e.preventDefault();
+  const n = document.getElementById("lost"); if (n) n.hidden = false;
+});
+renderer.domElement.addEventListener("webglcontextrestored", () => {
+  const n = document.getElementById("lost"); if (n) n.hidden = true;
+});
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x060a13, 0.0065);
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 2000);
@@ -313,7 +325,7 @@ function labelTexture(text, sub, w, h, big) {
 // the live ones and LOD_PER_TICK spreads the painting so flying never hitches.
 const LOD_ON = 4, LOD_OFF = 2.5, LOD_MAX = 16, LOD_PER_TICK = 2;
 function fieldHiTex(p) {
-  const lp = Math.max(4, Math.min(14, Math.floor(MAX_TEX / Math.max(p.lines.length, 3))));
+  const lp = Math.min(14, MAX_TEX / Math.max(p.lines.length, 3));   // never over the texture limit
   return paintPage(p, { lp, width: Math.round((W / LH) * lp), real: true });
 }
 const frustum = new THREE.Frustum(), projM = new THREE.Matrix4();
@@ -352,25 +364,26 @@ function stepLOD(now) {
 }
 
 // ---- the field ----
-const pageMeshes = [];
+const pageMeshes = [], field = new THREE.Group();
+scene.add(field);
 function buildPages() {
   for (const p of pages) {
     p.low = lowTex(p);
     const mat = new THREE.MeshBasicMaterial({ map: p.low, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, p.h), mat);
     mesh.position.set(p.x, p.y0 - p.h / 2, p.z); mesh.userData.page = p; mesh.renderOrder = 1;
-    p.mesh = mesh; scene.add(mesh); pageMeshes.push(mesh);
+    p.mesh = mesh; field.add(mesh); pageMeshes.push(mesh);
     mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry),
       new THREE.LineBasicMaterial({ color: 0x6f86b0, transparent: true, opacity: 0.55 })));
     const base = p.path.split("/").pop(), dir = p.path.slice(0, -base.length) || "./";
     p.label = new THREE.Mesh(new THREE.PlaneGeometry(W, W / 8),
       new THREE.MeshBasicMaterial({ map: labelTexture(base, dir + " · " + p.lines.length + " lines", 512, 64), transparent: true, depthWrite: false }));
-    p.label.position.set(p.x, p.y0 + W / 16 + 0.08, p.z); scene.add(p.label);
+    p.label.position.set(p.x, p.y0 + W / 16 + 0.08, p.z); field.add(p.label);
   }
   for (const row of rows) if (row.first) {
     const lab = new THREE.Mesh(new THREE.PlaneGeometry(W * 3, W * 3 / 8),
       new THREE.MeshBasicMaterial({ map: labelTexture(row.group === "/" ? "flake root" : row.group, "", 1024, 128, true), transparent: true, depthWrite: false }));
-    lab.position.set(row.x0 + W * 1.5, row.y + 1.4, row.z); scene.add(lab);
+    lab.position.set(row.x0 + W * 1.5, row.y + 1.4, row.z); field.add(lab);
   }
 }
 
@@ -402,7 +415,7 @@ function ribbons(segs, gain) {
 }
 let bridgeMesh = null;
 function buildBridges() {
-  if (bridgeMesh) { scene.remove(bridgeMesh); bridgeMesh.geometry.dispose(); }
+  if (bridgeMesh) { field.remove(bridgeMesh); bridgeMesh.geometry.dispose(); }
   const segs = links.filter(l => on[l.k]).map(l => {
     const A = pages[l.a], B = pages[l.b];
     const sA = Math.sign(B.x - A.x) || 1, sB = Math.sign(A.x - B.x) || sA;
@@ -414,7 +427,7 @@ function buildBridges() {
     };
   });
   bridgeMesh = new THREE.Mesh(ribbons(segs, 1), bridgeMat());
-  bridgeMesh.renderOrder = 2; scene.add(bridgeMesh);
+  bridgeMesh.renderOrder = 2; field.add(bridgeMesh);
 }
 
 // ---- reading: pages pulled forward in front of a camera that never moves ----
@@ -468,10 +481,12 @@ function setItemTexture(it) {
   it.tex = paintPage(it.p, { lp, width: Math.round(lp / RL), real: true, start: it.start, count: it.count, head: it.head });
   it.mesh.material.map = it.tex; it.mesh.material.needsUpdate = true;
 }
+// The focus page is painted in chunks; a chunk must cover the visible lines
+// plus margin, or a zoomed-out view would demand a repaint every frame.
 function focusChunk(p, scroll) {
-  const n = p.lines.length;
-  if (n <= CHUNK) return 0;
-  return Math.max(0, Math.min(n - CHUNK, Math.floor(scroll) - 60));
+  const n = p.lines.length, v = view();
+  const count = Math.min(n, Math.max(CHUNK, Math.ceil(v.Hv / v.lf) + 120));
+  return { start: Math.max(0, Math.min(n - count, Math.floor(scroll) - 60)), count };
 }
 
 function enter(p, scroll = 0) {
@@ -480,10 +495,10 @@ function enter(p, scroll = 0) {
     rig.position.copy(camera.position); rig.quaternion.copy(camera.quaternion);
     scene.add(rig); rig.updateMatrixWorld(true);
     const veil = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial({ color: 0x050810, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
+      new THREE.MeshBasicMaterial({ color: 0x0a1020, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
     veil.position.set(0, 0, -D - 3); veil.scale.set(400, 400, 1); veil.renderOrder = 10; veil.frustumCulled = false;
     rig.add(veil);
-    R = { rig, veil, items: new Map(), history: [], zoom: 1, pan: 0, panT: 0, veilT: 0.88, bridges: null, leaving: false };
+    R = { rig, veil, items: new Map(), history: [], zoom: 1, pan: 0, panT: 0, veilT: 1, bridges: null, leaving: false };
     fly.keys.clear(); fly.vel.set(0, 0, 0); tip.hidden = true;
     document.body.classList.add("reading");
   }
@@ -491,7 +506,7 @@ function enter(p, scroll = 0) {
   R.focus = p; R.scroll = R.scrollT = Math.max(0, Math.min(scroll, p.lines.length - 1));
   const cols = sides(p);
   const want = new Map();
-  want.set(p.i, { p, role: "focus", start: focusChunk(p, R.scroll), count: Math.min(p.lines.length, CHUNK) });
+  want.set(p.i, { p, role: "focus", ...focusChunk(p, R.scroll) });
   for (const side of ["left", "right"]) for (const e of cols[side]) {
     const n = e.p.lines.length, count = Math.min(n, SIDE_LINES);
     const start = Math.max(0, Math.min(n - count, e.sl - 1 - 3));
@@ -585,10 +600,13 @@ function stepReading(now) {
   if (Math.abs(R.panT - R.pan) < 0.0005) R.pan = R.panT;
   if (Math.abs(R.scrollT - R.scroll) < 0.002) R.scroll = R.scrollT;
   const f = R.items.get(R.focus.i);
-  if (f && !f.leaving && f.p.lines.length > CHUNK) {
-    const v = view(), visible = v.Hv / v.lf;
-    if (R.scroll < f.start + 8 && f.start > 0 || R.scroll + visible > f.start + f.count - 8 && f.start + f.count < f.p.lines.length) {
-      f.start = focusChunk(f.p, R.scroll); setItemTexture(f);
+  if (f && !f.leaving && f.count < f.p.lines.length) {
+    const v = view(), visible = v.Hv / v.lf, n = f.p.lines.length;
+    const need = R.scroll < f.start + 8 && f.start > 0 || R.scroll + visible > f.start + f.count - 8 && f.start + f.count < n;
+    if (need && now - (f.painted || 0) > 150) {
+      const c = focusChunk(f.p, R.scroll);
+      f.painted = now;
+      if (c.start !== f.start || c.count !== f.count) { Object.assign(f, c); setItemTexture(f); }
     }
   }
   const target = slots();
@@ -610,6 +628,8 @@ function stepReading(now) {
   }
   const vo = R.veil.material;
   vo.opacity += (R.veilT - vo.opacity) * (reduceMotion ? 1 : 0.12);
+  if (R.veilT === 1 && vo.opacity > 0.995) vo.opacity = 1;
+  field.visible = vo.opacity < 1;          // fully veiled: stop drawing the field at all
 
   if (R.bridges) { R.rig.remove(R.bridges); R.bridges.geometry.dispose(); R.bridges = null; }
   if (!R.leaving && f) {
@@ -633,7 +653,7 @@ function stepReading(now) {
     R.rig.add(R.bridges);
   }
   if (R.leaving && !busy && R.items.size === 0) {
-    scene.remove(R.rig); R.veil.geometry.dispose(); R.veil.material.dispose();
+    scene.remove(R.rig); R.veil.geometry.dispose(); R.veil.material.dispose(); field.visible = true;
     R = null;
     if (pendingOverview) { pendingOverview = false; flyTo(...overviewPose()); }
   }
@@ -840,6 +860,10 @@ addEventListener("resize", () => {
 });
 
 function frame(now) {
+  try { frameBody(now); } catch (err) { console.error("xanadu frame", err); }
+  requestAnimationFrame(frame);
+}
+function frameBody(now) {
   if (tween) {
     const u = Math.min(1, (now - tween.t0) / tween.dur), e = ease(u);
     camera.position.lerpVectors(tween.fromP, tween.toP, e);
@@ -850,7 +874,6 @@ function frame(now) {
   if (!R) { stepFly(dt); applyLook(); stepLOD(now); }
   else stepReading(now);
   renderer.render(scene, camera);
-  requestAnimationFrame(frame);
 }
 
 // fonts must be ready before any canvas text is painted
