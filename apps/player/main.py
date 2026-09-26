@@ -54,6 +54,7 @@ import atomicsave  # noqa: E402  (sibling module; also used by lyrics.py)
 from metadatawrites import MetadataWrites  # noqa: E402
 from albuminfo import AlbumInformation  # noqa: E402
 from releaseinfo import read_identity  # noqa: E402
+from discoverypreview import PreviewMixin  # noqa: E402
 import perftrace  # noqa: E402
 import infostore  # noqa: E402
 import artistalias  # noqa: E402  (sibling module; one person, many names)
@@ -2460,7 +2461,7 @@ class TagWriter(QObject):
 # Playback
 # ---------------------------------------------------------------------------
 
-class Player(QObject):
+class Player(PreviewMixin, QObject):
     """The queue + libmpv. The Python-side queue (list of track dicts) is the
     source of truth; it's mirrored into mpv's internal playlist from the
     current track onward so mpv prefetches the next file (gapless where the
@@ -2575,6 +2576,12 @@ class Player(QObject):
         self._sigPause.connect(self._on_pause)
         self._sigPlpos.connect(self._on_plpos)
         self._sigIdle.connect(self._on_idle)
+        self._sigPreviewPath.connect(self._preview_path)
+
+        @self._mpv.property_observer("path")
+        def _obs_preview_path(_name, value):
+            if value is not None:
+                self._sigPreviewPath.emit(str(value))
 
         @self._mpv.property_observer("time-pos")
         def _obs_pos(_name, value):  # mpv thread
@@ -2640,7 +2647,7 @@ class Player(QObject):
         """Tell Last.fm what is playing. On every start AND every resume: a
         now-playing entry expires by itself, so an unpause has to re-assert it
         or the site shows him as listening to nothing."""
-        if self._scrobbler is not None and self._playing:
+        if self._scrobbler is not None and self._playing and not self.previewing:
             self._scrobbler.nowPlaying(self.currentTrackDict())
 
     def _update_playing(self):
@@ -2667,6 +2674,12 @@ class Player(QObject):
     def _on_idle(self, idle):
         self._idle = idle
         self._update_playing()
+        if self.previewing:
+            if not idle:
+                self._preview_started = True
+            elif getattr(self, "_preview_started", False):
+                self.endPreview()
+            return
         if not idle or self._index < 0 or not self._queue:
             return
         # Whole mpv playlist ran out (our mirror only holds current→end).
@@ -2675,7 +2688,7 @@ class Player(QObject):
 
     def _maybe_count(self):
         t = self.currentTrackDict()
-        if self._counted or not t:
+        if self._counted or not t or t.get("id", 0) <= 0:
             return
         dur = t.get("duration") or self._duration
         if dur and self._listened >= min(dur / 2.0, 240.0):
@@ -2787,7 +2800,7 @@ class Player(QObject):
         self.replayGainChanged.emit()
 
     @perftrace.timed("_sync_mpv")
-    def _sync_mpv(self, start_idx, paused=False, defer_rest=False):
+    def _sync_mpv(self, start_idx, paused=False, defer_rest=False, position=0):
         """Point mpv at queue[start_idx:] — replace starts playback, appends
         prefetch the rest for gapless auto-advance. _set_index runs first so a
         playlist-pos event from the replace resolves to the same index (no-op)
@@ -2808,7 +2821,10 @@ class Player(QObject):
         # starts decoding each file.
         self._apply_rg(self._rg_effective(start_idx))
         self.replayGainChanged.emit()
-        self._mpv.command("loadfile", self._queue[start_idx]["path"], "replace")
+        if position > 0:
+            self._mpv.loadfile(self._queue[start_idx]["path"], "replace", start=str(position))
+        else:
+            self._mpv.command("loadfile", self._queue[start_idx]["path"], "replace")
         self._mpv.pause = paused
         if library_is_remote_cached() and start_idx + 1 < len(self._queue):
             # One next item is enough for gapless playback.  Do this on the
@@ -2872,7 +2888,8 @@ class Player(QObject):
         very same dict objects and comes along for free.
         """
         touched = False
-        for t in self._queue:
+        saved = getattr(self, "_preview_snapshot", None)
+        for t in self._queue + (saved["_queue"] if saved else []):
             if t.get("id") == track_id:
                 t.update(row)
                 touched = True
@@ -2961,6 +2978,8 @@ class Player(QObject):
         (a play-all): under shuffle it pins NOTHING, so a shuffled playlist or
         album no longer opens on the same first song every single time —
         `keep_first` is only for a track the user actually clicked."""
+        if self.previewing:
+            self.endPreview()
         ids = [int(i) for i in ids]
         self._queue = self._library.tracks_by_ids(ids)
         # Drop files whose path is gone (a local drive unplugged under a
@@ -3073,6 +3092,8 @@ class Player(QObject):
         has to grow too: it is what unshuffling restores, so anything added
         while shuffled and NOT mirrored here silently disappears the moment the
         shuffle button is turned off."""
+        if self.previewing:
+            self.endPreview()
         fresh = self._fresh_rows(ids)
         if not fresh:
             return
@@ -3098,6 +3119,8 @@ class Player(QObject):
         With nothing playing there is no "next" to insert before — the menu
         disables the entry in that case, and this falls back to a plain play
         rather than dropping the request."""
+        if self.previewing:
+            self.endPreview()
         fresh = self._fresh_rows(ids)
         if not fresh:
             return
@@ -3143,6 +3166,9 @@ class Player(QObject):
                 except ValueError:
                     pass
         if not self._queue:
+            if self.previewing:
+                self.endPreview()
+                return
             self._mpv_fill_token += 1
             self._mpv_fill_pending = False
             self._orig_queue = None
@@ -3249,6 +3275,8 @@ class Player(QObject):
 
     @Slot(bool)
     def setShuffle(self, on):
+        if self.previewing:
+            self.endPreview()
         on = bool(on)
         if on == self._shuffle:
             return
@@ -3312,6 +3340,8 @@ class Player(QObject):
 
     @Slot()
     def cycleLoop(self):
+        if self.previewing:
+            self.endPreview()
         self._loop = (self._loop + 1) % 3
         try:
             self._mpv["loop-file"] = "inf" if self._loop == self.LOOP_TRACK else "no"
@@ -3321,6 +3351,8 @@ class Player(QObject):
 
     @Slot(int)
     def setLoop(self, mode):
+        if self.previewing:
+            self.endPreview()
         self._loop = mode % 3
         try:
             self._mpv["loop-file"] = "inf" if self._loop == self.LOOP_TRACK else "no"
@@ -3335,6 +3367,7 @@ class Player(QObject):
 
     @perftrace.timed("stop_audio")
     def stop_audio(self):
+        self._restore_preview(False)
         # Run before metadata/scanner shutdown, which can wait on storage.
         # Preserve the queue and position for save_state, but silence mpv now.
         self._mpv_fill_token += 1
@@ -3343,6 +3376,8 @@ class Player(QObject):
 
     @perftrace.timed("save_state")
     def save_state(self):
+        if self.previewing:
+            self._restore_preview(False)
         self._prefs.set("queue", {
             "ids": [t["id"] for t in self._queue],
             "index": self._index, "position": self._position,
@@ -5479,6 +5514,10 @@ def main():
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Library", bridge)
     ctx.setContextProperty("Player", player)
+    from discoverybridge import Discovery
+    discovery = Discovery(DB_PATH, STATE, LIBRARY_ROOT, player, app)
+    ctx.setContextProperty("Discovery", discovery)
+    app.aboutToQuit.connect(discovery.shutdown)
     import visualizer
     visualizer.register()
     visual = visualizer.Visualizer(f"player-{os.getpid()}", app)
@@ -5769,7 +5808,7 @@ def _selftest(app, shell, win, plasma, warnings, player=None, library=None,
     view_owner = shell.root if shell is not None else (
         win.property("contentItem").childItems()[0] if win is not None else None)
     if want_view and view_owner is not None:
-        view_owner.setProperty("browserView", "playlists" if want_view == "playlists" else "albums")
+        view_owner.setProperty("browserView", want_view if want_view in ("albums", "playlists", "discover") else "albums")
 
     # PLAYER_STATEPOKE: put a queue under the app WITHOUT playing anything, so
     # a harness can see the chrome follow the app's state. This is the case that
