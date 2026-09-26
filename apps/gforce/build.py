@@ -32,7 +32,7 @@ NON_MOVING_WAVES=frozenset({
 })
 
 # Keep these basic line displays out of both manual selection and rotation.
-DISABLED_WAVES=NON_MOVING_WAVES | {'Example_Spectrum', 'Simple_Horizontal'}
+DISABLED_WAVES=NON_MOVING_WAVES | {'Example_Spectrum', 'Simple_Horizontal', 'Big_N_Banded'}
 
 
 def prepare():
