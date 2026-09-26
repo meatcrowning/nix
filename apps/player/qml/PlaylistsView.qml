@@ -25,6 +25,7 @@ Item {
                        c.b * (1 - amount), c.a)
     }
     property string current: ""
+    property Item overlayParent: root
     // Foreground tones, handed in already faded by Main (docs/DESIGN.md §3.1.1).
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
@@ -43,6 +44,7 @@ Item {
     function closeModal() { editor.cancel(); }
 
     onVisibleChanged: {
+        if (!visible && editor && editor.visible) editor.cancel();
         if (visible && current === "") {
             // Which list was open is view state the user would notice
             // reverting (docs/DESIGN.md §14), so it outlives the process — and
@@ -84,7 +86,7 @@ Item {
 
     Item {
         id: side
-        width: root.plasma ? 178 : 190
+        width: Math.min(root.plasma ? 178 : 190, root.width * .4)
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.left: parent.left
@@ -348,6 +350,7 @@ Item {
 
     SmartEditor {
         id: editor
+        parent: root.overlayParent
         objectName: "smartEditor"      // tools/smartlist-ui-test.py drives it
         anchors.fill: parent
         z: 80

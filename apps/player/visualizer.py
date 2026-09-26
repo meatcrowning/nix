@@ -57,6 +57,22 @@ class Visualizer(QObject):
     @Property('QStringList', notify=presetsChanged)
     def presetNames(self): return self._presets
 
+    @Property(int, notify=changed)
+    def changeInterval(self):
+        intervals = self.state.get('values', {}).get('intervals', {})
+        pairs = [intervals.get(kind, DEFAULTS['intervals'][kind]) for kind in 'WDC']
+        if all(pair == pairs[0] for pair in pairs) and pairs[0][1] == 0:
+            return round(pairs[0][0])
+        return 0
+
+    @Slot(int)
+    def setChangeInterval(self, seconds):
+        seconds = max(0, min(300, seconds))
+        # Zero restores the original varied timing; particle lifetimes stay separate.
+        for kind in 'WDC':
+            lo, spread = DEFAULTS['intervals'][kind] if seconds == 0 else (seconds, 0)
+            self.command({'op':'interval', 'kind':kind, 'value':[lo, lo + spread]})
+
     @Property('QVariantList', constant=True)
     def dials(self):
         return [dict(name=n,label=label,minimum=lo,maximum=hi,step=step,logarithmic=log)

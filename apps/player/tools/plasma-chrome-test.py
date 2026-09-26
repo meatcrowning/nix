@@ -13,23 +13,15 @@ The child is OFFSCREEN and deliberately not a whole player: `--selftest` starts
 no MPRIS name, binds no queue socket, runs no library scan and saves no state,
 so it cannot disturb the running player or his session (~/nix/AGENTS.md).
 
-It replaces `viewbar-test.py`, which tested `ViewBar.qml` — a QML imitation of a
-view toolbar. That file is gone; the three views, the sort cycler and the finder
-are real toolbar rows and a real QLineEdit now, and this is what checks them.
-
-Covers: that the menus are KDE's vocabulary in KDE's order with File first and
-Settings/Help last; that the three views are on the top toolbar AND still in the
-View menu (the menus are the complete set, the toolbar is the primary verbs);
-that the sort row carries the full word rather than the titlebar's two-character
-cell; that the finder is a QLineEdit on that bar; that the transport bar carries
-the six playback verbs and the seek widget; that a verb with nothing to act on
-is DISABLED rather than absent; and that in a Hyprland session none of it is
-built at all.
+The album/playlist browser buttons and Randomize occupy the main toolbar;
+search belongs to the album browser, and a native timing widget follows the
+buttons. Transport stays on the bottom toolbar.
 """
 
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -54,15 +46,42 @@ def run(session, **extra):
     # A page with one of every swapped control on it, so the face check below
     # has something to look at.
     env["PLAYER_VIEW"] = "playlists"
-    # QT_QPA_PLATFORMTHEME=kde is NOT optional: without a KDE platform theme the
-    # widgets take Qt's default light palette while the QML takes his dark
-    # scheme, and the window renders as an empty-looking toolbar with invisible
-    # labels — a bug in the harness, not in the app (apps/AGENTS.md).
-    out = subprocess.run([sys.executable, str(APP / "main.py"), "--selftest"],
-                         env=env, capture_output=True, text=True, timeout=120)
-    # stderr too: kdeshell's "publishes no buttonsChanged" warning is the only
-    # sign of a chrome that builds correctly and then never updates again.
-    return out.stdout + out.stderr
+    # No real session, database, mpv, scanner, metadata network, or saved preferences.
+    with tempfile.TemporaryDirectory(prefix="player-chrome-") as scratch:
+        root = Path(scratch)
+        for key in ('DATA', 'STATE', 'CONFIG', 'CACHE', 'RUNTIME'):
+            path = root/key; path.mkdir(mode=0o700)
+            env['XDG_RUNTIME_DIR' if key == 'RUNTIME' else 'XDG_'+key+'_HOME'] = str(path)
+        (root/'mpv.py').write_text("class MPV:\n"
+            "    def __init__(self, **kw): self.volume=100; self.pause=True; self.playlist_count=0; self.playlist_pos=0\n"
+            "    def property_observer(self, name): return lambda fn: fn\n"
+            "    def command(self, *args): pass\n"
+            "    def __setitem__(self, key, value): pass\n")
+        env.update(PYTHONPATH=str(root), QT_QPA_PLATFORM='offscreen',
+                   QT_QPA_PLATFORMTHEME='', QT_STYLE_OVERRIDE='Fusion', QT_QUICK_CONTROLS_STYLE='Basic',
+                   DBUS_SESSION_BUS_ADDRESS='unix:path='+str(root/'no-bus'),
+                   PIPEWIRE_REMOTE='/dev/null', PULSE_SERVER='unix:'+str(root/'no-pulse'),
+                   PLAYER_LIBRARY_ROOT=str(root/'music'), LASTFM_CONFIG=str(root/'no-lastfm'))
+        for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'HYPRLAND_INSTANCE_SIGNATURE'):
+            env.pop(key, None)
+        code = f"""
+import sys
+sys.path.insert(0, {str(APP)!r})
+import main
+main.AutoScanner=lambda *args: None
+main.Bridge._request_now_info=lambda self: None
+con=main.open_db()
+for i in range(1,4):
+    con.execute('INSERT INTO tracks (id,path,mtime,size,added_at,title) VALUES (?,?,0,0,0,?)',
+                (i, {scratch!r}+'/track'+str(i)+'.flac', 'fixture '+str(i)))
+con.commit()
+con.close()
+main.main()
+"""
+        out = subprocess.run([sys.executable, '-c', code, '--selftest'],
+                             env=env, capture_output=True, text=True, timeout=40)
+        assert out.returncode == 0, out.stdout + out.stderr
+        return out.stdout + out.stderr
 
 
 plasma = run("plasma")
@@ -84,7 +103,7 @@ menus = [ln for ln in lines[head:tail] if ln and not ln.startswith(" ")]
 check("File first, Help last", menus[:1] == ["&File"] and menus[-1:] == ["&Help"],
       str(menus))
 check("the KDE vocabulary, with the app's own group before Settings",
-      menus == ["&File", "&View", "&Playback", "Se&ttings", "&Help"], str(menus))
+      menus == ["&File", "&View", "&Playback", "&Visualizer", "Se&ttings", "&Help"], str(menus))
 
 
 def section(text, head):
@@ -115,15 +134,14 @@ top = section(plasma, "toolbar")
 transport = section(plasma, "toolbar[transport]")
 
 # ---- the menus are the COMPLETE set, the toolbar the primary verbs -------
-for name in ("Albums", "Playlists", "Now Playing"):
+for name in ("Albums", "Playlists"):
     check(f"{name} is in the View menu",
           any(verb(r).startswith(name) for r in view), str(view))
     check(f"{name} is on the toolbar",
           any(verb(r).startswith(name) for r in top), str(top))
-check("Now Playing is a radio row (checked, not just present)",
-      any(r.replace("&", "").startswith("[x] Now Playing")
-          or r.replace("&", "").startswith("[ ] Now Playing")
-          for r in view), str(view))
+check("only browser modes remain in navigation",
+      not any(verb(r).startswith(("Now Playing", "Visualizer")) for r in top + view), str(top + view))
+check("Randomize is on the toolbar", any(verb(r).startswith("Randomize") for r in top), str(top))
 
 # ---- sort moved beside the album index; its menu fallback remains ----------
 check("sort is not duplicated on the top toolbar",
@@ -163,14 +181,9 @@ check("...and none of them is a menubar title's",
       not (set(bar_letters) & set(menu_letters)),
       str(sorted(set(bar_letters))) + " vs " + str(sorted(set(menu_letters))))
 
-# ---- the finder is a real field, at the right-hand end ------------------
-check("the finder is a QLineEdit on the toolbar",
-      any(r.startswith("<QLineEdit") for r in top), str(top))
-check("...behind a stretch, so it sits against the right edge",
-      any(r == "<QWidget>" for r in top)
-      and top.index("<QWidget>") < [i for i, r in enumerate(top)
-                                    if r.startswith("<QLineEdit")][0],
-      str(top))
+# Search stays with the album browser, and timing occupies the native toolbar.
+check("the top toolbar has timing instead of a search field",
+      not any(r.startswith("<QLineEdit") for r in top) and "<QWidget>" in top, str(top))
 check("Find… is still in the View menu", any(r.startswith("Find…") for r in view),
       str(view))
 

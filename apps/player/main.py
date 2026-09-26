@@ -5537,48 +5537,38 @@ def main():
         shell.bar_labels()
         shell.bind_title("windowTitle")   # "artist — title", as under Hyprland
 
-        # ---- the finder, where KDE keeps it -----------------------------
-        # A real QLineEdit at the right-hand end of the toolbar. The QML
-        # `searchInput` stays the window's ONE source of search truth (filter vs
-        # full results, Escape, the click-out unfocus are all decided there), so
-        # this is a view onto it in both directions — guarded against the loop
-        # a two-way mirror would otherwise make.
-        mirroring = []
+        # Find stays in the album browser; the top toolbar controls the visualizer.
+        shell.on_action("search", lambda: QMetaObject.invokeMethod(root, "focusSearch"))
+        from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSpinBox
+        timing = QWidget()
+        timing.setObjectName("visualizerTiming")
+        timing_layout = QHBoxLayout(timing)
+        timing_layout.setContentsMargins(6, 0, 6, 0)
+        timing_label = QLabel("Change interval:")
+        timing_seconds = QSpinBox()
+        timing_seconds.setObjectName("visualizerChangeInterval")
+        timing_seconds.setRange(0, 300)
+        timing_seconds.setSpecialValueText("Varied")
+        timing_seconds.setSuffix(" s")
+        timing_seconds.setKeyboardTracking(False)
+        timing_seconds.setToolTip("Time between wave, distortion and colour changes. "
+                                  "Varied restores their default timing; particles keep their own lifetime.")
+        timing_label.setBuddy(timing_seconds)
+        timing_layout.addWidget(timing_label)
+        timing_layout.addWidget(timing_seconds)
+        timing_seconds.valueChanged.connect(visual.setChangeInterval)
 
-        def on_typed(text):
-            if mirroring:
-                return
-            mirroring.append(1)
-            try:
-                QMetaObject.invokeMethod(root, "setSearchText",
-                                         Q_ARG("QVariant", text))
-            finally:
-                mirroring.pop()
+        def update_timing():
+            timing.setEnabled(bool(visual.state.get("ready")) and not visual.state.get("paused"))
+            timing_seconds.blockSignals(True)
+            timing_seconds.setValue(visual.changeInterval)
+            timing_seconds.blockSignals(False)
 
-        field = shell.toolbar_search(on_typed, placeholder="search", width=140)
-
-        def on_qml_text():
-            if mirroring:
-                return
-            mirroring.append(1)
-            try:
-                text = str(root.property("searchText") or "")
-                if field.text() != text:
-                    field.setText(text)
-            finally:
-                mirroring.pop()
-
-        sig = getattr(root, "searchTextChanged", None)
-        if sig is not None and hasattr(sig, "connect"):
-            sig.connect(on_qml_text)
-        field.returnPressed.connect(
-            lambda: QMetaObject.invokeMethod(root, "submitSearch"))
-        # SPACE AND L ARE PLAY/PAUSE AND FAVOURITE in this session, on QActions
-        # — and a QAction shortcut is matched before the key reaches the focused
-        # widget, so without this the search field could not be typed a space
-        # into. They stand down while it has the keyboard.
-        shell.guard_typing(field)
-        shell.on_action("search", field.setFocus)
+        visual.changed.connect(update_timing)
+        update_timing()
+        shell.toolbar_widget("main", timing)
+        shell.guard_typing(timing_seconds)
+        shell.guard_typing(timing_seconds.lineEdit())
 
         # ---- the transport, along the bottom ----------------------------
         # A real QToolBar in the bottom area, filled from the same table by
@@ -5779,7 +5769,7 @@ def _selftest(app, shell, win, plasma, warnings, player=None, library=None,
     view_owner = shell.root if shell is not None else (
         win.property("contentItem").childItems()[0] if win is not None else None)
     if want_view and view_owner is not None:
-        view_owner.setProperty("view", want_view)
+        view_owner.setProperty("browserView", "playlists" if want_view == "playlists" else "albums")
 
     # PLAYER_STATEPOKE: put a queue under the app WITHOUT playing anything, so
     # a harness can see the chrome follow the app's state. This is the case that
@@ -5925,33 +5915,14 @@ def _selftest(app, shell, win, plasma, warnings, player=None, library=None,
                 print(f"face {cls} = {seen[cls]}")
             if not seen:
                 print("face: none found")
-        # PLAYER_SEARCH: type a query into the finder and press Return, then
-        # say what the window did with it. The finder is two halves that mirror
-        # each other (a real QLineEdit under Plasma, `searchInput` in the QML),
-        # and every way it can break — a mirror that does not fire, a Return
-        # that reaches nobody, an overlay that stays hidden — is invisible to a
-        # query the Library answers correctly. This drives the half the SESSION
-        # owns and prints the other end.
+        # PLAYER_SEARCH exercises the shared browser query and left results pane.
         if os.environ.get("PLAYER_SEARCH"):
             from PySide6.QtCore import QMetaObject
-            from PySide6.QtGui import QKeyEvent
-            from PySide6.QtCore import QEvent
             q = os.environ["PLAYER_SEARCH"]
-            root_item = shell.root if shell is not None else win
-            if plasma and shell is not None and shell._search is not None:
-                shell._search.setFocus()
-                for ch in q:
-                    ev = QKeyEvent(QEvent.KeyPress, 0, Qt.NoModifier, ch)
-                    app.sendEvent(shell._search, ev)
-                app.processEvents()
-                app.sendEvent(shell._search,
-                              QKeyEvent(QEvent.KeyPress, Qt.Key_Return,
-                                        Qt.NoModifier, "\r"))
-            else:
-                QMetaObject.invokeMethod(root_item, "setSearchText",
-                                         Q_ARG("QVariant", q))
-                app.processEvents()
-                QMetaObject.invokeMethod(root_item, "submitSearch")
+            root_item = view_owner
+            QMetaObject.invokeMethod(root_item, "setSearchText", Q_ARG("QVariant", q))
+            app.processEvents()
+            QMetaObject.invokeMethod(root_item, "submitSearch")
             for _ in range(8):
                 app.processEvents()
             item = root_item if shell is not None else (
