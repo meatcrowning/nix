@@ -198,6 +198,7 @@ check("a missing picture is an error, not an empty frame",
 # [his, 2026-08-24]. The file is the identity; a second request is answered
 # with where it is, not with another copy.
 o._paths_shown = set()
+o._image_digests = set()
 r = run_tool("show_image", {"path": str(PIC)})
 first = len(shown)
 r2 = run_tool("show_image", {"path": str(PIC)})
@@ -207,6 +208,7 @@ check("...and the model is told it is already there, not that it failed",
       bool(r2) and r2.get("ok") and r2.get("already_shown")
       and "not two" in (r2.get("note") or ""), json.dumps(r2)[:200])
 o._paths_shown = set()
+o._image_digests = set()
 
 # 2. screenshot: through a stub capture, drawn AND attached
 cap = script(_TMP / "shot.sh",
@@ -234,6 +236,7 @@ os.environ["ORACLE_SHOT_CMD"] = str(cap)
 # `_paths_shown` is per TURN in the app (reset in `send`); the harness calls
 # tools directly, so each section that draws the same file clears it itself.
 o._paths_shown = set()
+o._image_digests = set()
 made = _TMP / "made.png"
 img.save(str(made))
 os.environ["ORACLE_PAINTER"] = str(script(
@@ -534,6 +537,7 @@ os.environ["ORACLE_PAINTER"] = str(script(
     '}\'' % str(made)))
 seen.clear()
 o._paths_shown = set()
+o._image_digests = set()
 o._made_this_turn = {}          # a fresh turn (see 3a-stop)
 r = run_tool("make_image", {"prompt": "a red cube"}, ms=20000)
 check("a render reports where it is, as it runs",
