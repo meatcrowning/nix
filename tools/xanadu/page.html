@@ -39,7 +39,15 @@
   }
   body.reading .hud { opacity: 0.18; }
   body.reading .hud:hover, body.reading .hud:focus-within { opacity: 1; }
-  .hud h1 { margin: 0; font: 800 20px/1.1 var(--ui); letter-spacing: 0.01em; }
+  .hud h1 { margin: 0; font: 800 20px/1.1 var(--ui); letter-spacing: 0.01em; flex: 1; }
+  .hud .top { display: flex; align-items: center; gap: 8px; }
+  .hud .top button { padding: 3px 8px; font-weight: 400; color: var(--ink-dim); }
+  body.menu-off .hud { display: none; }
+  #menu-on {
+    position: fixed; left: 16px; top: calc(16px + env(safe-area-inset-top, 0px));
+    background: var(--panel); backdrop-filter: blur(6px);
+  }
+  body:not(.menu-off) #menu-on { display: none; }
   .hud h1 span { font: 400 13px var(--mono); color: var(--ink-dim); margin-left: 6px; }
   .hud .meta { color: var(--ink-dim); font: 12px var(--mono); font-variant-numeric: tabular-nums; }
   .kinds { display: grid; gap: 4px; }
@@ -100,7 +108,7 @@
 <div id="stage"></div>
 
 <section class="hud" aria-label="Controls">
-  <h1>Xanadu <span>~/nix</span></h1>
+  <div class="top"><h1>Xanadu <span>~/nix</span></h1><button type="button" id="menu-off" title="Hide menu (M)">Hide</button></div>
   <div class="meta" id="meta"></div>
   <div class="kinds" id="kinds"></div>
   <div class="hosts">
@@ -112,9 +120,10 @@
     <datalist id="paths"></datalist>
     <button type="button" id="home">Overview</button>
   </form>
-  <div class="help">Drag to orbit · right-drag to pan · scroll to zoom · click a page to pull it forward with everything bridged to it · <kbd>/</kbd> find</div>
+  <div class="help">Drag to orbit · right-drag to pan · scroll to zoom · move close to a page to read it · click a page to pull it forward with everything bridged to it · <kbd>/</kbd> find · <kbd>M</kbd> menu</div>
 </section>
 
+<button type="button" id="menu-on" title="Show menu (M)">Menu</button>
 <div id="cap" hidden></div>
 <div id="tip" hidden></div>
 
@@ -276,6 +285,48 @@ function labelTexture(text, sub, w, h, big) {
   return t;
 }
 
+// Pages near the camera swap their greeked texture for real text; LOD_MAX caps
+// the live ones and LOD_PER_TICK spreads the painting so flying never hitches.
+const LOD_ON = 4, LOD_OFF = 2.5, LOD_MAX = 16, LOD_PER_TICK = 2;
+function fieldHiTex(p) {
+  const lp = Math.max(4, Math.min(14, Math.floor(MAX_TEX / Math.max(p.lines.length, 3))));
+  return paintPage(p, { lp, width: Math.round((W / LH) * lp), real: true });
+}
+const frustum = new THREE.Frustum(), projM = new THREE.Matrix4();
+let lodClock = 0;
+function stepLOD(now) {
+  if (now - lodClock < 120) return;
+  lodClock = now;
+  projM.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  frustum.setFromProjectionMatrix(projM);
+  const k = innerHeight / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  const c = camera.position, ranked = [];
+  for (const p of pages) {
+    let px = 0;
+    if (p.mesh.visible && frustum.intersectsObject(p.mesh)) {
+      const dx = c.x - Math.max(p.x - W / 2, Math.min(p.x + W / 2, c.x));
+      const dy = c.y - Math.max(p.y0 - p.h, Math.min(p.y0, c.y));
+      const dist = Math.max(0.1, Math.hypot(dx, dy, c.z - p.z));
+      px = LH * k / dist;                       // on-screen height of one line
+    }
+    p.linePx = px;
+    if (px >= (p.fhi ? LOD_OFF : LOD_ON)) ranked.push(p);
+  }
+  ranked.sort((a, b) => b.linePx - a.linePx);
+  const keep = new Set(ranked.slice(0, LOD_MAX));
+  let painted = 0;
+  for (const p of pages) {
+    if (p.fhi && !keep.has(p)) {
+      p.fhi.dispose(); p.fhi = null; p.mesh.material.map = p.low; p.mesh.material.needsUpdate = true;
+    }
+  }
+  for (const p of ranked) {
+    if (!keep.has(p) || p.fhi) continue;
+    if (painted++ >= LOD_PER_TICK) break;
+    p.fhi = fieldHiTex(p); p.mesh.material.map = p.fhi; p.mesh.material.needsUpdate = true;
+  }
+}
+
 // ---- the field ----
 const pageMeshes = [];
 function buildPages() {
@@ -408,10 +459,11 @@ function enter(p, scroll = 0) {
       new THREE.MeshBasicMaterial({ color: 0x050810, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
     veil.position.set(0, 0, -D - 3); veil.scale.set(400, 400, 1); veil.renderOrder = 10; veil.frustumCulled = false;
     rig.add(veil);
-    R = { rig, veil, items: new Map(), history: [], zoom: 1, veilT: 0.88, bridges: null, leaving: false };
+    R = { rig, veil, items: new Map(), history: [], zoom: 1, pan: 0, panT: 0, veilT: 0.88, bridges: null, leaving: false };
     controls.enabled = false; tip.hidden = true;
     document.body.classList.add("reading");
   }
+  if (R.focus !== p) R.pan = R.panT = 0;
   R.focus = p; R.scroll = R.scrollT = Math.max(0, Math.min(scroll, p.lines.length - 1));
   const cols = sides(p);
   const want = new Map();
@@ -476,7 +528,7 @@ function slots() {
   const lineY = L => v.yTop - (L - 0.5 - R.scroll) * v.lf;       // y of focus line L's centre
   if (f && !f.leaving) {
     const top = v.yTop + (R.scroll - f.start + f.head) * v.lf, h = (f.count + f.head) * v.lf;
-    out.set(f, makePose(0, top - h / 2, -D, 0, v.Wf, h));
+    out.set(f, makePose(R.pan, top - h / 2, -D, 0, v.Wf, h));
   }
   for (const side of ["left", "right"]) {
     const sgn = side === "left" ? -1 : 1, rot = -sgn * TILT, a = v.Ws / 2;
@@ -488,7 +540,7 @@ function slots() {
       let top = lineY(e.fl) + (it.head + e.sl - 0.5 - it.start) * v.ls;
       top = Math.min(top, floor - v.ls * 1.2);
       floor = top - h;
-      out.set(it, makePose(cx, top - h / 2, cz, rot, v.Ws, h));
+      out.set(it, makePose(cx + R.pan, top - h / 2, cz, rot, v.Ws, h));
     }
   }
   return out;
@@ -505,6 +557,8 @@ function anchor(it, edge, line) {
 
 function stepReading(now) {
   R.scroll += (R.scrollT - R.scroll) * (reduceMotion ? 1 : 0.22);
+  R.pan += (R.panT - R.pan) * (reduceMotion ? 1 : 0.22);
+  if (Math.abs(R.panT - R.pan) < 0.0005) R.pan = R.panT;
   if (Math.abs(R.scrollT - R.scroll) < 0.002) R.scroll = R.scrollT;
   const f = R.items.get(R.focus.i);
   if (f && !f.leaving && f.p.lines.length > CHUNK) {
@@ -565,7 +619,7 @@ function updateCaption() {
   const cap = document.getElementById("cap"), p = R.focus;
   const nin = R.cols.left.length, nout = R.cols.right.length;
   cap.innerHTML = `<b>${esc(p.path)}</b><span class="n">${p.lines.length} lines · ${nin} bridged in · ${nout} out</span>` +
-    `<span class="keys">wheel to scroll · click a lit line or a side page to follow · <kbd>ctrl</kbd>+wheel to zoom · <kbd>Esc</kbd> ${R.history.length ? "back" : "return to field"}</span>`;
+    `<span class="keys">wheel to scroll · <kbd>shift</kbd>+wheel or drag to pan · <kbd>Z</kbd>+wheel to zoom · click a lit line or a side page to follow · <kbd>Esc</kbd> ${R.history.length ? "back" : "return to field"}</span>`;
   cap.hidden = false;
 }
 function esc(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]); }
@@ -591,7 +645,11 @@ document.getElementById("kinds").innerHTML = Object.entries(KINDS).map(([k, v]) 
 document.getElementById("kinds").addEventListener("change", e => {
   on[e.target.dataset.k] = e.target.checked;
   buildBridges();
-  for (const p of pages) { p.low.dispose(); p.low = lowTex(p); p.mesh.material.map = p.low; p.mesh.material.needsUpdate = true; }
+  for (const p of pages) {
+    p.low.dispose(); p.low = lowTex(p);
+    if (p.fhi) { p.fhi.dispose(); p.fhi = null; }
+    p.mesh.material.map = p.low; p.mesh.material.needsUpdate = true;
+  }
   if (R && !R.leaving) { R.repaint = true; enter(R.focus, R.scrollT); }
 });
 document.getElementById("paths").innerHTML = pages.map(p => `<option value="${esc(p.path)}"></option>`).join("");
@@ -605,14 +663,35 @@ document.getElementById("find").addEventListener("submit", e => { e.preventDefau
 q.addEventListener("change", jump);
 document.getElementById("home").onclick = () => { if (R) { pendingOverview = true; leave(); } else flyTo(...overviewPose()); };
 
+function setMenu(show) {
+  document.body.classList.toggle("menu-off", !show);
+  try { localStorage.setItem("xanadu-menu", show ? "on" : "off"); } catch (_) {}
+}
+try { if (localStorage.getItem("xanadu-menu") === "off") setMenu(false); } catch (_) {}
+document.getElementById("menu-off").onclick = () => setMenu(false);
+document.getElementById("menu-on").onclick = () => setMenu(true);
+
+// Z held turns the wheel into zoom while reading
+let zHeld = false;
+addEventListener("keyup", e => { if (e.key === "z" || e.key === "Z") zHeld = false; });
+addEventListener("blur", () => { zHeld = false; });
+
+// positive d moves the pages right (the view travels left)
+function panBy(d) {
+  const v = view(), lim = v.Wf / 2 + v.gap + v.Ws;
+  R.panT = Math.max(-lim, Math.min(lim, R.panT + d));
+}
 function visibleLines() { const v = view(); return v.Hv / v.lf; }
 addEventListener("keydown", e => {
   if (e.target === q) { if (e.key === "Escape") q.blur(); return; }
   if (e.key === "/") { e.preventDefault(); q.focus(); return; }
+  if (e.key === "z" || e.key === "Z") { zHeld = true; return; }
+  if ((e.key === "m" || e.key === "M") && !e.ctrlKey && !e.metaKey && !e.altKey) { setMenu(document.body.classList.contains("menu-off")); return; }
   if (!R || R.leaving) return;
   const n = R.focus.lines.length, page = Math.max(3, Math.floor(visibleLines() * 0.8));
   const k = { Escape: () => back(), Backspace: () => back(),
     ArrowDown: () => R.scrollT += 3, ArrowUp: () => R.scrollT -= 3,
+    ArrowLeft: () => panBy(view().Wv * 0.12), ArrowRight: () => panBy(-view().Wv * 0.12),
     PageDown: () => R.scrollT += page, " ": () => R.scrollT += page, PageUp: () => R.scrollT -= page,
     Home: () => R.scrollT = 0, End: () => R.scrollT = n - 3,
     "+": () => R.zoom = Math.min(2.2, R.zoom * 1.12), "=": () => R.zoom = Math.min(2.2, R.zoom * 1.12),
@@ -653,7 +732,7 @@ function followFrom(h) {
 
 let down = null;
 renderer.domElement.addEventListener("pointerdown", e => {
-  down = { x: e.clientX, y: e.clientY, sy: e.clientY, moved: false };
+  down = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false };
   if (R) renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener("pointerup", e => {
@@ -668,7 +747,8 @@ renderer.domElement.addEventListener("pointermove", e => {
   if (R && down && down.moved && !R.leaving) {
     const v = view(), px = innerHeight / v.Hv * v.lf;
     R.scrollT = Math.max(0, Math.min(R.focus.lines.length - 3, R.scrollT - (e.clientY - down.sy) / px));
-    R.scroll = R.scrollT; down.sy = e.clientY; return;
+    panBy((e.clientX - down.sx) / (innerHeight / v.Hv)); R.pan = R.panT;
+    R.scroll = R.scrollT; down.sx = e.clientX; down.sy = e.clientY; return;
   }
   if (hoverRaf || e.buttons) return;
   hoverRaf = requestAnimationFrame(() => {
@@ -686,8 +766,12 @@ renderer.domElement.addEventListener("pointerleave", () => { tip.hidden = true; 
 renderer.domElement.addEventListener("wheel", e => {
   if (!R || R.leaving) return;
   e.preventDefault(); e.stopImmediatePropagation();
-  const dy = e.deltaY * (e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? innerHeight : 1);
-  if (e.ctrlKey) { R.zoom = Math.max(0.5, Math.min(2.2, R.zoom * Math.exp(-dy * 0.002))); return; }
+  const m = e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? innerHeight : 1;
+  let dy = e.deltaY * m, dx = e.deltaX * m;
+  if (zHeld) { R.zoom = Math.max(0.5, Math.min(2.2, R.zoom * Math.exp(-dy * 0.002))); return; }
+  if (e.shiftKey && !dx) { dx = dy; dy = 0; }
+  if (dx) panBy(-dx / (innerHeight / view().Hv));
+  if (!dy) return;
   R.scrollT = Math.max(0, Math.min(R.focus.lines.length - 3, R.scrollT + dy * 0.05));
 }, { passive: false, capture: true });
 
@@ -702,7 +786,7 @@ function frame(now) {
     camera.position.lerpVectors(tween.fromP, tween.toP, e);
     if (u >= 1) tween = null;
   }
-  if (!R) controls.update();
+  if (!R) { controls.update(); stepLOD(now); }
   else stepReading(now);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
