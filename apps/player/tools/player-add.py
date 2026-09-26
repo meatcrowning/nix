@@ -378,37 +378,46 @@ def prune_empty_dirs(dl_dir, src):
 COVER_RE = re.compile(r"^(cover|folder|front|albumart.*)\.(jpe?g|png|webp|gif|bmp)$", re.I)
 
 
-def carry_cover(dl_dir, dest_dir, dry_run=False):
+def carry_cover(dl_dir, dest_dir, src_dirs, dry_run=False):
     """Move a cover image downloaded beside the audio into the album dir, if
-    the album lacks one and the downloads folder holds one.
+    the album lacks one and the album's own download folder holds one.
 
     player-add.py moves only AUDIO files, so a cover.jpg slskd grabbed with the
     album is otherwise orphaned in the downloads dir and the player shows no
-    art. Call after the move loop for each album's dest_dir."""
+    art. Call after the move loop for each album's dest_dir, with the folders
+    that album's audio was moved OUT of: only those (and a disc folder's
+    parent) are searched. Several albums land in the downloads dir at once,
+    each with its own cover.jpg, so a cover found anywhere else belongs to
+    some other record."""
     if dest_dir is None or not dest_dir.is_dir():
         return False
     # Already has a cover the player would trust? nothing to do.
     if any(f.is_file() and COVER_RE.match(f.name)
            for f in dest_dir.iterdir()):
         return False
-    # Look for an orphaned cover in the downloads dir (same relative folder).
-    d = str(dest_dir)
-    for root, _dirs, files in os.walk(dl_dir):
-        if os.path.basename(root) == NEEDS_ATTENTION:
+    candidates = []
+    for d in sorted(src_dirs):
+        candidates.append(d)
+        # a multi-disc grab keeps the cover beside the CD1/CD2 folders
+        if d.parent != dl_dir and dl_dir in d.parent.parents:
+            candidates.append(d.parent)
+    for d in candidates:
+        if not d.is_dir():
             continue
-        for name in files:
-            if COVER_RE.match(name):
-                src = Path(root) / name
-                dest = dest_dir / safe_file(name)
-                if dry_run:
-                    print(f"  would carry cover {name} -> {dest}")
-                    return True
-                try:
-                    shutil.move(str(src), str(dest))
-                    print(f"  carried cover    {name} -> {dest_dir.name}/")
-                    return True
-                except OSError:
-                    pass
+        for src in sorted(d.iterdir()):
+            if not (src.is_file() and COVER_RE.match(src.name)):
+                continue
+            dest = dest_dir / safe_file(src.name)
+            if dry_run:
+                print(f"  would carry cover {src.name} -> {dest}")
+                return True
+            try:
+                shutil.move(str(src), str(dest))
+            except OSError:
+                continue
+            print(f"  carried cover    {src.name} -> {dest_dir.name}/")
+            prune_empty_dirs(dl_dir, src)
+            return True
     return False
 
 
@@ -437,7 +446,7 @@ def main():
     skipped = 0
     parked = 0
     failed = 0
-    moved_dest_dirs = set()
+    moved_dest_dirs = {}  # dest album dir -> download folders its audio left
 
     for src in sorted(find_download_files(dl_dir)):
         t = P.read_tags(str(src))
@@ -506,7 +515,7 @@ def main():
             try:
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(src), str(dest))
-                moved_dest_dirs.add(dest_dir)
+                moved_dest_dirs.setdefault(dest_dir, set()).add(src.parent)
             except OSError as e:
                 # one unmovable file must not starve the rest of the batch
                 failed += 1
@@ -519,8 +528,8 @@ def main():
 
     # Carry each album's cover art into place — audio moves but the cover.jpg
     # slskd grabbed beside it is otherwise orphaned (and the player shows no art).
-    for dest_dir in sorted(moved_dest_dirs):
-        carry_cover(dl_dir, dest_dir, dry_run=args.dry_run)
+    for dest_dir, src_dirs in sorted(moved_dest_dirs.items()):
+        carry_cover(dl_dir, dest_dir, src_dirs, dry_run=args.dry_run)
 
     print(f"\n{moved} download(s) imported into {root}" + ("" if args.dry_run else f"; skipped {skipped} already present" if skipped else "") + (f"; {failed} failed" if failed else ""))
     if parked:

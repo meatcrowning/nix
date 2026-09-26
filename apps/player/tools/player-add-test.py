@@ -418,6 +418,49 @@ def test_main_end_to_end():
           (dest / "05 La vieja.flac").is_file())
 
 
+def test_cover_stays_with_its_album():
+    print("main(): each album gets the cover from its own download folder")
+    dl = SCRATCH / "dl-covers"
+    meta = SCRATCH / "meta-covers"
+    meta.mkdir()
+    write_tsv(meta / "soulseek-state.tsv", S.STATE_COLS, [])
+    write_tsv(meta / "missing.tsv",
+              ["artists", "title", "album", "year", "duration_ms", "isrc",
+               "spotify_id", "sources"], [])
+    # three grabs in flight at once, each folder with its own cover.jpg; a
+    # multi-disc grab keeps its cover beside the disc folders
+    for folder, album in (("Alpha Grab", "Alpha"), ("Beta Grab", "Beta")):
+        make_flac(dl / folder / "01 Song.flac",
+                  {"artist": "Cover Band", "title": "Song", "album": album,
+                   "albumartist": "Cover Band"})
+        (dl / folder / "cover.jpg").write_bytes(album.encode())
+    make_flac(dl / "Gamma Grab" / "CD1" / "01 Song.flac",
+              {"artist": "Cover Band", "title": "Song", "album": "Gamma",
+               "albumartist": "Cover Band"})
+    (dl / "Gamma Grab" / "cover.jpg").write_bytes(b"Gamma")
+    # a stray cover that belongs to no album being imported
+    (dl / "Unrelated").mkdir()
+    (dl / "Unrelated" / "cover.jpg").write_bytes(b"Unrelated")
+
+    old_argv = sys.argv
+    sys.argv = ["player-add.py", "--downloads-dir", str(dl),
+                "--meta-dir", str(meta)]
+    try:
+        PA.main()
+    finally:
+        sys.argv = old_argv
+
+    band = AUD / "Cover Band"
+    for album in ("Alpha", "Beta", "Gamma"):
+        cov = band / album / "cover.jpg"
+        check(f"{album} got its own cover",
+              cov.is_file() and cov.read_bytes() == album.encode())
+    check("an unrelated folder's cover is left alone",
+          (dl / "Unrelated" / "cover.jpg").is_file())
+    check("emptied download folders are pruned",
+          not (dl / "Alpha Grab").exists() and not (dl / "Beta Grab").exists())
+
+
 def main():
     test_load_meta_new_style_rows()
     test_build_album_index()
@@ -425,6 +468,7 @@ def main():
     test_meta_for_file()
     test_state_key_roundtrip()
     test_main_end_to_end()
+    test_cover_stays_with_its_album()
     print("\nPASS: player-add album-placement suite")
 
 
