@@ -34,6 +34,7 @@ class Visualizer(QObject):
         self.generation = 0
         self.window = None
         self.requested = False
+        self.playing = False
         self.closed = False
         self.state = {'values':dict(DEFAULTS), 'choices':{}, 'selections':{},
                       'presets':[], 'status':'', 'ready':False, 'paused':False, 'comparing':False}
@@ -71,7 +72,8 @@ class Visualizer(QObject):
 
     def eventFilter(self, obj, event):
         if event.type() in (QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.WindowStateChange,
-                            QEvent.Type.Expose):
+                            QEvent.Type.Expose, QEvent.Type.WindowActivate,
+                            QEvent.Type.WindowDeactivate, QEvent.Type.ActivationChange):
             QTimer.singleShot(0,self.reconcile)
         return False
 
@@ -86,8 +88,18 @@ class Visualizer(QObject):
         self.requested = shown
         self.reconcile()
 
+    @Slot(bool)
+    def setPlaying(self, playing):
+        self.playing = playing
+        self.reconcile()
+
     def reconcile(self):
         want = self.requested and not self.closed and self.shown()
+        if want:
+            # Plasma owns a QWidget; Hyprland owns a QWindow.
+            focused = (self.window.isActive() if isinstance(self.window, QQuickWindow)
+                       else self.window.isActiveWindow())
+            want = self.playing or focused
         if not want:
             self.stop()
         elif self.process is None:

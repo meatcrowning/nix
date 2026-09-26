@@ -5483,6 +5483,8 @@ def main():
     visualizer.register()
     visual = visualizer.Visualizer(f"player-{os.getpid()}", app)
     visual.closed = selftest or resource_fixture
+    player.playingChanged.connect(lambda: visual.setPlaying(player.playing))
+    visual.setPlaying(player.playing)
     ctx.setContextProperty("Visualizer", visual)
     app.aboutToQuit.connect(visual.shutdown)
     ctx.setContextProperty("Lyrics", lyrics)
