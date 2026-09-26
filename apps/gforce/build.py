@@ -25,6 +25,12 @@ LOW_COLOR_MAPS=frozenset({
     'DT_-_Wild_West_End', 'Firestorm', 'Purple_N_Blues', 'Purple_N_Blues_II',
 })
 
+# No working audio input, or audio affects only brightness/dot size.
+NON_MOVING_WAVES=frozenset({
+    'CrossBall', 'Magnum', 'DT_-_SineDot', 'The_Dot_Line',
+    'Melt_O_Rama', 'Parkening_Power',
+})
+
 
 def prepare():
     archive=Path(os.environ['GF_ENGINE_ARCHIVE'])
@@ -63,6 +69,7 @@ def prepare():
                     dest=data/('GForce'+kind);dest.mkdir()
                     for preset in (src/('GForce'+kind)).iterdir():
                         if kind=='ColorMaps' and preset.name in LOW_COLOR_MAPS:continue
+                        if kind=='WaveShapes' and preset.name in NON_MOVING_WAVES:continue
                         if preset.is_file() and preset.name!='Makefile.am':shutil.copy2(preset,dest/preset.name)
                 include=build/'include/libvisual';include.mkdir(parents=True)
                 shutil.copy2(ROOT/'libvisual.h',include/'libvisual.h')
