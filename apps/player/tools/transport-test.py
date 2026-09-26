@@ -95,7 +95,8 @@ app = QApplication(sys.argv)
 
 player = FakePlayer()
 seek = TransportSeek(player)
-seek.resize(400, 30)
+# Leave room for Oxygen's larger handle and clock metrics as well as Fusion.
+seek.resize(800, 40)
 seek.show()
 slider = seek._slider
 
@@ -190,6 +191,40 @@ check("sub-detent deltas do not each fire a step", player.seeks == [],
 wheel(0.25)
 check("...they add up to one when they reach a detent", len(player.seeks) == 1,
       str(player.seeks))
+
+# Playback-driven chrome must join Quick's frame, rather than swapping its
+# previous texture while QQuickWidget's render timer is still pending.
+class RenderWindow(QObject):
+    afterRendering = Signal()
+
+
+render = RenderWindow()
+coalesced = TransportSeek(player, render_window=render)
+coalesced.set_visualizer_active(True)
+before = coalesced._slider.value()
+player.advance(150)
+player.advance(180)
+check("position updates wait for the visualizer frame",
+      coalesced._slider.value() == before and coalesced._refresh.isActive())
+render.afterRendering.emit()
+check("one frame takes the newest position and stops the fallback",
+      coalesced._slider.value() == 600 and not coalesced._refresh.isActive())
+player.advance(210)
+QTest.qWait(150)
+check("a stopped renderer cannot freeze the seek bar",
+      coalesced._slider.value() == 700 and not coalesced._refresh.isActive())
+player.advance(240)
+coalesced.set_visualizer_active(False)
+check("leaving visualizer flushes pending position",
+      coalesced._slider.value() == 800 and not coalesced._refresh.isActive())
+player.advance(270)
+check("other views continue updating immediately",
+      coalesced._slider.value() == 900 and not coalesced._refresh.isActive())
+QTest.qWait(20)
+check("clock ticks do not create native cross-fade overlays",
+      not any(child.inherits("Oxygen::TransitionWidget")
+              for label in (seek._elapsed, seek._total)
+              for child in label.findChildren(QObject)))
 
 print(("FAILED: " + ", ".join(fails)) if fails else "all ok")
 sys.exit(1 if fails else 0)

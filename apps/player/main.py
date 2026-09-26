@@ -5584,7 +5584,7 @@ def main():
         # widget that takes the room the buttons leave.
         shell.toolbar("transport", "Transport Bar", area=Qt.BottomToolBarArea)
         from transport import TransportSeek
-        seek = TransportSeek(player)
+        seek = TransportSeek(player, render_window=shell.view.quickWindow())
         shell.toolbar_widget("transport", seek, stretch=True)
 
         # The Plasma panel and this toolbar share ONE Cava producer. While the
@@ -5598,6 +5598,7 @@ def main():
         def publish_view():
             view = str(root.property("view") or "")
             seek.set_now_playing(view == "now")
+            seek.set_visualizer_active(view == "visualizer")
             tmp = view_state.with_name(view_state.name + f".{os.getpid()}.tmp")
             try:
                 tmp.write_text(json.dumps({"view": view, "pid": os.getpid(),

@@ -184,15 +184,31 @@ class TransportSeek(QWidget):
     alone with the clocks drifting.
     """
 
-    def __init__(self, player, parent=None):
+    def __init__(self, player, parent=None, *, render_window=None):
         super().__init__(parent)
         self._player = player
         self._drag = False
         self._pending = -1.0
+        self._render_window = render_window
+        self._visualizer_active = False
+        self._refresh = QTimer(self)
+        self._refresh.setSingleShot(True)
+        self._refresh.setInterval(100)
+        self._refresh.timeout.connect(self._pull)
+        if render_window is not None:
+            # QQuickWidget renders on the GUI thread. Its scene graph and
+            # QWidget chrome share one backing-store swap: changing the bar
+            # during Quick's 5 ms render delay can swap the OLD texture first,
+            # blocking the GUI for a refresh and making the new frame late.
+            render_window.afterRendering.connect(self._flush_refresh)
 
         self._elapsed = QLabel("-:--")
         self._total = QLabel("-:--")
         for lab in (self._elapsed, self._total):
+            # A clock is a live counter. Oxygen's label cross-fade starts a
+            # separate repaint animation every second, interrupting the
+            # visualizer's shared window swap even when the tick is batched.
+            lab.setProperty("_kde_no_animations", True)
             lab.setAlignment(Qt.AlignCenter)
             # FIXED-WIDTH SLOTS, so the track does not reflow as the digits
             # change (§5.4) — the readout is the one thing here that changes
@@ -218,7 +234,7 @@ class TransportSeek(QWidget):
         self._slider.sliderMoved.connect(self._on_move)
         self._slider.sliderReleased.connect(self._on_release)
 
-        player.positionChanged.connect(self._pull)
+        player.positionChanged.connect(self._request_refresh)
         player.durationChanged.connect(self._pull)
         player.indexChanged.connect(self._pull)
         self._pull()
@@ -228,11 +244,29 @@ class TransportSeek(QWidget):
         if on:
             self._spectrum._pull()
 
+    def set_visualizer_active(self, on):
+        self._visualizer_active = bool(on) and self._render_window is not None
+        if not self._visualizer_active:
+            self._flush_refresh()
+
+    def _request_refresh(self):
+        if not self._visualizer_active:
+            self._pull()
+        elif not self._refresh.isActive():
+            # Normally flushed with the next visualizer frame. Bound the wait
+            # if its worker fails, the window hides, or rendering is paused.
+            self._refresh.start()
+
+    def _flush_refresh(self):
+        if self._refresh.isActive():
+            self._pull()
+
     # ---- the source -> the handle -------------------------------------
     def _has_track(self):
         return self._player.duration > 0 and self._player.index >= 0
 
     def _pull(self):
+        self._refresh.stop()
         has = self._has_track()
         self._slider.setEnabled(has)
         dur = float(self._player.duration or 0.0)

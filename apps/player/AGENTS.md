@@ -371,6 +371,12 @@ producer on repaint: coupling the clocks amplifies missed refreshes. Keep
 only the newest pending image, with no queue to replay after a stall.
 Flush that tiny ACK with a zero-timeout write: QProcess's queued output can
 otherwise sit through the GUI's next display wait.
+On Plasma, transport position updates join QQuickWidget's `afterRendering`
+while Visualizer is selected. Independent native-widget swaps can display the
+previous texture during Quick's render delay and stall the next frame. A
+single-shot fallback keeps the transport responsive without renderer frames.
+Clock labels opt out of Oxygen's text cross-fades: their per-second animation
+would introduce independent swaps again after the synchronized update.
 Render scale remains supersampling.
 Textures are created and released on the scene-graph thread; do not put a
 QQuickPaintedItem/CPU scaling pass back between the frame and its texture.
@@ -389,3 +395,7 @@ Verify with `tools/visualizer-test.py`, `tools/visualizer-presentation-test.py`,
 `tools/visualizer-ack-test.py`, and G-Force's `embedded-check.py` and
 `player-audio-check.py`. The latter starts private PipeWire/WirePlumber with
 all hardware monitors disabled; never run its fixtures against the live graph.
+`bash tools/visualizer-cadence-test.sh` requires KWin and Oxygen and measures
+native transport updates on a private virtual output with synthetic frames,
+its own D-Bus session, and no audio. Offscreen rendering cannot expose swaps
+blocked on a display refresh.
