@@ -79,10 +79,11 @@ git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REMOTE"
 # ---- 1. commit whatever this machine changed --------------------------------
 # CM_SYNC_PATHS narrows what a tick commits, for a repo that also takes
 # hand-made commits (~/xanadu's tool/): only these pathspecs sync on their own.
+# One add per pathspec: git refuses the whole list when any entry matches
+# nothing yet (times/ before the first save).
 if [ -n "$CM_SYNC_PATHS" ]; then
   set -f
-  # shellcheck disable=SC2086  # a pathspec list, split on purpose, never globbed
-  git add -A -- $CM_SYNC_PATHS
+  for p in $CM_SYNC_PATHS; do git add -A -- "$p" 2>/dev/null; done
   set +f
 else
   git add -A
