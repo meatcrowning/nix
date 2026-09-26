@@ -834,65 +834,6 @@ SP<Render::ITexture> CVtbDeco::renderStackedTex(const std::string& text, int run
     return tex;
 }
 
-// The title laid SIDEWAYS: one pango line rotated a quarter turn clockwise, so
-// it reads top-to-bottom with the head tilted right — book-spine convention,
-// glyph tops toward the bar's outer edge. The alternative to the stacked
-// column above (plugin:hyprvtb:title_rotated — Settings > appearance > title
-// orientation). Same colW-wide, runLenPx-tall surface; pango does the ellipsis
-// itself when the title outruns the bar. No flat colon here: in a horizontal
-// run an upright ':' already reads as a separator (DESIGN.md §2.5 is about
-// vertical runs only).
-SP<Render::ITexture> CVtbDeco::renderRotatedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR) {
-    const auto FONT = Cfg::font();
-    const int  SIZE = std::round(Cfg::fontSize() * scale);
-    const int  BARW = std::round(colW() * scale);
-
-    if (runLenPx < SIZE || text.empty())
-        return nullptr;
-
-    auto SURF = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, runLenPx);
-    auto CR   = cairo_create(SURF);
-
-    // mono for pixel faces only — see renderStackedTex for the rule
-    cairo_font_options_t* fo = cairo_font_options_create();
-    applyTextFontOptions(fo);
-
-    // user -> device: the reading direction runs DOWN the bar, line height
-    // from the right edge leftward — the whole line turned 90° clockwise.
-    cairo_translate(CR, BARW, 0);
-    cairo_rotate(CR, M_PI / 2.0);
-
-    PangoLayout* layout = pango_cairo_create_layout(CR);
-    pango_cairo_context_set_font_options(pango_layout_get_context(layout), fo);
-
-    PangoFontDescription* fd = pango_font_description_new();
-    pango_font_description_set_family(fd, FONT.c_str());
-    pango_font_description_set_absolute_size(fd, terminalRasterSize(SIZE) * PANGO_SCALE);
-    pango_layout_set_font_description(layout, fd);
-    pango_layout_set_width(layout, runLenPx * PANGO_SCALE);
-    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
-    pango_layout_set_single_paragraph_mode(layout, true);
-    pango_layout_set_text(layout, text.c_str(), -1);
-
-    // centre the line across the bar's width (the rotated space's y axis)
-    int lh = 0;
-    pango_layout_get_pixel_size(layout, nullptr, &lh);
-    cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
-    cairo_move_to(CR, 0, std::max(0.0, (BARW - lh) / 2.0));
-    showTextLayout(CR, layout, COLOR);
-
-    pango_font_description_free(fd);
-    g_object_unref(layout);
-    cairo_font_options_destroy(fo);
-    cairo_surface_flush(SURF);
-
-    auto tex = Hl::textureFromCairo(SURF);
-
-    cairo_destroy(CR);
-    cairo_surface_destroy(SURF);
-    return tex;
-}
-
 void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& color) {
     if (!barVertical()) {
         // A horizontal (top/bottom) bar's title reads along the bar, i.e. as
@@ -908,15 +849,11 @@ void CVtbDeco::renderTitleTex(int runLenPx, float scale, const CHyprColor& color
         m_pTitleTex = renderStackedTex(m_szLastTitle, runLenPx, scale, color, nullptr, nullptr, /*ellipsis=*/true, /*flatColon=*/false, &m_iTitleTopInk);
 }
 
-// One horizontal pango line, ellipsized to the run length — the title texture
-// for a top/bottom bar (the run goes ALONG the bar, which is horizontal).
-// Surface is runLenPx wide × one bar-column tall; the line is centred across
-// the bar's thickness.
-SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLenPx, float scale, const CHyprColor& COLOR) {
-    const auto FONT = Cfg::font();
-    const int  SIZE = std::round(Cfg::fontSize() * scale);
-    const int  BARW = std::round(colW() * scale);
-
+// Shape and rasterise a normal horizontal line before rotating any pixels.
+// Rotating Pango's drawing context changes hinting for pixel fonts.
+static SP<Render::ITexture> renderLineTex(const std::string& text, int runLenPx,
+                                        const std::string& FONT, int SIZE, int BARW,
+                                        const CHyprColor& COLOR, bool rotated) {
     if (runLenPx < SIZE || text.empty())
         return nullptr;
 
@@ -938,8 +875,7 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     pango_layout_set_single_paragraph_mode(layout, true);
     pango_layout_set_text(layout, text.c_str(), -1);
 
-    // Preserve the titlebar's established line-box placement. The titlebar's
-    // fixed 14px cell deliberately contains this 13px terminal raster.
+    // Centre the same unrotated line box for either orientation.
     int lh = 0;
     pango_layout_get_pixel_size(layout, nullptr, &lh);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
@@ -951,11 +887,36 @@ SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLe
     cairo_font_options_destroy(fo);
     cairo_surface_flush(SURF);
 
-    auto tex = Hl::textureFromCairo(SURF);
+    if (rotated) {
+        auto turned = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BARW, runLenPx);
+        auto turnCR = cairo_create(turned);
+        cairo_translate(turnCR, BARW, 0);
+        cairo_rotate(turnCR, M_PI / 2.0);
+        cairo_set_source_surface(turnCR, SURF, 0, 0);
+        cairo_pattern_set_filter(cairo_get_source(turnCR), CAIRO_FILTER_NEAREST);
+        cairo_paint(turnCR);
+        cairo_destroy(turnCR);
+        cairo_destroy(CR);
+        cairo_surface_destroy(SURF);
+        SURF = turned;
+        cairo_surface_flush(SURF);
+    } else
+        cairo_destroy(CR);
 
-    cairo_destroy(CR);
+    auto tex = Hl::textureFromCairo(SURF);
     cairo_surface_destroy(SURF);
     return tex;
+}
+
+SP<Render::ITexture> CVtbDeco::renderHorizTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color) {
+    return renderLineTex(text, runLenPx, Cfg::font(), std::round(Cfg::fontSize() * scale),
+                         std::round(colW() * scale), color, false);
+}
+
+// Clockwise book-spine orientation, with exactly the horizontal line's pixels.
+SP<Render::ITexture> CVtbDeco::renderRotatedTex(const std::string& text, int runLenPx, float scale, const CHyprColor& color) {
+    return renderLineTex(text, runLenPx, Cfg::font(), std::round(Cfg::fontSize() * scale),
+                         std::round(colW() * scale), color, true);
 }
 
 // The address editor's text laid ALONG a horizontal (top/bottom) bar: one
