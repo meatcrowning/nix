@@ -1138,7 +1138,12 @@ addEventListener("keydown", e => {
   }
   if (R.leaving) return;
   const n = R.focus.rowsN, page = Math.max(3, Math.floor(visibleLines() * 0.8));
-  if (EDIT && (e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); startEdit(); return; }
+  if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    if (EDIT) startEdit();
+    else flash("This copy is read-only. To edit, run tools/xanadu/serve.py in ~/nix and open http://127.0.0.1:8787/", true);
+    return;
+  }
   const k = { Escape: () => back(), Backspace: () => back(),
     ArrowDown: () => R.scrollT += 3, ArrowUp: () => R.scrollT -= 3,
     ArrowLeft: () => panBy(view().Wv * 0.12), ArrowRight: () => panBy(-view().Wv * 0.12),
@@ -1730,6 +1735,10 @@ function showCheck(job) {
       (rows ? `<ul>${rows}</ul>` : `<div class="sub">No location inside this repo was named.</div>`);
   }
 }
+if (!EDIT) renderer.domElement.addEventListener("dblclick", e => {
+  if (R && !R.leaving && pickRead(e)?.it.role === "focus")
+    flash("This copy is read-only. To edit, run tools/xanadu/serve.py in ~/nix and open http://127.0.0.1:8787/", true);
+});
 if (EDIT) {
   $("chk").addEventListener("click", e => {
     if (e.target.id === "chkx") { $("chk").hidden = true; ED.checkErrors = []; relink(); refreshAfterRelink(); return; }
