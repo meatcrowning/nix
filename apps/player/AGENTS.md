@@ -244,8 +244,9 @@ facts, choices and provenance without triggering downloads.
 `Root.qml.tbButtons` supplies both hyprvtb chrome and Plasma menus/toolbars.
 `Titlebar.buttonsChanged` must fire for state changes even when the vtb socket
 is absent. Plasma actions own shortcuts; duplicate QML shortcuts stand down,
-and bare-key actions suspend while typing. Root's search field remains the
-single search state mirrored to the native toolbar field.
+and bare-key actions suspend while typing. Root owns the shared search state;
+the album browser owns the visible field. Find focuses that browser on both
+desktop faces.
 
 Plasma uses a real `QMainWindow` with opaque `QQuickWidget`, native menus and
 transport toolbar; player disables the status bar. Scan/mount text appears only
@@ -254,10 +255,7 @@ its engine lifetime. Selected controls retain their sibling API; controlled
 slider values need a `Binding`. `transport.py` keeps pending/drag seeks separate
 from reported position and banks sub-detent wheel motion.
 
-The Hyprland art layout chooses its breakpoint from window geometry, never a
-fraction being dragged. Plasma selects its own `NowPlaying.qml` with persisted
-art/info and upper/queue splits. Preserve the continuous style-owned background
-through overlays. The visualizer consumes the existing producer: the short
+Preserve the continuous style-owned background through overlays. The short
 `player-view.json` lease suppresses duplicate titlebar/panel display and expires
 if player dies. Never start a second analyzer.
 
@@ -266,14 +264,15 @@ favourited, otherwise an outline. `HeartIcon.qml` owns QML geometry;
 `kdeshell_icons.py` renders the matching player-heart icons for native actions.
 Keep click targets unchanged when changing the drawing size.
 
-`+plasma/NowPlaying.qml` becomes the ALL-IN-ONE page once the window is wide
-and tall enough (`expanded`, read from geometry — QML inside a QQuickWidget has
-no window state to ask, and a window one pixel short of maximized deserves the
-same page). Expanded, `NowInfoPane.showLyrics` is false, so the lyrics TAB is
-gone and lyrics own the lower half of the right-hand column; an `AlbumBrowser`
-loads beside the queue. Both new splits are draggable and persisted
-(`npPlasmaInfoFrac`, `npPlasmaBrowseFrac`). Below the floors the page is exactly
-the compact one, tab included — never both at once (docs/DESIGN.md §5.2).
+`Root.qml` keeps `VisualizerPage.qml` loaded as the sole screen. Albums and
+Playlists switch only the left browser column (`browserView` in preferences);
+the right visualizer, controls, artwork and queue retain their instances and
+splits. Legacy `view` preferences seed the browser choice once. Album search
+and full search results stay in the left column; the playlist rule editor is a
+window-wide modal. Randomize (`R`) lives on the main toolbar. Its timing control
+sets the existing wave/distortion/colour intervals together; zero (Varied)
+restores the default ranges. Particle lifetime remains separate. Native Plasma
+controls use the shared visualizer bridge; Hyprland uses its QML counterpart.
 
 Covers carry ONE menu and one selection gesture wherever they are drawn:
 `AlbumMenu.qml` (the album twin of `TrackMenu.qml`) is opened by both the
@@ -360,8 +359,8 @@ conversion hashes misleading. Never point write-capable probes at the library.
 `visualizer.py`, `qml/VisualizerPage.qml` and `qml/VisualizerControls.qml` own
 Player's Visualizer view on both desktop faces. `apps/gforce/embedded_worker.py`
 runs the shared renderer in a disposable surfaceless process via `gforce-qtenv`.
-Only the selected, visible view starts it; changing pages, covering it with an
-app overlay, hiding/minimizing the window, and quitting tear down its process
+Only the visible visualizer starts it; covering it with an app modal,
+hiding/minimizing the window, and quitting tear down its process
 group including audio capture. A renderer failure must never stop playback.
 An unfocused window also tears down the worker while playback is paused or
 stopped. Playback or focus resumes it only while the view is visible and the

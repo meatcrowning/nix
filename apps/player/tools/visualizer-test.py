@@ -183,12 +183,13 @@ import sys
 sys.path.insert(0,{str(HERE.parent)!r})
 import main
 from PySide6.QtCore import QObject, QPoint, QPointF, Qt
+from PySide6.QtQml import qmlEngine
 from PySide6.QtTest import QTest
 main.AutoScanner=lambda *args:None
 original=main._selftest
 def check_layout(app,shell,win,*args):
     root=shell.root if shell is not None else win.property('contentItem').childItems()[0]
-    root.setProperty('view','visualizer')
+    root.setProperty('browserView','albums')
     root.setProperty('visualAlbumFrac',.5)
     QTest.qWait(100)
     root.findChild(QObject,'visualizerSurface').parentItem().parentItem().setProperty('bottomCollapsed',False)
@@ -208,12 +209,52 @@ def check_layout(app,shell,win,*args):
     target=shell.view if shell is not None else win
     target.show()
     QTest.qWait(50)
+    visual=qmlEngine(root).rootContext().contextProperty('Visualizer')
+    commands=[]
+    visual.command=lambda message: commands.append(message)
+    visual.state={{**visual.state,'ready':True}}
+    visual.changed.emit()
+    QTest.qWait(20)
+    root.forceActiveFocus()
+    QTest.keyClick(target,Qt.Key_R)
+    QTest.qWait(20)
+    assert commands==[{{'op':'key','key':'r'}}],commands
+    commands.clear()
+    if shell is not None:
+        shell._actions['visualR'].trigger()
+    else:
+        root.tbAction('visualR')
+    assert commands==[{{'op':'key','key':'r'}}],commands
+    commands.clear()
+    if shell is not None:
+        seconds=shell.window.findChild(QObject,'visualizerChangeInterval')
+        seconds.setValue(45)
+    else:
+        root.findChild(QObject,'visualizerChangeInterval').moved.emit(45)
+    assert commands==[{{'op':'interval','kind':kind,'value':[45,45]}} for kind in 'WDC'],commands
+    commands.clear()
+    visual.state['values']={{**visual.state['values'],'intervals':{{'W':[45,0],'D':[45,0],'C':[45,0],'P':[8,15]}}}}
+    visual.changed.emit()
+    QTest.qWait(20)
+    assert visual.changeInterval==45 and not commands
+    if shell is not None:
+        assert seconds.value()==45
+        seconds.setValue(0)
+    else:
+        root.findChild(QObject,'visualizerChangeInterval').moved.emit(0)
+    assert len(commands)==3 and all(c['value'][1]>c['value'][0] for c in commands)
+    commands.clear()
     toggle=root.findChild(QObject,'visualizerSidebarButton')
     buttons=root.property('tbButtons').toVariant()
+    navigation=[b['id'] for b in buttons if isinstance(b,dict) and b.get('group')=='view']
+    assert navigation==['albums','playlists'], navigation
+    if shell is not None:
+        assert shell._search is None
+        assert shell.window.findChild(QObject,'visualizerChangeInterval')
     visual_actions=[b['id'] for b in buttons if isinstance(b,dict)
                     and b.get('id','').startswith('visual') and b['id']!='visualizer']
     if shell is None:
-        assert not visual_actions, visual_actions
+        assert visual_actions==['visualR'], visual_actions
     else:
         assert 'visualSidebar' in visual_actions and 'visualW' in visual_actions
     assert toggle.parentItem()==surface
@@ -261,6 +302,7 @@ def check_layout(app,shell,win,*args):
     QTest.qWait(20)
     assert root.property('albumSearchEditing')
     sidebar=root.property('visualSidebar')
+    commands.clear()
     triggered=[]
     if shell is not None:
         for action in shell._actions.values():
@@ -271,6 +313,7 @@ def check_layout(app,shell,win,*args):
     assert root.property('searchText').lower()=='w lr',root.property('searchText')
     assert not root.property('searching')
     assert root.property('visualSidebar')==sidebar and not triggered
+    assert not [c for c in commands if c['op']=='key'], 'typing triggered visualizer actions'
     QTest.keyClick(target,Qt.Key_Escape)
     QTest.qWait(20)
     assert root.property('searchText')=='' and search.isVisible()
@@ -320,10 +363,33 @@ def check_layout(app,shell,win,*args):
     assert gallery.height()==right.height()
     root.openAlbum(0)
     assert root.property('view')=='visualizer'
-    root.setProperty('view','albums')
+    root.setView('playlists')
     QTest.qWait(50)
-    assert grid.width()==gallery.parentItem().width()
-    root.setProperty('view','visualizer')
+    playlists=root.findChild(QObject,'playlistBrowser')
+    assert playlists.isVisible() and not grid.isVisible()
+    assert playlists.width()==gallery.width() and playlists.height()==gallery.height()
+    assert root.findChild(QObject,'visualizerSurface')==surface and surface.isVisible()
+    assert root.property('view')=='visualizer'
+    editor=root.findChild(QObject,'smartEditor')
+    editor.createNew()
+    QTest.qWait(30)
+    assert editor.parentItem()==root and editor.width()==root.width()
+    assert editor.isVisible() and not visual.requested
+    commands.clear()
+    QTest.keyClick(target,Qt.Key_R)
+    QTest.qWait(20)
+    assert not [c for c in commands if c['op']=='key'], 'playlist text triggered randomize'
+    root.setView('albums')
+    QTest.qWait(30)
+    assert not editor.isVisible() and visual.requested
+    root.forceActiveFocus()
+    root.setView('playlists')
+    root.focusSearch()
+    QTest.qWait(30)
+    assert root.property('browserView')=='albums' and root.property('albumSearchEditing')
+    root.forceActiveFocus()
+
+    root.setProperty('browserView','albums')
     QTest.qWait(50)
     assert root.findChild(QObject,'albumGrid')==grid
     assert root.findChild(QObject,'visualizerSurface').parentItem().parentItem().property('bottomCollapsed')
@@ -339,7 +405,8 @@ main.main()
         assert result.returncode==0,result.stdout+result.stderr
         assert '0 QML warning(s)' in result.stdout
         if session=='plasma':
-            assert '[x] V&isualizer' in result.stdout
+            assert 'Now Playing' not in result.stdout
+            assert 'Randomize' in result.stdout
             assert 'Show Visualizer Controls  Tab' in result.stdout
             assert 'Pause or Resume Changes  Shift+Space' in result.stdout
             assert 'Play  Space' in result.stdout

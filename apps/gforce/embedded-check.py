@@ -33,6 +33,11 @@ with tempfile.TemporaryDirectory(prefix='gforce-embedded-') as directory:
         for name,value in [('persist',40),('fps',60),('rate',2),('grid',320),('resolution',.5),('hitHold',80)]:
             engine.command({'op':'dial','name':name,'value':value})
         assert abs(engine.lib.gf_get(b'persist')-.5**(1/40))<1e-6
+        particles = engine.values['intervals']['P'][:]
+        for kind in 'WDC':
+            engine.command({'op':'interval','kind':kind,'value':[45,45]})
+        assert all(engine.values['intervals'][kind]==[45,0] for kind in 'WDC')
+        assert engine.values['intervals']['P']==particles
         engine.command({'op':'key','key':' '})
         assert engine.snapshot('')['paused']
         engine.command({'op':'savePreset'})
@@ -44,6 +49,8 @@ with tempfile.TemporaryDirectory(prefix='gforce-embedded-') as directory:
         assert engine.values['fps']==60 and engine.values['persist']==40
         engine.save()
         assert (root/'config/gforce-vis/dials.json').exists()
+        saved=json.loads((root/'config/gforce-vis/dials.json').read_text())
+        assert all(saved['intervals'][kind]==[45,0] for kind in 'WDC')
         engine.command({'op':'deletePreset','index':0})
         assert not engine.presets
         print('PASS dial units, keys, saved looks, comparison, persistence')

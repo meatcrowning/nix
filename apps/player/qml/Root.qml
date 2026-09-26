@@ -2,9 +2,8 @@ import QtQuick
 import QtQuick.Window
 import "../../qmlcommon"
 
-// player's CONTENT: album gallery / playlists / now-playing views. There is no
-// separate album page — clicking a cover opens an AlbumPanel section inline,
-// under that cover's row in the gallery.
+// Player keeps the visualizer and queue visible beside an album/playlist browser.
+// Clicking a cover opens its AlbumPanel inline in the left column.
 //
 // AN ITEM, NOT A WINDOW, because it has two roofs (apps/AGENTS.md → kdeshell):
 // under Hyprland `Main.qml` is a plain `Window` around this, and in a Plasma
@@ -14,8 +13,8 @@ import "../../qmlcommon"
 // geometry request goes out as `requestResize`.
 //
 // Under Hyprland ALL chrome is the hyprvtb titlebar (the same bridge viewer
-// uses): transport (<< >/|| >> shuffle repeat), the view switcher (a/p/n), the
-// sort cycler, a search toggle whose bar slides in from the titlebar edge, and
+// uses): transport (<< >/|| >> shuffle repeat), the browser switcher (a/p), the
+// sort cycler, a browser search action, and
 // a bottom-anchored settings button whose drawer slides out from that edge
 // (rescan + the gallery's column count) — no in-window header row. Under Plasma
 // that same table becomes a menubar, a view toolbar and a transport toolbar
@@ -32,25 +31,18 @@ Item {
     readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
                                    ? DeskStyle.plasma === true : false
 
-    // "albums" | "playlists" | "now" | "visualizer"  ("detail" is a pre-inline-panel leftover
-    // that may still sit in prefs — fold it back into the gallery)
-    property string view: {
-        var v = Prefs.get("view", "albums");
-        return v === "detail" ? "albums" : v;
-    }
+    readonly property string view: "visualizer"
+    property string browserView: Prefs.get("browserView", Prefs.get("view", "albums")) === "playlists"
+                                 ? "playlists" : "albums"
     property real visualAlbumFrac: Number(Prefs.get("visualizerAlbumFrac", .5)) || .5
     property bool visualSidebar: Prefs.get("visualizerSidebar", true) === true
     function toggleVisualSidebar() {
         visualSidebar = !visualSidebar;
         Prefs.set("visualizerSidebar", visualSidebar);
     }
-    // The gallery has one tile tree per album.  It used to be constructed even
-    // while the saved view was now-playing or playlists, making air open a
-    // hidden ~2,400-cover gallery before it could show the actual page.  Once
-    // visited it stays resident, so changing pages still preserves browsing
-    // position and the open inline album section for this session.
+    // Keep the gallery resident after its first visit to preserve scroll and expansion.
     property bool albumsLoaded: false
-    onViewChanged: if (view === "albums" || view === "visualizer") albumsLoaded = true
+    onBrowserViewChanged: if (browserView === "albums") albumsLoaded = true
     // The album whose inline section is open in the gallery (0 = none).
     property int openAlbumId: 0
     property bool searching: false          // full results overlay
@@ -120,10 +112,7 @@ Item {
     // the position readout (see tbTime), below the scrub track.
     readonly property string windowTitle: footerStr !== "" ? footerStr : "player"
 
-    // ---- the Plasma finder -------------------------------------------------
-    // The finder's text, out and in. The QML `searchInput` below stays the one
-    // source of truth in both sessions; under Plasma main.py mirrors it onto a
-    // real QLineEdit on the toolbar and back again.
+    // Shared album filter state; the visible search field belongs to the browser.
     readonly property bool albumSearchEditing: albumPage.item ? albumPage.item.searchEditing : false
     readonly property bool searchEditing: searchInput.activeFocus || albumSearchEditing
     readonly property string searchText: searchInput.text
@@ -142,8 +131,7 @@ Item {
             Library.search(searchInput.text);
         }
     }
-    // The View menu's "Find…" row under Plasma: there is no bar to slide out,
-    // so main.py answers this id by focusing the toolbar's field instead.
+    // Both desktop faces focus the album browser for Find.
     function focusSearch() { win.openSearch(); }
 
     // The window's own surface. Under Plasma this is `transparent` and the KDE
@@ -170,10 +158,11 @@ Item {
         onNavigate: function (s) { win._apply(s); }
     }
 
-    function _here() { return { view: view, albumId: openAlbumId }; }
+    function _here() { return { view: browserView, albumId: openAlbumId }; }
     function _apply(s) {
         openAlbumId = s.albumId;   // the AlbumPanel loads that album's tracks itself
-        view = s.view;
+        browserView = s.view === "playlists" ? "playlists" : "albums";
+        Prefs.set("browserView", browserView);
     }
     function goBack() { navHist.back(); }
     function goForward() { navHist.forward(); }
@@ -185,14 +174,14 @@ Item {
     // Open (or, with 0, close) an album's inline section in the gallery. Always
     // uses the visible gallery, including the visualizer’s left column.
     function openAlbum(albumId) {
-        _navigate({ view: view === "visualizer" ? "visualizer" : "albums", albumId: albumId });
+        _navigate({ view: "albums", albumId: albumId });
     }
 
     // "show me this artist": land on the gallery with the search bar open and
     // carrying their name — the same state typing it would produce, so the
     // grid is filtered to that artist's albums and Escape clears it as usual.
     function browseArtist(artist) {
-        if (view !== "albums" && view !== "visualizer")
+        if (browserView !== "albums")
             setView("albums");
         searching = false;          // results overlay off: this filters the grid
         openSearch();
@@ -209,7 +198,6 @@ Item {
 
     function setView(v) {
         _navigate({ view: v, albumId: openAlbumId });
-        Prefs.set("view", v);
     }
 
     function cycleSort() {
@@ -232,14 +220,13 @@ Item {
     }
 
     function openSearch() {
-        if ((view === "albums" || view === "visualizer") && albumPage.item) {
+        if (browserView !== "albums") setView("albums");
+        if (albumPage.item) {
             filterAlbums(searchText);
             albumPage.item.focusSearch();
             return;
         }
-        searchOpen = true;
-        searchInput.forceActiveFocus();
-        searchInput.selectAll();
+        Qt.callLater(function() { if (albumPage.item) albumPage.item.focusSearch(); });
     }
 
     function closeSearch() {
@@ -259,7 +246,7 @@ Item {
     }
 
     Component.onCompleted: {
-        albumsLoaded = view === "albums" || view === "visualizer";
+        albumsLoaded = browserView === "albums";
         Library.setSort(sortMode);
         Library.setSortDescending(sortDescending);
         // opt in to the footer sitting below the scrub track (hyprvtb >= 2.72);
@@ -289,7 +276,7 @@ Item {
     //   icon:      a freedesktop icon name — a two-character cell is a titlebar
     //              affordance and has no place on a real toolbar
     //   bar:       true for the top toolbar, "transport" for the bottom one
-    //   group:     a radio set (the three views are one)
+    //   group:     a radio set (the two browser modes)
     //   shortcut:  THIS FACE'S key. The QML `Shortcut`s below stand down under
     //              Plasma — two owners of one sequence in one window is an
     //              ambiguous shortcut, which Qt answers by firing NEITHER.
@@ -336,21 +323,16 @@ Item {
               menu: "playback", menuText: "Shuffle", icon: "media-playlist-shuffle",
               bar: "transport" },
             "-",
-            // The pages are a RADIO SET on the real toolbar: one of them
-            // is always the page you are on, and two independent checkboxes
-            // could claim otherwise (§3.5, §5.4).
-            { id: "albums",    label: "a", state: view === "albums" ? 1 : 0, tip: "albums",
+            // The radio buttons select only the left browser column.
+            { id: "albums",    label: "a", state: browserView === "albums" ? 1 : 0, tip: "albums",
               menu: "view", menuText: "Albums", icon: "view-list-icons",
               bar: true, group: "view" },
-            { id: "playlists", label: "p", state: view === "playlists" ? 1 : 0, tip: "playlists",
+            { id: "playlists", label: "p", state: browserView === "playlists" ? 1 : 0, tip: "playlists",
               menu: "view", menuText: "Playlists", icon: "view-media-playlist",
               bar: true, group: "view" },
-            { id: "now",       label: "n", state: view === "now" ? 1 : 0, tip: "now playing",
-              menu: "view", menuText: "Now Playing", icon: "view-media-visualization",
-              bar: true, group: "view" },
-            { id: "visualizer", label: "v", state: view === "visualizer" ? 1 : 0, tip: "visualizer",
-              menu: "view", menuText: "Visualizer", icon: "view-media-visualization",
-              bar: true, group: "view" },
+            { id: "visualR", label: "R", state: Visualizer.stateInfo.ready ? 0 : 2,
+              menuText: "Randomize", menu: "visualizer", tip: "randomize (R)",
+              icon: "view-refresh", bar: true, shortcut: "R" },
             "-",
             // The full word, not the titlebar's two-character cell — a toolbar
             // has the room a titlebar cell never did (§7.6, and `barText` puts
@@ -361,9 +343,7 @@ Item {
               menu: "view", menuText: "Sort by " + sortWord,
               icon: "view-sort-ascending", bar: !win.plasma,
               barText: "sort: " + sortWord },
-            // Under Plasma this row does NOT go on the toolbar: the finder is a
-            // real QLineEdit at its right-hand end, where Dolphin and Gwenview
-            // keep theirs (kdeshell.toolbar_search). The menu row focuses it.
+            // Find lives in the album browser, leaving the toolbar to visualization.
             { id: "search",    label: "fs", state: win.searchOpen ? 1 : 0, tip: "find (Ctrl+F)",
               menu: "view", menuText: "Find…", icon: "edit-find", shortcut: "@Find" },
             // ...and this one opens the drawer under Hyprland and the real
@@ -372,7 +352,7 @@ Item {
             { id: "settings",  label: "st", state: win.settingsOpen ? 1 : 0, tip: "settings",
               bottom: true, menu: "settings", menuText: "Configure player…",
               icon: "configure" },
-        ].concat(win.plasma && view === "visualizer" ? [
+        ].concat(win.plasma ? [
             { id: "visualSidebar", label: "vc", state: visualSidebar ? 1 : 0,
               tip: "visualizer controls", menu: "settings", menuText: "Show Visualizer Controls", shortcut: "Tab" },
             { id: "visualPause", label: "vp", state: 0, tip: "pause visual changes",
@@ -382,7 +362,6 @@ Item {
             { id: "visualX", label: "X", menuText: "Next Colours", menu: "visualizer", tip: "next colours", shortcut: "X" },
             { id: "visualN", label: "N", menuText: "Next Particles", menu: "visualizer", tip: "next particles", shortcut: "N" },
             { id: "visualP", label: "P", menuText: "Toggle Particles", menu: "visualizer", tip: "toggle particles", shortcut: "P" },
-            { id: "visualR", label: "R", menuText: "Randomise", menu: "visualizer", tip: "randomise", shortcut: "R" },
             { id: "visualS", label: "S", menuText: "Save Look", menu: "visualizer", tip: "save look", shortcut: "S" }
         ] : []).filter(button => win.plasma || button.id !== "visualFullscreen");
     }
@@ -451,8 +430,6 @@ Item {
                           break;
         case "albums":    win.setView("albums");              break;
         case "playlists": win.setView("playlists");           break;
-        case "now":       win.setView("now");                 break;
-        case "visualizer": win.setView("visualizer");          break;
         case "sort":      win.cycleSort();                    break;
         case "search":    win.searchOpen ? win.closeSearch() : win.openSearch(); break;
         case "settings":  win.settingsOpen = !win.settingsOpen; break;
@@ -480,24 +457,46 @@ Item {
         onTriggered: (id) => win.tbAction(id)
     }
 
+    Row {
+        id: timingBar
+        anchors { top: menuBar.bottom; right: parent.right; rightMargin: 8 }
+        height: win.plasma ? 0 : 28
+        visible: !win.plasma
+        spacing: 8
+        enabled: Visualizer.stateInfo.ready === true && !Visualizer.stateInfo.paused
+        PixelText {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "change interval: " + (Visualizer.changeInterval > 0 ? Visualizer.changeInterval + " s" : "varied")
+            color: win.fgDim
+        }
+        Slider {
+            objectName: "visualizerChangeInterval"
+            width: 150; height: 20
+            anchors.verticalCenter: parent.verticalCenter
+            from: 0; to: 300; step: 1
+            value: Visualizer.changeInterval
+            onMoved: value => Visualizer.setChangeInterval(value)
+        }
+    }
+
     // ---- content views (the rest of the window) ----
     Item {
         id: content
         readonly property real visualAlbumW: Math.round(Math.max(0, width-9)
                                             * Math.max(.2, Math.min(.8, win.visualAlbumFrac)))
-        anchors { top: menuBar.bottom; left: parent.left
+        anchors { top: timingBar.bottom; left: parent.left
                   right: parent.right; bottom: parent.bottom }
 
         Loader {
             id: albumPage
             anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-            width: win.view === "visualizer" ? content.visualAlbumW : parent.width
+            width: content.visualAlbumW
             active: win.albumsLoaded
             sourceComponent: Component {
                 AlbumGrid {
                     objectName: "albumGrid"
                     anchors.fill: parent
-                    visible: win.view === "albums" || win.view === "visualizer"
+                    visible: win.browserView === "albums"
                     searchText: win.searchText
                     onFilterRequested: text => win.filterAlbums(text)
                     filtered: searchInput.text !== ""
@@ -521,8 +520,11 @@ Item {
         }
         PlaylistsView {
             id: playlists
-            anchors.fill: parent
-            visible: win.view === "playlists"
+            objectName: "playlistBrowser"
+            overlayParent: win
+            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+            width: content.visualAlbumW
+            visible: win.browserView === "playlists"
             fgText: win.fgText
             fgDim: win.fgDim
             fgAccent: win.fgAccent
@@ -534,7 +536,7 @@ Item {
             id: visualPage
             anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
             width: Math.max(0, parent.width-content.visualAlbumW-9)
-            active: win.view === "visualizer" && typeof Visualizer !== "undefined"
+            active: typeof Visualizer !== "undefined"
             source: active ? "VisualizerPage.qml" : ""
             onLoaded: {
                 item.plasma = Qt.binding(function() { return win.plasma; });
@@ -548,7 +550,6 @@ Item {
         MouseArea {
             id: visualDivider
             objectName: "visualizerAlbumDivider"
-            visible: win.view === "visualizer"
             x: content.visualAlbumW; width: 9; height: parent.height
             hoverEnabled: true
             preventStealing: true
@@ -567,29 +568,16 @@ Item {
         }
         QtObject {
             id: visualLife
-            property bool shown: typeof Visualizer !== "undefined" && win.view === "visualizer"
-                                 && !win.searching && !win.settingsOpen && !aliasEditor.visible
+            property bool shown: typeof Visualizer !== "undefined"
+                                 && !win.settingsOpen && !aliasEditor.visible && !playlists.modal
             onShownChanged: if (typeof Visualizer !== "undefined") Visualizer.setShown(shown)
-        }
-        NowPlaying {
-            anchors.fill: parent
-            visible: win.view === "now"
-            fgText: win.fgText
-            fgDim: win.fgDim
-            fgAccent: win.fgAccent
-            fgArt: win.fgArt
-            onOpenAlbum: function(albumId) { win.openAlbum(albumId); }
-            onBrowseArtist: function(artist) { win.browseArtist(artist); }
-            onEditAliases: function(artist) { win.editArtistAliases(artist); }
         }
     }
 
     SearchOverlay {
-        anchors.fill: parent
-        // clear the Hyprland slide-out search bar. Under Plasma there is
-        // nothing to clear here — the finder is a real QLineEdit on the window's
-        // toolbar, outside this QML entirely.
-        anchors.topMargin: menuBar.height + (win.plasma ? 8 : 36)
+        anchors { left: content.left; top: content.top; bottom: content.bottom }
+        width: content.visualAlbumW
+        // Full search results also stay inside the left column.
         visible: win.searching
         z: 40
         query: searchInput.text
@@ -624,35 +612,9 @@ Item {
     // The desktop's motion, from the plugin's published key (qmlcommon/Motion.qml).
     Motion { id: motion }
 
-    // ---- search bar: slides in from the right (titlebar) edge under Hyprland.
-    //
-    // THE FIELD IS STILL THE WINDOW'S ONE SOURCE OF SEARCH TRUTH in both
-    // sessions, but under Plasma nobody looks at it: the finder there is a real
-    // QLineEdit at the right-hand end of the toolbar (`kdeshell.toolbar_search`,
-    // where Dolphin and Gwenview keep theirs), and main.py keeps the two in step
-    // — `searchText` out, `setSearchText()` in. So this box is simply invisible
-    // there, and every rule below it (filter vs full search, Escape, the
-    // click-out unfocus) goes on being decided in exactly one place.
-    Rectangle {
-        id: searchBar
-        visible: !win.plasma
-        anchors.top: menuBar.bottom
-        anchors.topMargin: 8
-        anchors.right: parent.right
-        anchors.rightMargin: win.searchOpen ? 8 : -(width + 4)
-        // A reveal sliding out of the edge it belongs to, so it takes the
-        // desktop's slide (docs/DESIGN.md §6.2). It was 120ms with NO easing at
-        // all, i.e. Linear — nothing chose that, it was just the default.
-        Behavior on anchors.rightMargin { NumberAnimation { duration: motion.ms(motion.slideMs); easing.type: motion.slideEasing } }
-        width: 260
-        height: 22
-        z: 50
-        color: Theme.bgAlt
-        radius: Theme.rounding
-
-        border.color: searchInput.activeFocus ? win.fgAccent : Theme.border
-        border.width: Theme.ctrlBorder
-
+    // Keep the shared text state outside the lazy album loader.
+    Item {
+        visible: false
         TextInput {
             id: searchInput
             anchors.fill: parent
@@ -691,7 +653,7 @@ Item {
     // a real "Configure player…" dialog, opened by `kdeshell.on_action`.
     SettingsPanel {
         visible: !win.plasma && open
-        anchors { top: menuBar.bottom; left: parent.left
+        anchors { top: timingBar.bottom; left: parent.left
                   right: parent.right; bottom: parent.bottom }
         z: 70
         open: win.settingsOpen
@@ -724,7 +686,7 @@ Item {
         z: 100
         visible: win.searchEditing
         onPressed: function(mouse) {
-            const field = win.albumSearchEditing ? albumPage.item.searchField : searchBar;
+            const field = win.albumSearchEditing ? albumPage.item.searchField : searchInput;
             const p = mapToItem(field, mouse.x, mouse.y);
             if (p.x < 0 || p.y < 0 || p.x > field.width || p.y > field.height) {
                 if (win.albumSearchEditing) win.forceActiveFocus();
@@ -760,7 +722,7 @@ Item {
     // on the QActions the shell builds from `tbButtons` (`shortcut:`), and two
     // owners of one sequence in one window is an ambiguous shortcut — which Qt
     // answers by firing NEITHER, so the key would simply stop working. The
-    // shell also suspends the bare-key ones while its toolbar finder has the
+    // shell also suspends the bare-key ones while its text editor has the
     // keyboard (`kdeshell.guard_typing`), which is what the
     // `!win.searchEditing` guards do here.
     //
@@ -796,7 +758,7 @@ Item {
             required property string modelData
             Shortcut {
                 sequence: modelData
-                enabled: !win.plasma && (win.view === "visualizer" || modelData === "F11") && !win.searchEditing && !win.settingsOpen && !win.searching
+                enabled: !win.plasma && !win.searchEditing && !win.settingsOpen && !win.searching && !playlists.modal
                 onActivated: {
                     if (modelData === "Tab") win.toggleVisualSidebar();
                     else if (modelData === "F11") Visualizer.toggleFullscreen();
