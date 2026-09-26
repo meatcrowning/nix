@@ -8,6 +8,7 @@ Item {
     signal browseArtist(string artist)
     signal editAliases(string artist)
     signal toggleSidebar()
+    property bool plasma: false
     property bool sidebar: true
     property color fgText: Theme.text
     property color fgDim: Theme.textDim
@@ -29,6 +30,7 @@ Item {
             id: surface
             objectName: "visualizerSurface"
             source: Visualizer
+            HoverHandler { id: surfaceHover }
             width: Math.max(1, parent.width-(root.sidebar ? controls.width+6 : 0))
             height: parent.height
             function resize() { Visualizer.setSize(Math.round(width), Math.round(height)); }
@@ -38,13 +40,23 @@ Item {
         }
         HeaderButton {
             id: sidebarButton
-            anchors { left: parent.left; top: parent.top; margins: 6 }
+            objectName: "visualizerSidebarButton"
+            parent: root.plasma ? upper : surface
+            visible: root.plasma || surfaceHover.hovered
+            anchors {
+                left: root.plasma ? parent.left : undefined
+                top: root.plasma ? parent.top : undefined
+                right: root.plasma ? undefined : parent.right
+                bottom: root.plasma ? undefined : parent.bottom
+                margins: 6
+            }
             label: root.sidebar ? "hide controls (Tab)" : "show controls (Tab)"
             iconName: "sidebar-show"
             onClicked: root.toggleSidebar()
         }
         HeaderButton {
-            anchors { left: sidebarButton.right; top: parent.top; margins: 6 }
+            anchors { left: parent.left; top: parent.top; margins: 6
+                      leftMargin: root.plasma ? sidebarButton.width+12 : 6 }
             label: "retry"
             visible: (Visualizer.stateInfo.status || "").indexOf("stopped") >= 0
                      || (Visualizer.stateInfo.status || "").indexOf("unavailable") >= 0

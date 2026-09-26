@@ -55,6 +55,7 @@ for plasma in (False,True):
     theme=tc.create(); assert theme,tc.errorString(); keep.extend([tc,theme]);ctx.setContextProperty('Theme',theme)
     comp=QQmlComponent(engine,QUrl.fromLocalFile(str(f.QML/'VisualizerPage.qml')))
     page=comp.create(); assert page,comp.errorString();keep.extend([comp,page])
+    page.setProperty("plasma",plasma)
     scene=QQuickWindow();keep.append(scene);page.setParentItem(scene.contentItem());scene.show()
     for width,height in ((960,700),(1400,950),(480,320)):
         page.setWidth(width);page.setHeight(height);QTest.qWait(50)
@@ -206,6 +207,33 @@ def check_layout(app,shell,win,*args):
     target=shell.view if shell is not None else win
     target.show()
     QTest.qWait(50)
+    toggle=root.findChild(QObject,'visualizerSidebarButton')
+    buttons=root.property('tbButtons').toVariant()
+    visual_actions=[b['id'] for b in buttons if isinstance(b,dict)
+                    and b.get('id','').startswith('visual') and b['id']!='visualizer']
+    if shell is None:
+        assert not visual_actions, visual_actions
+        assert toggle.parentItem()==surface
+        assert abs(toggle.x()+toggle.width()+6-surface.width())<1
+        assert abs(toggle.y()+toggle.height()+6-surface.height())<1
+        QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
+        QTest.qWait(30)
+        assert not toggle.isVisible()
+        QTest.mouseMove(target,surface.mapToScene(QPointF(surface.width()/2,surface.height()/2)).toPoint())
+        QTest.qWait(30)
+        assert toggle.isVisible()
+        before=root.property('visualSidebar')
+        QTest.mouseClick(target,Qt.LeftButton,Qt.NoModifier,
+                         toggle.mapToScene(QPointF(toggle.width()/2,toggle.height()/2)).toPoint())
+        QTest.qWait(30)
+        assert root.property('visualSidebar')!=before
+        root.setProperty('visualSidebar',before)
+        QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
+        QTest.qWait(30)
+        assert not toggle.isVisible()
+    else:
+        assert 'visualSidebar' in visual_actions and 'visualW' in visual_actions
+        assert toggle.isVisible() and toggle.x()==6 and toggle.y()==6
     search=root.findChild(QObject,'albumSearch')
     toolbar=root.findChild(QObject,'albumToolbar')
     choice=root.findChild(QObject,'albumSortChoice')
