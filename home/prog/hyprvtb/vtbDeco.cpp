@@ -875,11 +875,12 @@ static SP<Render::ITexture> renderLineTex(const std::string& text, int runLenPx,
     pango_layout_set_single_paragraph_mode(layout, true);
     pango_layout_set_text(layout, text.c_str(), -1);
 
-    // Centre the same unrotated line box for either orientation.
+    // Keep the baseline on whole pixels: a half-pixel offset thickens aliased
+    // glyphs compared with the stacked layout, which starts at integer rows.
     int lh = 0;
     pango_layout_get_pixel_size(layout, nullptr, &lh);
     cairo_set_source_rgba(CR, COLOR.r, COLOR.g, COLOR.b, COLOR.a);
-    cairo_move_to(CR, 0, std::max(0.0, (BARW - lh) / 2.0));
+    cairo_move_to(CR, 0, std::floor(std::max(0.0, (BARW - lh) / 2.0)));
     showTextLayout(CR, layout, COLOR);
 
     pango_font_description_free(fd);
