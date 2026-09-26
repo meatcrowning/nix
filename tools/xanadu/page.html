@@ -321,20 +321,21 @@ function mdLines(lines) {
   let fence = false;
   return lines.map(line => {
     let m;
-    if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return { pieces: [{ t: line.trim(), c: "f", f: "mono", s: 1 }], x0: lead(line), bg: "code" }; }
-    if (fence) return { pieces: [{ t: line, c: "", f: "mono", s: 1 }], hang: lead(line) + 2, bg: "code" };
+    if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return { kind: "fence", pieces: [{ t: line.trim(), c: "f", f: "mono", s: 1 }], x0: lead(line), bg: "code" }; }
+    if (fence) return { kind: "code", pieces: [{ t: line, c: "", f: "mono", s: 1 }], hang: lead(line) + 2, bg: "code" };
+    if (!line.trim()) return { kind: "blank", pieces: [] };
     if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) {
       const big = m[1].length <= 2;
-      return { pieces: mdInline(m[2], "h", "h", big ? 1.45 : 1.12), h: big ? 2 : 1 };
+      return { kind: "h", pieces: mdInline(m[2], "h", "h", big ? 1.45 : 1.12), h: big ? 2 : 1 };
     }
-    if (/^\s*\|/.test(line)) return { pieces: [{ t: line, c: "t", f: "mono", s: 1 }], hang: 2 };
-    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) return { pieces: [], bg: "hr" };
+    if (/^\s*\|/.test(line)) return { kind: "t", pieces: [{ t: line, c: "t", f: "mono", s: 1 }], hang: 2 };
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) return { kind: "hr", pieces: [], bg: "hr" };
     if ((m = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line))) {
       const mark = /\d/.test(m[2]) ? m[2] : "•", x0 = m[1].length * 0.6 + 1;
-      return { pieces: [{ t: mark + " ", c: "li", f: "prose", s: 1 }, ...mdInline(m[3], "p", "prose", 1)], x0, hang: x0 + measure(mark + " ", "prose", 1) };
+      return { kind: "li", pieces: [{ t: mark + " ", c: "li", f: "prose", s: 1 }, ...mdInline(m[3], "p", "prose", 1)], x0, hang: x0 + measure(mark + " ", "prose", 1) };
     }
-    if ((m = /^\s*>\s?(.*)$/.exec(line))) return { pieces: mdInline(m[1], "q", "prose", 1), x0: 2, hang: 2, bg: "quote" };
-    return { pieces: mdInline(line.trim(), "p", "prose", 1), x0: lead(line) * 0.6, hang: lead(line) * 0.6 };
+    if ((m = /^\s*>\s?(.*)$/.exec(line))) return { kind: "quote", pieces: mdInline(m[1], "q", "prose", 1), x0: 2, hang: 2, bg: "quote" };
+    return { kind: "p", pieces: mdInline(line.trim(), "p", "prose", 1), x0: lead(line) * 0.6, hang: lead(line) * 0.6 };
   });
 }
 
@@ -355,7 +356,7 @@ function measure(t, f, s) {
 }
 function wrapLine(pieces, x0, hang) {
   const rows = [[]]; let x = x0;
-  const push = (t, pc, w) => { rows[rows.length - 1].push({ t, c: pc.c, f: pc.f, s: pc.s, x, w }); x += w; };
+  const push = (t, pc, w) => { rows[rows.length - 1].push({ t, c: pc.c, f: pc.f, s: pc.s, x, w, ln: pc.ln }); x += w; };
   for (const pc of pieces) for (const tok of pc.t.split(/(\s+)/)) {
     if (!tok) continue;
     let t = tok, tw = measure(t, pc.f, pc.s);
@@ -371,21 +372,40 @@ function wrapLine(pieces, x0, hang) {
   }
   return rows;
 }
+// Markdown paragraphs are hard-wrapped in the source; like any renderer we
+// reflow them, so a block may hold several source lines and a row may start
+// mid-line. rowY[line] is the row holding that line's first word.
 function layout(p) {
-  const specs = isMd(p) ? mdLines(p.lines)
-    : lexNix(p.text).map((ps, i) => ({ pieces: ps.map(([t, c]) => ({ t, c, f: "mono", s: 1 })), hang: lead(p.lines[i] || "") + 2 }));
-  const n = p.lines.length;
-  p.rows = []; p.rowY = new Float64Array(n); p.lineH = new Float64Array(n);
-  let y = 0;
+  const md = isMd(p), n = p.lines.length;
+  const specs = md ? mdLines(p.lines)
+    : lexNix(p.text).map((ps, i) => ({ kind: "code", pieces: ps.map(([t, c]) => ({ t, c, f: "mono", s: 1 })), hang: lead(p.lines[i] || "") + 2 }));
+  const blocks = [];
   for (let i = 0; i < n; i++) {
-    const sp = specs[i] || { pieces: [] }, h = sp.h || 1;
-    p.rowY[i] = y;
-    wrapLine(sp.pieces, sp.x0 || 0, Math.min(sp.hang || 0, 40)).forEach((ops, j) => {
-      p.rows.push({ line: i + 1, y, h, ops, bg: sp.bg, cont: j > 0 }); y += h;
-    });
-    p.lineH[i] = y - p.rowY[i];
+    const sp = specs[i] || { kind: "blank", pieces: [] }, prev = blocks[blocks.length - 1];
+    const pieces = sp.pieces.map(pc => ({ ...pc, ln: i }));
+    if (md && prev && prev.reflow && (sp.kind === "p" && (prev.kind === "p" || prev.kind === "li") || sp.kind === "quote" && prev.kind === "quote")) {
+      prev.lines.push(i); prev.pieces.push({ t: " ", c: "p", f: "prose", s: 1, ln: i }, ...pieces); continue;
+    }
+    blocks.push({ kind: sp.kind, reflow: md && (sp.kind === "p" || sp.kind === "li" || sp.kind === "quote"),
+                  lines: [i], pieces, x0: sp.x0 || 0, hang: Math.min(sp.hang || 0, 40), h: sp.h || 1, bg: sp.bg });
   }
-  p.rowsN = y;
+  p.rows = []; p.rowY = new Float64Array(n).fill(-1); p.lineH = new Float64Array(n);
+  let y = 0;
+  for (const b of blocks) {
+    const top = y;
+    wrapLine(b.pieces, b.x0, b.hang).forEach((ops, j) => {
+      p.rows.push({ line: (ops.length ? ops[0].ln : b.lines[0]) + 1, y, h: b.h, ops, bg: b.bg, cont: j > 0 && !b.reflow });
+      for (const o of ops) if (p.rowY[o.ln] < 0) p.rowY[o.ln] = y;
+      y += b.h;
+    });
+    let last = top;
+    for (const ln of b.lines) { if (p.rowY[ln] < 0) p.rowY[ln] = last; last = p.rowY[ln]; }
+    b.lines.forEach((ln, k) => {
+      const next = k + 1 < b.lines.length ? p.rowY[b.lines[k + 1]] : y;
+      p.lineH[ln] = Math.max(b.h, next - p.rowY[ln]);
+    });
+  }
+  p.rowsN = Math.max(y, 1);
 }
 const clampL = (p, L) => Math.max(0, Math.min(p.lines.length - 1, L - 1));
 const rowOf = (p, L) => p.rowY[clampL(p, L)];
@@ -489,10 +509,11 @@ function labelTexture(text, sub, w, h, big) {
 
 // Pages near the camera swap their greeked texture for real text; LOD_MAX caps
 // the live ones and LOD_PER_TICK spreads the painting so flying never hitches.
-const LOD_ON = 4, LOD_OFF = 2.5, LOD_MAX = 16, LOD_PER_TICK = 2;
+const LOD_ON = 4, LOD_OFF = 2.5, LOD_MAX = 12, LOD_PER_TICK = 2;
+const lodLp = p => Math.max(6, Math.min(14, Math.ceil(p.linePx * Math.min(devicePixelRatio || 1, 2) * 1.25)));
 function fieldHiTex(p) {
-  const lp = Math.min(14, MAX_TEX / Math.max(p.rowsN, 3));   // never over the texture limit
-  return paintPage(p, { lp, width: Math.round(lp / RL), real: true });
+  p.fhiLp = Math.min(lodLp(p), MAX_TEX / Math.max(p.rowsN, 3));   // never over the texture limit
+  return paintPage(p, { lp: p.fhiLp, width: Math.round(p.fhiLp / RL), real: true });
 }
 const frustum = new THREE.Frustum(), projM = new THREE.Matrix4();
 let lodClock = 0;
@@ -523,8 +544,10 @@ function stepLOD(now) {
     }
   }
   for (const p of ranked) {
-    if (!keep.has(p) || p.fhi) continue;
+    if (!keep.has(p)) continue;
+    if (p.fhi && !(lodLp(p) > p.fhiLp * 1.4 && p.fhiLp < 14 && p.fhiLp < MAX_TEX / p.rowsN)) continue;
     if (painted++ >= LOD_PER_TICK) break;
+    if (p.fhi) p.fhi.dispose();
     p.fhi = fieldHiTex(p); p.mesh.material.map = p.fhi; p.mesh.material.needsUpdate = true;
   }
 }
@@ -643,10 +666,14 @@ function sides(p) {
 function itemMaterial(tex) {
   return new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
 }
+// Paint at the page's on-screen row height (times DPR), not a fixed size:
+// GPU memory, not paint time, is what takes the tab down.
 function setItemTexture(it) {
   if (it.tex) it.tex.dispose();
-  const lp = it.role === "focus" ? Math.min(RLP, Math.floor(MAX_TEX / (it.count + it.head))) : RLP;
+  const v = view(), rowPx = (it.role === "focus" ? v.lf : v.ls) * innerHeight / v.Hv * Math.min(devicePixelRatio || 1, 2);
+  const lp = Math.max(8, Math.min(RLP, Math.ceil(rowPx * 1.1), Math.floor(MAX_TEX / (it.count + it.head))));
   it.tex = paintPage(it.p, { lp, width: Math.round(lp / RL), real: true, start: it.start, count: it.count, head: it.head });
+  it.tex.generateMipmaps = false; it.tex.minFilter = THREE.LinearFilter;
   it.mesh.material.map = it.tex; it.mesh.material.needsUpdate = true;
 }
 // The focus page is painted in chunks; a chunk must cover the visible lines
@@ -775,6 +802,10 @@ function stepReading(now) {
       f.painted = now;
       if (c.start !== f.start || c.count !== f.count) { Object.assign(f, c); setItemTexture(f); }
     }
+  }
+  if (R.zoomAt && now - R.zoomAt > 300 && !R.leaving) {
+    R.zoomAt = 0;
+    for (const it of R.items.values()) if (!it.leaving) setItemTexture(it);
   }
   const target = slots();
   let busy = false;
@@ -914,8 +945,9 @@ addEventListener("keydown", e => {
     ArrowLeft: () => panBy(view().Wv * 0.12), ArrowRight: () => panBy(-view().Wv * 0.12),
     PageDown: () => R.scrollT += page, " ": () => R.scrollT += page, PageUp: () => R.scrollT -= page,
     Home: () => R.scrollT = 0, End: () => R.scrollT = n - 3,
-    "+": () => R.zoom = Math.min(2.2, R.zoom * 1.12), "=": () => R.zoom = Math.min(2.2, R.zoom * 1.12),
-    "-": () => R.zoom = Math.max(0.5, R.zoom / 1.12) }[e.key];
+    "+": () => { R.zoom = Math.min(2.2, R.zoom * 1.12); R.zoomAt = performance.now(); },
+    "=": () => { R.zoom = Math.min(2.2, R.zoom * 1.12); R.zoomAt = performance.now(); },
+    "-": () => { R.zoom = Math.max(0.5, R.zoom / 1.12); R.zoomAt = performance.now(); } }[e.key];
   if (k) { e.preventDefault(); k(); R.scrollT = Math.max(0, Math.min(n - 3, R.scrollT)); }
 });
 
@@ -1015,7 +1047,7 @@ renderer.domElement.addEventListener("wheel", e => {
   }
   if (R.leaving) return;
   let dy = e.deltaY * m, dx = e.deltaX * m;
-  if (zHeld) { R.zoom = Math.max(0.5, Math.min(2.2, R.zoom * Math.exp(-dy * 0.002))); return; }
+  if (zHeld) { R.zoom = Math.max(0.5, Math.min(2.2, R.zoom * Math.exp(-dy * 0.002))); R.zoomAt = performance.now(); return; }
   if (e.shiftKey && !dx) { dx = dy; dy = 0; }
   if (dx) panBy(-dx / (innerHeight / view().Hv));
   if (!dy) return;
@@ -1043,12 +1075,36 @@ function frameBody(now) {
   renderer.render(scene, camera);
 }
 
+// Prose is measured with Chivo; if it was not loaded yet the wrap widths are
+// wrong, so a late font load triggers one full relayout.
+let fontsAtBuild = true;
+function fontsLoaded() {
+  const fam = n => [...document.fonts].some(f => f.family.replace(/"/g, "") === n && f.status === "loaded");
+  return fam("Chivo") && fam("JetBrains Mono");
+}
+document.fonts.addEventListener("loadingdone", () => {
+  if (fontsAtBuild || !pages[0].mesh || !fontsLoaded()) return;
+  fontsAtBuild = true; mcache.clear();
+  if (R) { R.items.forEach(it => { R.rig.remove(it.mesh); it.tex.dispose(); }); scene.remove(R.rig); R = null; document.body.classList.remove("reading"); document.getElementById("cap").hidden = true; field.visible = true; }
+  for (const p of pages) {
+    layout(p); p.h = Math.max(p.rowsN, 3) * LH;
+    p.mesh.geometry.dispose(); p.mesh.geometry = new THREE.PlaneGeometry(W, p.h);
+    p.mesh.children.forEach(c => { c.geometry.dispose(); c.geometry = new THREE.EdgesGeometry(p.mesh.geometry); });
+    p.mesh.position.y = p.y0 - p.h / 2; p.mesh.visible = p.label.visible = true;
+    p.low.dispose(); p.low = lowTex(p);
+    if (p.fhi) { p.fhi.dispose(); p.fhi = null; }
+    p.mesh.material.map = p.low; p.mesh.material.needsUpdate = true;
+  }
+  buildBridges();
+});
+
 // fonts must be ready before any canvas text is painted
 Promise.race([
   Promise.all(['600 32px "JetBrains Mono"', '400 12px "JetBrains Mono"', "800 64px Chivo", "600 16px Chivo", "400 16px Chivo"].map(f => document.fonts.load(f))),
   new Promise(r => setTimeout(r, 2500)),
 ]).catch(() => {}).then(() => {
   buildPages(); buildBridges();
+  fontsAtBuild = fontsLoaded();
   const [t, p] = overviewPose(); camera.position.copy(p); Object.assign(fly, lookAt(t)); applyLook();
   if (/^#[\w./-]+$/.test(location.hash)) {
     const p0 = pages.find(p => p.path === location.hash.slice(1)); if (p0) go(p0, 0);
