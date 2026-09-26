@@ -154,6 +154,8 @@ try:
         assert notice.x() == 8 and notice.y() >= 0
         cover = page.findChild(QObject, 'visualizerNoticeArt')
         assert cover.x() == 0
+        metadata = page.findChild(QObject, 'visualizerNoticeText')
+        assert abs(metadata.y()+metadata.height()/2-cover.y()-cover.height()/2) < 1
         assert abs(notice.y()+cover.y()+cover.height()-notice.parentItem().height()+8) < 1
         assert notice.x()+notice.width() <= notice.parentItem().width()
         QTest.qWait(3600)
@@ -173,6 +175,8 @@ try:
         QTest.mouseMove(scene, surface.mapToScene(QPointF(surface.width()/2, surface.height()/2)).toPoint())
         QTest.qWait(150)
         assert 0 < notice.opacity() < 1 and not timer.property('running')
+        toggle = page.findChild(QObject, 'visualizerSidebarButton')
+        assert abs(toggle.opacity()-notice.opacity()) < .03
         QTest.qWait(750)
         assert notice.opacity() == 1
         # Source rows are inverted on screen: white at the source top lies
@@ -192,6 +196,7 @@ try:
         QTest.mouseMove(scene, QPointF(-10, -10).toPoint())
         QTest.qWait(150)
         assert 0 < notice.opacity() < 1
+        assert abs(toggle.opacity()-notice.opacity()) < .03
         assert surface.contrastRect.isEmpty(), 'hidden labels must not sample frames'
         QTest.qWait(750)
         assert not notice.isVisible()

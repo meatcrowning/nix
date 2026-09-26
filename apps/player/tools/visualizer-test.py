@@ -271,7 +271,7 @@ def check_layout(app,shell,win,*args):
     assert abs(toggle.x()+toggle.width()+6-surface.width())<1
     assert abs(toggle.y()+toggle.height()+6-surface.height())<1
     QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
-    QTest.qWait(400)
+    QTest.qWait(900)
     assert not toggle.isVisible()
     QTest.mouseMove(target,surface.mapToScene(QPointF(surface.width()/2,surface.height()/2)).toPoint())
     QTest.qWait(30)
@@ -283,7 +283,7 @@ def check_layout(app,shell,win,*args):
     assert root.property('visualSidebar')!=before
     root.setProperty('visualSidebar',before)
     QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
-    QTest.qWait(400)
+    QTest.qWait(900)
     assert not toggle.isVisible()
     search=root.findChild(QObject,'albumSearch')
     toolbar=root.findChild(QObject,'albumToolbar')
