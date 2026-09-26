@@ -173,7 +173,7 @@
     <button type="button" id="home">Overview</button>
   </form>
   <div class="unsaved" id="unsaved" hidden><span id="unsavedn"></span><button type="button" id="reload" hidden>Reload changed</button><button type="button" id="unsavedsave">Save all</button></div>
-  <div class="help"><kbd>WASD</kbd> fly · <kbd>Q</kbd>/<kbd>E</kbd> down/up · <kbd>Shift</kbd> faster · drag to look · right-drag to slide · scroll to glide · move close to a page to read it · click a page to pull it forward with everything bridged to it · <kbd>/</kbd> find · <kbd>M</kbd> menu</div>
+  <div class="help"><kbd>WASD</kbd> fly · <kbd>Q</kbd>/<kbd>E</kbd> down/up · <kbd>Shift</kbd> faster · drag to look · right-drag to slide · scroll to glide · <kbd>Ctrl</kbd>+wheel to zoom · move close to a page to read it · click a page to pull it forward with everything bridged to it · <kbd>/</kbd> find · <kbd>M</kbd> menu</div>
 </section>
 
 <button type="button" id="menu-on" title="Show menu (M)">Menu</button>
@@ -1049,8 +1049,8 @@ function updateCaption() {
   const cap = document.getElementById("cap"), p = R.focus;
   const nin = R.cols.left.length, nout = R.cols.right.length;
   cap.innerHTML = `<b>${esc(p.path)}</b><span class="n">${p.lines.length} lines · ${nin} bridged in · ${nout} out</span>` +
-    (R.editing ? `<span class="keys"><kbd>Ctrl</kbd>+<kbd>S</kbd> save all · bridges update as you pause · <kbd>Esc</kbd> done editing</span>`
-      : `<span class="keys">wheel to scroll · <kbd>shift</kbd>+wheel or drag to pan · <kbd>Z</kbd>+wheel to zoom · click a lit line or a side page to follow${EDIT ? " · <kbd>E</kbd> or double-click to edit" : ""} · <kbd>Esc</kbd> ${R.history.length ? "back" : "return to field"}</span>`);
+    (R.editing ? `<span class="keys"><kbd>Ctrl</kbd>+<kbd>S</kbd> save all · <kbd>Ctrl</kbd>+wheel to zoom · bridges update as you pause · <kbd>Esc</kbd> done editing</span>`
+      : `<span class="keys">wheel to scroll · <kbd>shift</kbd>+wheel or drag to pan · <kbd>Ctrl</kbd>/<kbd>Z</kbd>+wheel to zoom · click a lit line or a side page to follow${EDIT ? " · <kbd>E</kbd> or double-click to edit" : ""} · <kbd>Esc</kbd> ${R.history.length ? "back" : "return to field"}</span>`);
   cap.hidden = false;
 }
 function esc(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]); }
@@ -1104,7 +1104,10 @@ function jump() {
 }
 document.getElementById("find").addEventListener("submit", e => { e.preventDefault(); jump(); });
 q.addEventListener("change", jump);
-document.getElementById("home").onclick = () => { if (R) { pendingOverview = true; leave(); } else flyTo(...overviewPose()); };
+document.getElementById("home").onclick = () => {
+  camera.fov = 50; camera.updateProjectionMatrix();
+  if (R) { pendingOverview = true; leave(); } else flyTo(...overviewPose());
+};
 
 function setMenu(show) {
   document.body.classList.toggle("menu-off", !show);
@@ -1119,6 +1122,12 @@ let zHeld = false;
 addEventListener("keyup", e => { if (e.key === "z" || e.key === "Z") zHeld = false; fly.keys.delete(e.code); });
 addEventListener("blur", () => { zHeld = false; fly.keys.clear(); });
 
+// One zoom path for wheel, keys and pinch: the editor follows at once rather
+// than on the next frame, and textures repaint once the zoom settles.
+function setZoom(z) {
+  R.zoom = z; R.zoomAt = performance.now();
+  if (R.editing && ED.cm) positionEditor();
+}
 // positive d moves the pages right (the view travels left)
 function panBy(d) {
   const v = view(), lim = v.Wf / 2 + v.gap + v.Ws;
@@ -1149,9 +1158,9 @@ addEventListener("keydown", e => {
     ArrowLeft: () => panBy(view().Wv * 0.12), ArrowRight: () => panBy(-view().Wv * 0.12),
     PageDown: () => R.scrollT += page, " ": () => R.scrollT += page, PageUp: () => R.scrollT -= page,
     Home: () => R.scrollT = 0, End: () => R.scrollT = n - 3,
-    "+": () => { R.zoom = Math.min(2.2, R.zoom * 1.12); R.zoomAt = performance.now(); },
-    "=": () => { R.zoom = Math.min(2.2, R.zoom * 1.12); R.zoomAt = performance.now(); },
-    "-": () => { R.zoom = Math.max(0.5, R.zoom / 1.12); R.zoomAt = performance.now(); } }[e.key];
+    "+": () => { setZoom(Math.min(2.2, R.zoom * 1.12)); },
+    "=": () => { setZoom(Math.min(2.2, R.zoom * 1.12)); },
+    "-": () => { setZoom(Math.max(0.5, R.zoom / 1.12)); } }[e.key];
   if (k) { e.preventDefault(); k(); R.scrollT = Math.max(0, Math.min(n - 3, R.scrollT)); }
 });
 
@@ -1241,6 +1250,21 @@ renderer.domElement.addEventListener("pointermove", e => {
 });
 renderer.domElement.addEventListener("pointerleave", () => { tip.hidden = true; });
 renderer.domElement.addEventListener("contextmenu", e => e.preventDefault());
+// Ctrl+wheel (and trackpad pinch, which browsers send as Ctrl+wheel) is ours in
+// every mode: the browser's page zoom would only blur the canvas. It must be a
+// non-passive window listener, or Chromium zooms before we can cancel it.
+addEventListener("wheel", e => {
+  if (!e.ctrlKey) return;
+  e.preventDefault(); e.stopPropagation();
+  const dy = e.deltaY * (e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? innerHeight : 1);
+  if (R) {
+    if (R.leaving) return;
+    setZoom(Math.max(0.5, Math.min(2.2, R.zoom * Math.exp(-dy * 0.002))));
+  } else {
+    camera.fov = Math.max(12, Math.min(80, camera.fov * Math.exp(dy * 0.0015)));
+    camera.updateProjectionMatrix();
+  }
+}, { passive: false, capture: true });
 renderer.domElement.addEventListener("wheel", e => {
   e.preventDefault();
   const m = e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? innerHeight : 1;
@@ -1252,7 +1276,7 @@ renderer.domElement.addEventListener("wheel", e => {
   }
   if (R.leaving) return;
   let dy = e.deltaY * m, dx = e.deltaX * m;
-  if (zHeld) { R.zoom = Math.max(0.5, Math.min(2.2, R.zoom * Math.exp(-dy * 0.002))); R.zoomAt = performance.now(); return; }
+  if (zHeld) { setZoom(Math.max(0.5, Math.min(2.2, R.zoom * Math.exp(-dy * 0.002)))); return; }
   if (e.shiftKey && !dx) { dx = dy; dy = 0; }
   if (dx) panBy(-dx / (innerHeight / view().Hv));
   if (!dy) return;
