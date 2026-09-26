@@ -32,11 +32,16 @@ Item {
     readonly property bool plasma: (typeof DeskStyle !== "undefined" && DeskStyle)
                                    ? DeskStyle.plasma === true : false
 
-    // "albums" | "playlists" | "now"  ("detail" is a pre-inline-panel leftover
+    // "albums" | "playlists" | "now" | "visualizer"  ("detail" is a pre-inline-panel leftover
     // that may still sit in prefs — fold it back into the gallery)
     property string view: {
         var v = Prefs.get("view", "albums");
         return v === "detail" ? "albums" : v;
+    }
+    property bool visualSidebar: Prefs.get("visualizerSidebar", true) === true
+    function toggleVisualSidebar() {
+        visualSidebar = !visualSidebar;
+        Prefs.set("visualizerSidebar", visualSidebar);
     }
     // The gallery has one tile tree per album.  It used to be constructed even
     // while the saved view was now-playing or playlists, making air open a
@@ -318,7 +323,7 @@ Item {
               menu: "playback", menuText: "Shuffle", icon: "media-playlist-shuffle",
               bar: "transport" },
             "-",
-            // The three pages are a RADIO SET on the real toolbar: one of them
+            // The pages are a RADIO SET on the real toolbar: one of them
             // is always the page you are on, and two independent checkboxes
             // could claim otherwise (§3.5, §5.4).
             { id: "albums",    label: "a", state: view === "albums" ? 1 : 0, tip: "albums",
@@ -330,10 +335,15 @@ Item {
             { id: "now",       label: "n", state: view === "now" ? 1 : 0, tip: "now playing",
               menu: "view", menuText: "Now Playing", icon: "view-media-visualization",
               bar: true, group: "view" },
+            { id: "visualizer", label: "v", state: view === "visualizer" ? 1 : 0, tip: "visualizer",
+              menu: "view", menuText: "Visualizer", icon: "view-media-visualization",
+              bar: true, group: "view" },
             "-",
             // The full word, not the titlebar's two-character cell — a toolbar
             // has the room a titlebar cell never did (§7.6, and `barText` puts
             // the name beside the icon for this one row).
+            { id: "visualFullscreen", label: "vf", state: 0, tip: "fullscreen",
+              menu: "view", menuText: "Fullscreen", shortcut: "F11" },
             { id: "sort",      label: sortLabel, state: 0, tip: sortTip,
               menu: "view", menuText: "Sort by " + sortWord,
               icon: "view-sort-ascending", bar: !win.plasma,
@@ -349,7 +359,19 @@ Item {
             { id: "settings",  label: "st", state: win.settingsOpen ? 1 : 0, tip: "settings",
               bottom: true, menu: "settings", menuText: "Configure player…",
               icon: "configure" },
-        ];
+        ].concat(view === "visualizer" ? [
+            { id: "visualSidebar", label: "vc", state: visualSidebar ? 1 : 0,
+              tip: "visualizer controls", menu: "settings", menuText: "Show Visualizer Controls", shortcut: "Tab" },
+            { id: "visualPause", label: "vp", state: 0, tip: "pause visual changes",
+              menu: "visualizer", menuText: "Pause or Resume Changes", shortcut: "Shift+Space" },
+            { id: "visualW", label: "W", menuText: "Next Wave Shape", menu: "visualizer", tip: "next wave shape", shortcut: "W" },
+            { id: "visualC", label: "C", menuText: "Next Distortion", menu: "visualizer", tip: "next distortion", shortcut: "C" },
+            { id: "visualX", label: "X", menuText: "Next Colours", menu: "visualizer", tip: "next colours", shortcut: "X" },
+            { id: "visualN", label: "N", menuText: "Next Particles", menu: "visualizer", tip: "next particles", shortcut: "N" },
+            { id: "visualP", label: "P", menuText: "Toggle Particles", menu: "visualizer", tip: "toggle particles", shortcut: "P" },
+            { id: "visualR", label: "R", menuText: "Randomise", menu: "visualizer", tip: "randomise", shortcut: "R" },
+            { id: "visualS", label: "S", menuText: "Save Look", menu: "visualizer", tip: "save look", shortcut: "S" }
+        ] : []);
     }
     onTbButtonsChanged: Titlebar.setButtons(tbButtons)
 
@@ -393,6 +415,7 @@ Item {
         function onDurationChanged() { win.pushPlaybar(); }
     }
     Component.onDestruction: {
+        if (typeof Visualizer !== "undefined") Visualizer.setShown(false);
         Titlebar.setPlaybar(false, 0);
         Titlebar.setFooter("");
     }
@@ -400,6 +423,10 @@ Item {
     // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
     // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
     function tbAction(id) {
+        if (id === "visualSidebar") { toggleVisualSidebar(); return; }
+        if (id === "visualFullscreen") { Visualizer.toggleFullscreen(); return; }
+        if (id === "visualPause") { Visualizer.key(" "); return; }
+        if (/^visual[WCXNPRS]$/.test(id)) { Visualizer.key(id.slice(-1).toLowerCase()); return; }
         switch (id) {
         case "prev":      Player.previous();                  break;
         case "playpause": Player.toggle();                    break;
@@ -412,6 +439,7 @@ Item {
         case "albums":    win.setView("albums");              break;
         case "playlists": win.setView("playlists");           break;
         case "now":       win.setView("now");                 break;
+        case "visualizer": win.setView("visualizer");          break;
         case "sort":      win.cycleSort();                    break;
         case "search":    win.searchOpen ? win.closeSearch() : win.openSearch(); break;
         case "settings":  win.settingsOpen = !win.settingsOpen; break;
@@ -482,6 +510,25 @@ Item {
             onOpenAlbumRequested: function(albumId) { win.openAlbum(albumId); }
             onBrowseArtistRequested: function(artist) { win.browseArtist(artist); }
             onEditAliasesRequested: function(artist) { win.editArtistAliases(artist); }
+        }
+        Loader {
+            id: visualPage
+            anchors.fill: parent
+            active: win.view === "visualizer" && typeof Visualizer !== "undefined"
+            source: active ? "VisualizerPage.qml" : ""
+            onLoaded: {
+                item.sidebar = Qt.binding(function() { return win.visualSidebar; });
+                item.openAlbum.connect(win.openAlbum);
+                item.browseArtist.connect(win.browseArtist);
+                item.editAliases.connect(win.editArtistAliases);
+                item.toggleSidebar.connect(win.toggleVisualSidebar);
+            }
+        }
+        QtObject {
+            id: visualLife
+            property bool shown: typeof Visualizer !== "undefined" && win.view === "visualizer"
+                                 && !win.searching && !win.settingsOpen && !aliasEditor.visible
+            onShownChanged: if (typeof Visualizer !== "undefined") Visualizer.setShown(shown)
         }
         NowPlaying {
             anchors.fill: parent
@@ -698,6 +745,21 @@ Item {
         enabled: !win.plasma && !searchInput.activeFocus && !playlists.modal
         onActivated: if (Player.current && Player.current.id !== undefined)
                          Library.setFavorite(Player.current.id, !Player.current.favorite)
+    }
+    Repeater {
+        model: ["Tab", "F11", "Shift+Space", "W", "C", "X", "N", "P", "R", "S"]
+        Item {
+            required property string modelData
+            Shortcut {
+                sequence: modelData
+                enabled: !win.plasma && (win.view === "visualizer" || modelData === "F11") && !searchInput.activeFocus && !win.settingsOpen && !win.searching
+                onActivated: {
+                    if (modelData === "Tab") win.toggleVisualSidebar();
+                    else if (modelData === "F11") Visualizer.toggleFullscreen();
+                    else Visualizer.key(modelData === "Shift+Space" ? " " : modelData.toLowerCase());
+                }
+            }
+        }
     }
     // Escape keeps BOTH roofs: it closes a modal, a drawer or a search, and no
     // QAction claims it, so there is nothing here for it to be ambiguous with.

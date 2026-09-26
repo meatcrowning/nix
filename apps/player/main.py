@@ -2531,7 +2531,8 @@ class Player(QObject):
 
         import mpv as libmpv
         opts = dict(vid="no", audio_display="no",
-                    gapless_audio="weak", ytdl=False)
+                    gapless_audio="weak", ytdl=False,
+                    audio_client_name=f"player-{os.getpid()}")
         # A file on a network mount looks local to mpv, so `cache=auto` leaves
         # the demuxer cache OFF and every decode reads straight off the wire.
         # Measured on book 2026-08-19, streaming from top over SMB on wifi:
@@ -5478,6 +5479,12 @@ def main():
     ctx.setContextProperty("Prefs", prefs)
     ctx.setContextProperty("Library", bridge)
     ctx.setContextProperty("Player", player)
+    import visualizer
+    visualizer.register()
+    visual = visualizer.Visualizer(f"player-{os.getpid()}", app)
+    visual.closed = selftest or resource_fixture
+    ctx.setContextProperty("Visualizer", visual)
+    app.aboutToQuit.connect(visual.shutdown)
     ctx.setContextProperty("Lyrics", lyrics)
     ctx.setContextProperty("Lastfm", scrobbler)
     ctx.setContextProperty("AlbumsModel", bridge.albumsModel)
@@ -5665,6 +5672,8 @@ def main():
                 print(f"  {w}", file=sys.stderr)
             sys.exit(1)
         win = engine.rootObjects()[0]
+
+    visual.bind_window(win)
 
     win_state = []
     if not selftest and not resource_fixture and plasma:
