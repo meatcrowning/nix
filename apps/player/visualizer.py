@@ -247,6 +247,10 @@ class Visualizer(QObject):
                 # waiting for a repaint: the producer and display clocks must
                 # not lock-step or a missed refresh also delays the next render.
                 self.command({'op':'ack'})
+                # QProcess.write only queues bytes. Flush the tiny ACK with
+                # a zero timeout before Qt can enter another vblank wait;
+                # otherwise the producer waits an extra display refresh.
+                p.waitForBytesWritten(0)
                 perftrace.visualizer_frame('received')
                 self.frame.emit(frame)
 

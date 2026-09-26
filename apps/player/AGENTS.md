@@ -369,6 +369,8 @@ A private image copy acknowledges the shared buffer immediately; the QSG
 image node takes the newest complete copy when Qt repaints. Never gate the
 producer on repaint: coupling the clocks amplifies missed refreshes. Keep
 only the newest pending image, with no queue to replay after a stall.
+Flush that tiny ACK with a zero-timeout write: QProcess's queued output can
+otherwise sit through the GUI's next display wait.
 Render scale remains supersampling.
 Textures are created and released on the scene-graph thread; do not put a
 QQuickPaintedItem/CPU scaling pass back between the frame and its texture.
@@ -383,7 +385,7 @@ Player preferences and native engine state uses `gforce-vis/player-engine/`.
 Tab toggles controls, Space controls playback, Shift+Space pauses visual changes,
 and W/C/X/N/P/R/S retain the visualizer actions only in that view.
 
-Verify with `tools/visualizer-test.py`, `tools/visualizer-presentation-test.py`
-and G-Force's `embedded-check.py` and
+Verify with `tools/visualizer-test.py`, `tools/visualizer-presentation-test.py`,
+`tools/visualizer-ack-test.py`, and G-Force's `embedded-check.py` and
 `player-audio-check.py`. The latter starts private PipeWire/WirePlumber with
 all hardware monitors disabled; never run its fixtures against the live graph.
