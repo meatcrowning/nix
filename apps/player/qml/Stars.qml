@@ -35,7 +35,7 @@ Row {
                 enabled: root.interactive
                 onClicked: {
                     var v = (index + 1) / 5;
-                    root.rated(Math.abs(root.rating - v) < 0.01 ? -1 : v);
+                    root.rated(Math.round(root.rating * 5) === index + 1 ? -1 : v);
                 }
             }
         }
