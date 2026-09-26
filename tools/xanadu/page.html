@@ -149,10 +149,10 @@ const HOSTC = { top: css.getPropertyValue("--top").trim(), air: css.getPropertyV
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---- field geometry (world units) ----
-const W = 4, GAP = 1.5, LH = 0.055, PER_ROW = 16, ROW_DZ = 16, ROW_DY = 4.5;
+const W = 4, GAP = 1.5, LH = 0.08, PER_ROW = 16, ROW_DZ = 16, ROW_DY = 4.5;
 const GROUP_ORDER = ["/", "hosts/", "sys/", "lib/", "overlays/", "home/", "home/prog/", "home/srvs/", "home/pkgs/", "apps/"];
 // ---- reading geometry: pages pulled forward sit D in front of the camera ----
-const D = 10, RL = 0.02;          // RL: line height as a fraction of page width (100 columns)
+const D = 10, RL = LH / W;        // RL: row height as a fraction of page width (100 columns)
 const HEAD = 2;                   // header rows on a pulled-forward page
 const SIDE_LINES = 14, SIDE_MAX = 16, CHUNK = 240, TILT = 0.34, RLP = 22;
 
@@ -175,11 +175,10 @@ rows.forEach((row, r) => {
   row.pages.forEach((p, j) => {
     p.x = (j - (n - 1) / 2) * (W + GAP);
     p.y0 = row.y; p.z = row.z;
-    p.h = Math.max(p.lines.length, 3) * LH;
   });
   row.x0 = row.pages[0].x - W / 2;
 });
-const yOf = (p, line) => p.y0 - (Math.min(line, p.lines.length) - 0.5) * LH;
+const yOf = (p, line) => p.y0 - rowMid(p, line) * LH;
 
 // ---- renderer ----
 const stage = document.getElementById("stage");
@@ -226,27 +225,181 @@ function stepFly(dt) {
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 const MAX_TEX = Math.min(renderer.capabilities.maxTextureSize, 8192);
 
-// ---- text painting ----
+// ---- formatting: every page is laid out once into visual rows ----
+// A row is one line-height tall (two for big headings); long lines wrap onto
+// extra rows, so geometry everywhere works in row offsets, not line numbers.
+const COLS = 100;
+const STY = {
+  "": "#b9c5d8", op: "#7d8aa3", c: "#6b8a77", s: "#e2a56a", i: "#ff9e64", kw: "#c792ea", b: "#82aaff",
+  k: "#7fd1c7", n: "#f78c6c", pa: "#c3e88d",
+  p: "#c9d3e2", h: "#f0f4fa", ic: "#e2a56a", a: "#8fb0ff", st: "#eef3fa", li: "#7d8aa3", f: "#4a5670", q: "#8c9ab3", t: "#9fb0c8",
+};
 const isMd = p => p.path.endsWith(".md");
-function tokenize(line, md) {
-  if (md) return /^\s*#/.test(line) ? [[line, "h"]] : /^\s*(~~~|```)/.test(line) ? [[line, "c"]] : [[line, ""]];
-  const out = []; let i = 0, buf = "";
-  const push = (t, c) => { if (buf) { out.push([buf, ""]); buf = ""; } if (t) out.push([t, c]); };
-  const km = line.match(/^(\s*)([A-Za-z_][\w.'"-]*)(\s*=)(?!=)/);
-  if (km) { out.push([km[1], ""], [km[2], "k"]); buf = km[3]; i = km[0].length; }
-  while (i < line.length) {
-    const ch = line[i];
-    if (ch === "#") { push(line.slice(i), "c"); return out; }
-    if (ch === '"') {
-      let j = i + 1; while (j < line.length && line[j] !== '"') j += line[j] === "\\" ? 2 : 1;
-      push(line.slice(i, j + 1), "s"); i = j + 1; continue;
+const lead = s => s.length - s.trimStart().length;
+
+const NIX_KW = new Set("let in with rec inherit if then else assert or".split(" "));
+const NIX_B = new Set("import builtins toString throw abort derivation map baseNameOf dirOf isNull removeAttrs fetchTarball".split(" "));
+const NIX_C = new Set(["true", "false", "null"]);
+// A small Nix lexer over the whole file: strings ("…" and ''…'') nest ${…}
+// antiquotations, which nest code again, so the state is a stack.
+function lexNix(text) {
+  const lines = [[]]; let cur = lines[0];
+  const emit = (t, c) => t.split("\n").forEach((s, j) => { if (j) { cur = []; lines.push(cur); } if (s) cur.push([s, c]); });
+  const st = ["code"], depth = [0], n = text.length;
+  const identRe = /[A-Za-z_][A-Za-z0-9_'-]*(?:\.(?:[A-Za-z_][A-Za-z0-9_'-]*|"[^"\n]*"))*/y;
+  const pathRe = /(?:\.{1,2}\/|~\/|\/)[A-Za-z0-9._+\-/]+|<[A-Za-z0-9._\-/]+>/y;
+  const numRe = /\d+(?:\.\d+)?/y;
+  let i = 0;
+  while (i < n) {
+    const m = st[st.length - 1], ch = text[i];
+    if (m === "str") {
+      if (ch === "\\") { emit(text.substr(i, 2), "s"); i += 2; continue; }
+      if (ch === '"') { emit('"', "s"); st.pop(); depth.pop(); i++; continue; }
+      if (ch === "$" && text[i + 1] === "{") { emit("${", "i"); st.push("code"); depth.push(0); i += 2; continue; }
+      let j = i + 1; while (j < n && text[j] !== "\\" && text[j] !== '"' && text[j] !== "$") j++;
+      emit(text.slice(i, j), "s"); i = j; continue;
     }
-    if (ch === "'" && line[i + 1] === "'") { push("''", "s"); i += 2; continue; }
-    buf += ch; i++;
+    if (m === "istr") {
+      if (text.startsWith("'''", i)) { emit("'''", "s"); i += 3; continue; }
+      if (text.startsWith("''$", i) || text.startsWith("''\\", i)) { emit(text.substr(i, 3), "s"); i += 3; continue; }
+      if (text.startsWith("''", i)) { emit("''", "s"); st.pop(); depth.pop(); i += 2; continue; }
+      if (ch === "$" && text[i + 1] === "{") { emit("${", "i"); st.push("code"); depth.push(0); i += 2; continue; }
+      let j = i + 1; while (j < n && text[j] !== "'" && text[j] !== "$") j++;
+      emit(text.slice(i, j), "s"); i = j; continue;
+    }
+    if (ch === "#") { let j = text.indexOf("\n", i); if (j < 0) j = n; emit(text.slice(i, j), "c"); i = j; continue; }
+    if (text.startsWith("/*", i)) { let j = text.indexOf("*/", i + 2); j = j < 0 ? n : j + 2; emit(text.slice(i, j), "c"); i = j; continue; }
+    if (ch === '"') { emit('"', "s"); st.push("str"); depth.push(0); i++; continue; }
+    if (text.startsWith("''", i)) { emit("''", "s"); st.push("istr"); depth.push(0); i += 2; continue; }
+    if (ch === "$" && text[i + 1] === "{") { emit("${", "i"); st.push("code"); depth.push(0); i += 2; continue; }
+    if (ch === "{") { depth[depth.length - 1]++; emit("{", "op"); i++; continue; }
+    if (ch === "}") {
+      if (depth[depth.length - 1] === 0 && st.length > 1) { emit("}", "i"); st.pop(); depth.pop(); i++; continue; }
+      depth[depth.length - 1]--; emit("}", "op"); i++; continue;
+    }
+    if (/\s/.test(ch)) { let j = i + 1; while (j < n && /\s/.test(text[j])) j++; emit(text.slice(i, j), ""); i = j; continue; }
+    const prevIdent = /[A-Za-z0-9_'-]/.test(text[i - 1] || "");
+    let mm;
+    if (!prevIdent) {
+      pathRe.lastIndex = i;
+      if ((mm = pathRe.exec(text)) && mm[0].length > 1) { emit(mm[0], "pa"); i += mm[0].length; continue; }
+      numRe.lastIndex = i;
+      if ((mm = numRe.exec(text))) { emit(mm[0], "n"); i += mm[0].length; continue; }
+    }
+    identRe.lastIndex = i;
+    if ((mm = identRe.exec(text))) {
+      const t = mm[0], head = t.split(".")[0];
+      let j = i + t.length; while (text[j] === " " || text[j] === "\t") j++;
+      const cls = text[j] === "=" && text[j + 1] !== "=" ? "k"
+        : NIX_KW.has(t) ? "kw" : NIX_C.has(t) ? "n" : NIX_B.has(head) ? "b" : "";
+      emit(t, cls); i += t.length; continue;
+    }
+    let j = i + 1;
+    while (j < n && /[;:,=.()[\]@?!<>+\-*/&|]/.test(text[j]) && !text.startsWith("''", j)) j++;
+    emit(text.slice(i, j), "op"); i = j;
   }
-  push("", ""); return out;
+  return lines;
 }
-const TK = { "": "#b9c5d8", c: "#6b8a77", s: "#e2a56a", k: "#8fb0ff", h: "#f0f4fa" };
+
+// Markdown: headings, lists, quotes, fenced code and tables; inline code,
+// bold and links. Markers are dropped; line numbers stay one-to-one.
+function mdInline(s, base, f, sc) {
+  const out = [], re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[([^\]]+)\]\(([^)]+)\))/g;
+  let last = 0, m;
+  const bold = f === "h" ? "h" : "pb";
+  while ((m = re.exec(s))) {
+    if (m.index > last) out.push({ t: s.slice(last, m.index), c: base, f, s: sc });
+    if (m[1]) out.push({ t: m[1].slice(1, -1), c: "ic", f: "mono", s: sc });
+    else if (m[2]) out.push({ t: m[2].slice(2, -2), c: base === "h" ? "h" : "st", f: bold, s: sc });
+    else out.push({ t: m[4], c: "a", f, s: sc });
+    last = re.lastIndex;
+  }
+  if (last < s.length) out.push({ t: s.slice(last), c: base, f, s: sc });
+  return out;
+}
+function mdLines(lines) {
+  let fence = false;
+  return lines.map(line => {
+    let m;
+    if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return { pieces: [{ t: line.trim(), c: "f", f: "mono", s: 1 }], x0: lead(line), bg: "code" }; }
+    if (fence) return { pieces: [{ t: line, c: "", f: "mono", s: 1 }], hang: lead(line) + 2, bg: "code" };
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) {
+      const big = m[1].length <= 2;
+      return { pieces: mdInline(m[2], "h", "h", big ? 1.45 : 1.12), h: big ? 2 : 1 };
+    }
+    if (/^\s*\|/.test(line)) return { pieces: [{ t: line, c: "t", f: "mono", s: 1 }], hang: 2 };
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) return { pieces: [], bg: "hr" };
+    if ((m = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line))) {
+      const mark = /\d/.test(m[2]) ? m[2] : "•", x0 = m[1].length * 0.6 + 1;
+      return { pieces: [{ t: mark + " ", c: "li", f: "prose", s: 1 }, ...mdInline(m[3], "p", "prose", 1)], x0, hang: x0 + measure(mark + " ", "prose", 1) };
+    }
+    if ((m = /^\s*>\s?(.*)$/.exec(line))) return { pieces: mdInline(m[1], "q", "prose", 1), x0: 2, hang: 2, bg: "quote" };
+    return { pieces: mdInline(line.trim(), "p", "prose", 1), x0: lead(line) * 0.6, hang: lead(line) * 0.6 };
+  });
+}
+
+function fontStr(f, px) {
+  return f === "mono" ? `${px}px "JetBrains Mono", monospace`
+    : f === "prose" ? `${px}px Chivo, sans-serif`
+    : f === "pb" ? `600 ${px}px Chivo, sans-serif`
+    : `800 ${px}px Chivo, sans-serif`;
+}
+// Width in columns: JetBrains Mono advances 0.6em, so at 100px one column is 60px.
+const mctx = document.createElement("canvas").getContext("2d"), mcache = new Map();
+function measure(t, f, s) {
+  if (f === "mono") return t.length * s;
+  const key = f + "\u0000" + t;
+  let w = mcache.get(key);
+  if (w === undefined) { mctx.font = fontStr(f, 100); w = mctx.measureText(t).width / 60; mcache.set(key, w); }
+  return w * s;
+}
+function wrapLine(pieces, x0, hang) {
+  const rows = [[]]; let x = x0;
+  const push = (t, pc, w) => { rows[rows.length - 1].push({ t, c: pc.c, f: pc.f, s: pc.s, x, w }); x += w; };
+  for (const pc of pieces) for (const tok of pc.t.split(/(\s+)/)) {
+    if (!tok) continue;
+    let t = tok, tw = measure(t, pc.f, pc.s);
+    if (/^\s/.test(t)) { if (rows.length === 1 || rows[rows.length - 1].length) x += tw; continue; }
+    while (x + tw > COLS + 1e-6) {
+      if (rows[rows.length - 1].length && tw <= COLS - hang) { rows.push([]); x = hang; continue; }
+      const per = tw / t.length, room = Math.max(1, Math.floor((COLS - x) / per));
+      if (room >= t.length) break;
+      push(t.slice(0, room), pc, per * room);
+      t = t.slice(room); tw = per * t.length; rows.push([]); x = hang;
+    }
+    if (t) push(t, pc, tw);
+  }
+  return rows;
+}
+function layout(p) {
+  const specs = isMd(p) ? mdLines(p.lines)
+    : lexNix(p.text).map((ps, i) => ({ pieces: ps.map(([t, c]) => ({ t, c, f: "mono", s: 1 })), hang: lead(p.lines[i] || "") + 2 }));
+  const n = p.lines.length;
+  p.rows = []; p.rowY = new Float64Array(n); p.lineH = new Float64Array(n);
+  let y = 0;
+  for (let i = 0; i < n; i++) {
+    const sp = specs[i] || { pieces: [] }, h = sp.h || 1;
+    p.rowY[i] = y;
+    wrapLine(sp.pieces, sp.x0 || 0, Math.min(sp.hang || 0, 40)).forEach((ops, j) => {
+      p.rows.push({ line: i + 1, y, h, ops, bg: sp.bg, cont: j > 0 }); y += h;
+    });
+    p.lineH[i] = y - p.rowY[i];
+  }
+  p.rowsN = y;
+}
+const clampL = (p, L) => Math.max(0, Math.min(p.lines.length - 1, L - 1));
+const rowOf = (p, L) => p.rowY[clampL(p, L)];
+const rowMid = (p, L) => { const i = clampL(p, L); return p.rowY[i] + p.lineH[i] / 2; };
+function lineAt(p, off) {
+  let lo = 0, hi = p.lines.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (p.rowY[mid] <= off) lo = mid; else hi = mid - 1; }
+  return lo + 1;
+}
+function firstRow(p, off) {
+  let lo = 0, hi = p.rows.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (p.rows[mid].y + p.rows[mid].h > off) hi = mid; else lo = mid + 1; }
+  return lo;
+}
 
 function lineMarks(p) {
   const m = new Map();
@@ -255,43 +408,56 @@ function lineMarks(p) {
   return m;
 }
 
-// Paints lines [start, start+count) of a page; `head` rows of title strip on top.
+// Paints rows [start, start+count) of a page; `head` rows of title strip on top.
 // `real` draws glyphs; otherwise words are greeked into bars for the distant field.
-function paintPage(p, { lp, width, real, start = 0, count = p.lines.length, head = 0 }) {
-  const rowsN = Math.max(count, 1) + head;
-  const cv = document.createElement("canvas"); cv.width = width; cv.height = Math.round(rowsN * lp);
-  const g = cv.getContext("2d");
+function paintPage(p, { lp, width, real, start = 0, count = p.rowsN, head = 0 }) {
+  const cv = document.createElement("canvas"); cv.width = width; cv.height = Math.round((Math.max(count, 1) + head) * lp);
+  const g = cv.getContext("2d"), end = start + count, y0 = head * lp;
+  const Y = off => y0 + (off - start) * lp;
   g.fillStyle = "#101828"; g.fillRect(0, 0, cv.width, cv.height);
-  const y0 = head * lp, inRange = ln => ln > start && ln <= start + count;
-  for (const [ln, k] of lineMarks(p)) if (inRange(ln)) {
-    g.globalAlpha = 0.26; g.fillStyle = KINDS[k].color; g.fillRect(0, y0 + (ln - 1 - start) * lp, cv.width, lp);
+  const pad = Math.max(4, lp * 0.9), cw = (cv.width - pad * 1.5) / COLS, fs = cw / 0.6;
+  const r0 = p.rows.length ? firstRow(p, start) : 0;
+  for (let ri = r0; ri < p.rows.length && p.rows[ri].y < end; ri++) {
+    const r = p.rows[ri];
+    if (r.bg === "code") { g.fillStyle = "#0a111f"; g.fillRect(pad * 0.5, Y(r.y), cv.width - pad, r.h * lp); }
+    else if (r.bg === "quote") { g.fillStyle = "#34466a"; g.fillRect(pad * 0.6, Y(r.y), Math.max(2, lp * 0.18), r.h * lp); }
+    else if (r.bg === "hr") { g.fillStyle = "#2b3a58"; g.fillRect(pad, Y(r.y) + lp * 0.45, cv.width - pad * 2, Math.max(1, lp * 0.1)); }
+  }
+  for (const [ln, k] of lineMarks(p)) {
+    const a = p.rowY[ln - 1], hh = p.lineH[ln - 1];
+    if (a === undefined || a >= end || a + hh <= start) continue;
+    g.globalAlpha = 0.26; g.fillStyle = KINDS[k].color; g.fillRect(0, Y(a), cv.width, hh * lp);
   }
   g.globalAlpha = 1;
-  for (const [ln, host] of p.hosts) if (inRange(ln)) {
-    g.fillStyle = HOSTC[host]; g.fillRect(0, y0 + (ln - 1 - start) * lp, Math.max(3, lp * 0.3), lp);
+  for (const [ln, host] of p.hosts) {
+    const a = p.rowY[ln - 1], hh = p.lineH[ln - 1];
+    if (a === undefined || a >= end || a + hh <= start) continue;
+    g.fillStyle = HOSTC[host]; g.fillRect(0, Y(a), Math.max(3, lp * 0.3), hh * lp);
   }
-  const pad = Math.max(4, lp * 0.9), cols = 100, cw = (cv.width - pad * 1.5) / cols;
+  g.textBaseline = "middle";
+  let lastFont = "";
+  for (let ri = r0; ri < p.rows.length && p.rows[ri].y < end; ri++) {
+    const r = p.rows[ri], yc = Y(r.y) + r.h * lp / 2;
+    if (r.cont && real) { g.fillStyle = "#3b4d70"; g.font = lastFont = fontStr("mono", fs * 0.8); g.fillText("↪", pad * 0.05, yc); }
+    for (const op of r.ops) {
+      const x = pad + op.x * cw, w = op.w * cw;
+      if (op.c === "ic") { g.fillStyle = "#1c2a45"; g.fillRect(x - cw * 0.2, yc - lp * 0.42 * op.s, w + cw * 0.4, lp * 0.84 * op.s); }
+      g.fillStyle = STY[op.c] || STY[""];
+      if (real) {
+        const font = fontStr(op.f, fs * op.s);
+        if (font !== lastFont) { g.font = font; lastFont = font; }
+        g.fillText(op.t, x, yc);
+      } else g.fillRect(x, yc - lp * 0.26 * op.s, w, lp * 0.52 * op.s);
+    }
+  }
   if (head) {
     g.fillStyle = "#1c2840"; g.fillRect(0, 0, cv.width, y0);
-    g.textBaseline = "middle";
     g.font = `600 ${lp * 0.95}px "JetBrains Mono", monospace`; g.fillStyle = "#e8eef8";
     g.fillText(p.path, pad, y0 / 2);
-    const sub = count >= p.lines.length ? `${p.lines.length} lines` : `${start + 1}–${start + count} of ${p.lines.length}`;
+    const n = p.lines.length;
+    const sub = count >= p.rowsN ? `${n} lines` : `${lineAt(p, start)}–${lineAt(p, end - 0.001)} of ${n}`;
     g.font = `400 ${lp * 0.7}px "JetBrains Mono", monospace`; g.fillStyle = "#7d8aa3";
     g.textAlign = "right"; g.fillText(sub, cv.width - pad, y0 / 2); g.textAlign = "left";
-  }
-  if (real) {
-    g.font = `${Math.min(lp * 0.8, cw / 0.6)}px "JetBrains Mono", monospace`; g.textBaseline = "middle";
-  }
-  const md = isMd(p);
-  for (let li = start; li < Math.min(start + count, p.lines.length); li++) {
-    let col = 0; const yc = y0 + (li - start) * lp + lp / 2;
-    for (const [t, c] of tokenize(p.lines[li], md)) {
-      g.fillStyle = TK[c];
-      if (real) g.fillText(t, pad + col * cw, yc);
-      else for (const m of t.matchAll(/\S+/g)) g.fillRect(pad + (col + m.index) * cw, yc - lp * 0.26, m[0].length * cw, lp * 0.52);
-      col += t.length; if (col > cols) break;
-    }
   }
   // a dark page on a dark void needs its own edge
   g.strokeStyle = "#3b4d70"; g.lineWidth = Math.max(2, lp * 0.15);
@@ -301,8 +467,8 @@ function paintPage(p, { lp, width, real, start = 0, count = p.lines.length, head
   return tex;
 }
 function lowTex(p) {
-  const lp = Math.min(4, MAX_TEX / Math.max(p.lines.length, 3));
-  return paintPage(p, { lp, width: Math.round((W / LH) * lp), real: false });
+  const lp = Math.min(4, MAX_TEX / Math.max(p.rowsN, 3));
+  return paintPage(p, { lp, width: Math.round(lp / RL), real: false });
 }
 
 function labelTexture(text, sub, w, h, big) {
@@ -325,8 +491,8 @@ function labelTexture(text, sub, w, h, big) {
 // the live ones and LOD_PER_TICK spreads the painting so flying never hitches.
 const LOD_ON = 4, LOD_OFF = 2.5, LOD_MAX = 16, LOD_PER_TICK = 2;
 function fieldHiTex(p) {
-  const lp = Math.min(14, MAX_TEX / Math.max(p.lines.length, 3));   // never over the texture limit
-  return paintPage(p, { lp, width: Math.round((W / LH) * lp), real: true });
+  const lp = Math.min(14, MAX_TEX / Math.max(p.rowsN, 3));   // never over the texture limit
+  return paintPage(p, { lp, width: Math.round(lp / RL), real: true });
 }
 const frustum = new THREE.Frustum(), projM = new THREE.Matrix4();
 let lodClock = 0;
@@ -368,6 +534,8 @@ const pageMeshes = [], field = new THREE.Group();
 scene.add(field);
 function buildPages() {
   for (const p of pages) {
+    layout(p);
+    p.h = Math.max(p.rowsN, 3) * LH;
     p.low = lowTex(p);
     const mat = new THREE.MeshBasicMaterial({ map: p.low, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, p.h), mat);
@@ -446,7 +614,7 @@ function makePose(x, y, z, rotY, sx, sy) {
   return { pos: new THREE.Vector3(x, y, z), quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY), sx, sy };
 }
 function fieldPose(it) {
-  const p = it.p, count = Math.min(it.count, p.lines.length);
+  const p = it.p, count = Math.min(it.count, p.rowsN);
   const wp = new THREE.Vector3(p.x, p.y0 - it.start * LH - count * LH / 2, p.z);
   return { pos: R.rig.worldToLocal(wp), quat: R.rig.quaternion.clone().invert(), sx: W, sy: (count + it.head) * LH };
 }
@@ -484,7 +652,7 @@ function setItemTexture(it) {
 // The focus page is painted in chunks; a chunk must cover the visible lines
 // plus margin, or a zoomed-out view would demand a repaint every frame.
 function focusChunk(p, scroll) {
-  const n = p.lines.length, v = view();
+  const n = p.rowsN, v = view();
   const count = Math.min(n, Math.max(CHUNK, Math.ceil(v.Hv / v.lf) + 120));
   return { start: Math.max(0, Math.min(n - count, Math.floor(scroll) - 60)), count };
 }
@@ -503,13 +671,13 @@ function enter(p, scroll = 0) {
     document.body.classList.add("reading");
   }
   if (R.focus !== p) R.pan = R.panT = 0;
-  R.focus = p; R.scroll = R.scrollT = Math.max(0, Math.min(scroll, p.lines.length - 1));
+  R.focus = p; R.scroll = R.scrollT = Math.max(0, Math.min(scroll, p.rowsN - 1));
   const cols = sides(p);
   const want = new Map();
   want.set(p.i, { p, role: "focus", ...focusChunk(p, R.scroll) });
   for (const side of ["left", "right"]) for (const e of cols[side]) {
-    const n = e.p.lines.length, count = Math.min(n, SIDE_LINES);
-    const start = Math.max(0, Math.min(n - count, e.sl - 1 - 3));
+    const n = e.p.rowsN, count = Math.min(n, SIDE_LINES);
+    const start = Math.max(0, Math.min(n - count, Math.floor(rowOf(e.p, e.sl)) - 3));
     want.set(e.p.i, { p: e.p, role: side, start, count, entry: e });
   }
   R.cols = cols;
@@ -564,7 +732,7 @@ function go(p, scroll) {
 // ride along with the text they are bridged to.
 function slots() {
   const v = view(), out = new Map(), f = R.items.get(R.focus.i);
-  const lineY = L => v.yTop - (L - 0.5 - R.scroll) * v.lf;       // y of focus line L's centre
+  const lineY = L => v.yTop - (rowMid(R.focus, L) - R.scroll) * v.lf;   // y of focus line L's centre
   if (f && !f.leaving) {
     const top = v.yTop + (R.scroll - f.start + f.head) * v.lf, h = (f.count + f.head) * v.lf;
     out.set(f, makePose(R.pan, top - h / 2, -D, 0, v.Wf, h));
@@ -576,7 +744,7 @@ function slots() {
     for (const e of R.cols[side]) {
       const it = R.items.get(e.p.i); if (!it || it.leaving) continue;
       const h = (it.count + it.head) * v.ls;
-      let top = lineY(e.fl) + (it.head + e.sl - 0.5 - it.start) * v.ls;
+      let top = lineY(e.fl) + (it.head + rowMid(it.p, e.sl) - it.start) * v.ls;
       top = Math.min(top, floor - v.ls * 1.2);
       floor = top - h;
       out.set(it, makePose(cx + R.pan, top - h / 2, cz, rot, v.Ws, h));
@@ -585,11 +753,10 @@ function slots() {
   return out;
 }
 
-// World point on an item's inner edge at a given line, from its live pose.
-function anchor(it, edge, line) {
-  const rowsN = it.count + it.head;
-  const L = Math.max(it.start + 1, Math.min(it.start + it.count, line));
-  const ly = 0.5 - (it.head + L - 0.5 - it.start) / rowsN;
+// World point on an item's inner edge at a row offset, from its live pose.
+function anchor(it, edge, off) {
+  const o = Math.max(it.start + 0.5, Math.min(it.start + it.count - 0.5, off));
+  const ly = 0.5 - (it.head + o - it.start) / (it.count + it.head);
   return new THREE.Vector3(edge * 0.5 * it.mesh.scale.x, ly * it.mesh.scale.y, 0)
     .applyQuaternion(it.mesh.quaternion).add(it.mesh.position);
 }
@@ -600,8 +767,8 @@ function stepReading(now) {
   if (Math.abs(R.panT - R.pan) < 0.0005) R.pan = R.panT;
   if (Math.abs(R.scrollT - R.scroll) < 0.002) R.scroll = R.scrollT;
   const f = R.items.get(R.focus.i);
-  if (f && !f.leaving && f.count < f.p.lines.length) {
-    const v = view(), visible = v.Hv / v.lf, n = f.p.lines.length;
+  if (f && !f.leaving && f.count < f.p.rowsN) {
+    const v = view(), visible = v.Hv / v.lf, n = f.p.rowsN;
     const need = R.scroll < f.start + 8 && f.start > 0 || R.scroll + visible > f.start + f.count - 8 && f.start + f.count < n;
     if (need && now - (f.painted || 0) > 150) {
       const c = focusChunk(f.p, R.scroll);
@@ -642,7 +809,7 @@ function stepReading(now) {
           const whole = side === "right" ? l.bl <= 1 : false;
           segs.push({
             kind: l.k, d0: sgn, d3: -sgn, bend: 0.45, minBend: 0.2,
-            p0: anchor(f, sgn, fl), p3: anchor(it, -sgn, whole ? it.start + 1 : sl),
+            p0: anchor(f, sgn, rowMid(f.p, fl)), p3: anchor(it, -sgn, whole ? it.start + 0.5 : rowMid(it.p, sl)),
             t0: v.lf * 1.1, t3: whole ? v.ls * (it.head + 1) : v.ls * 1.1,
           });
         }
@@ -741,7 +908,7 @@ addEventListener("keydown", e => {
     return;
   }
   if (R.leaving) return;
-  const n = R.focus.lines.length, page = Math.max(3, Math.floor(visibleLines() * 0.8));
+  const n = R.focus.rowsN, page = Math.max(3, Math.floor(visibleLines() * 0.8));
   const k = { Escape: () => back(), Backspace: () => back(),
     ArrowDown: () => R.scrollT += 3, ArrowUp: () => R.scrollT -= 3,
     ArrowLeft: () => panBy(view().Wv * 0.12), ArrowRight: () => panBy(-view().Wv * 0.12),
@@ -764,7 +931,7 @@ function pickField(ev) {
   const hit = ray.intersectObjects(pageMeshes.filter(m => m.visible), false)[0];
   if (!hit) return null;
   const p = hit.object.userData.page;
-  return { p, line: Math.max(1, Math.min(p.lines.length, Math.ceil((p.y0 - hit.point.y) / LH))) };
+  return { p, line: lineAt(p, (p.y0 - hit.point.y) / LH) };
 }
 function pickRead(ev) {
   aim(ev);
@@ -773,14 +940,14 @@ function pickRead(ev) {
   // depthTest is off, so the item drawn last (the focus) is the one on screen
   hits.sort((a, b) => b.object.renderOrder - a.object.renderOrder);
   const hit = hits[0]; if (!hit) return null;
-  const it = hit.object.userData.item, row = Math.floor((1 - hit.uv.y) * (it.count + it.head)) - it.head;
-  return { it, p: it.p, line: row < 0 ? 0 : Math.min(it.p.lines.length, it.start + row + 1) };
+  const it = hit.object.userData.item, off = (1 - hit.uv.y) * (it.count + it.head) - it.head;
+  return { it, p: it.p, line: off < 0 ? 0 : lineAt(it.p, it.start + off) };
 }
 function followFrom(h) {
-  if (h.it.role !== "focus") return go(h.p, Math.max(0, (h.line || h.it.start + 1) - 6));
+  if (h.it.role !== "focus") return go(h.p, Math.max(0, (h.line ? rowOf(h.p, h.line) : h.it.start) - 6));
   const out = h.p.out.find(l => on[l.k] && l.al === h.line), inc = h.p.inc.find(l => on[l.k] && l.bl === h.line && l.bl > 1);
-  if (out) go(pages[out.b], Math.max(0, out.bl - 6));
-  else if (inc) go(pages[inc.a], Math.max(0, inc.al - 6));
+  if (out) go(pages[out.b], Math.max(0, rowOf(pages[out.b], out.bl) - 6));
+  else if (inc) go(pages[inc.a], Math.max(0, rowOf(pages[inc.a], inc.al) - 6));
 }
 
 let down = null;
@@ -799,7 +966,7 @@ renderer.domElement.addEventListener("pointermove", e => {
   if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) down.moved = true;
   if (R && down && down.moved && !R.leaving) {
     const v = view(), px = innerHeight / v.Hv * v.lf;
-    R.scrollT = Math.max(0, Math.min(R.focus.lines.length - 3, R.scrollT - (e.clientY - down.sy) / px));
+    R.scrollT = Math.max(0, Math.min(R.focus.rowsN - 3, R.scrollT - (e.clientY - down.sy) / px));
     panBy((e.clientX - down.sx) / (innerHeight / v.Hv)); R.pan = R.panT;
     R.scroll = R.scrollT; down.sx = e.clientX; down.sy = e.clientY; return;
   }
@@ -852,7 +1019,7 @@ renderer.domElement.addEventListener("wheel", e => {
   if (e.shiftKey && !dx) { dx = dy; dy = 0; }
   if (dx) panBy(-dx / (innerHeight / view().Hv));
   if (!dy) return;
-  R.scrollT = Math.max(0, Math.min(R.focus.lines.length - 3, R.scrollT + dy * 0.05));
+  R.scrollT = Math.max(0, Math.min(R.focus.rowsN - 3, R.scrollT + dy * 0.05));
 }, { passive: false, capture: true });
 
 addEventListener("resize", () => {
@@ -878,7 +1045,7 @@ function frameBody(now) {
 
 // fonts must be ready before any canvas text is painted
 Promise.race([
-  Promise.all([document.fonts.load('600 32px "JetBrains Mono"'), document.fonts.load('400 12px "JetBrains Mono"'), document.fonts.load("800 64px Chivo")]),
+  Promise.all(['600 32px "JetBrains Mono"', '400 12px "JetBrains Mono"', "800 64px Chivo", "600 16px Chivo", "400 16px Chivo"].map(f => document.fonts.load(f))),
   new Promise(r => setTimeout(r, 2500)),
 ]).catch(() => {}).then(() => {
   buildPages(); buildBridges();
