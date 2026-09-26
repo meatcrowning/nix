@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls as QQC
 import Player.Visualizer 1.0
 import "../../qmlcommon"
 
@@ -90,73 +89,62 @@ Item {
             clip: true
             objectName: "visualizerInformation"
             x: root.queueW+7; width: Math.max(0,parent.width-x); height: parent.height
-            KineticFlickable {
-                id: informationScroll
-                objectName: "visualizerInformationScroll"
-                anchors.fill: parent
-                clip: true
-                contentWidth: width
-                contentHeight: card.height
-                QQC.ScrollBar.vertical: VScroll { id: informationBar }
-                Item {
-                    id: card
-                    width: informationScroll.width-informationBar.barW
-                    // Leave a readable metadata viewport when the lower pane
-                    // is shortened; the whole card then remains reachable.
-                    height: Math.max(informationScroll.height, details.y+album.y+album.height+5+Theme.lineHeight*12+8)
-                    Image {
-                        id: art
-                        width: Math.max(48, card.width*.32); height: Math.min(card.height, width)
-                        source: root.cur.artPath ? "file://"+root.cur.artPath : ""
-                        fillMode: Image.PreserveAspectFit
-                        asynchronous: true; sourceSize.width: 512; sourceSize.height: 512
-                        opacity: root.fgArt
-                        MouseArea { anchors.fill: parent
-                            enabled: (root.cur.albumId || 0)>0
-                            onDoubleClicked: root.openAlbum(root.cur.albumId) }
+            Image {
+                id: art
+                objectName: "visualizerArt"
+                // Follow the pane's height; only constrain the square when
+                // a narrow pane needs room for the metadata and controls.
+                height: Math.max(0, Math.min(parent.height,
+                            parent.width-Math.max(120, rating.width)-16))
+                width: height
+                source: root.cur.artPath ? "file://"+root.cur.artPath : ""
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true; sourceSize.width: 512; sourceSize.height: 512
+                opacity: root.fgArt
+                MouseArea { anchors.fill: parent
+                    enabled: (root.cur.albumId || 0)>0
+                    onDoubleClicked: root.openAlbum(root.cur.albumId) }
+            }
+            Column {
+                id: details
+                anchors { left: art.right; right: parent.right; top: parent.top; margins: 8 }
+                spacing: 3
+                PixelText {
+                    width: parent.width; text: root.cur.title || "nothing playing"
+                    color: root.fgText; elide: Text.ElideRight
+                }
+                PixelText {
+                    width: parent.width; text: root.cur.artist || ""
+                    color: root.fgDim; elide: Text.ElideRight
+                }
+                PixelText {
+                    id: album
+                    objectName: "visualizerAlbumYear"
+                    width: parent.width
+                    text: (root.cur.album || "")+(root.cur.year ? " · "+root.cur.year : "")
+                    color: root.fgDim; elide: Text.ElideRight
+                }
+                Row {
+                    id: rating
+                    objectName: "visualizerRating"
+                    spacing: 4
+                    height: Math.max(stars.height, favorite.height)
+                    Stars {
+                        id: stars
+                        objectName: "visualizerStars"
+                        anchors.verticalCenter: parent.verticalCenter
+                        rating: root.cur.rating === undefined || root.cur.rating === null ? -1 : root.cur.rating
+                        enabled: root.cur.id !== undefined
+                        onRated: v => Library.setRating(root.cur.id,v)
                     }
-                    Item {
-                        id: details
-                        anchors { left: art.right; right: parent.right; top: parent.top; bottom: parent.bottom; margins: 8 }
-                        Row {
-                            id: rating
-                            anchors { right: parent.right; top: parent.top }
-                            spacing: 4
-                            height: Math.max(stars.height, favorite.height)
-                            Stars {
-                                id: stars
-                                objectName: "visualizerStars"
-                                anchors.verticalCenter: parent.verticalCenter
-                                rating: root.cur.rating === undefined || root.cur.rating === null ? -1 : root.cur.rating
-                                enabled: root.cur.id !== undefined
-                                onRated: v => Library.setRating(root.cur.id,v)
-                            }
-                            HeaderButton {
-                                id: favorite
-                                objectName: "visualizerFavorite"
-                                anchors.verticalCenter: parent.verticalCenter
-                                label: "favourite"; iconName: "heart"; iconOnly: true
-                                lit: root.cur.favorite === true
-                                enabled: root.cur.id !== undefined
-                                onClicked: Library.setFavorite(root.cur.id, !root.cur.favorite)
-                            }
-                        }
-                        PixelText { id: title
-                            y: rating.height+3
-                            width: parent.width; text: root.cur.title || "nothing playing"
-                            color: root.fgText; elide: Text.ElideRight }
-                        PixelText { id: artist; y: title.y+title.height+3; width: parent.width
-                            text: root.cur.artist || ""; color: root.fgDim; elide: Text.ElideRight }
-                        PixelText { id: album; y: artist.y+artist.height+3; width: parent.width
-                            text: (root.cur.album || "")+(root.cur.year ? " · "+root.cur.year : "")
-                            color: root.fgDim; elide: Text.ElideRight }
-                        NowInfoPane {
-                            objectName: "visualizerInfoPane"
-                            anchors { left: parent.left; right: parent.right; top: album.bottom; topMargin: 5; bottom: parent.bottom }
-                            trackId: root.cur.id === undefined ? -1 : root.cur.id
-                            track: root.cur
-                            fgText: root.fgText; fgDim: root.fgDim; fgAccent: root.fgAccent
-                        }
+                    HeaderButton {
+                        id: favorite
+                        objectName: "visualizerFavorite"
+                        anchors.verticalCenter: parent.verticalCenter
+                        label: "favourite"; iconName: "heart"; iconOnly: true
+                        lit: root.cur.favorite === true
+                        enabled: root.cur.id !== undefined
+                        onClicked: Library.setFavorite(root.cur.id, !root.cur.favorite)
                     }
                 }
             }

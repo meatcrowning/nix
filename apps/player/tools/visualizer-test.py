@@ -63,14 +63,17 @@ for plasma in (False,True):
         info=page.findChild(QObject,'visualizerInformation')
         assert surface.height()>0 and info.width()>0
         assert info.x()>=queue.width()
-        assert page.findChild(QObject,'visualizerInfoPane') is not None
-        scroll=page.findChild(QObject,'visualizerInformationScroll')
-        assert scroll.property('contentHeight') >= scroll.height()
-        if height == 320:
-            assert scroll.property('contentHeight') > scroll.height()
-            scroll.setProperty('contentY',40.)
-            assert scroll.property('contentY') == 40.
-            scroll.setProperty('contentY',0.)
+        assert page.findChild(QObject,'visualizerInfoPane') is None
+        assert page.findChild(QObject,'visualizerInformationScroll') is None
+        art=page.findChild(QObject,'visualizerArt')
+        album=page.findChild(QObject,'visualizerAlbumYear')
+        rating=page.findChild(QObject,'visualizerRating')
+        assert art.width()==art.height() and 0<art.height()<=info.height()
+        if width>=960:
+            assert art.height()==info.height(), 'cover does not follow pane height'
+        assert rating.y()>=album.y()+album.height()
+        assert rating.parentItem().y()+rating.y()+rating.height()<=info.height()
+        assert rating.width()<=rating.parentItem().width()
         stars=page.findChild(QObject,'visualizerStars')
         heart=page.findChild(QObject,'visualizerFavorite')
         assert abs(stars.y()+stars.height()/2-heart.y()-heart.height()/2)<.5
