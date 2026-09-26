@@ -260,7 +260,7 @@ def main():
     try:
         while running:
             now = time.monotonic()
-            if select.select([0], [], [], max(0, min(.05, next_frame-now)))[0]:
+            if select.select([0], [], [], max(0, min(.05, next_frame-now)) if ack else .05)[0]:
                 chunk = os.read(0,65536)
                 if not chunk: break
                 pending.extend(chunk)
@@ -290,12 +290,16 @@ def main():
                 state['actualFps'] = actual_fps
                 send(b'J',state)
                 next_state = now+1.
-            if now >= next_frame:
-                if ack:
-                    send(b'F',engine.frame(audio))
-                    ack = False
-                    report_frames += 1
-                next_frame = now+1/max(15,engine.values['fps'])
+            if ack and now >= next_frame:
+                send(b'F',engine.frame(audio))
+                ack = False
+                report_frames += 1
+                interval = 1/max(15,engine.values['fps'])
+                # Keep cadence without dropping an extra interval for a late
+                # ACK, or trying to catch up with a burst after a long stall.
+                next_frame += interval
+                if next_frame <= now:
+                    next_frame = now+interval
     finally:
         audio.close()
         engine.close()

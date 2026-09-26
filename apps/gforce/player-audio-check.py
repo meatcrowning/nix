@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import time
 
 from player_audio import PlayerAudio, props
@@ -73,6 +74,22 @@ with tempfile.TemporaryDirectory(prefix='player-audio-check-') as directory:
         own=next(o['id'] for o in g if props(o).get('node.name')=='player-test')
         assert len(links)==2 and all(o['output-node-id']==own for o in links),links
         print('PASS captures only Player, with direct upstream links; unrelated tone excluded')
+        original_dump = subprocess.check_output
+        def slow_dump(*args, **kwargs):
+            if threading.current_thread() is not threading.main_thread() and args[0] == ['pw-dump']:
+                time.sleep(.3)
+            return original_dump(*args, **kwargs)
+        subprocess.check_output = slow_dump
+        try:
+            ages = []
+            deadline = time.monotonic()+2.8
+            while time.monotonic() < deadline:
+                with tap.lock: ages.append(time.monotonic()-tap.last_audio)
+                time.sleep(.01)
+            assert max(ages) < .15, f'graph polling stalled capture for {max(ages):.3f}s'
+            print('PASS slow graph inspection leaves PCM capture uninterrupted')
+        finally:
+            subprocess.check_output = original_dump
         music.terminate();music.wait()
         wait_for(lambda:all(v==0 for v in tap.sample(time.monotonic(),0)))
         assert other.poll() is None

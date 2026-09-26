@@ -18,6 +18,7 @@ from gforce.settings import DEFAULTS, DIALS, TOGGLES
 
 class Visualizer(QObject):
     changed = Signal()
+    statisticsChanged = Signal()
     choicesChanged = Signal()
     presetsChanged = Signal()
     frame = Signal(QImage)
@@ -32,6 +33,7 @@ class Visualizer(QObject):
         self.closed = False
         self.state = {'values':dict(DEFAULTS), 'choices':{}, 'selections':{},
                       'presets':[], 'status':'', 'ready':False, 'paused':False, 'comparing':False}
+        self._statistics = {}
         self._choices = {}
         self._presets = []
         self.size = (640,360)
@@ -40,6 +42,9 @@ class Visualizer(QObject):
 
     @Property('QVariantMap', notify=changed)
     def stateInfo(self): return self.state
+
+    @Property('QVariantMap', notify=statisticsChanged)
+    def statistics(self): return self._statistics
 
     @Property('QVariantMap', notify=choicesChanged)
     def choices(self): return self._choices
@@ -210,8 +215,13 @@ class Visualizer(QObject):
                 if state.get("presets",[]) != self._presets:
                     self._presets = state.get("presets",[])
                     self.presetsChanged.emit()
-                self.state = state
-                self.changed.emit()
+                statistics = {key:state.pop(key,0) for key in ('actualFps','renderWidth','renderHeight')}
+                if statistics != self._statistics:
+                    self._statistics = statistics
+                    self.statisticsChanged.emit()
+                if state != self.state:
+                    self.state = state
+                    self.changed.emit()
             elif kind==ord('F') and size>=8:
                 w,h = struct.unpack_from('!II',data)
                 if w*h*4!=size-8 or not w or not h: continue
