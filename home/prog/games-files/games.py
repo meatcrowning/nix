@@ -38,6 +38,8 @@ SRM_DATA = CONFIG / "steam-rom-manager/userData"
 SRM_MANIFESTS = DATA / "games/steam-rom-manager"
 SRM_PARSER_ID = "games-manifest"
 ART = DATA / "games/art"
+# The last run of each game's output, for when a launch shows nothing.
+LOGS = Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "games"
 LUDUSAVI_CONFIG = CONFIG / "ludusavi/config.yaml"
 # Ludusavi entries this tool owns carry this suffix, so a sync replaces its
 # own entries and leaves anything added in Ludusavi's GUI alone.
@@ -137,6 +139,24 @@ def run(slug):
         sys.exit(reason)
     argv, cwd = command(game)
     env = dict(os.environ)
+    if "SteamGameId" in env and game["runner"] in ("retroarch", "pcsx2", "steam-run"):
+        # Steam turns on its Vulkan overlay layer for everything it launches,
+        # and that layer only handles X11 windows: a Vulkan emulator on a
+        # native Wayland surface runs but never shows. Use XWayland, as
+        # Proton games already do, so the overlay and the window both work.
+        env.pop("WAYLAND_DISPLAY", None)
+        env["QT_QPA_PLATFORM"] = "xcb"
+        env["SDL_VIDEODRIVER"] = "x11"
+    if game["runner"] == "retroarch":
+        argv.insert(1, "--verbose")
+    LOGS.mkdir(parents=True, exist_ok=True)
+    log = os.open(LOGS / f"{slug}.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    os.write(log, (f"$ {' '.join(argv)}\n" + "".join(
+        f"{k}={env[k]}\n" for k in sorted(env)
+        if k in ("SteamGameId", "WAYLAND_DISPLAY", "DISPLAY", "QT_QPA_PLATFORM", "SDL_VIDEODRIVER",
+                 "LD_PRELOAD", "ENABLE_VK_LAYER_VALVE_steam_overlay_1"))).encode())
+    os.dup2(log, 1)
+    os.dup2(log, 2)
     if game["runner"] == "proton":
         prefix = PREFIXES / slug
         prefix.mkdir(parents=True, exist_ok=True)
