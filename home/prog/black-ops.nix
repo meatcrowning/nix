@@ -15,7 +15,7 @@ let
   '';
   launcher = pkgs.writeShellApplication {
     name = "black-ops";
-    runtimeInputs = [ wine pkgs.cabextract pkgs.coreutils pkgs.util-linux ];
+    runtimeInputs = [ wine pkgs.cabextract pkgs.coreutils pkgs.gnused pkgs.util-linux ];
     text = ''
       game="''${BLACK_OPS_GAME_DIR:-$HOME/.wine/drive_c/Program Files (x86)/Activision/Call of Duty - Black Ops}"
       if [[ ! -f "$game/BlackOps.exe" ]]; then
@@ -53,9 +53,24 @@ let
           client="''${BLACK_OPS_LAN_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/black-ops/plutonium}"
           mkdir -p "$client"
           cp -r --no-preserve=mode ${lanClient}/. "$client/"
+          extra=()
+          if [[ "$mode" == t5mp && -f "$client/storage/t5/players/config.cfg" ]]; then
+            # MP clears action binds on startup/shutdown in this installation.
+            # Keep Zombies as the shared-controls source; apply one frame late.
+            {
+              echo 'wait 1'
+              if [[ -f "$client/storage/t5/players/config_mp.cfg" ]]; then
+                sed -n '/^bind[[:alnum:]_]*[[:space:]]/p' "$client/storage/t5/players/config_mp.cfg"
+              fi
+              # Retain MP's pause command and omit SP-only save/load controls.
+              sed -n '/^bind[[:alnum:]_]*[[:space:]]/ { /savegame\|loadgame/d; /^bind PAUSE /d; p; }' \
+                "$client/storage/t5/players/config.cfg"
+            } > "$client/storage/t5/black-ops-bindings.cfg"
+            extra=(+exec black-ops-bindings.cfg)
+          fi
           game_windows=$(winepath -w "$game")
           cd "$client"
-          exec wine bin/plutonium-bootstrapper-win32.exe "$mode" "$game_windows" -lan +name Player "$@"
+          exec wine bin/plutonium-bootstrapper-win32.exe "$mode" "$game_windows" -lan +name Player "''${extra[@]}" "$@"
           ;;
       esac
       cd "$game"
