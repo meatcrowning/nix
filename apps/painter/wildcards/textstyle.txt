@@ -1,0 +1,14 @@
+bold sans-serif
+thin sans-serif
+condensed sans-serif
+geometric sans-serif
+rounded sans-serif
+classic serif
+bold slab-serif
+italic serif
+monospaced
+cursive script
+handwritten
+brush-lettered
+blackletter
+Art Deco
