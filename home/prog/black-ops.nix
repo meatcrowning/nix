@@ -26,7 +26,7 @@ let
   '';
   launcher = pkgs.writeShellApplication {
     name = "black-ops";
-    runtimeInputs = [ wine pkgs.cabextract pkgs.coreutils pkgs.gnused pkgs.util-linux ];
+    runtimeInputs = [ wine pkgs.cabextract pkgs.coreutils pkgs.gnused pkgs.util-linux pkgs.python3 ];
     text = ''
       game="''${BLACK_OPS_GAME_DIR:-$HOME/.wine/drive_c/Program Files (x86)/Activision/Call of Duty - Black Ops}"
       if [[ ! -f "$game/BlackOps.exe" ]]; then
@@ -54,7 +54,27 @@ let
         touch "$WINEPREFIX/.black-ops-runtime-v1"
       fi
       cp -f ${pkgs.dxvk.bin}/x32/d3d9.dll "$WINEPREFIX/drive_c/windows/syswow64/d3d9.dll"
+      if [[ ! -f "$WINEPREFIX/.black-ops-controller-v1" ]]; then
+        # SDL maps DualSense to XInput; the raw HID backend exposes only DInput.
+        wine reg add 'HKLM\System\CurrentControlSet\Services\winebus' \
+          /v 'Enable SDL' /t REG_DWORD /d 1 /f
+        wine reg add 'HKLM\System\CurrentControlSet\Services\winebus' \
+          /v DisableHidraw /t REG_DWORD /d 1 /f
+        wineserver -w
+        touch "$WINEPREFIX/.black-ops-controller-v1"
+      fi
+      enable_controller() {
+        local cfg="$1"
+        mkdir -p "$(dirname "$cfg")"
+        if [[ -f "$cfg" ]]; then
+          sed -i '/^[[:space:]]*seta\? gpad_enabled /d' "$cfg"
+        fi
+        echo 'seta gpad_enabled "1"' >> "$cfg"
+      }
       case "''${1:-}" in
+        --campaign)
+          shift
+          ;;
         --zombies|--multiplayer|--multiplayer-stock)
           variant="$1"
           mode=t5sp
@@ -80,6 +100,11 @@ let
           elif [[ "$variant" == --multiplayer-stock ]]; then
             extra+=(+set fs_game "")
           fi
+          if [[ "$mode" == t5sp ]]; then
+            enable_controller "$client/storage/t5/players/config.cfg"
+          else
+            enable_controller "$mp_config"
+          fi
           if [[ "$mode" == t5mp && -f "$client/storage/t5/players/config.cfg" ]]; then
             # MP clears action binds on startup/shutdown in this installation.
             # Keep Zombies as the shared-controls source; apply one frame late.
@@ -96,11 +121,16 @@ let
           fi
           game_windows=$(winepath -w "$game")
           cd "$client"
-          exec wine bin/plutonium-bootstrapper-win32.exe "$mode" "$game_windows" -lan +name Player "''${extra[@]}" "$@"
+          exec wine bin/plutonium-bootstrapper-win32.exe "$mode" "$game_windows" -lan +name Player "''${extra[@]}" +set gpad_enabled 1 "$@"
           ;;
       esac
-      cd "$game"
-      exec wine BlackOps.exe "$@"
+      # DLC updates target the LAN client, not the original campaign executable.
+      # Reuse the verified pre-update assets without changing the LAN files.
+      enable_controller "$game/players/config.cfg"
+      campaign=$(python3 ${./black-ops-campaign.py} "$game" "$logdir/dlc-backups" \
+        "''${XDG_DATA_HOME:-$HOME/.local/share}/black-ops/campaign")
+      cd "$campaign"
+      exec wine BlackOps.exe +set gpad_enabled 1 "$@"
     '';
   };
 in
@@ -124,7 +154,11 @@ in
         StartupNotify=true
         StartupWMClass=blackops.exe
         Categories=Game;
-        Actions=Zombies;Multiplayer;
+        Actions=Campaign;Zombies;Multiplayer;
+
+        [Desktop Action Campaign]
+        Name=Single-player Campaign
+        Exec=${launcher}/bin/black-ops --campaign
 
         [Desktop Action Zombies]
         Name=Zombies (Offline)
@@ -134,6 +168,13 @@ in
         Name=Multiplayer Bots (Offline)
         Exec=${launcher}/bin/black-ops --multiplayer
       '';
+    };
+    xdg.desktopEntries.black-ops-campaign = {
+      name = "Black Ops Campaign";
+      exec = "${launcher}/bin/black-ops --campaign";
+      icon = "6C6C_BlackOps.0";
+      categories = [ "Game" ];
+      terminal = false;
     };
     xdg.desktopEntries.black-ops-zombies = {
       name = "Black Ops Zombies (Offline)";
