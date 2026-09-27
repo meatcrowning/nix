@@ -1,0 +1,260 @@
+{
+  "revision": 5354,
+  "files": [
+    {
+      "name": "bin/AppCore.dll",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/3a43f2989903bede21c4f599c86f3e10403e4bf1",
+      "hash": "sha256-tTOLhY5cZfnDa7yBdnO6XhoF7tj03PAHtrxP9hQPyPg="
+    },
+    {
+      "name": "bin/Ultralight.dll",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/01cd853173dca709c6a9c3ec8c68e5cb1ce7802a",
+      "hash": "sha256-dYylS6yCiEh8+m6idsck/ErSnG1qQpTXTqNOBybOhmE="
+    },
+    {
+      "name": "bin/UltralightCore.dll",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/405be77c308b4aeb678dd9235ceee201da8babb8",
+      "hash": "sha256-ntJwG6fDNJ7LvPJ2woCgkmK02nK+n9zd2BqLrJybPWk="
+    },
+    {
+      "name": "bin/VibeCheck.exe",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/34dd74dc967addb4b84deb3585ed3151dc33c762",
+      "hash": "sha256-SwU/RYh+015YSz3cTES6oVMzchYblt6qosPB6m/Ofys="
+    },
+    {
+      "name": "bin/WebCore.dll",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/ebd5792c38e598e09de2e87f435c809927400e25",
+      "hash": "sha256-tNNhvxP5jJbCHD3slNFJFP+Aw1FaSM09+XQ3jNYFIII="
+    },
+    {
+      "name": "bin/discord_game_sdk.dll",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/62cd6f527be6c82e1c1669fde807a4b34774691b",
+      "hash": "sha256-2OfZ/rPehIKxhq5E/Ryau0H+Kzs9LHzTpNdC67rTDN8="
+    },
+    {
+      "name": "bin/plutonium-bootstrapper-win32.exe",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/fcc853d66faabd22a0f65760d7cdb6b8ae9536aa",
+      "hash": "sha256-bEBb7AOom42VTYrl7eob7Ym0FH9T5NvmjO1u9agVqWs="
+    },
+    {
+      "name": "bin/plutonium-launcher-win32.exe",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/95ff686a29516f9d4e6a4c912241adad363bf00b",
+      "hash": "sha256-fW4VEjYLQK9h9Dfas8m59HQezZgAo7fF7XBxW5jd3MY="
+    },
+    {
+      "name": "bin/steam_api64.dll",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/40d0ae44e090db49b2309fb152fbd3e11124a376",
+      "hash": "sha256-pE5VN5Oa5O68aQAFiaqbJDemZ4E6FlfMd5GYuum4Fak="
+    },
+    {
+      "name": "games/t5mp.exe",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/27fcf68d62138c0775d46661f95dde0d60721762",
+      "hash": "sha256-alRElHIqr5CuJB1of8oK69c/l/DXlBLQ+MMR9sNpw/s="
+    },
+    {
+      "name": "games/t5sp.exe",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/154fdeece89a2fcefd4da13a43f16dd94b709dd9",
+      "hash": "sha256-+WjOW31T51PKMgSZ7iHLlYP4sdD6ZJKONJa2a9J4Iwo="
+    },
+    {
+      "name": "storage/demonware/18301/pub/online_tu14_mp_english.wad",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/f06e0065173d2a7492402cf7800e6899cd28c681",
+      "hash": "sha256-36ZbCpCU62Qt3kAhbiZp7SEJjtBIoySWTGrQSnSTstQ="
+    },
+    {
+      "name": "storage/demonware/18301/pub/online_tu14_sp_english.wad",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/bf9e767a4e34d595752b07bcf33c9c34c7cdf236",
+      "hash": "sha256-X3+/5LnEBTirVrSYcbODION7/VzD5JDg3QRN9geIVeE="
+    },
+    {
+      "name": "storage/demonware/18397/pub/ffotd_tu17_mp_147.ff.00",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/7e4ddfcc8bdaa10e8edccc4bd7e641f8d1637fca",
+      "hash": "sha256-qocMV0VgdUhRAF8ryS46Xecds/L3wZ9dtH1SQSKeVNg="
+    },
+    {
+      "name": "storage/demonware/18397/pub/ffotd_tu17_zm_147.ff.00",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/ce132cdb870e514380c82b7901e3db70a68005b0",
+      "hash": "sha256-col+bEQBcMJRVfyq3yPrup7w+60Wd2gnAsIyejjQtGk="
+    },
+    {
+      "name": "storage/demonware/18397/pub/ffotd_tu17_zm_147.ff.01",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/90638b568eedc31d154afe4f1f31b298654e3f46",
+      "hash": "sha256-aBFbLnRG6wt/iEWMADULEWthQrQpHifsqW5NWZhJ//s="
+    },
+    {
+      "name": "storage/demonware/18397/pub/largeheatmap.raw",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/7eae1a4198028ac4780f285219ef5e541a8148a5",
+      "hash": "sha256-7ypg7cvSBhFoyr4CL6JYQ5Iy0C1WGYV/pHMm5aAVqP4="
+    },
+    {
+      "name": "storage/demonware/18397/pub/lsssk0",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/c97b016517df6643f652aeb4d3e7a7af4f479ac8",
+      "hash": "sha256-sfEaumQ7ysr25Z6eQwnOq3MVVD6tP6OjrQVVwP3XPfY="
+    },
+    {
+      "name": "storage/demonware/18397/pub/lsssk1",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/499e689939ff79c84ef8f2e672a6b69c416edb9a",
+      "hash": "sha256-lerwWt34dzJ5kZlvBB2AhuFYrSAEPymwBmTMNb2+Z4k="
+    },
+    {
+      "name": "storage/demonware/18397/pub/online_tu17_mp.wad",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/806a59d28189a5cc0292851a6e2786de8044da59",
+      "hash": "sha256-oAkSLGk3Vy7z1qe3/pP6sHzn9RbOhvixGj5qlB4d/hY="
+    },
+    {
+      "name": "storage/demonware/18397/pub/online_tu17_zm.wad",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/3b57d3210cb7da6beb3c60238d6aed6cbb388d34",
+      "hash": "sha256-3NlJ44ceh+N3WNKRDzr157WanT568MQYufW+pBOM4QU="
+    },
+    {
+      "name": "storage/demonware/18409/pub/heatmap.raw",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/79a022824d36aa7e8d1666bdc4e8c0698a09afa1",
+      "hash": "sha256-BEidVkb3ajfLtsGT/jsqnyBShJeKM3lbBkWLDxbhWQM="
+    },
+    {
+      "name": "storage/demonware/18409/pub/iotd-english.jpg",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/9718931b6171dbce0c5762ea89b713042f75d3db",
+      "hash": "sha256-H4/cuFB1LAG/96ilSSJZksgM9/bRYt8NzuizWasVoWE="
+    },
+    {
+      "name": "storage/demonware/18409/pub/iotd-english.txt",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/1845bec139deca6b730531b0356be39fce9300a0",
+      "hash": "sha256-DESwyFDOYMZEewBUKREcFKAAdwiV6ATEhYh+NRBeMl0="
+    },
+    {
+      "name": "storage/demonware/18409/pub/motd-english.txt",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/1845bec139deca6b730531b0356be39fce9300a0",
+      "hash": "sha256-DESwyFDOYMZEewBUKREcFKAAdwiV6ATEhYh+NRBeMl0="
+    },
+    {
+      "name": "storage/demonware/18409/pub/online_mp.img",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/0e60a52920c749b7e4eea392e7517ed125170d67",
+      "hash": "sha256-3TSW+Sei/6zU1GHH0KESVdsaKDuXbUXQiwWiWM2rO0A="
+    },
+    {
+      "name": "storage/demonware/18409/pub/online_tu14_mp_english.wad",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/f0d8dbd04be65007dbf44a72f5f56f82650bd363",
+      "hash": "sha256-rvAqRPBnBTh0FqQ08WzgSqLcqQs1Fg+6nfGNvtfLj6I="
+    },
+    {
+      "name": "storage/demonware/18409/pub/playlists_tu21.aggr",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/59636b39dcbe80fae7e7c95e68da9898f0d3e036",
+      "hash": "sha256-PpjUw071wis04lgP4wG5/mE9yArk6yMeLcYcDX+7b6I="
+    },
+    {
+      "name": "storage/demonware/18409/pub/social_tu21.cfg",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/cb875922c58dcd9576787bd95fafa623baeb4416",
+      "hash": "sha256-cFmLeHWcu2evWJ8WtL+2ezYfwsP2DX9CSCpyaYzKEek="
+    },
+    {
+      "name": "storage/t5/plutonium/dvar_descriptions.json",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/4abb6eb2ada134359fe9e6fb195a8a32931a3de7",
+      "hash": "sha256-mN9uClQUCabkRxlWOExPZhUW6F5lZnNCM047xRr78a4="
+    },
+    {
+      "name": "storage/t5/raw/scripts/mp/mp_spawn_fix.gsc",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/7d9432adf27f5aaeb86190befc973885efd45ada",
+      "hash": "sha256-YMwjHY6VDZUEjf3e4/gI/Bz+XaOYfLQeF9BNi1FLyQU="
+    },
+    {
+      "name": "storage/t5/raw/scripts/sp/zm_spawn_fix.gsc",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/9b93ffc0f4fa1c988fb53f5657305cd72f5df165",
+      "hash": "sha256-WwB6U9z4W2VDlvQH2VM16vOVmVKDUEOMWr74pHW6UYw="
+    },
+    {
+      "name": "storage/t5/zone/en_plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/1beeef6c6186a4d0fb4cde3e8d5b0c1e4a98b8eb",
+      "hash": "sha256-Kiu3pLD0ntPbw0QJOQBHtcBHy0MMEHzgPTDSzRVwV50="
+    },
+    {
+      "name": "storage/t5/zone/en_plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/1beeef6c6186a4d0fb4cde3e8d5b0c1e4a98b8eb",
+      "hash": "sha256-Kiu3pLD0ntPbw0QJOQBHtcBHy0MMEHzgPTDSzRVwV50="
+    },
+    {
+      "name": "storage/t5/zone/fr_plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/2f9f63b86424819b8746afe3e476bd9fa75bba55",
+      "hash": "sha256-9oDuoT6dLTf3BjswvLUT4er8wAkHpCnOuEOU9fn7RIs="
+    },
+    {
+      "name": "storage/t5/zone/fr_plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/2f9f63b86424819b8746afe3e476bd9fa75bba55",
+      "hash": "sha256-9oDuoT6dLTf3BjswvLUT4er8wAkHpCnOuEOU9fn7RIs="
+    },
+    {
+      "name": "storage/t5/zone/ge_plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/875ac1494406bb7df9b3dff2c7e4df41cd1d3160",
+      "hash": "sha256-UinIASzYrmhihkk8nG6Utf9otOjmq2c58Iv2vqRBsI0="
+    },
+    {
+      "name": "storage/t5/zone/ge_plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/875ac1494406bb7df9b3dff2c7e4df41cd1d3160",
+      "hash": "sha256-UinIASzYrmhihkk8nG6Utf9otOjmq2c58Iv2vqRBsI0="
+    },
+    {
+      "name": "storage/t5/zone/it_plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/b1d32fc70a89bf13a4e7ba477028b2309c5fd12d",
+      "hash": "sha256-zZn7A7eybWmVaup2OsJCadUbtCtKLZiwwJFqTwiXOuQ="
+    },
+    {
+      "name": "storage/t5/zone/it_plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/b1d32fc70a89bf13a4e7ba477028b2309c5fd12d",
+      "hash": "sha256-zZn7A7eybWmVaup2OsJCadUbtCtKLZiwwJFqTwiXOuQ="
+    },
+    {
+      "name": "storage/t5/zone/ja_plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/7079458be4d2fb09dac1a89c2c9f0187bd3771b0",
+      "hash": "sha256-nGLz7ptyyKu8oO11QanpMNQk1DouRp/sbUtnYo0nwaU="
+    },
+    {
+      "name": "storage/t5/zone/ja_plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/7079458be4d2fb09dac1a89c2c9f0187bd3771b0",
+      "hash": "sha256-nGLz7ptyyKu8oO11QanpMNQk1DouRp/sbUtnYo0nwaU="
+    },
+    {
+      "name": "storage/t5/zone/plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/8ebbdb858b3ee3a747d330f7bec46e110a6c6eb9",
+      "hash": "sha256-jBNkvGUAjqu7FkrOryzs3zQ58FwAPdE4HF7tZ4fs55Y="
+    },
+    {
+      "name": "storage/t5/zone/plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/421b6dc6971bae39389f58732638927842738d4c",
+      "hash": "sha256-Dy6YDS8N7OllXWwlOs3jp//L0TThmrun6IrkWJsoWz0="
+    },
+    {
+      "name": "storage/t5/zone/plutonium_ui_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/862609d2c78b9ea98377fd8c096a358d17be73db",
+      "hash": "sha256-s4g8JdtoF3spRUMmP/CSBswDXskgyiKOwp/DIgY6WVE="
+    },
+    {
+      "name": "storage/t5/zone/po_plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/53cc53beeb3a2a3343cfa65d7d16df5582058f68",
+      "hash": "sha256-5DLXuX/tN6ZvANZjnbyDUYhUyAB1GziGDpI+vrxv0co="
+    },
+    {
+      "name": "storage/t5/zone/po_plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/53cc53beeb3a2a3343cfa65d7d16df5582058f68",
+      "hash": "sha256-5DLXuX/tN6ZvANZjnbyDUYhUyAB1GziGDpI+vrxv0co="
+    },
+    {
+      "name": "storage/t5/zone/ru_plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/4f579ca824928b9d3894c22bbd9e66225cd1ead4",
+      "hash": "sha256-JJisHhFRsAxWUI92sdI/E5owD7otqc4UKEqwZLsl/Mw="
+    },
+    {
+      "name": "storage/t5/zone/ru_plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/4f579ca824928b9d3894c22bbd9e66225cd1ead4",
+      "hash": "sha256-JJisHhFRsAxWUI92sdI/E5owD7otqc4UKEqwZLsl/Mw="
+    },
+    {
+      "name": "storage/t5/zone/sp_plutonium_mp.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/a9512c25d6380d1822945c387745d12c3bdde372",
+      "hash": "sha256-eNJKyxGDTaDAj3imtXHKe+UfE6v0BaMcNeqPX7yU7lc="
+    },
+    {
+      "name": "storage/t5/zone/sp_plutonium_ui.ff",
+      "url": "https://cdn.plutoniummod.com/updater/prod/files/a9512c25d6380d1822945c387745d12c3bdde372",
+      "hash": "sha256-eNJKyxGDTaDAj3imtXHKe+UfE6v0BaMcNeqPX7yU7lc="
+    }
+  ]
+}
