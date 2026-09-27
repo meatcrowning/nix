@@ -1,20 +1,20 @@
 v-shaped eyebrows
 wince
-thinking. pensive
+thinking, pensive
 serious
 sigh
 sleepy
 sulking
 surprised
-scared , panicking, worried
-sad. depressed, frown, gloom \(expression\), tears
+scared, worried
+sad, depressed
 pain
 pout
 raised eyebrow
 raised inner eyebrows
 rape face
 rolling eyes
-round mouth, open mouth, parted lips
+open mouth
 bored
 confused
 crazy
@@ -36,7 +36,11 @@ guilt
 happy
 lonely
 nervous
-one eye closed (winking)
-blush, embarrassed, full-face blush, nose blush
+one eye closed
+blush, embarrassed
 annoyed
-angry, anger vein, annoyed, clenched teeth, scowl
+angry, scowl
+smile
+light smile
+grin
+laughing
