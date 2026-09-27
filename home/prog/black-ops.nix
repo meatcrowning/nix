@@ -2,6 +2,14 @@
 
 let
   wine = pkgs.wineWow64Packages.stable;
+  # T5 client files from Plutonium's official updater manifest. Content-addressed
+  # downloads keep the tested LAN client stable without storing binaries here.
+  lanManifest = builtins.fromJSON (builtins.readFile ./black-ops-lan.json);
+  lanClient = pkgs.runCommand "black-ops-lan-r${toString lanManifest.revision}" { } (
+    lib.concatMapStringsSep "\n" (file:
+      "install -Dm644 ${pkgs.fetchurl { inherit (file) url hash; }} $out/${lib.escapeShellArg file.name}"
+    ) lanManifest.files
+  );
   dxvkConfig = pkgs.writeText "black-ops-dxvk.conf" ''
     d3d9.maxAvailableMemory = 1024
   '';
@@ -35,6 +43,21 @@ let
         touch "$WINEPREFIX/.black-ops-runtime-v1"
       fi
       cp -f ${pkgs.dxvk.bin}/x32/d3d9.dll "$WINEPREFIX/drive_c/windows/syswow64/d3d9.dll"
+      case "''${1:-}" in
+        --zombies|--multiplayer)
+          mode=t5sp
+          [[ "$1" != --multiplayer ]] || mode=t5mp
+          shift
+          # The client writes profiles beside its assets. Copy only the pinned
+          # distribution files; preserve the player's generated settings/stats.
+          client="''${BLACK_OPS_LAN_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/black-ops/plutonium}"
+          mkdir -p "$client"
+          cp -r --no-preserve=mode ${lanClient}/. "$client/"
+          game_windows=$(winepath -w "$game")
+          cd "$client"
+          exec wine bin/plutonium-bootstrapper-win32.exe "$mode" "$game_windows" -lan +name Player "$@"
+          ;;
+      esac
       cd "$game"
       exec wine BlackOps.exe "$@"
     '';
@@ -60,7 +83,30 @@ in
         StartupNotify=true
         StartupWMClass=blackops.exe
         Categories=Game;
+        Actions=Zombies;Multiplayer;
+
+        [Desktop Action Zombies]
+        Name=Zombies (Offline)
+        Exec=${launcher}/bin/black-ops --zombies
+
+        [Desktop Action Multiplayer]
+        Name=Multiplayer Bots (Offline)
+        Exec=${launcher}/bin/black-ops --multiplayer
       '';
+    };
+    xdg.desktopEntries.black-ops-zombies = {
+      name = "Black Ops Zombies (Offline)";
+      exec = "${launcher}/bin/black-ops --zombies";
+      icon = "6C6C_BlackOps.0";
+      categories = [ "Game" ];
+      terminal = false;
+    };
+    xdg.desktopEntries.black-ops-multiplayer = {
+      name = "Black Ops Multiplayer Bots (Offline)";
+      exec = "${launcher}/bin/black-ops --multiplayer";
+      icon = "6C6C_BlackOps.0";
+      categories = [ "Game" ];
+      terminal = false;
     };
   };
 }
