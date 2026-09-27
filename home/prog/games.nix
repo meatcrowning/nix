@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, host, pkgs, lib, ... }:
 
 # Launchers for games outside Steam. The per-host manifest lives in the private
 # docs repo (docs/games.<hostname>.json) because it lists the user's own files;
@@ -28,6 +28,12 @@ let
 in
 {
   home.packages = [ games ] ++ lib.optionals isX86 [ retroarch ];
+
+  # ~/Games is the launcher folder itself, not a place for game files. Only
+  # top's ~/Games was emptied for this; book's may still hold real files.
+  home.file."Games" = lib.mkIf (host == "top") {
+    source = config.lib.file.mkOutOfStoreSymlink "${config.xdg.dataHome}/plasma-games";
+  };
 
   # Icon extraction reads the games' drives and box art comes from the
   # network, so keep both off the activation path.
