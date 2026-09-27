@@ -237,7 +237,9 @@ def sync(offline):
     finally:
         if staging.exists():
             shutil.rmtree(staging)
-    subprocess.run(["systemctl", "--user", "start", "--no-block", "plasma-games-refresh.service"],
+    # restart, not start: a refresh the path unit began mid-sync would absorb a
+    # start request and finish with the old entry set.
+    subprocess.run(["systemctl", "--user", "restart", "--no-block", "plasma-games-refresh.service"],
                    stderr=subprocess.DEVNULL)
     print(f"games: wrote {len(games)} launchers to {ENTRIES}")
 
