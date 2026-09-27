@@ -10,6 +10,17 @@ let
       "install -Dm644 ${pkgs.fetchurl { inherit (file) url hash; }} $out/${lib.escapeShellArg file.name}"
     ) lanManifest.files
   );
+  botWarfareArchive = pkgs.fetchurl {
+    url = "https://github.com/ineedbots/t5_bot_warfare/releases/download/v1.1.1/bo1bw111.zip";
+    hash = "sha256-C+9oqXn8Vg7+myytU2H24jliEgz79X0J/i9+/f8dw8M=";
+  };
+  botWarfare = pkgs.runCommand "black-ops-bot-warfare-1.1.1" {
+    nativeBuildInputs = [ pkgs.unzip ];
+  } ''
+    unzip -q ${botWarfareArchive}
+    mkdir -p "$out"
+    cp -r "Move to root of Black Ops folder/mods/mp_bots/." "$out/"
+  '';
   dxvkConfig = pkgs.writeText "black-ops-dxvk.conf" ''
     d3d9.maxAvailableMemory = 1024
   '';
@@ -44,9 +55,10 @@ let
       fi
       cp -f ${pkgs.dxvk.bin}/x32/d3d9.dll "$WINEPREFIX/drive_c/windows/syswow64/d3d9.dll"
       case "''${1:-}" in
-        --zombies|--multiplayer)
+        --zombies|--multiplayer|--multiplayer-stock)
+          variant="$1"
           mode=t5sp
-          [[ "$1" != --multiplayer ]] || mode=t5mp
+          [[ "$variant" == --zombies ]] || mode=t5mp
           shift
           # The client writes profiles beside its assets. Copy only the pinned
           # distribution files; preserve the player's generated settings/stats.
@@ -54,19 +66,33 @@ let
           mkdir -p "$client"
           cp -r --no-preserve=mode ${lanClient}/. "$client/"
           extra=()
+          mp_config="$client/storage/t5/players/config_mp.cfg"
+          if [[ "$variant" == --multiplayer ]]; then
+            mkdir -p "$client/storage/t5/mods/mp_bots" "$client/storage/t5/players/mods/mp_bots"
+            cp -r --no-preserve=mode ${botWarfare}/. "$client/storage/t5/mods/mp_bots/"
+            # Mods have independent stats/configs. Seed preferences, not ranks.
+            mod_config="$client/storage/t5/players/mods/mp_bots/config_mp.cfg"
+            if [[ ! -f "$mod_config" && -f "$mp_config" ]]; then
+              cp "$mp_config" "$mod_config"
+            fi
+            mp_config="$mod_config"
+            extra+=(+set fs_game mods/mp_bots)
+          elif [[ "$variant" == --multiplayer-stock ]]; then
+            extra+=(+set fs_game "")
+          fi
           if [[ "$mode" == t5mp && -f "$client/storage/t5/players/config.cfg" ]]; then
             # MP clears action binds on startup/shutdown in this installation.
             # Keep Zombies as the shared-controls source; apply one frame late.
             {
               echo 'wait 1'
-              if [[ -f "$client/storage/t5/players/config_mp.cfg" ]]; then
-                sed -n '/^bind[[:alnum:]_]*[[:space:]]/p' "$client/storage/t5/players/config_mp.cfg"
+              if [[ -f "$mp_config" ]]; then
+                sed -n '/^bind[[:alnum:]_]*[[:space:]]/p' "$mp_config"
               fi
               # Retain MP's pause command and omit SP-only save/load controls.
               sed -n '/^bind[[:alnum:]_]*[[:space:]]/ { /savegame\|loadgame/d; /^bind PAUSE /d; p; }' \
                 "$client/storage/t5/players/config.cfg"
             } > "$client/storage/t5/black-ops-bindings.cfg"
-            extra=(+exec black-ops-bindings.cfg)
+            extra+=(+exec black-ops-bindings.cfg)
           fi
           game_windows=$(winepath -w "$game")
           cd "$client"
