@@ -44,19 +44,23 @@ in
   config = lib.mkIf (host == "top") {
     home.packages = [ launcher ];
 
-    # Match Wine's desktop-file ID so existing menu shortcuts use this launcher.
-    home.file.".local/share/applications/wine-Programs-Activision-Call of Duty - Black Ops-Call of Duty - Black Ops.desktop".text = ''
-      [Desktop Entry]
-      Type=Application
-      Name=Call of Duty - Black Ops
-      Exec=${launcher}/bin/black-ops
-      TryExec=${launcher}/bin/black-ops
-      Path=${config.home.homeDirectory}/.wine/drive_c/Program Files (x86)/Activision/Call of Duty - Black Ops
-      Icon=6C6C_BlackOps.0
-      Terminal=false
-      StartupNotify=true
-      StartupWMClass=blackops.exe
-      Categories=Game;
-    '';
+    # Replace Wine's actual file: a flattened duplicate has the same desktop ID,
+    # but KDE can still resolve that ID to the original nested Wine shortcut.
+    home.file.".local/share/applications/wine/Programs/Activision/Call of Duty - Black Ops/Call of Duty - Black Ops.desktop" = {
+      force = true;
+      text = ''
+        [Desktop Entry]
+        Type=Application
+        Name=Call of Duty - Black Ops
+        Exec=${launcher}/bin/black-ops
+        TryExec=${launcher}/bin/black-ops
+        Path=${config.home.homeDirectory}/.wine/drive_c/Program Files (x86)/Activision/Call of Duty - Black Ops
+        Icon=6C6C_BlackOps.0
+        Terminal=false
+        StartupNotify=true
+        StartupWMClass=blackops.exe
+        Categories=Game;
+      '';
+    };
   };
 }
