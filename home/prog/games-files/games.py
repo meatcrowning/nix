@@ -3,7 +3,7 @@
 The manifest (a host-local JSON list, kept in the private docs repo because it
 names the user's own files) says where each game is and how it runs. `sync`
 turns it into desktop entries with icons and keeps Steam ROM Manager's and
-Ludusavi's configs in step; `steam` adds every game to Steam; `run` starts one
+Ludusavi's configs in step; `steam` adds every game to Steam, with artwork; `run` starts one
 game; `check` reports which entries would launch without starting anything.
 
 Games stay where they are, often on removable drives, so `run` names the
@@ -19,6 +19,7 @@ import sys
 import tempfile
 import urllib.parse
 import urllib.request
+import zlib
 from pathlib import Path
 
 HOME = Path.home()
@@ -36,6 +37,7 @@ GAMES_BIN = os.environ.get("GAMES_BIN", "games")
 SRM_DATA = CONFIG / "steam-rom-manager/userData"
 SRM_MANIFESTS = DATA / "games/steam-rom-manager"
 SRM_PARSER_ID = "games-manifest"
+ART = DATA / "games/art"
 LUDUSAVI_CONFIG = CONFIG / "ludusavi/config.yaml"
 # Ludusavi entries this tool owns carry this suffix, so a sync replaces its
 # own entries and leaves anything added in Ludusavi's GUI alone.
@@ -288,14 +290,14 @@ def write_steam_rom_manager(games):
     ], indent=1, ensure_ascii=False))
 
     SRM_DATA.mkdir(parents=True, exist_ok=True)
-    settings = SRM_DATA / "userSettings.json"
-    if not settings.exists():
-        # Packaged by Nix, so its self-updater has nothing to update.
-        settings.write_text(json.dumps({
-            "version": 11,
-            "autoUpdate": False,
-            "environmentVariables": {"steamDirectory": str(STEAM)},
-        }, indent=2))
+    settings_path = SRM_DATA / "userSettings.json"
+    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {"version": 11}
+    # Packaged by Nix, so its self-updater has nothing to update.
+    settings["autoUpdate"] = False
+    env = settings.setdefault("environmentVariables", {})
+    if not env.get("steamDirectory"):
+        env["steamDirectory"] = str(STEAM)
+    settings_path.write_text(json.dumps(settings, indent=2))
 
     configs_path = SRM_DATA / "userConfigurations.json"
     configs = json.loads(configs_path.read_text()) if configs_path.exists() else []
@@ -327,14 +329,117 @@ def write_steam_rom_manager(games):
     configs_path.write_text(json.dumps(configs, indent=2))
 
 
+def srm_app_id(title):
+    """Steam's id for a shortcut, computed as Steam ROM Manager does.
+
+    Matching its formula means a later "Save to Steam" from Steam ROM
+    Manager's GUI updates these shortcuts instead of duplicating them.
+    """
+    exe = f'"{GAMES_BIN}"'
+    return (zlib.crc32((exe + title).encode()) | 0x80000000) & 0xFFFFFFFF
+
+
+def norm(title):
+    return re.sub(r"[^a-z0-9]", "", title.lower().replace("the ", ""))
+
+
+def steam_store_id(game):
+    """The game's Steam app id, for its official library artwork."""
+    if "steamAppId" in game:
+        return game["steamAppId"]
+    query = urllib.parse.quote(game["name"])
+    try:
+        with urllib.request.urlopen(
+                f"https://store.steampowered.com/api/storesearch/?term={query}&cc=us&l=en",
+                timeout=15) as response:
+            items = json.load(response).get("items", [])
+    except OSError:
+        return None
+    want = norm(game["name"])
+    for match in (lambda n: n == want, lambda n: n.startswith(want)):
+        for item in items:
+            if match(norm(item["name"])):
+                return item["id"]
+    return None
+
+
+def fetch(url, out):
+    if out.exists():
+        return True
+    try:
+        with urllib.request.urlopen(url, timeout=20) as response:
+            out.write_bytes(response.read())
+        return True
+    except OSError:
+        return False
+
+
+def artwork(game):
+    """Portrait, wide, hero and logo images for Steam's library, cached."""
+    art = ART / game["slug"]
+    art.mkdir(parents=True, exist_ok=True)
+    found = {}
+    if "thumb" in game:
+        system, title = game["thumb"].split("/", 1)
+        title = re.sub(r'[&*/:`<>?\\|"]', "_", title)
+        base = f"https://raw.githubusercontent.com/libretro-thumbnails/{system}/master"
+        if fetch(f"{base}/Named_Boxarts/{urllib.parse.quote(title)}.png", art / "p.png"):
+            found["p"] = art / "p.png"
+        if fetch(f"{base}/Named_Titles/{urllib.parse.quote(title)}.png", art / "hero.png"):
+            found["_hero"] = art / "hero.png"
+        return found
+    app = steam_store_id(game)
+    if not app:
+        return found
+    cdn = f"https://cdn.akamai.steamstatic.com/steam/apps/{app}"
+    for key, remote, local in (("p", "library_600x900.jpg", "p.jpg"), ("", "header.jpg", "wide.jpg"),
+                               ("_hero", "library_hero.jpg", "hero.jpg"), ("_logo", "logo.png", "logo.png")):
+        if fetch(f"{cdn}/{remote}", art / local):
+            found[key] = art / local
+    return found
+
+
 def steam(games):
-    """Add every game to Steam, with artwork, through Steam ROM Manager."""
+    """Add every game to Steam as a shortcut, with artwork and Steam Input."""
+    import vdf
     if subprocess.run(["pgrep", "-x", "steam"], stdout=subprocess.DEVNULL).returncode == 0:
-        sys.exit("games: quit Steam first; Steam overwrites shortcuts it didn't write while it runs")
-    write_steam_rom_manager(games)
-    subprocess.run(["steam-rom-manager", "disable", "--all"], check=True)
-    subprocess.run(["steam-rom-manager", "enable", SRM_PARSER_ID], check=True)
-    subprocess.run(["steam-rom-manager", "add"], check=True)
+        sys.exit("games: quit Steam first; it overwrites shortcuts.vdf on exit")
+    users = [u for u in (STEAM / "userdata").iterdir() if u.name.isdigit() and u.name != "0"]
+    exe = f'"{GAMES_BIN}"'
+    arts = {}
+    for game in games:
+        arts[game["slug"]] = artwork(game)
+        print(f"games: art {len(arts[game['slug']])}/4 {game['name']}")
+    for user in users:
+        path = user / "config/shortcuts.vdf"
+        data = vdf.binary_loads(path.read_bytes()) if path.exists() else {"shortcuts": {}}
+        # Replace only the shortcuts this tool made; keep the user's own.
+        kept = [v for v in data.get("shortcuts", {}).values() if v.get("Exe") != exe]
+        grid = user / "config/grid"
+        grid.mkdir(parents=True, exist_ok=True)
+        for game in games:
+            app = srm_app_id(game["name"])
+            kept.append({
+                "appid": app - (1 << 32),
+                "AppName": game["name"],
+                "Exe": exe,
+                "StartDir": f'"{HOME}"',
+                "icon": icon_for(game, offline=True),
+                "ShortcutPath": "",
+                "LaunchOptions": f"run {game['slug']}",
+                "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1,
+                "OpenVR": 0, "Devkit": 0, "DevkitGameID": "", "DevkitOverrideAppID": 0,
+                "LastPlayTime": 0, "FlatpakAppID": "", "tags": {},
+            })
+            for suffix, src in arts[game["slug"]].items():
+                for old in grid.glob(f"{app}{suffix}.*"):
+                    old.unlink()
+                shutil.copyfile(src, grid / f"{app}{suffix}{src.suffix}")
+        if path.exists():
+            shutil.copyfile(path, path.with_name("shortcuts.vdf.bak"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(vdf.binary_dumps({"shortcuts": {str(i): v for i, v in enumerate(kept)}}))
+        print(f"games: {len(games)} shortcuts in {path}")
 
 
 def write_ludusavi(games):
