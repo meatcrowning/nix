@@ -77,6 +77,12 @@ def load():
     return json.loads(MANIFEST.read_text())["games"]
 
 
+def load_extra_saves():
+    if not MANIFEST.exists():
+        return []
+    return json.loads(MANIFEST.read_text()).get("extraSaves", [])
+
+
 def find(slug):
     for game in load():
         if game["slug"] == slug:
@@ -348,7 +354,8 @@ def write_ludusavi(games):
               {"store": "otherWine", "path": str(HOME / ".wine")}]
     wanted += [{"store": "otherWine", "path": str(p)}
                for p in sorted(DATA.glob("wineprefixes/*/pfx")) + sorted(DATA.glob("wineprefixes/games/*/pfx"))
-               + [q for q in sorted(DATA.glob("wineprefixes/*")) if (q / "drive_c").is_dir()]]
+               + [q for q in sorted(DATA.glob("wineprefixes/*"))
+                  if (q / "drive_c").is_dir() and not (q / "pfx").is_dir()]]
     for root in wanted:
         if root not in roots:
             roots.append(root)
@@ -361,6 +368,10 @@ def write_ludusavi(games):
     for game in games:
         if game.get("saves"):
             custom.append({"name": game["name"] + LUDUSAVI_TAG, "files": game["saves"]})
+    # Games launched some other way (a dedicated module) whose saves Ludusavi
+    # cannot find on its own.
+    for extra in load_extra_saves():
+        custom.append({"name": extra["name"] + LUDUSAVI_TAG, "files": extra["files"]})
     config["customGames"] = custom
     LUDUSAVI_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     LUDUSAVI_CONFIG.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
