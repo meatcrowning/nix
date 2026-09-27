@@ -53,6 +53,7 @@ SYSTEM_LABELS = {
     "Nintendo_-_Super_Nintendo_Entertainment_System": "Super Nintendo",
     "Nintendo_-_Nintendo_Entertainment_System": "NES",
     "Nintendo_-_Game_Boy_Advance": "Game Boy Advance",
+    "Nintendo_-_Game_Boy": "Game Boy",
     "Sony_-_PlayStation_Portable": "PSP",
     "Sony_-_PlayStation_2": "PlayStation 2",
 }
