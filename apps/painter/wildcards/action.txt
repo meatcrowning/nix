@@ -1,0 +1,7 @@
+balancing
+stretching
+falling
+floating
+jumping
+running
+walking

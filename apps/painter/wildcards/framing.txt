@@ -1,0 +1,4 @@
+portrait
+upper body
+full body
+close-up
