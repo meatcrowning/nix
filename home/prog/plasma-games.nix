@@ -72,6 +72,11 @@ EOF
         done < <(find -L "$steamapps_dir" -maxdepth 1 -type f -name 'appmanifest_*.acf' -print0)
       done
 
+      # Dolphin and Folder View refuse to run a launcher outside the XDG
+      # application dirs unless it is executable, and ask "trust this program?"
+      # instead.
+      chmod +x "$staging_dir"/*.desktop 2>/dev/null || true
+
       rm -rf "$games_dir"
       mv "$staging_dir" "$games_dir"
       trap - EXIT
