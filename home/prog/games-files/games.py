@@ -98,10 +98,19 @@ def missing_reason(path):
     return f"{path} is missing."
 
 
+def missing_file(game):
+    """The first file the game needs that isn't there, including absolute args."""
+    for path in [game["path"], *game.get("args", [])]:
+        if path.startswith("/") and not Path(path).exists():
+            return path
+    return None
+
+
 def run(slug):
     game = find(slug)
-    if not Path(game["path"]).exists():
-        reason = missing_reason(game["path"])
+    missing = missing_file(game)
+    if missing:
+        reason = missing_reason(missing)
         subprocess.run(["notify-send", "-a", "Games", "-i", "dialog-warning",
                         "--", game["name"], reason])
         sys.exit(reason)
@@ -122,7 +131,7 @@ def check():
     bad = 0
     for game in games:
         argv, cwd = command(game)
-        exists = Path(game["path"]).exists()
+        exists = missing_file(game) is None
         core_ok = game["runner"] != "retroarch" or Path(argv[2]).exists()
         ok = exists and core_ok
         bad += not ok
