@@ -15,19 +15,23 @@ let
     fceumm
     ppsspp
   ]);
+  python = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
   games = pkgs.writeShellApplication {
     name = "games";
-    runtimeInputs = [ pkgs.python3 pkgs.icoutils pkgs.libnotify pkgs.hostname ]
-      ++ lib.optionals isX86 [ pkgs.umu-launcher retroarch pkgs.pcsx2 pkgs.steam-run ];
+    runtimeInputs = [ python pkgs.icoutils pkgs.libnotify pkgs.hostname pkgs.procps ]
+      ++ lib.optionals isX86 [ pkgs.umu-launcher retroarch pkgs.pcsx2 pkgs.steam-run pkgs.steam-rom-manager ];
     text = ''
       export GAMES_MANIFEST="''${GAMES_MANIFEST:-${config.home.homeDirectory}/nix/docs/games.$(hostname).json}"
+      export GAMES_BIN=${config.home.profileDirectory}/bin/games
       export GAMES_RETROARCH_CORES=${if isX86 then "${retroarch}/lib/retroarch/cores" else "/nonexistent"}
       exec python3 ${./games-files/games.py} "$@"
     '';
   };
 in
 {
-  home.packages = [ games ] ++ lib.optionals isX86 [ retroarch ];
+  # Steam ROM Manager puts every manifest game into Steam (`games steam`);
+  # Ludusavi backs up their saves, configured by `games sync`.
+  home.packages = [ games pkgs.ludusavi ] ++ lib.optionals isX86 [ retroarch pkgs.steam-rom-manager ];
 
   # ~/Games is the launcher folder itself, not a place for game files. Only
   # top's ~/Games was emptied for this; book's may still hold real files.

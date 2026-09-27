@@ -2,8 +2,9 @@
 
 The manifest (a host-local JSON list, kept in the private docs repo because it
 names the user's own files) says where each game is and how it runs. `sync`
-turns it into desktop entries with icons; `run` starts one game; `check`
-reports which entries would launch without starting anything.
+turns it into desktop entries with icons and keeps Steam ROM Manager's and
+Ludusavi's configs in step; `steam` adds every game to Steam; `run` starts one
+game; `check` reports which entries would launch without starting anything.
 
 Games stay where they are, often on removable drives, so `run` names the
 missing drive instead of failing silently when one is unplugged.
@@ -28,6 +29,17 @@ ENTRIES = DATA / "applications/games"
 ICONS = DATA / "games/icons"
 PREFIXES = DATA / "wineprefixes/games"
 PROTON = DATA / "Steam/steamapps/common/Proton - Experimental"
+STEAM = DATA / "Steam"
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
+# Steam shortcuts must name a path that survives rebuilds, not a store path.
+GAMES_BIN = os.environ.get("GAMES_BIN", "games")
+SRM_DATA = CONFIG / "steam-rom-manager/userData"
+SRM_MANIFESTS = DATA / "games/steam-rom-manager"
+SRM_PARSER_ID = "games-manifest"
+LUDUSAVI_CONFIG = CONFIG / "ludusavi/config.yaml"
+# Ludusavi entries this tool owns carry this suffix, so a sync replaces its
+# own entries and leaves anything added in Ludusavi's GUI alone.
+LUDUSAVI_TAG = " (games)"
 
 CORE_FILES = {
     "swanstation": "swanstation_libretro.so",
@@ -252,6 +264,106 @@ def sync(offline):
     subprocess.run(["systemctl", "--user", "restart", "--no-block", "plasma-games-refresh.service"],
                    stderr=subprocess.DEVNULL)
     print(f"games: wrote {len(games)} launchers to {ENTRIES}")
+    write_steam_rom_manager(games)
+    write_ludusavi(games)
+
+
+def write_steam_rom_manager(games):
+    """A Manual-parser manifest plus the one parser that reads it.
+
+    Steam ROM Manager turns each manifest entry into a Steam shortcut and
+    fetches its artwork from SteamGridDB. Other parsers made in its GUI are
+    kept; only the parser with our id is replaced.
+    """
+    SRM_MANIFESTS.mkdir(parents=True, exist_ok=True)
+    (SRM_MANIFESTS / "games.json").write_text(json.dumps([
+        {"title": g["name"], "target": GAMES_BIN, "startIn": str(HOME),
+         "launchOptions": f"run {g['slug']}"} for g in games
+    ], indent=1, ensure_ascii=False))
+
+    SRM_DATA.mkdir(parents=True, exist_ok=True)
+    settings = SRM_DATA / "userSettings.json"
+    if not settings.exists():
+        # Packaged by Nix, so its self-updater has nothing to update.
+        settings.write_text(json.dumps({
+            "version": 11,
+            "autoUpdate": False,
+            "environmentVariables": {"steamDirectory": str(STEAM)},
+        }, indent=2))
+
+    configs_path = SRM_DATA / "userConfigurations.json"
+    configs = json.loads(configs_path.read_text()) if configs_path.exists() else []
+    configs = [c for c in configs if c.get("parserId") != SRM_PARSER_ID]
+    configs.insert(0, {
+        "version": 29,
+        "parserType": "Manual",
+        "configTitle": "Games",
+        "parserId": SRM_PARSER_ID,
+        "steamCategories": [],
+        "executable": {"path": "", "shortcutPassthrough": False, "appendArgsToExecutable": True},
+        "executableArgs": "",
+        "executableModifier": "\"${exePath}\"",
+        "romDirectory": "",
+        "steamDirectory": "${steamdirglobal}",
+        "startInDirectory": "",
+        "userAccounts": {"specifiedAccounts": ["Global"]},
+        "imagePool": "${fuzzyTitle}",
+        "drmProtect": False,
+        "onlineImageQueries": ["${fuzzyTitle}"],
+        "imageProviders": ["sgdb"],
+        "titleModifier": "${title}",
+        "steamInputEnabled": "1",
+        "controllers": {},
+        "disabled": False,
+        "group": "",
+        "parserInputs": {"manualManifests": str(SRM_MANIFESTS)},
+    })
+    configs_path.write_text(json.dumps(configs, indent=2))
+
+
+def steam(games):
+    """Add every game to Steam, with artwork, through Steam ROM Manager."""
+    if subprocess.run(["pgrep", "-x", "steam"], stdout=subprocess.DEVNULL).returncode == 0:
+        sys.exit("games: quit Steam first; Steam overwrites shortcuts it didn't write while it runs")
+    write_steam_rom_manager(games)
+    subprocess.run(["steam-rom-manager", "disable", "--all"], check=True)
+    subprocess.run(["steam-rom-manager", "enable", SRM_PARSER_ID], check=True)
+    subprocess.run(["steam-rom-manager", "add"], check=True)
+
+
+def write_ludusavi(games):
+    """Point Ludusavi at the prefixes, emulators and in-folder saves.
+
+    Ludusavi finds most PC saves itself from its own database once it knows
+    the Wine prefixes; games that save inside their own folder, and the
+    emulators, need custom entries.
+    """
+    import yaml
+    config = {}
+    if LUDUSAVI_CONFIG.exists():
+        config = yaml.safe_load(LUDUSAVI_CONFIG.read_text()) or {}
+    roots = config.setdefault("roots", [])
+    wanted = [{"store": "steam", "path": str(STEAM)},
+              {"store": "otherHome", "path": str(HOME)},
+              {"store": "otherWine", "path": str(HOME / ".wine")}]
+    wanted += [{"store": "otherWine", "path": str(p)}
+               for p in sorted(DATA.glob("wineprefixes/*/pfx")) + sorted(DATA.glob("wineprefixes/games/*/pfx"))
+               + [q for q in sorted(DATA.glob("wineprefixes/*")) if (q / "drive_c").is_dir()]]
+    for root in wanted:
+        if root not in roots:
+            roots.append(root)
+
+    custom = [c for c in config.get("customGames", []) if not c.get("name", "").endswith(LUDUSAVI_TAG)]
+    custom.append({"name": "RetroArch" + LUDUSAVI_TAG,
+                   "files": [str(CONFIG / "retroarch/saves"), str(CONFIG / "retroarch/states")]})
+    custom.append({"name": "PCSX2" + LUDUSAVI_TAG,
+                   "files": [str(CONFIG / "PCSX2/memcards"), str(CONFIG / "PCSX2/sstates")]})
+    for game in games:
+        if game.get("saves"):
+            custom.append({"name": game["name"] + LUDUSAVI_TAG, "files": game["saves"]})
+    config["customGames"] = custom
+    LUDUSAVI_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    LUDUSAVI_CONFIG.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
 
 
 def main():
@@ -262,8 +374,10 @@ def main():
         sync(offline="--offline" in args)
     elif args == ["check"]:
         sys.exit(check())
+    elif args == ["steam"]:
+        steam(load())
     else:
-        sys.exit("usage: games run SLUG | games sync [--offline] | games check")
+        sys.exit("usage: games run SLUG | games sync [--offline] | games check | games steam")
 
 
 if __name__ == "__main__":
