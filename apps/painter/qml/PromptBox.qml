@@ -460,6 +460,14 @@ Rectangle {
                         e.accepted = true
                     return
                 }
+                // Tab is an explicit completion request. Flush a pending
+                // query before Qt can use it to navigate to another field.
+                if (e.key === Qt.Key_Tab && e.modifiers === Qt.NoModifier
+                        && box.tagsOn
+                        && (completeSoon.running || !box.completionMine())) {
+                    completeSoon.stop()
+                    box.refreshCompletion()
+                }
                 if (!box.completionMine()) return
                 if (e.key === Qt.Key_Down) { box.tagPopup.move(1); e.accepted = true }
                 else if (e.key === Qt.Key_Up) { box.tagPopup.move(-1); e.accepted = true }

@@ -1365,6 +1365,9 @@ being typed, so a near-miss is never written in the first place.
   `ParamsPane.tagPopup` the way the other two are. **It never takes the
   keyboard**: `PromptBox` drives it from the editor's own key handler, because
   the point is that typing continues underneath it.
+- **Tab flushes pending completion queries before accepting.** It must not
+  depend on the popup's debounce having fired, and an already-current list
+  must retain its highlighted row.
 - **Escape is spent by whichever handler reaches it first.** A window-level
   `Shortcut` fires AND the key still reaches the editor's `Keys.onEscapePressed`
   — measured. That is invisible while the two agree and it is the bug when they
@@ -1429,6 +1432,9 @@ thing, and knows an escaped bracket is part of a name and not a group. It is on
 in every prompt box on every family: it is prompt syntax, not a tag feature.
 
 Harness: `tools/ui-test.py` → `test_tag_complete`.
+Focused runs use `PAINTER_UI_ONLY=tags` or `tab`; add `PAINTER_UI_NATIVE=1`
+for the Tab regression through the Plasma shell's real widget event path.
+Use the offscreen session guard and `painter-qtenv python3` on top.
 
 ## Prompt pills are a lossless view, not a formatter
 

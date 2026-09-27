@@ -41,6 +41,13 @@ Q_ARG = None  # bound in build(), once PySide6 is importable
 os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
 os.environ.pop("WAYLAND_DISPLAY", None)       # no way back to his session
 os.environ.pop("DISPLAY", None)
+if os.environ.get("PAINTER_UI_NATIVE") == "1":
+    os.environ["DESK_SESSION"] = "plasma"
+    os.environ["QT_QUICK_CONTROLS_STYLE"] = "org.kde.desktop"
+    # Native menu integration needs a real platform window. Keep the widget
+    # event path and KDE QML controls, with an offscreen-safe widget style.
+    os.environ["QT_QPA_PLATFORMTHEME"] = ""
+    os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
 os.environ["PAINTER_SYNC_SCAN"] = "1"       # deterministic model assertions
 # WHICH ROOF THIS HARNESS RENDERS, pinned rather than inherited. `is_plasma()`
@@ -226,8 +233,14 @@ def key(win, k, mods=None, text=""):
     from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QGuiApplication, QKeyEvent
     mods = Qt.NoModifier if mods is None else mods
+    if hasattr(win, "keyTarget") and not text:
+        from PySide6.QtTest import QTest
+        QTest.keyClick(win.keyTarget, k, mods)
+        spin(60)
+        return
+    target = getattr(win, "keyTarget", win)
     for typ in (QEvent.KeyPress, QEvent.KeyRelease):
-        QGuiApplication.sendEvent(win, QKeyEvent(typ, k, mods, text))
+        QGuiApplication.sendEvent(target, QKeyEvent(typ, k, mods, text))
     spin(60)
 
 
@@ -363,7 +376,12 @@ def build(tmp):
     from PySide6.QtCore import Q_ARG as _QARG
     Q_ARG = _QARG
 
-    app = QGuiApplication.instance() or QGuiApplication(sys.argv)
+    native = os.environ.get("PAINTER_UI_NATIVE") == "1"
+    if native:
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication(sys.argv)
+    else:
+        app = QGuiApplication.instance() or QGuiApplication(sys.argv)
     if app.platformName() != "offscreen":
         raise SystemExit("refusing to run on platform %r, not offscreen"
                          % app.platformName())
@@ -442,7 +460,13 @@ def build(tmp):
     ctl._unit_poll.stop()
     ctl._probe.stop()
 
-    engine = QQmlApplicationEngine()
+    shell = None
+    if native:
+        from kdeshell import shell as make_shell
+        shell = make_shell("painter-ui-test")
+        engine = shell.engine()
+    else:
+        engine = QQmlApplicationEngine()
     if os.environ.get("DESK_SESSION") == "plasma":
         # Main.py installs this selector before loading Root.qml. Without it,
         # `DESK_SESSION=plasma` changed app policy but the harness silently
@@ -482,8 +506,16 @@ def build(tmp):
     _DESKSTYLE, _STUBBAR = DeskStyle, StubTitlebar
     _THEME[0] = theme
 
-    engine.load(QUrl.fromLocalFile(os.path.join(PAINTER, "qml/Main.qml")))
-    roots = engine.rootObjects()
+    if native:
+        assert shell.load(os.path.join(PAINTER, "qml/Root.qml")), shell.errors()
+        shell.bind_chrome(None)
+        shell.window.show()
+        shell.view.setFocus()
+        roots = [shell.view.quickWindow()]
+        roots[0].keyTarget = shell.window.windowHandle()
+    else:
+        engine.load(QUrl.fromLocalFile(os.path.join(PAINTER, "qml/Main.qml")))
+        roots = engine.rootObjects()
     if not roots:
         for w in WARNINGS:
             print("  " + w)
@@ -502,7 +534,7 @@ def build(tmp):
     # backend the list would be empty and half of this would silently SKIP.
     ctl.rescan()
     spin(200)
-    return app, engine, win, ctl, keep + (theme,)
+    return app, engine, win, ctl, keep + (theme, shell)
 
 
 # ------------------------------------------------------------------- the tests
@@ -4166,6 +4198,60 @@ def test_preset_isolation(win, ctl, tmp):
     spin(120)
 
 
+def test_tab_complete(win, ctl, keep):
+    """Tab completes the current token even before the popup debounce fires."""
+    from PySide6.QtCore import Qt
+    rel = "unet/anima-base-v1.0.safetensors"
+    path = os.path.join(os.environ["PAINTER_MODELS"], rel)
+    write_safetensors(path, MODE_FAKES[rel])
+    ctl.rescan()
+    ctl.selectModelByName("anima-base-v1.0.safetensors")
+    spin(200)
+    tags = keep[6]
+    tags.prepare()
+    end = time.time() + 30
+    while not tags.property("ready") and time.time() < end:
+        spin(100)
+    check("tag index is ready", tags.property("ready"))
+    popup = find(win.contentItem(), "TagPopup")
+    boxes = find_all(win.contentItem(), "PromptBox")
+    check("both prompt boxes exist", len(boxes) == 2)
+    for box in boxes:
+        edit = find(box, "QQuickTextEdit")
+        check("prompt supports tags", box.property("tagsOn"))
+        edit.forceActiveFocus()
+        edit.setProperty("text", "long_h")
+        edit.setProperty("cursorPosition", 6)
+        # No event-loop turn between typing and Tab: the 12ms popup timer
+        # must not decide whether this key completes or navigates focus.
+        key(win, Qt.Key_Tab)
+        check("Tab before the popup opens completes the token",
+              edit.property("text") == "long hair, ", repr(edit.property("text")))
+        check("completion retains prompt focus", edit.property("activeFocus"))
+        check("completion closes suggestions", not popup.property("visible"))
+
+        edit.setProperty("text", "long_h")
+        edit.setProperty("cursorPosition", 6)
+        spin(100)
+        key(win, Qt.Key_Down)
+        selected = popup.property("currentTag").replace("_", " ") + ", "
+        key(win, Qt.Key_Tab)
+        check("Tab preserves the highlighted suggestion",
+              edit.property("text") == selected, repr(edit.property("text")))
+
+        edit.setProperty("text", "long_h")
+        edit.setProperty("cursorPosition", 6)
+        spin(100)
+        edit.setProperty("text", "1gi")
+        edit.setProperty("cursorPosition", 3)
+        key(win, Qt.Key_Tab)
+        check("Tab refreshes a stale suggestion before accepting",
+              edit.property("text") == "1girl, ", repr(edit.property("text")))
+    os.remove(path)
+    ctl.rescan()
+    spin(100)
+
+
 def test_tag_complete(win, ctl, keep):
     """Typing a tag offers the tag Danbooru actually HAS.
 
@@ -4966,6 +5052,7 @@ def main():
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
     os.environ["XDG_STATE_HOME"] = os.path.join(tmp, "state")
     os.environ["XDG_CACHE_HOME"] = os.path.join(tmp, "cache")
+    os.environ["KDESHELL_STATE"] = os.path.join(tmp, "shell.ini")
     os.environ["PAINTER_OUT"] = os.path.join(tmp, "out")
     # The other machine's outputs, read-only — what comfy-tunnel.sh mounts top's
     # root at on book. Read once at import, so it has to be set before build().
@@ -4973,9 +5060,14 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("seed", "preview", "live", "llada", "modes", "compare", "pairing", "source"):
+    if only in ("seed", "preview", "live", "llada", "modes", "compare",
+                "pairing", "source", "tags", "tab"):
         print("== %s ==" % only)
-        if only == "source":
+        if only == "tab":
+            test_tab_complete(win, ctl, keep)
+        elif only == "tags":
+            test_tag_complete(win, ctl, keep)
+        elif only == "source":
             test_source_actions(win, ctl, tmp)
         elif only == "pairing":
             test_pairing(win, ctl, tmp)
