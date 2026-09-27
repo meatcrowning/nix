@@ -162,9 +162,29 @@ def run(slug):
         prefix.mkdir(parents=True, exist_ok=True)
         env.update(WINEPREFIX=str(prefix), PROTONPATH=str(PROTON),
                    GAMEID="umu-default", STORE="none")
+        import_registry(game, prefix, env)
     if cwd:
         os.chdir(cwd)
     os.execvpe(argv[0], argv, env)
+
+
+def import_registry(game, prefix, env):
+    """Import a game's registry file into its prefix, once, before first run.
+
+    Extracting a GOG installer skips the keys its setup would write, and some
+    games (RollerCoaster Tycoon) read them at startup.
+    """
+    reg = game.get("registry")
+    marker = prefix / ".games-registry-imported"
+    if not reg or marker.exists():
+        return
+    regedit = prefix / "pfx/drive_c/windows/regedit.exe"
+    if not regedit.exists():
+        # umu-run with an empty command only creates the prefix.
+        subprocess.run(["umu-run", ""], env=env, check=False)
+    wine_path = "Z:" + reg.replace("/", "\\")
+    if subprocess.run(["umu-run", str(regedit), "/S", wine_path], env=env).returncode == 0:
+        marker.touch()
 
 
 def check():
