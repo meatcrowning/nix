@@ -139,6 +139,8 @@ def run(slug):
         sys.exit(reason)
     argv, cwd = command(game)
     env = dict(os.environ)
+    # Per-game compatibility settings also apply when launched outside Steam.
+    env.update(game.get("env", {}))
     if "SteamGameId" in env and game["runner"] in ("retroarch", "pcsx2", "steam-run"):
         # Steam turns on its Vulkan overlay layer for everything it launches,
         # and that layer only handles X11 windows: a Vulkan emulator on a
