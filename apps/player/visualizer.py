@@ -25,6 +25,7 @@ class Visualizer(QObject):
     statisticsChanged = Signal()
     choicesChanged = Signal()
     presetsChanged = Signal()
+    fullscreenChanged = Signal()
     frame = Signal(QImage)
 
     def __init__(self, stream_name, parent=None):
@@ -34,6 +35,8 @@ class Visualizer(QObject):
         self.process = None
         self.generation = 0
         self.window = None
+        self._fullscreen = False
+        self._fullscreen_chrome = []
         self.requested = False
         self.playing = False
         self.closed = False
@@ -87,7 +90,28 @@ class Visualizer(QObject):
         window.installEventFilter(self)
         self.reconcile()
 
+    @Property(bool, notify=fullscreenChanged)
+    def fullscreen(self): return self._fullscreen
+
+    def sync_fullscreen(self):
+        fullscreen = bool(self.window.windowState() & Qt.WindowState.WindowFullScreen)
+        if fullscreen == self._fullscreen: return
+        self._fullscreen = fullscreen
+        # Preserve the user's toolbar visibility while the visualizer fills the window.
+        from PySide6.QtWidgets import QMainWindow, QToolBar
+        if isinstance(self.window, QMainWindow):
+            if fullscreen:
+                widgets = [self.window.menuWidget(), *self.window.findChildren(QToolBar)]
+                self._fullscreen_chrome = [w for w in widgets if w and not w.isHidden()]
+                for widget in self._fullscreen_chrome: widget.hide()
+            else:
+                for widget in self._fullscreen_chrome: widget.show()
+                self._fullscreen_chrome = []
+        self.fullscreenChanged.emit()
+
     def eventFilter(self, obj, event):
+        if obj is self.window and event.type() == QEvent.Type.WindowStateChange:
+            self.sync_fullscreen()
         if event.type() in (QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.WindowStateChange,
                             QEvent.Type.Expose, QEvent.Type.WindowActivate,
                             QEvent.Type.WindowDeactivate, QEvent.Type.ActivationChange):
@@ -208,6 +232,7 @@ class Visualizer(QObject):
         else:
             self.was_maximized = bool(self.window.windowState() & Qt.WindowState.WindowMaximized)
             self.window.showFullScreen()
+        self.sync_fullscreen()
 
     @Slot()
     def retry(self):

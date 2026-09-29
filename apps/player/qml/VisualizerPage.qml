@@ -8,6 +8,8 @@ Item {
     signal browseArtist(string artist)
     signal editAliases(string artist)
     signal toggleSidebar()
+    readonly property bool fullscreen: Visualizer.fullscreen
+    readonly property bool infoHidden: fullscreen || bottomCollapsed
     property bool plasma: false
     property bool sidebar: true
     property real controlsWidth: Number(Prefs.get("visualizerControlsWidth", 300)) || 300
@@ -19,7 +21,7 @@ Item {
     property real topFrac: Number(Prefs.get("visualizerStackTopFrac", .5)) || .5
     property bool bottomCollapsed: Prefs.get("visualizerBottomCollapsed", false) === true
     property real infoFrac: Number(Prefs.get("visualizerInfoWidthFrac", .5)) || .5
-    readonly property real topH: bottomCollapsed ? Math.max(0, height-7)
+    readonly property real topH: fullscreen ? height : bottomCollapsed ? Math.max(0, height-7)
                                 : Math.max(0, Math.min(Math.max(0, height-107), Math.max(80, height*topFrac)))
     readonly property real infoW: Math.round(Math.max(0, bottom.width-7)
                                             * Math.max(.2, Math.min(.8, infoFrac)))
@@ -36,7 +38,7 @@ Item {
         const id = cur.id === undefined ? null : cur.id;
         if (!trackNoticeReady || id === lastTrackId) return;
         lastTrackId = id;
-        if (bottomCollapsed && id !== null) trackNoticeTimer.restart();
+        if (infoHidden && id !== null) trackNoticeTimer.restart();
         else trackNoticeTimer.stop();
     }
     onBottomCollapsedChanged: if (!bottomCollapsed) trackNoticeTimer.stop()
@@ -55,6 +57,10 @@ Item {
             objectName: "visualizerSurface"
             source: Visualizer
             HoverHandler { id: surfaceHover }
+            MouseArea {
+                anchors.fill: parent
+                onDoubleClicked: Visualizer.toggleFullscreen()
+            }
             contrastRect: surfaceHover.hovered
                 ? Qt.rect(sidebarButton.x, sidebarButton.y, sidebarButton.width, sidebarButton.height)
                 : Qt.rect(0, 0, 0, 0)
@@ -74,7 +80,7 @@ Item {
             anchors.margins: 8
             width: Math.max(0, Math.min(380, parent.width-16))
             height: Math.max(64, noticeText.height)
-            visible: opacity > 0 && root.bottomCollapsed && root.cur.id !== undefined
+            visible: opacity > 0 && root.infoHidden && root.cur.id !== undefined
             opacity: trackNoticeTimer.running || surfaceHover.hovered ? 1 : 0
             clip: true
             Behavior on opacity { NumberAnimation {
@@ -186,7 +192,7 @@ Item {
 
     Item {
         id: bottom
-        visible: !root.bottomCollapsed
+        visible: !root.infoHidden
         clip: true
         y: root.topH+7; width: parent.width; height: Math.max(0,parent.height-y)
         Item {
@@ -298,6 +304,7 @@ Item {
     }
     MouseArea {
         id: topDivider
+        visible: !root.fullscreen
         objectName: "visualizerTopDivider"
         hoverEnabled: true
         preventStealing: true
