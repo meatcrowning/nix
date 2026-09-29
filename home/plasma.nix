@@ -120,9 +120,9 @@ in
             } // lib.optionalAttrs (host == "top" || host == "air") {
               autoFontAndSize = false;
               fontFamily = "Oxygen-Sans";
-              # Air's 22px top panel uses a slightly smaller clock; top keeps
-              # matching the 8-point global-menu labels beside it.
-              fontSize = if host == "air" then 7 else 8;
+              # Matches the global-menu labels beside it, which use the
+              # kdeglobals general font (Oxygen-Sans 8).
+              fontSize = 8;
               fontStyleName = "Sans-Book";
               fontWeight = 400;
             };
