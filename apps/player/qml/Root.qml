@@ -36,7 +36,11 @@ Item {
     function validBrowser(value) { return ["albums", "playlists", "discover"].indexOf(value) >= 0 ? value : "albums"; }
     property real visualAlbumFrac: Number(Prefs.get("visualizerAlbumFrac", .5)) || .5
     property bool visualSidebar: Prefs.get("visualizerSidebar", true) === true
+    readonly property bool visualFullscreen: Visualizer.fullscreen
+    property bool fullscreenSidebar: false
+    onVisualFullscreenChanged: fullscreenSidebar = false
     function toggleVisualSidebar() {
+        if (visualFullscreen) { fullscreenSidebar = !fullscreenSidebar; return; }
         visualSidebar = !visualSidebar;
         Prefs.set("visualizerSidebar", visualSidebar);
     }
@@ -552,13 +556,15 @@ Item {
         }
         Loader {
             id: visualPage
+            parent: win.visualFullscreen ? win : content
+            z: win.visualFullscreen ? 100 : 0
             anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
-            width: Math.max(0, parent.width-content.visualAlbumW-9)
+            width: win.visualFullscreen ? parent.width : Math.max(0, parent.width-content.visualAlbumW-9)
             active: typeof Visualizer !== "undefined"
             source: active ? "VisualizerPage.qml" : ""
             onLoaded: {
                 item.plasma = Qt.binding(function() { return win.plasma; });
-                item.sidebar = Qt.binding(function() { return win.visualSidebar; });
+                item.sidebar = Qt.binding(function() { return win.visualFullscreen ? win.fullscreenSidebar : win.visualSidebar; });
                 item.openAlbum.connect(win.openAlbum);
                 item.browseArtist.connect(win.browseArtist);
                 item.editAliases.connect(win.editArtistAliases);
@@ -791,7 +797,8 @@ Item {
         sequence: "Escape"
         enabled: !win.searchEditing
         onActivated: {
-            if (playlists.modal) playlists.closeModal();
+            if (win.visualFullscreen) Visualizer.toggleFullscreen();
+            else if (playlists.modal) playlists.closeModal();
             else if (win.settingsOpen) win.settingsOpen = false;
             else if (win.searching || win.searchOpen) win.closeSearch();
             else if (win.openAlbumId > 0) win.openAlbum(0);   // close the inline section

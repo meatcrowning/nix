@@ -416,6 +416,9 @@ The recorder cannot autoconnect or fall back to a desktop monitor. Do not
 replace this with the standalone G-Force sink monitor or change playback links.
 Dials and saved looks share G-Force's settings; Player's sidebar/splits use
 Player preferences and native engine state uses `gforce-vis/player-engine/`.
+Double-clicking the visualizer or F11 toggles fullscreen; Escape exits it.
+Fullscreen retains hover overlays and a temporary controls sidebar, restoring
+the window state, native chrome, and pane layout on exit.
 Tab toggles controls, Space controls playback, Shift+Space pauses visual changes,
 and W/C/X/N/P/R/S retain the visualizer actions only in that view.
 

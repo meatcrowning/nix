@@ -273,7 +273,7 @@ def check_layout(app,shell,win,*args):
     toggle=root.findChild(QObject,'visualizerSidebarButton')
     buttons=root.property('tbButtons').toVariant()
     navigation=[b['id'] for b in buttons if isinstance(b,dict) and b.get('group')=='view']
-    assert navigation==['albums','playlists'], navigation
+    assert navigation==['albums','playlists','discover'], navigation
     if shell is not None:
         assert shell._search is None
         assert shell.window.findChild(QObject,'visualizerChangeInterval')
@@ -301,6 +301,46 @@ def check_layout(app,shell,win,*args):
     QTest.mouseMove(target,grid.mapToScene(QPointF(10,10)).toPoint())
     QTest.qWait(900)
     assert not toggle.isVisible()
+    for maximized in (False, True):
+        host=shell.window if shell is not None else win
+        if maximized: host.showMaximized()
+        else: host.showNormal()
+        QTest.qWait(30)
+        original_size=(surface.width(),surface.height())
+        QTest.mouseDClick(target,Qt.LeftButton,Qt.NoModifier,
+                         surface.mapToScene(QPointF(20,20)).toPoint())
+        QTest.mouseRelease(target,Qt.LeftButton,Qt.NoModifier,
+                           surface.mapToScene(QPointF(20,20)).toPoint())
+        QTest.qWait(100)
+        assert visual.fullscreen and root.property('visualFullscreen')
+        assert surface.width()==root.width() and surface.height()==root.height()
+        assert not root.findChild(QObject,'visualizerTopDivider').isVisible()
+        if shell is not None:
+            assert shell.window.menuWidget().isHidden()
+        QTest.mouseMove(target,surface.mapToScene(QPointF(40,40)).toPoint())
+        QTest.qWait(50)
+        assert toggle.isVisible()
+        QTest.mouseMove(target,toggle.mapToScene(QPointF(toggle.width()/2,toggle.height()/2)).toPoint())
+        QTest.qWait(50)
+        QTest.mouseClick(target,Qt.LeftButton,Qt.NoModifier,
+                         toggle.mapToScene(QPointF(toggle.width()/2,toggle.height()/2)).toPoint())
+        QTest.qWait(30)
+        assert root.property('fullscreenSidebar'), (maximized, toggle.isVisible(), toggle.mapToScene(QPointF()), target.size(), surface.size())
+        assert root.findChild(QObject,'visualizerControls').isVisible()
+        QTest.mouseDClick(target,Qt.LeftButton,Qt.NoModifier,
+                         surface.mapToScene(QPointF(20,20)).toPoint())
+        QTest.mouseRelease(target,Qt.LeftButton,Qt.NoModifier,
+                           surface.mapToScene(QPointF(20,20)).toPoint())
+        QTest.qWait(100)
+        assert not visual.fullscreen
+        assert bool(host.windowState() & Qt.WindowMaximized)==maximized
+        assert (surface.width(),surface.height())==original_size
+        assert root.property('visualSidebar')==before
+        if shell is not None:
+            assert not shell.window.menuWidget().isHidden()
+    host.showNormal()
+    QTest.qWait(50)
+    print('PASS double-click fullscreen, hover controls, and layout restoration')
     search=root.findChild(QObject,'albumSearch')
     toolbar=root.findChild(QObject,'albumToolbar')
     choice=root.findChild(QObject,'albumSortChoice')
