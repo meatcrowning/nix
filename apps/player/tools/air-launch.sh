@@ -44,6 +44,12 @@ DBSYNC="$HERE/dbsync.py"
 ART_LOCAL="${XDG_CACHE_HOME:-$HOME/.cache}/player/art"
 PREFS="${XDG_STATE_HOME:-$HOME/.local/state}/player/prefs.json"
 PY="${PLAYER_PYTHON:-/usr/bin/python3}"
+# Plasma's launch PATH on Fedora omits the home-manager profile, where the
+# visualizer's gforce-qtenv lives. Append it so Fedora's tools still win.
+case ":$PATH:" in
+    *":$HOME/.nix-profile/bin:"*) ;;
+    *) export PATH="$PATH:$HOME/.nix-profile/bin" ;;
+esac
 export PLAYER_STARTUP_TRACE="${XDG_CACHE_HOME:-$HOME/.cache}/player/startup.trace"
 mkdir -p "$(dirname "$PLAYER_STARTUP_TRACE")"
 : > "$PLAYER_STARTUP_TRACE"
