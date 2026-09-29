@@ -120,9 +120,11 @@ in
             } // lib.optionalAttrs (host == "top" || host == "air") {
               autoFontAndSize = false;
               fontFamily = "Oxygen-Sans";
-              # Matches the global-menu labels beside it, which use the
-              # kdeglobals general font (Oxygen-Sans 8).
-              fontSize = 8;
+              # Match the 8pt global-menu labels beside it. The clock converts
+              # points with the screen's physical DPI, not Qt's logical 96:
+              # book's 1.5-scaled panel is ~152 dpi, so 5 gives the menu's
+              # ~11px (7 and 8 both clamp to the 22px panel height).
+              fontSize = if host == "air" then 5 else 8;
               fontStyleName = "Sans-Book";
               fontWeight = 400;
             };
