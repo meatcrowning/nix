@@ -6,8 +6,8 @@ import subprocess
 import sys
 
 
-def prepare(game):
-    config = game / "players/iw4x_config.cfg"
+def prepare(game, spec_ops=False):
+    config = game / ("players/iw4x_sp_config.cfg" if spec_ops else "players/iw4x_config.cfg")
     config.parent.mkdir(parents=True, exist_ok=True)
     text = config.read_text() if config.exists() else ""
     existing = set(re.findall(r"^\s*seta?\s+(\S+)", text, re.MULTILINE))
@@ -22,10 +22,17 @@ def prepare(game):
         "bots_main_firstIsHost": 1,
         "scr_xpscale": 1, "scr_rankedmatch": 1,
     }
+    if spec_ops:
+        defaults = {
+            "r_fullscreen": 0, "r_noBorder": 1, "r_aspectRatio": "auto",
+            "com_maxfps": 120, "r_multiGpu": 0,
+        }
     additions = [f'seta {key} "{value}"\n' for key, value in defaults.items()
                  if key not in existing]
     if additions:
         config.write_text(text.rstrip() + "\n" + "".join(additions))
+    if spec_ops:
+        return
     names = game / "mods/mp_bots/bots.txt"
     if not names.exists():
         names.parent.mkdir(parents=True, exist_ok=True)
@@ -55,5 +62,5 @@ def resolution():
 
 if __name__ == "__main__":
     size = resolution()
-    prepare(Path(sys.argv[1]))
+    prepare(Path(sys.argv[1]), spec_ops="--spec-ops" in sys.argv[2:])
     print(size)

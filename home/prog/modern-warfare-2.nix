@@ -50,7 +50,15 @@ let
     runtimeInputs = [ wine pkgs.coreutils pkgs.util-linux pkgs.python3 pkgs.xrandr pkgs.bubblewrap ];
     text = ''
       game="''${MW2_GAME_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/games/modern-warfare-2}"
-      for file in main/iw_00.iwd zone/english/common_mp.ff zone/english/patch_mp.ff; do
+      mode=multiplayer
+      files=(main/iw_00.iwd zone/english/common_mp.ff zone/english/patch_mp.ff)
+      if [[ "''${1:-}" == --spec-ops ]]; then
+        mode=spec-ops
+        shift
+        files=(iw4x-sp.exe data/iw4sp.exe main/iw_00.iwd zone/english/common.ff
+          zone/english/patch.ff zone/english/so_killspree_trainer.ff)
+      fi
+      for file in "''${files[@]}"; do
         if [[ ! -f "$game/$file" ]]; then
           echo "Modern Warfare 2 installation is incomplete: $game/$file" >&2
           exit 1
@@ -62,7 +70,9 @@ let
       flock -n 9 || exit 0
       logdir="''${XDG_STATE_HOME:-$HOME/.local/state}/modern-warfare-2"
       mkdir -p "$logdir"
-      exec >"$logdir/last.log" 2>&1
+      logfile=last.log
+      [[ "$mode" != spec-ops ]] || logfile=spec-ops.log
+      exec >"$logdir/$logfile" 2>&1
       export WINEDEBUG="''${WINEDEBUG:--all}"
       export WINEDLLOVERRIDES="winemenubuilder.exe,mscoree,mshtml=d;d3d9=n"
       export DXVK_LOG_PATH="$logdir" DXVK_CONFIG_FILE=${dxvkConfig}
@@ -78,6 +88,16 @@ let
         touch "$WINEPREFIX/.mw2-controller-v1"
       fi
       cp -f ${pkgs.dxvk.bin}/x32/d3d9.dll "$WINEPREFIX/drive_c/windows/syswow64/d3d9.dll"
+      if [[ "$mode" == spec-ops ]]; then
+        resolution=$(python3 ${./modern-warfare-2-settings.py} "$game" --spec-ops)
+        extra=()
+        [[ -z "$resolution" ]] || extra+=(+set r_mode "$resolution")
+        cd "$game"
+        bwrap --unshare-net --bind / / --dev-bind /dev /dev --proc /proc \
+          wine iw4x-sp.exe -nosteam +set net_ip 127.0.0.1 \
+          "''${extra[@]}" "$@"
+        exit "$?"
+      fi
       if [[ ! -f "$game/.nix-rawfiles-${rawFiles.name}" ]]; then
         cp -r --no-preserve=mode ${rawFiles}/. "$game/"
         touch "$game/.nix-rawfiles-${rawFiles.name}"
@@ -98,11 +118,23 @@ let
         "''${extra[@]}" "$@"
     '';
   };
+  specOpsLauncher = pkgs.writeShellScriptBin "modern-warfare-2-spec-ops" ''
+    exec ${launcher}/bin/modern-warfare-2 --spec-ops "$@"
+  '';
 in
 {
   # The disc installation and x86 Wine runtime are local to top.
   config = lib.mkIf (host == "top") {
-    home.packages = [ launcher ];
+    home.packages = [ launcher specOpsLauncher ];
+    xdg.desktopEntries.modern-warfare-2-spec-ops = {
+      name = "Modern Warfare 2 — Spec Ops";
+      comment = "Solo Special Ops and campaign";
+      exec = "${specOpsLauncher}/bin/modern-warfare-2-spec-ops";
+      icon = "${config.xdg.dataHome}/games/modern-warfare-2/mw2.png";
+      categories = [ "Game" ];
+      terminal = false;
+      settings.StartupWMClass = "iw4x-sp.exe";
+    };
     xdg.desktopEntries.modern-warfare-2 = {
       name = "Modern Warfare 2 — Offline Bots";
       comment = "Bot Warfare with saved ranks and unlocks";
