@@ -89,9 +89,10 @@ let
       fi
       cp -f ${pkgs.dxvk.bin}/x32/d3d9.dll "$WINEPREFIX/drive_c/windows/syswow64/d3d9.dll"
       if [[ "$mode" == spec-ops ]]; then
-        resolution=$(python3 ${./modern-warfare-2-settings.py} "$game" --spec-ops)
-        extra=()
-        [[ -z "$resolution" ]] || extra+=(+set r_mode "$resolution")
+        arguments=$(python3 ${./modern-warfare-2-settings.py} "$game" --spec-ops --launch-args)
+        mapfile -t extra <<< "$arguments"
+        mkdir -p "$game/spdata/scripts"
+        cp -f ${./modern-warfare-2-graphics.gsc} "$game/spdata/scripts/nix_graphics.gsc"
         cd "$game"
         bwrap --unshare-net --bind / / --dev-bind /dev /dev --proc /proc \
           wine iw4x-sp.exe -nosteam +set net_ip 127.0.0.1 \
