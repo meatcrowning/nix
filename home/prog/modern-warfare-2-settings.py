@@ -19,6 +19,19 @@ SHARED_GRAPHICS = (
     "r_texFilterAnisoMax", "r_texFilterAnisoMin", "r_texFilterMipMode",
     "r_vsync", "r_zFeather", "sm_enable", "sm_maxLights",
 )
+SHARED_CONTROLLER = {
+    "gpad_enabled": (1, 0, 1),
+    "input_invertPitch": (0, 0, 1),
+    "input_viewSensitivity": (1, .1, 5),
+    "gpad_stick_deadzone_min": (.2, 0, .8),
+    "gpad_stick_deadzone_max": (.01, 0, .1),
+    "gpad_slowdown_enabled": (1, 0, 1),
+    "gpad_lockon_enabled": (1, 0, 1),
+    "aim_turnrate_yaw": (260, 0, 1000),
+    "aim_turnrate_pitch": (90, 0, 1000),
+    "aim_turnrate_yaw_ads": (90, 0, 1000),
+    "aim_turnrate_pitch_ads": (55, 0, 1000),
+}
 
 
 def read_settings(config):
@@ -61,7 +74,7 @@ def spec_ops_arguments(game, size):
     # Hardware autoconfiguration runs after the profile is read. Restore the
     # snapshot afterward and restart the renderer to apply latched settings.
     # A cfg avoids the engine's limit on the number of +commands at startup.
-    keys = (*SHARED_GRAPHICS, "r_noBorder", "mw2_sp_fov", "mw2_sp_fovScale")
+    keys = (*SHARED_GRAPHICS, *SHARED_CONTROLLER, "r_noBorder", "mw2_sp_fov", "mw2_sp_fovScale")
     if size:
         values["r_mode"] = size
         yield from ("+set", "r_mode", size)
@@ -78,6 +91,22 @@ def prepare(game, spec_ops=False):
     config.parent.mkdir(parents=True, exist_ok=True)
     if spec_ops:
         import_spec_ops_graphics(config)
+        marker = config.parent / ".mw2-sp-controller-v1"
+        if not marker.exists():
+            multiplayer = config.parent / "iw4x_config.cfg"
+            values = read_settings(multiplayer) if multiplayer.exists() else {}
+            text = config.read_text() if config.exists() else ""
+            for key, (default, low, high) in SHARED_CONTROLLER.items():
+                try:
+                    value = float(values.get(key, default))
+                except ValueError:
+                    value = default
+                if not low <= value <= high:
+                    value = default
+                text = re.sub(rf'^\s*seta?\s+{re.escape(key)}\s+[^\r\n]*$', "", text, flags=re.MULTILINE)
+                text = text.rstrip() + f'\nseta {key} "{value:g}"\n'
+            config.write_text(text)
+            marker.touch()
     text = config.read_text() if config.exists() else ""
     existing = set(re.findall(r"^\s*seta?\s+(\S+)", text, re.MULTILINE))
     defaults = {

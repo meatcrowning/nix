@@ -2,6 +2,32 @@
 
 let
   wine = pkgs.wineWow64Packages.stable;
+  specOpsController = pkgs.pkgsCross.mingw32.stdenv.mkDerivation {
+    pname = "mw2-spec-ops-controller";
+    version = "1";
+    src = ./mw2-controller;
+    dontConfigure = true;
+    nativeBuildInputs = [ pkgs.buildPackages.stdenv.cc ];
+    preBuild = ''
+      ${pkgs.buildPackages.stdenv.cc}/bin/cc -std=c11 -Wall -Wextra -Werror test.c -lm -o test-controller
+      ./test-controller
+    '';
+    buildPhase = ''
+      runHook preBuild
+      $CC -std=c11 -O2 -mstackrealign -Wall -Wextra -Werror -shared controller.c -o mw2-controller.dll \
+        -Wl,--kill-at -static-libgcc -lxinput -luser32
+      $CC -std=c11 -O2 -Wall -Wextra -Werror -municode loader.c -o mw2-controller.exe -static-libgcc
+      $CC -std=c11 -O2 -mstackrealign -Wall -Wextra -Werror test-native.c -o test-native.exe \
+        -static-libgcc -lxinput -luser32
+      runHook postBuild
+    '';
+    installPhase = ''
+      mkdir -p "$out/bin"
+      cp mw2-controller.{dll,exe} "$out/bin/"
+      mkdir -p "$out/libexec"
+      cp test-native.exe "$out/libexec/"
+    '';
+  };
   client = pkgs.fetchurl {
     name = "iw4x.dll";
     url = "https://github.com/iw4x/iw4x-client/releases/download/r5149/iw4x.dll";
@@ -89,13 +115,19 @@ let
       fi
       cp -f ${pkgs.dxvk.bin}/x32/d3d9.dll "$WINEPREFIX/drive_c/windows/syswow64/d3d9.dll"
       if [[ "$mode" == spec-ops ]]; then
+        # The native input hooks are specific to this SP159 client and payload.
+        (cd "$game"; sha256sum --check --status <<'HASHES'
+      8ba01f52ae5075ef9fcf8bebf0c2335b66015eb15aee72e0c633ae2b87075043  iw4x-sp.exe
+      9480909b18cf5a4ec483c989aafce929d2172c5f9448f8c23b723683d1a43565  data/iw4sp.exe
+      HASHES
+        ) || { echo "Unsupported Spec Ops executable for native controller support"; exit 1; }
         arguments=$(python3 ${./modern-warfare-2-settings.py} "$game" --spec-ops --launch-args)
         mapfile -t extra <<< "$arguments"
         mkdir -p "$game/spdata/scripts"
         cp -f ${./modern-warfare-2-graphics.gsc} "$game/spdata/scripts/nix_graphics.gsc"
         cd "$game"
         bwrap --unshare-net --bind / / --dev-bind /dev /dev --proc /proc \
-          wine iw4x-sp.exe -nosteam +set net_ip 127.0.0.1 \
+          wine ${specOpsController}/bin/mw2-controller.exe -nosteam +set net_ip 127.0.0.1 \
           "''${extra[@]}" "$@"
         exit "$?"
       fi
