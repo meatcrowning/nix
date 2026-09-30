@@ -6,9 +6,78 @@ import subprocess
 import sys
 
 
+# These renderer preferences exist in both clients. Do not copy multiplayer's
+# debug/render hooks, controller dvars, bindings, or progression settings.
+SHARED_GRAPHICS = (
+    "cg_fov", "cg_fovScale", "com_maxfps",
+    "r_aaAlpha", "r_aaSamples", "r_aspectRatio", "r_customAspectRatio",
+    "r_customMode", "r_mode", "r_fullscreen", "r_multiGpu", "r_gamma",
+    "r_distortion", "r_dlightLimit", "r_dof_enable", "r_drawSun", "r_drawWater",
+    "r_glow_allowed", "r_inGameVideo", "r_lodBiasRigid", "r_lodBiasSkinned",
+    "r_lodScaleRigid", "r_lodScaleSkinned", "r_picmip", "r_picmip_bump",
+    "r_picmip_manual", "r_picmip_spec", "r_picmip_water", "r_specular",
+    "r_texFilterAnisoMax", "r_texFilterAnisoMin", "r_texFilterMipMode",
+    "r_vsync", "r_zFeather", "sm_enable", "sm_maxLights",
+)
+
+
+def read_settings(config):
+    return dict(re.findall(
+        r'^\s*seta?\s+(\S+)\s+"([^"\r\n]*)"\s*$',
+        config.read_text(), re.MULTILINE))
+
+
+def import_spec_ops_graphics(config):
+    marker = config.parent / ".mw2-sp-graphics-v1"
+    multiplayer = config.parent / "iw4x_config.cfg"
+    if marker.exists() or not multiplayer.exists():
+        return
+    values = read_settings(multiplayer)
+    settings = {key: values[key] for key in SHARED_GRAPHICS if key in values}
+    if "r_noborder" in values:
+        settings["r_noBorder"] = values["r_noborder"]
+    # SP resets these engine dvars on map load. Keep the chosen values separate
+    # for the map initialization script to restore after that reset.
+    for key in ("cg_fov", "cg_fovScale"):
+        if key in settings:
+            settings[key.replace("cg_", "mw2_sp_")] = settings[key]
+    if not settings:
+        return
+    text = config.read_text() if config.exists() else ""
+    backup = config.with_suffix(".cfg.before-mp-graphics")
+    if config.exists() and not backup.exists():
+        backup.write_text(text)
+    for key, value in settings.items():
+        pattern = rf'^\s*seta?\s+{re.escape(key)}\s+[^\r\n]*$'
+        text = re.sub(pattern, "", text, flags=re.MULTILINE | re.IGNORECASE)
+        text = text.rstrip() + f'\nseta {key} "{value}"\n'
+    config.write_text(text)
+    # Import once, so subsequent changes in the Spec Ops menu remain editable.
+    marker.touch()
+
+
+def spec_ops_arguments(game, size):
+    values = read_settings(game / "players/iw4x_sp_config.cfg")
+    # Hardware autoconfiguration runs after the profile is read. Restore the
+    # snapshot afterward and restart the renderer to apply latched settings.
+    # A cfg avoids the engine's limit on the number of +commands at startup.
+    keys = (*SHARED_GRAPHICS, "r_noBorder", "mw2_sp_fov", "mw2_sp_fovScale")
+    if size:
+        values["r_mode"] = size
+        yield from ("+set", "r_mode", size)
+    startup = game / "spdata/nix_graphics.cfg"
+    startup.parent.mkdir(parents=True, exist_ok=True)
+    startup.write_text("".join(
+        f'seta {key} "{values[key]}"\n' for key in keys if key in values
+    ) + "vid_restart\n")
+    yield from ("+exec", "nix_graphics.cfg")
+
+
 def prepare(game, spec_ops=False):
     config = game / ("players/iw4x_sp_config.cfg" if spec_ops else "players/iw4x_config.cfg")
     config.parent.mkdir(parents=True, exist_ok=True)
+    if spec_ops:
+        import_spec_ops_graphics(config)
     text = config.read_text() if config.exists() else ""
     existing = set(re.findall(r"^\s*seta?\s+(\S+)", text, re.MULTILINE))
     defaults = {
@@ -62,5 +131,9 @@ def resolution():
 
 if __name__ == "__main__":
     size = resolution()
-    prepare(Path(sys.argv[1]), spec_ops="--spec-ops" in sys.argv[2:])
-    print(size)
+    game = Path(sys.argv[1])
+    prepare(game, spec_ops="--spec-ops" in sys.argv[2:])
+    if "--launch-args" in sys.argv[2:]:
+        print("\n".join(spec_ops_arguments(game, size)))
+    else:
+        print(size)
