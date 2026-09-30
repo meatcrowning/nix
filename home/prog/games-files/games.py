@@ -100,7 +100,12 @@ def command(game):
     runner = game["runner"]
     args = game.get("args", [])
     if runner == "proton":
-        return ["umu-run", str(path), *args], path.parent
+        # Wine may reassign removable-drive letters during startup, invalidating
+        # the inherited Windows cwd. Set it after startup through the stable Z:
+        # mapping, so relative resource paths still resolve inside the game.
+        windows_cwd = "Z:" + str(path.parent).replace("/", "\\")
+        return ["umu-run", "C:\\windows\\system32\\start.exe", "/wait",
+                "/d", windows_cwd, "/unix", str(path), *args], path.parent
     if runner == "steam-run":
         return ["steam-run", f"./{path.name}", *args], path.parent
     if runner == "pcsx2":
@@ -165,6 +170,9 @@ def run(slug):
         env.update(WINEPREFIX=str(prefix), PROTONPATH=str(PROTON),
                    GAMEID="umu-default", STORE="none")
         import_registry(game, prefix, env)
+        # umu sees start.exe as the executable; keep the actual game directory
+        # available to its runtime mounts and Proton's game-drive setup.
+        env["STEAM_COMPAT_INSTALL_PATH"] = str(cwd)
     if cwd:
         os.chdir(cwd)
     os.execvpe(argv[0], argv, env)
