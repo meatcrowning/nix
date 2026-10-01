@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Focusable } from '@decky/ui/dist/components/Focusable';
-import { Navigation } from '@decky/ui/dist/modules/Router';
+import { findFocusable, steamNavigation } from './steam.mjs';
 import { afterPatch } from '@decky/ui/dist/utils/patcher';
 import { definePlugin, routerHook } from '@decky/api';
 import { libraryGroups, edgeFades, revealScroll } from './model.mjs';
@@ -8,6 +7,12 @@ import css from './style.css';
 
 let rememberedApp = null, rememberedScroll = 0;
 const store = () => window.appStore;
+let Focusable;
+function resolveSteamUI() {
+  window.webpackChunksteamui.push([[Symbol('home-library-grid')], {}, requireModule => {
+    Focusable = findFocusable(requireModule);
+  }]);
+}
 
 function artwork(app, kind) {
   if (!app) return [];
@@ -76,9 +81,9 @@ function HomeGrid() {
       preferredFocus={app.appid === (rememberedApp || all[0]?.appid)}
       onGamepadFocus={e => select(app, e.currentTarget || e.target)}
       onFocus={e => select(app, e.currentTarget)}
-      onActivate={() => Navigation.Navigate(`/library/app/${app.appid}`)}
+      onActivate={() => steamNavigation().Navigate(`/library/app/${app.appid}`)}
       onOKActionDescription="Select" onCancelActionDescription="Back"
-      onCancel={() => Navigation.NavigateBack()}>
+      onCancel={() => steamNavigation().NavigateBack()}>
       <span className="hlg-fallback">{app.display_name}</span>
       <Picture key={`${app.appid}-${app.rt_custom_image_mtime}-${app.local_cache_version}`} sources={artwork(app, 'cover')} lazy />
       {downloadable && <span className="hlg-download" aria-hidden="true">↓</span>}
@@ -119,6 +124,7 @@ function replacePage(node) {
 }
 
 export default definePlugin(() => {
+  resolveSteamUI();
   if (!Focusable || !store()) throw new Error('Steam library components are unavailable');
   const patches = [], patched = new WeakSet();
   const patchType = (object, handler) => {
@@ -128,12 +134,15 @@ export default definePlugin(() => {
   };
   const patch = routerHook.addPatch('/library/home', props => {
     patchType(props.children, (_args, result) => {
-      patchType(result?.type, (_args, page) => replacePage(page));
+      patchType(result?.type, (_args, page) => {
+        try { return replacePage(page); }
+        catch (error) { console.error('[Home Library Grid] Keeping native Home', error); return page; }
+      });
       return result;
     });
     return props;
   });
-  return { name: 'Home Library Grid', title: <div>Home Library Grid</div>,
+  return { name: 'Home Library Grid', titleView: <div>Home Library Grid</div>,
     content: <div style={{ padding: 16 }}>Installed games and shortcuts first, then your games available to install.</div>,
     icon: <span>▦</span>, onDismount() {
       routerHook.removePatch('/library/home', patch);
@@ -141,4 +150,4 @@ export default definePlugin(() => {
     } };
 });
 
-export { HomeGrid, replacePage };
+export { HomeGrid, replacePage, resolveSteamUI };
