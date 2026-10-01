@@ -10,7 +10,8 @@ test('local games and shortcuts precede owned installable games, without tools o
   const remote = game(9, { per_client_data: [{ clientid: 'remote', installed: true },
     { clientid: '0', is_available_on_current_platform: true, display_status: 9 }] });
   const groups = libraryGroups([game(1), remote, shortcut, local, local,
-    game(2, { app_type: 4 }), game(3, { subscribed_to: false }),
+    game(2, { app_type: 4 }), game(11, { app_type: 32 }), game(12, { app_type: 2 }),
+    game(3, { subscribed_to: false }),
     game(4, { BIsUnreleased: () => true }), game(5, { visible_in_game_list: false }),
     game(6, { local_per_client_data: { is_available_on_current_platform: false } }),
     game(10, { BIsAppBlocked: () => true })]);

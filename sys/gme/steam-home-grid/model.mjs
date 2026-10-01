@@ -6,7 +6,7 @@ export function libraryGroups(apps) {
     if (!app.appid || seen.has(app.appid)) continue;
     seen.add(app.appid);
     const shortcut = app.BIsShortcut?.() ?? app.app_type === 1073741824;
-    if (!shortcut && ![1, 2, 32].includes(app.app_type)) continue;
+    if (!shortcut && app.app_type !== 1 && !app.BIsDemo?.()) continue;
     if (app.visible_in_game_list === false || app.BIsAppBlocked?.()) continue;
     const local = app.local_per_client_data ?? app.per_client_data?.find(c => String(c.clientid) === '0');
     if (shortcut || local?.installed) ready.push(app);
