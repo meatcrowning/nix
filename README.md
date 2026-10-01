@@ -1,6 +1,6 @@
 # `nixos/hyprland/qs/plasma/...`
 
-monorepo for what is essentially my entire system. point an agent at this and ask it to explain. 
+monorepo for what is essentially my entire system (and some random side projects). point an agent at this and ask it to explain. 
 
 screenshots of individual programs and hyprland setup below. all programs are native-styled in both hyprland and kde plasma. not shown; filer, player, reader, viewer, goetia, editor, and askpass:
 
