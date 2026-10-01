@@ -1,0 +1,10 @@
+{
+  "name": "OLED Black",
+  "author": "local",
+  "version": "1.0.0",
+  "manifest_version": 8,
+  "target": "System-Wide",
+  "inject": {
+    "shared.css": ["SP", "MainMenu", "QuickAccess", "Steam", "SteamDialog.*", "~https://store.steampowered.com/~"]
+  }
+}

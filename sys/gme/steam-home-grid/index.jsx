@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { findFocusable, steamNavigation } from './steam.mjs';
 import { afterPatch } from '@decky/ui/dist/utils/patcher';
-import { definePlugin, routerHook } from '@decky/api';
-import { libraryGroups, edgeFades, revealScroll } from './model.mjs';
+import { definePlugin, routerHook, callable } from '@decky/api';
+import { libraryGroups, edgeFades, revealScroll, metadataLine } from './model.mjs';
 import css from './style.css';
 
 let rememberedApp = null, rememberedScroll = 0;
 const store = () => window.appStore;
+const readMetadata = callable('library_metadata');
 let Focusable;
 function resolveSteamUI() {
   window.webpackChunksteamui.push([[Symbol('home-library-grid')], {}, requireModule => {
@@ -33,6 +34,13 @@ function Picture({ sources, className, lazy = false }) {
 }
 
 function HomeGrid() {
+  const [metadata, setMetadata] = useState({});
+  useEffect(() => {
+    let active = true;
+    readMetadata().then(data => { if (active) setMetadata(data || {}); })
+      .catch(error => console.warn('[Home Library Grid] Metadata unavailable', error));
+    return () => { active = false; };
+  }, []);
   const [groups, setGroups] = useState(() => libraryGroups(store().allApps));
   const all = [...groups.ready, ...groups.available];
   const [selected, setSelected] = useState(() => all.find(a => a.appid === rememberedApp) || all[0]);
@@ -75,7 +83,7 @@ function HomeGrid() {
     }
   };
   const renderGroup = (label, apps, downloadable) => apps.length ? <React.Fragment key={label}>
-    <h2 className="hlg-section">{label}<span>{apps.length}</span></h2>
+    {downloadable && <h2 className="hlg-section">{label}<span>{apps.length}</span></h2>}
     {apps.map(app => <Focusable key={app.appid} className="hlg-card" noFocusRing
       data-appid={app.appid} aria-label={`${app.display_name}${downloadable ? ', available to install' : ''}`}
       preferredFocus={app.appid === (rememberedApp || all[0]?.appid)}
@@ -93,10 +101,10 @@ function HomeGrid() {
     <style>{css}</style>
     <div className="hlg-hero"><Picture key={`${selected?.appid}-${selected?.rt_custom_image_mtime}`} sources={artwork(selected, 'hero')} /></div>
     <div className="hlg-heading"><h1>{selected?.display_name || 'Your library'}</h1>
-      <span>{selected && (groups.ready.includes(selected) ? 'Ready to play' : 'Available to install')}</span></div>
+      <span>{metadataLine(selected, metadata[selected?.appid])}</span></div>
     <div className="hlg-scroll" ref={viewport} onScroll={measure} data-fade-top={edges.top} data-fade-bottom={edges.bottom}>
       <Focusable className="hlg-covers" flow-children="grid" autoFocus>
-        {renderGroup('Ready to play', groups.ready, false)}
+        {renderGroup('Installed', groups.ready, false)}
         {renderGroup('Available to install', groups.available, true)}
         {!all.length && <div className="hlg-empty">Your library is loading…</div>}
       </Focusable>

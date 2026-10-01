@@ -435,8 +435,13 @@ def artwork(game):
         base = f"https://raw.githubusercontent.com/libretro-thumbnails/{system}/master"
         if fetch(f"{base}/Named_Boxarts/{urllib.parse.quote(title)}.png", art / "p.png"):
             found["p"] = art / "p.png"
-        if fetch(f"{base}/Named_Titles/{urllib.parse.quote(title)}.png", art / "hero.png"):
-            found["_hero"] = art / "hero.png"
+        # A title-screen thumbnail is not a hero image. Curated promotional
+        # artwork lives separately so cached thumbnails never replace it.
+        for extension in ("png", "jpg", "webp"):
+            curated = art / f"hero-curated.{extension}"
+            if curated.exists():
+                found["_hero"] = curated
+                break
         return found
     app = steam_store_id(game)
     if not app:
@@ -482,8 +487,9 @@ def steam(games):
                 "LastPlayTime": 0, "FlatpakAppID": "", "tags": {},
             })
             for suffix, src in arts[game["slug"]].items():
-                for old in grid.glob(f"{app}{suffix}.*"):
-                    old.unlink()
+                # SteamGridDB and manual selections belong to the user.
+                if any(grid.glob(f"{app}{suffix}.*")):
+                    continue
                 shutil.copyfile(src, grid / f"{app}{suffix}{src.suffix}")
         if path.exists():
             shutil.copyfile(path, path.with_name("shortcuts.vdf.bak"))

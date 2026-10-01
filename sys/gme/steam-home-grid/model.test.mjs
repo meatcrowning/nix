@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { libraryGroups, edgeFades, revealScroll } from './model.mjs';
+import { libraryGroups, edgeFades, revealScroll, metadataLine } from './model.mjs';
 const game = (id, extra = {}) => ({ appid: id, display_name: `Game ${id}`, app_type: 1,
   subscribed_to: true, visible_in_game_list: true,
   per_client_data: [{ clientid: '0', is_available_on_current_platform: true }], ...extra });
@@ -42,4 +42,12 @@ test('component discovery does not trigger Decky React trampoline getters', asyn
   requireModule.m = modules;
   assert.equal(findFocusable(requireModule), native);
   assert.equal(getterReads, 0);
+});
+
+test('metadata uses console-specific credits and omits unknown shortcut details', () => {
+  const app = { BIsShortcut: () => true, rt_original_release_date: 946684800 };
+  assert.equal(metadataLine(app, {console: 'GameCube', year: '2002', developer: 'Example'}), 'GameCube · 2002 · Example');
+  assert.equal(metadataLine({BIsShortcut: () => true}, {console: 'Game Boy Advance'}), 'Game Boy Advance');
+  assert.equal(metadataLine({rt_original_release_date: 946684800}), 'PC · 2000');
+  assert.equal(metadataLine(null), '');
 });
