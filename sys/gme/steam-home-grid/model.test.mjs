@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { libraryGroups, edgeFades, revealScroll, metadataLine, displayTitle, adjacentApp } from './model.mjs';
+import { libraryGroups, edgeFades, revealScroll, metadataLine, displayTitle, adjacentApp, verticalNeighbor } from './model.mjs';
 const game = (id, extra = {}) => ({ appid: id, display_name: `Game ${id}`, app_type: 1,
   subscribed_to: true, visible_in_game_list: true,
   per_client_data: [{ clientid: '0', is_available_on_current_platform: true }], ...extra });
@@ -46,9 +46,9 @@ test('component discovery does not trigger Decky React trampoline getters', asyn
 
 test('metadata uses console-specific credits and omits unknown shortcut details', () => {
   const app = { BIsShortcut: () => true, rt_original_release_date: 946684800 };
-  assert.equal(metadataLine(app, {console: 'GameCube', year: '2002', developer: 'Example'}), 'GameCube · 2002 · Example');
-  assert.equal(metadataLine({BIsShortcut: () => true}, {console: 'Game Boy Advance'}), 'Game Boy Advance');
-  assert.equal(metadataLine({rt_original_release_date: 946684800}), 'PC · 2000');
+  assert.equal(metadataLine(app, {console: 'GameCube', year: '2002', developer: 'Example'}), '2002 · Example');
+  assert.equal(metadataLine({BIsShortcut: () => true}, {console: 'Game Boy Advance'}), '');
+  assert.equal(metadataLine({rt_original_release_date: 946684800}), '2000');
   assert.equal(metadataLine(null), '');
 });
 
@@ -87,4 +87,14 @@ test('release sorting puts unknown dates last in either direction; developer gro
   assert.deepEqual(librarySections(groups,metadata,'developer').map(s=>s.label),['Studio A','Studio B','Unknown developer']);
   assert.equal(validSort('bad-value'),'recent');
   assert.equal(validSort('console'),'console');
+});
+
+test('vertical navigation keeps the nearest column through short rows and group headings', () => {
+  const cards = [{appid:1,top:0,left:0,width:90},{appid:2,top:0,left:100,width:90},
+    {appid:3,top:150,left:0,width:90},{appid:4,top:350,left:0,width:90},{appid:5,top:350,left:100,width:90}];
+  assert.equal(verticalNeighbor(cards,2,1),3);
+  assert.equal(verticalNeighbor(cards,3,1),4);
+  assert.equal(verticalNeighbor(cards,5,-1),3);
+  assert.equal(verticalNeighbor(cards,1,-1),undefined);
+  assert.equal(verticalNeighbor(cards,5,1),undefined);
 });
