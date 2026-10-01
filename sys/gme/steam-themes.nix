@@ -53,6 +53,9 @@ let
     unzip -q ${cssArchive} -d "$out/plugins"
     unzip -q ${steamGridDbArchive} -d "$out/plugins"
     ${lib.concatMapStringsSep "\n" (archive: ''unzip -q ${archive} -d "$out/themes"'') themeArchives}
+    mkdir -p "$out/migrations"
+    cp "$out/themes/More Library Icons/shared.css" "$out/migrations/library-icons-upstream.css"
+    cp ${./steam-library-icons.css} "$out/themes/More Library Icons/shared.css"
     for theme in "$out/themes/"*; do
       echo '{"active":true}' > "$theme/config_USER.json"
     done
@@ -67,6 +70,9 @@ in
     description = "Steam Big Picture themes (Decky Loader)";
     wantedBy = [ "multi-user.target" ];
     after = [ "network.target" ];
+    # Decky's reinjection can restart steamwebhelper. Apply theme-only changes
+    # through CSS Loader; pick up service/package changes on the next boot.
+    restartIfChanged = false;
     path = [ pkgs.coreutils pkgs.systemd pkgs.psmisc ];
     environment = {
       UNPRIVILEGED_USER = user;
@@ -93,6 +99,13 @@ in
           chown -R ${user}:users "$destination"
         fi
       done
+      # Migrate only the exact upstream file, preserving any user CSS edits.
+      if cmp -s '${state}/themes/More Library Icons/shared.css' \
+          ${seed}/migrations/library-icons-upstream.css; then
+        install -m 644 -o ${user} -g users \
+          '${seed}/themes/More Library Icons/shared.css' \
+          '${state}/themes/More Library Icons/shared.css'
+      fi
       # Steam reads this on its next launch; never restart the live client.
       install -d -o ${user} -g users '${userHome}/.local/share/Steam'
       touch '${userHome}/.local/share/Steam/.cef-enable-remote-debugging'
