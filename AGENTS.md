@@ -1,13 +1,66 @@
 # AGENTS.md — ~/nix
 
 This is a live desktop with no CI or staging host. Use IPC, logs, and isolated
-harnesses for verification. Finish changes: edit → verify → focused commit →
-host rebuild → push to main. Keep replies concise; report the result and commit,
-plus any problem the user needs to know about.
+harnesses for verification. For implementation tasks, finish the work: edit →
+verify → focused commit → host rebuild when required → push to main. Questions
+and reviews alone do not authorize changes. Documentation-only changes need no
+rebuild; live app source exceptions are listed under Applying changes. Keep
+replies concise; report the result and commit, plus any problem the user needs
+to know about.
 
 This guide applies to every agent. CLAUDE.md is its symlink; edit this file.
 Read the relevant nested guide before editing; the closest guide wins, and
 explicit user instructions take precedence. Do not add nested CLAUDE.md files.
+
+## Ownership and permissions
+
+Preserve unrelated working-tree edits. Never use git reset --hard,
+git checkout --, git restore, git stash, or git clean; never hand-edit
+Nix-store symlinks. Tracked edits need no staging for evaluation; new files use
+git add -N path.
+
+Commit through tools/git-commit.sh with explicit -- <paths>. A pathspec takes
+the whole file: review every hunk; use --hunks for mixed ownership or --yes-file
+PATH for a reviewed large edit. Never use pathless commits or -a. Subjects are
+imperative, lowercase, ≤72 characters; include a Co-Authored-By trailer.
+Push main. Remove landed worktrees and their branches, then run
+tools/prune-worktrees.sh.
+
+Ask before changing compositor/Quickshell pins (including hyprland-air),
+panel/plugin/view-gesture architecture, login/logout behavior, or next-login
+app launches. Also ask before deleting/reorganizing anything outside this repo,
+force-pushing history, or committing edits whose ownership is unclear.
+
+## Test isolation
+
+Never let tests touch the user's focus, pointer, clipboard/primary selection,
+windows/workspaces, notifications/OSDs, audio/MPRIS, gamma, brightness, cursor
+theme, screen, or systemd user-manager environment. Do not launch test apps on
+the real monitor, take live screenshots, synthesize input, script hyprvtb window
+actions, or call save_session() (manual Meta+Ctrl+S only).
+The user performs visual/interaction checks. If IPC/logs/traces cannot resolve
+a visual bug, request permission for the specific live test and turn.
+
+Use tools/sandbox.sh start|exec CMD|shot|clients|stop or
+QT_QPA_PLATFORM=offscreen. Source tools/lib/session-guard.sh and immediately
+use the matching guard: sg_require_nested, sg_require_offscreen,
+sg_require_live_session, sg_seat_snapshot, sg_seat_assert; use
+sg_pointer_pin CMD… only for a compositor-side cursor snap.
+Abort on isolation failure; never fall through to inherited display/compositor
+environment. Put teardown in a trap. Nested hyprvtb harnesses instead require
+their own positive per-run config-path check and must not source this guard.
+
+Sandbox exec verifies headless placement. Preflight's tools/leak-check.sh
+warns about leaked sessions, stale locks/environment, test windows, and moved
+seat/pointer. Repair with ~/.config/scripts/hypr-session-env.sh --restore and
+tools/sandbox.sh stop. Never enable FONT_DEMO_ON_HIS_SCREEN=1 or run
+heavy-gate.sh demo as a test; boot-verify.sh --vm is opt-in.
+
+Read-only checks include qs log, qs ipc call view geom, qs ipc call view trace,
+qs ipc call state carried, qs ipc call launcher geom,
+qs ipc call wallpaper status, hyprctl plugin list, hyprctl configerrors,
+and hyprctl layers. Use the per-area harnesses and qmllint with correct
+import paths. seed-drift.sh --pre-switch reports expected reconciliation.
 
 ## Host and commands
 
@@ -16,7 +69,7 @@ absent, run hostname. top is NixOS; book is Fedora Asahi, flake host air.
 Do not infer the active compositor from defaults or the host from the kernel.
 Name hosts explicitly in synced notes and hardware/rebuild dispatches.
 
-Run from /home/lam/nix:
+Run from /home/lam/nix; choose the matching host rebuild only when required:
 
 ~~~bash
 git status --short
@@ -68,42 +121,6 @@ also verifies the public noreply Git identity (home/git-privacy.nix).
 - Apps run live Python/QML source and need no rebuild unless packaging or
   dependencies change. Do not relaunch the user's apps for verification.
 - nix-pull [check|apply] is the only pull/apply path; it uses --ff-only.
-
-Ask before changing compositor/Quickshell pins (including hyprland-air),
-panel/plugin/view-gesture architecture, login/logout behavior, or next-login
-app launches. Also ask before deleting/reorganizing anything outside this repo,
-force-pushing history, or committing edits whose ownership is unclear.
-
-## Test isolation
-
-Never let tests touch the user's focus, pointer, clipboard/primary selection,
-windows/workspaces, notifications/OSDs, audio/MPRIS, gamma, brightness, cursor
-theme, screen, or systemd user-manager environment. Do not launch test apps on
-the real monitor, take live screenshots, synthesize input, script hyprvtb window
-actions, or call save_session() (manual Meta+Ctrl+S only).
-The user performs visual/interaction checks. If IPC/logs/traces cannot resolve
-a visual bug, request permission for the specific live test and turn.
-
-Use tools/sandbox.sh start|exec CMD|shot|clients|stop or
-QT_QPA_PLATFORM=offscreen. Source tools/lib/session-guard.sh and immediately
-use the matching guard: sg_require_nested, sg_require_offscreen,
-sg_require_live_session, sg_seat_snapshot, sg_seat_assert; use
-sg_pointer_pin CMD… only for a compositor-side cursor snap.
-Abort on isolation failure; never fall through to inherited display/compositor
-environment. Put teardown in a trap. Nested hyprvtb harnesses instead require
-their own positive per-run config-path check and must not source this guard.
-
-Sandbox exec verifies headless placement. Preflight's tools/leak-check.sh
-warns about leaked sessions, stale locks/environment, test windows, and moved
-seat/pointer. Repair with ~/.config/scripts/hypr-session-env.sh --restore and
-tools/sandbox.sh stop. Never enable FONT_DEMO_ON_HIS_SCREEN=1 or run
-heavy-gate.sh demo as a test; boot-verify.sh --vm is opt-in.
-
-Read-only checks include qs log, qs ipc call view geom, qs ipc call view trace,
-qs ipc call state carried, qs ipc call launcher geom,
-qs ipc call wallpaper status, hyprctl plugin list, hyprctl configerrors,
-and hyprctl layers. Use the per-area harnesses and qmllint with correct
-import paths. seed-drift.sh --pre-switch reports expected reconciliation.
 
 ## Layout and references
 
@@ -170,19 +187,7 @@ import paths. seed-drift.sh --pre-switch reports expected reconciliation.
   (loopback + per-run token, hash-checked all-or-nothing saves, renames use
   git add -N, never commits). Test it with --root on a scratch clone.
 
-## Git and documentation
-
-Preserve unrelated working-tree edits. Never use git reset --hard,
-git checkout --, git restore, git stash, or git clean; never hand-edit
-Nix-store symlinks. Tracked edits need no staging for evaluation; new files use
-git add -N path.
-
-Commit through tools/git-commit.sh with explicit -- <paths>. A pathspec takes
-the whole file: review every hunk; use --hunks for mixed ownership or --yes-file
-PATH for a reviewed large edit. Never use pathless commits or -a. Subjects are
-imperative, lowercase, ≤72 characters; include a Co-Authored-By trailer.
-Push main. Remove landed worktrees and their branches, then run
-tools/prune-worktrees.sh.
+## Documentation
 
 Keep guides to commands, ownership, architecture, and non-obvious constraints.
 Document a fact once, near its owner; comments explain reasons the code cannot.
