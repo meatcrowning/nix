@@ -15,6 +15,47 @@ let
     url = "https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/6d6eca184677dc9ff7736439ee7a575ca8ab386c5ffb1627d446bc43dbd1ecf3.zip";
     sha256 = "6d6eca184677dc9ff7736439ee7a575ca8ab386c5ffb1627d446bc43dbd1ecf3";
   };
+  audioArchive = pkgs.fetchurl {
+    url = "https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/fd5a090c2e2cd4da6723d7bd08937ab31b9f8d4663510431713da531343e303f.zip";
+    sha256 = "fd5a090c2e2cd4da6723d7bd08937ab31b9f8d4663510431713da531343e303f";
+  };
+  audioPlugin = pkgs.runCommand "steam-audio-loader" {
+    nativeBuildInputs = [ pkgs.unzip pkgs.python3 ];
+  } ''
+    unzip -q ${audioArchive}
+    mv SDH-AudioLoader "$out"
+    chmod -R u+w "$out"
+    python3 ${./steam-audio/patch.py} "$out/dist/index.js" ${./steam-audio/bridge.js}
+  '';
+  audioPacks = map (pack: pkgs.fetchurl {
+    url = "https://api.deckthemes.com/blobs/${pack.id}";
+    inherit (pack) hash;
+  }) [
+    { # Nintendo GameCube Menu SFX
+      id = "dc05a069-161e-483d-aaeb-627c37a3c865";
+      hash = "sha256-6CaWnSrwITiqnnrj5B1RUn4AICBXGfv0KvnFQGEZhmA=";
+    }
+    { # Kingdom Hearts Menu
+      id = "f8c3d003-0106-4691-84b1-30b546c071ca";
+      hash = "sha256-HlNroYeTbx94rPArscXaI2GMsjHmkd/2gzkwX6ibbY8=";
+    }
+    { # NFS Underground PS2 Beta UI sounds
+      id = "692ba5df-b978-44ee-bb8f-139f1bdde158";
+      hash = "sha256-jiyssSJll/eBncitSAeiTFzoxmFQESTxqi6XXVFzY5M=";
+    }
+    { # Metal Gear Solid SFX Pack for AudioLoader
+      id = "62332540-4629-4e30-903d-0943b699335f";
+      hash = "sha256-xYja6pCcSONJ4A5OU3YaZ9EJ9viBHZSAgXblZt4A7SM=";
+    }
+    { # Xbox 360 Metro UI Sounds
+      id = "25296c42-7750-463a-af4a-68fa31aaae0b";
+      hash = "sha256-bmu8tA+aJ8P5xDvCWIuKuzGTFSB1FwgnBYsNUgWvn2g=";
+    }
+    { # PS2 Ambience
+      id = "85cdba2c-e85b-49d1-b38d-01556962768f";
+      hash = "sha256-10KTFIOmK9d9G1o87GkHnwq2VtGQyn35w2LlSdIp0Ho=";
+    }
+  ];
   deckyUi = pkgs.fetchurl {
     url = "https://registry.npmjs.org/@decky/ui/-/ui-4.12.1.tgz";
     hash = "sha256-G6HEPZPN+DrdiCr+DdYsewF0aBl+AGVkq2XAvz43eN4=";
@@ -71,8 +112,10 @@ let
   seed = pkgs.runCommand "steam-big-picture-theme-seed" {
     nativeBuildInputs = [ pkgs.unzip ];
   } ''
-    mkdir -p "$out/plugins" "$out/themes"
+    mkdir -p "$out/plugins" "$out/themes" "$out/sounds"
     unzip -q ${cssArchive} -d "$out/plugins"
+    cp -R ${audioPlugin} "$out/plugins/SDH-AudioLoader"
+    ${lib.concatMapStringsSep "\n" (archive: ''unzip -q ${archive} -d "$out/sounds"'') audioPacks}
     unzip -q ${steamGridDbArchive} -d "$out/plugins"
     cp -R ${homeGrid} "$out/plugins/home-library-grid"
     cp -R ${./steam-oled} "$out/themes/OLED Black"
@@ -107,7 +150,7 @@ in
       KEEP_SYSTEMD_SERVICE = "1";
     };
     preStart = ''
-      install -d -o ${user} -g users ${state}/{plugins,themes,settings,data,logs}
+      install -d -o ${user} -g users ${state}/{plugins,themes,sounds,settings,data,logs}
       for plugin in ${seed}/plugins/*; do
         destination="${state}/plugins/$(basename "$plugin")"
         if [ ! -e "$destination" ]; then
@@ -124,6 +167,18 @@ in
           chown -R ${user}:users "$destination"
         fi
       done
+      for pack in ${seed}/sounds/*; do
+        destination="${state}/sounds/$(basename "$pack")"
+        if [ ! -e "$destination" ]; then
+          cp -R "$pack" "$destination"
+          chmod -R u+w "$destination"
+          chown -R ${user}:users "$destination"
+        fi
+      done
+      # Pin the Home audio integration; user pack selections remain mutable.
+      cp -R ${audioPlugin}/. '${state}/plugins/SDH-AudioLoader/'
+      chmod -R u+w '${state}/plugins/SDH-AudioLoader'
+      chown -R ${user}:users '${state}/plugins/SDH-AudioLoader'
       # This local plugin is declarative; unlike downloaded plugins, update it
       # on every boot. Live updates use Decky's plugin import, never a restart.
       cp -R ${homeGrid}/. '${state}/plugins/home-library-grid/'

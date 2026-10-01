@@ -34,8 +34,7 @@ export function metadataLine(app, details = {}) {
   if (!app) return '';
   const timestamp = app.rt_original_release_date || app.rt_steam_release_date;
   const year = details.year || (timestamp ? new Date(timestamp * 1000).getUTCFullYear() : '');
-  const platform = systemName(app, details);
-  return [platform, year, details.developer].filter(Boolean).join(' · ');
+  return [year, details.developer].filter(Boolean).join(' · ');
 }
 
 // Strip only explicit platform suffixes, preserving years and edition names.
@@ -90,4 +89,14 @@ export function librarySections(groups, metadata, mode) {
     } else if (apps.length) sections.push({ key, label: downloadable ? 'Available to install' : '', apps: apps.sort(compare), downloadable });
   }
   return sections;
+}
+
+// Use untransformed card positions; group headings and short rows add gaps.
+export function verticalNeighbor(cards, appid, step) {
+  const current = cards.find(card => card.appid === appid);
+  if (!current) return undefined;
+  const candidates = cards.filter(card => (card.top - current.top) * step > 1);
+  candidates.sort((a,b) => Math.abs(a.top-current.top)-Math.abs(b.top-current.top)
+    || Math.abs(a.left+a.width/2-current.left-current.width/2)-Math.abs(b.left+b.width/2-current.left-current.width/2));
+  return candidates[0]?.appid;
 }
