@@ -25,7 +25,7 @@ let
     unzip -q ${audioArchive}
     mv SDH-AudioLoader "$out"
     chmod -R u+w "$out"
-    python3 ${./steam-audio/patch.py} "$out/dist/index.js" ${./steam-audio/bridge.js}
+    python3 ${./steam-audio/patch.py} "$out/dist/index.js" ${./steam-audio/bridge.js} "$out/main.py"
   '';
   audioPacks = map (pack: pkgs.fetchurl {
     url = "https://api.deckthemes.com/blobs/${pack.id}";

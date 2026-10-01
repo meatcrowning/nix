@@ -35,3 +35,12 @@ test('invalid or failed writes never change playback, and the queue recovers',as
   const f=setup(true);await assert.rejects(f.api.write({music:'PS2 Ambience',musicEnabled:true}));
   assert.equal(f.music.length,0);assert.equal(f.api.read().musicEnabled,false);
 });
+
+test('custom effects and music use the encoded Decky asset route; Steam sounds stay native',()=>{
+  const url = vm.runInNewContext(readFileSync(new URL('./bridge.js', import.meta.url),'utf8') + '\nhomeAudioURL');
+  assert.equal(url('/sounds/deck_ui_navigation.wav'),'/sounds/deck_ui_navigation.wav');
+  assert.equal(url('/sounds_custom/PS2 Ambience/menu_music.mp3'),
+    'http://127.0.0.1:1337/plugins/Audio%20Loader/assets/sounds/PS2%20Ambience/menu_music.mp3');
+  assert.equal(url('/sounds_custom/Test #1/Select.wav'),
+    'http://127.0.0.1:1337/plugins/Audio%20Loader/assets/sounds/Test%20%231/Select.wav');
+});
