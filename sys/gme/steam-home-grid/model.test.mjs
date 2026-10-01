@@ -66,3 +66,25 @@ test('horizontal navigation follows adjacent games across rows and group heading
   assert.equal(adjacentApp(apps,1,-1),undefined);
   assert.equal(adjacentApp(apps,99,1),undefined);
 });
+
+test('sort sections group consoles while retaining installed-first ordering', async () => {
+  const {librarySections} = await import('./model.mjs');
+  const groups = {ready:[game(3), game(1), game(2)], available:[game(4)]};
+  const metadata = {1:{console:'PSP'},2:{console:'PC'},3:{console:'PSP'},4:{console:'PC'}};
+  const sections = librarySections(groups, metadata, 'console');
+  assert.deepEqual(sections.map(s => [s.label,s.apps.map(a=>a.appid)]), [
+    ['PC',[2]],['PSP',[1,3]],['PC · Available to install',[4]],
+  ]);
+  assert.deepEqual(groups.ready.map(a=>a.appid), [3,1,2]);
+});
+test('release sorting puts unknown dates last in either direction; developer groups use metadata', async () => {
+  const {librarySections, validSort} = await import('./model.mjs');
+  const groups = {ready:[game(1),game(2),game(3)], available:[]};
+  const metadata = {1:{year:'2002',developer:'Studio B'},2:{year:'1995',developer:'Studio A'}};
+  const ids = mode => librarySections(groups,metadata,mode).flatMap(s=>s.apps.map(a=>a.appid));
+  assert.deepEqual(ids('oldest'),[2,1,3]);
+  assert.deepEqual(ids('newest'),[1,2,3]);
+  assert.deepEqual(librarySections(groups,metadata,'developer').map(s=>s.label),['Studio A','Studio B','Unknown developer']);
+  assert.equal(validSort('bad-value'),'recent');
+  assert.equal(validSort('console'),'console');
+});

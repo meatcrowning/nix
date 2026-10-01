@@ -51,3 +51,43 @@ export function adjacentApp(apps, appid, step) {
   const index = apps.findIndex(app => app.appid === appid);
   return index < 0 ? undefined : apps[index + step];
 }
+
+export const sortModes = [
+  ['recent', 'Recently played'], ['title', 'Title A–Z'], ['console', 'Console'],
+  ['newest', 'Newest first'], ['oldest', 'Oldest first'], ['developer', 'Developer'],
+];
+export const validSort = value => sortModes.some(([id]) => id === value) ? value : 'recent';
+
+export function librarySections(groups, metadata, mode) {
+  const title = (a, b) => displayTitle(a).localeCompare(displayTitle(b)) || a.appid - b.appid;
+  const details = app => metadata[app.appid] || {};
+  const year = app => Number(details(app).year) || new Date((app.rt_original_release_date || app.rt_steam_release_date || 0) * 1000).getUTCFullYear();
+  const release = app => details(app).year || app.rt_original_release_date || app.rt_steam_release_date ? year(app) : null;
+  const category = app => mode === 'console' ? systemName(app, details(app)) || 'Other systems'
+    : details(app).developer || 'Unknown developer';
+  const compare = (a, b) => {
+    if (mode === 'recent') return (b.rt_last_time_played || 0) - (a.rt_last_time_played || 0) || title(a, b);
+    if (mode === 'newest' || mode === 'oldest') {
+      const ay = release(a), by = release(b);
+      return (ay === null) - (by === null) || (ay !== null && by !== null ? (ay - by) * (mode === 'newest' ? -1 : 1) : 0) || title(a, b);
+    }
+    return title(a, b);
+  };
+  const sections = [];
+  for (const [key, downloadable] of [['ready', false], ['available', true]]) {
+    const apps = [...groups[key]];
+    if (mode === 'console' || mode === 'developer') {
+      const buckets = new Map();
+      for (const app of apps) {
+        const label = category(app);
+        if (!buckets.has(label)) buckets.set(label, []);
+        buckets.get(label).push(app);
+      }
+      for (const label of [...buckets.keys()].sort((a, b) => a.localeCompare(b))) {
+        sections.push({ key: `${key}-${label}`, label: label + (downloadable ? ' · Available to install' : ''),
+          system: mode === 'console' ? label : null, apps: buckets.get(label).sort(title), downloadable });
+      }
+    } else if (apps.length) sections.push({ key, label: downloadable ? 'Available to install' : '', apps: apps.sort(compare), downloadable });
+  }
+  return sections;
+}

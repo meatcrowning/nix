@@ -32,7 +32,7 @@ let
     tar xf ${deckyApi} -C node_modules/@decky/api --strip-components=1
     esbuild source/index.jsx --bundle --format=esm --target=chrome110 \
       --alias:react=./source/react-shim.js \
-      --alias:@decky/manifest=./source/plugin.json --loader:.css=text \
+      --alias:@decky/manifest=./source/plugin.json --loader:.css=text --loader:.svg=dataurl \
       --outfile="$out/dist/index.js"
     cp source/{plugin,package}.json source/main.py "$out/"
     cp node_modules/@decky/ui/LICENSE "$out/LICENSE.decky-ui"
