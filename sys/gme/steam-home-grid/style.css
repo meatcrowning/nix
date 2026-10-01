@@ -1,30 +1,30 @@
 .home-library-grid {
   position: relative; width: 100%; height: 100vh; overflow: hidden;
-  background: #0d141c; color: #f2f5f7; isolation: isolate;
+  background: #000; color: #f2f5f7; isolation: isolate;
 }
-.hlg-hero { position: absolute; inset: 0 0 auto; height: 55%; overflow: hidden; pointer-events: none; }
-.hlg-hero img { width: 100%; height: 100%; object-fit: cover; object-position: center 35%; animation: hlg-appear .24s ease-out; }
+.hlg-hero { position: absolute; inset: 0 0 auto; height: 50%; overflow: hidden; pointer-events: none; }
+.hlg-hero img { width: 100%; height: 100%; object-fit: cover; object-position: center; animation: hlg-appear .24s ease-out; }
 .hlg-hero::after { content: ''; position: absolute; inset: 0;
-  background: linear-gradient(180deg, #0005, transparent 25%, #0d141c18 55%, #0d141c 100%); }
-.hlg-heading { position: absolute; left: 3.5%; right: 3.5%; bottom: 51%; z-index: 1;
-  text-shadow: 0 2px 12px #000; pointer-events: none; }
-.hlg-heading h1 { margin: 0 0 6px; font-size: clamp(22px, 2.8vw, 36px); font-weight: 650;
+  background: linear-gradient(180deg, #0005, transparent 25%, #0000 55%, #000 100%); }
+.hlg-heading { position: absolute; left: 3.5%; right: 3.5%; top: 50%; height: 44px; z-index: 1; display: flex; align-items: center; gap: 20px;
+  pointer-events: none; }
+.hlg-heading h1 { margin: 0; flex: 1; min-width: 0; font-size: clamp(16px, 1.8vw, 24px); font-weight: 550;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hlg-heading span { font-size: 12px; color: #c4cdd5; }
-.hlg-scroll { position: absolute; top: 50%; bottom: 30px; left: 0; right: 0;
+.hlg-heading span { font-size: 12px; color: #aaa; max-width: 52%; text-align: right; }
+.hlg-scroll { position: absolute; top: calc(50% + 44px); bottom: 30px; left: 0; right: 0;
   overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
-  scrollbar-width: none; scroll-padding: 24px; padding: 10px 3.5% 24px;
+  scrollbar-width: none; scroll-padding: 24px; padding: 8px 3.5% 22px;
   box-sizing: border-box; --fade-top: #000; --fade-bottom: #000;
   mask-image: linear-gradient(to bottom, var(--fade-top), #000 22px, #000 calc(100% - 22px), var(--fade-bottom)); }
 .hlg-scroll::-webkit-scrollbar { display: none; }
 .hlg-scroll[data-fade-top='true'] { --fade-top: transparent; }
 .hlg-scroll[data-fade-bottom='true'] { --fade-bottom: transparent; }
-.hlg-covers { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 18px 14px; }
+.hlg-covers { display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 12px 10px; }
 .hlg-section { grid-column: 1 / -1; margin: 5px 0 0; font-size: 12px; letter-spacing: .07em;
   text-transform: uppercase; font-weight: 550; color: #a9b6c2; }
 .hlg-section span { color: #738292; margin-left: 8px; }
 .hlg-card { position: relative; aspect-ratio: 2 / 3; min-width: 0; cursor: pointer;
-  border-radius: 4px; background: linear-gradient(145deg, #28394b, #17222e);
+  border-radius: 4px; background: linear-gradient(145deg, #181818, #090909);
   outline: 0; box-shadow: 0 3px 10px #0005; transition: transform .12s ease-out, box-shadow .12s ease-out; }
 .hlg-card img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; position: relative; }
 .hlg-card .hlg-fallback { position: absolute; inset: 0; display: grid; place-items: center;
@@ -35,7 +35,7 @@
 .hlg-download { position: absolute; right: 6px; bottom: 6px; padding: 3px 6px; border-radius: 4px;
   background: #101923df; color: #dee8ef; font-size: 13px; line-height: 1; pointer-events: none; }
 .hlg-empty { padding: 24px; color: #a9b6c2; }
-@media (max-width: 900px) { .hlg-covers { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 16px 12px; } }
-@media (max-width: 700px) { .hlg-covers { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px 10px; } }
+@media (max-width: 900px) { .hlg-covers { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 12px 9px; } }
+@media (max-width: 700px) { .hlg-covers { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px 8px; } }
 @media (prefers-reduced-motion: reduce) { .hlg-hero img { animation: none; } .hlg-card { transition: none; } }
 @keyframes hlg-appear { from { opacity: .25; } to { opacity: 1; } }

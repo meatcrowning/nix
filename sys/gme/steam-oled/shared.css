@@ -1,0 +1,54 @@
+/* Structural surfaces only: keep cover art, hero images and focus indicators. */
+:root {
+  --gpBackground-DarkSofter: #000;
+  --gpBackground-DarkSoft: #000;
+  --gpBackground-DarkMedium: #000;
+  --gpBackground-DarkHard: #000;
+  --gpBackground-LightSoft: #151515;
+  --gpBackground-LightMedium: #202020;
+}
+.gamepadui_BasicUiRoot_gbo6E,
+.gamepadui_OpaqueBackground_b084m,
+.gamepadlibrary_GamepadLibrary_ZBBhe,
+.gamepadtabbedpage_TabHeaderRowWrapper_2Jobs,
+.gamepadtabbedpage_TabContents_WDa0_,
+.gamepadpage_DialogBackground_2msTK,
+.gamepadpage_GamepadPageDialogContent_5ZP0m,
+.gamepadhome_TabbedContent,
+.mainmenu_Menu_23IDi,
+.quickaccessmenu_Menu_1gJzx,
+.quickaccessmenu_TabContentColumn_2z5NL,
+.quickaccessmenu_Tabs_3Ag1w,
+.gamepadpagedsettings_PagedSettingsDialog_PageContent_wIOLO,
+.gamepadpagedsettings_PagedSettingsDialog_PageListColumn_2EZ3o,
+.gamepadpagedsettings_PagedSettingDialog_ContentColumn_3JPle,
+.pagedsettings_PagedSettingsDialog_PageContent_1I3Ni,
+.pagedsettings_PagedSettingsDialog_PageListColumn_RTicB,
+.appdetails_Container_2iE-7,
+.libraryhome_Container_2gSXC,
+.libraryhome_InnerContainer_2AUVZ,
+.gamelistbar_Container_3x1Hk,
+.steamdesktop_TopBar_3Z7VQ,
+.steamdesktop_RootMenuBar_3s0lk,
+.steamdesktop_SuperNavBar_3Z3oh,
+.steamdesktop_Library_3WJCt,
+.DialogContent,
+.ModalPosition_Content {
+  background: #000 !important;
+}
+.gamepadui_BackgroundAnimation_3mtl3,
+.gamepadlibrary_BackgroundAnimation_2k4zo,
+.gamepadtabbedpage_BackgroundAnimation_3bAel,
+.mainmenu_BackgroundAnimation_3rifS,
+.quickaccessmenu_BackgroundAnimation_Z38Nu,
+.gamepadpagedsettings_BackgroundAnimation_Lezt5,
+.appdetails_BackgroundAnimation_2MuQ_ {
+  background: #000 !important;
+  background-image: none !important;
+}
+/* Store chrome uses un-hashed classes in its own web document. */
+body.v6, .responsive_page_frame, .responsive_page_content,
+#global_header, .home_page_body_ctn, .page_content_ctn {
+  background-color: #000 !important;
+  background-image: none !important;
+}

@@ -34,7 +34,7 @@ let
       --alias:react=./source/react-shim.js \
       --alias:@decky/manifest=./source/plugin.json --loader:.css=text \
       --outfile="$out/dist/index.js"
-    cp source/{plugin,package}.json "$out/"
+    cp source/{plugin,package}.json source/main.py "$out/"
     cp node_modules/@decky/ui/LICENSE "$out/LICENSE.decky-ui"
   '';
   themeArchives = map (theme: pkgs.fetchurl {
@@ -75,6 +75,8 @@ let
     unzip -q ${cssArchive} -d "$out/plugins"
     unzip -q ${steamGridDbArchive} -d "$out/plugins"
     cp -R ${homeGrid} "$out/plugins/home-library-grid"
+    cp -R ${./steam-oled} "$out/themes/OLED Black"
+    chmod -R u+w "$out/themes/OLED Black"
     ${lib.concatMapStringsSep "\n" (archive: ''unzip -q ${archive} -d "$out/themes"'') themeArchives}
     mkdir -p "$out/migrations"
     cp "$out/themes/More Library Icons/shared.css" "$out/migrations/library-icons-upstream.css"
@@ -127,6 +129,8 @@ in
       cp -R ${homeGrid}/. '${state}/plugins/home-library-grid/'
       chmod -R u+w '${state}/plugins/home-library-grid'
       chown -R ${user}:users '${state}/plugins/home-library-grid'
+      cp ${./steam-oled/shared.css} '${state}/themes/OLED Black/shared.css'
+      chown ${user}:users '${state}/themes/OLED Black/shared.css'
       # Migrate only the exact upstream file, preserving any user CSS edits.
       if cmp -s '${state}/themes/More Library Icons/shared.css' \
           ${seed}/migrations/library-icons-upstream.css; then

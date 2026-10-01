@@ -29,3 +29,11 @@ export function revealScroll(top, height, cardTop, cardHeight, margin = 22) {
   if (cardTop + cardHeight > top + height - margin) return cardTop + cardHeight - height + margin;
   return top;
 }
+
+export function metadataLine(app, details = {}) {
+  if (!app) return '';
+  const timestamp = app.rt_original_release_date || app.rt_steam_release_date;
+  const year = details.year || (timestamp ? new Date(timestamp * 1000).getUTCFullYear() : '');
+  const platform = details.console || (app.BIsShortcut?.() ? '' : 'PC');
+  return [platform, year, details.developer].filter(Boolean).join(' · ');
+}
