@@ -1,0 +1,12 @@
+/* Keep Steam's inline gaps and padding: its virtualized grid uses those same
+   values to calculate columns and offscreen rows. The upstream 21px gap
+   wraps six 134px covers to five columns in a 904px desktop grid. */
+.rz1mrOnj9WN6UErES7qsq.Panel {
+    zoom: var(--mli-zoom);
+}
+
+@media (min-width: 900px) {
+    .rz1mrOnj9WN6UErES7qsq.Panel {
+        zoom: var(--mli-zoom-tv);
+    }
+}
