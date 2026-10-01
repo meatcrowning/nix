@@ -15,6 +15,28 @@ let
     url = "https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/6d6eca184677dc9ff7736439ee7a575ca8ab386c5ffb1627d446bc43dbd1ecf3.zip";
     sha256 = "6d6eca184677dc9ff7736439ee7a575ca8ab386c5ffb1627d446bc43dbd1ecf3";
   };
+  deckyUi = pkgs.fetchurl {
+    url = "https://registry.npmjs.org/@decky/ui/-/ui-4.12.1.tgz";
+    hash = "sha256-G6HEPZPN+DrdiCr+DdYsewF0aBl+AGVkq2XAvz43eN4=";
+  };
+  deckyApi = pkgs.fetchurl {
+    url = "https://registry.npmjs.org/@decky/api/-/api-1.1.3.tgz";
+    hash = "sha256-JzInzYAQT9WpMHMot5jCmauqF0ER42gIEo5hb9q+uAc=";
+  };
+  homeGrid = pkgs.runCommand "steam-home-library-grid" {
+    nativeBuildInputs = [ pkgs.esbuild ];
+  } ''
+    cp -R ${./steam-home-grid} source
+    mkdir -p node_modules/@decky/{ui,api} "$out/dist"
+    tar xf ${deckyUi} -C node_modules/@decky/ui --strip-components=1
+    tar xf ${deckyApi} -C node_modules/@decky/api --strip-components=1
+    esbuild source/index.jsx --bundle --format=esm --target=chrome110 \
+      --alias:react=./source/react-shim.js \
+      --alias:@decky/manifest=./source/plugin.json --loader:.css=text \
+      --outfile="$out/dist/index.js"
+    cp source/{plugin,package}.json "$out/"
+    cp node_modules/@decky/ui/LICENSE "$out/LICENSE.decky-ui"
+  '';
   themeArchives = map (theme: pkgs.fetchurl {
     url = "https://api.deckthemes.com/blobs/${theme.id}";
     inherit (theme) hash;
@@ -52,6 +74,7 @@ let
     mkdir -p "$out/plugins" "$out/themes"
     unzip -q ${cssArchive} -d "$out/plugins"
     unzip -q ${steamGridDbArchive} -d "$out/plugins"
+    cp -R ${homeGrid} "$out/plugins/home-library-grid"
     ${lib.concatMapStringsSep "\n" (archive: ''unzip -q ${archive} -d "$out/themes"'') themeArchives}
     mkdir -p "$out/migrations"
     cp "$out/themes/More Library Icons/shared.css" "$out/migrations/library-icons-upstream.css"
@@ -99,6 +122,11 @@ in
           chown -R ${user}:users "$destination"
         fi
       done
+      # This local plugin is declarative; unlike downloaded plugins, update it
+      # on every boot. Live updates use Decky's plugin import, never a restart.
+      cp -R ${homeGrid}/. '${state}/plugins/home-library-grid/'
+      chmod -R u+w '${state}/plugins/home-library-grid'
+      chown -R ${user}:users '${state}/plugins/home-library-grid'
       # Migrate only the exact upstream file, preserving any user CSS edits.
       if cmp -s '${state}/themes/More Library Icons/shared.css' \
           ${seed}/migrations/library-icons-upstream.css; then
