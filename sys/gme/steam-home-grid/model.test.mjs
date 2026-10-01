@@ -29,3 +29,16 @@ test('controller focus reveals a whole card without moving an already visible ro
   assert.equal(revealScroll(200, 400, 560, 190), 372);
   assert.equal(revealScroll(0, 400, 0, 190), 0);
 });
+
+test('component discovery does not trigger Decky React trampoline getters', async () => {
+  const { findFocusable } = await import('./steam.mjs');
+  let getterReads = 0;
+  function unrelated() {}
+  Object.defineProperty(unrelated, 'contextType', { get() { getterReads++; throw new Error('React stub installed'); } });
+  const native = new Function('e', 'const{"flow-children":t,onActivate:r}=e;return null;');
+  const modules = { 1: { unrelated }, 2: { Native: native } };
+  const requireModule = id => modules[id];
+  requireModule.m = modules;
+  assert.equal(findFocusable(requireModule), native);
+  assert.equal(getterReads, 0);
+});
