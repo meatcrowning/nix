@@ -1,4 +1,4 @@
-{ config, pkgs, user, ... }:
+{ config, lib, pkgs, user, ... }:
 
 let
   # Use Jovian's source-built package without importing its SteamOS session.
@@ -11,17 +11,42 @@ let
     url = "https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/1a1e8f4dded8494febe56df16429ef5bba1e5b8feb3fd989d5808fbef0d71350.zip";
     sha256 = "1a1e8f4dded8494febe56df16429ef5bba1e5b8feb3fd989d5808fbef0d71350";
   };
-  themeArchive = pkgs.fetchurl {
-    url = "https://api.deckthemes.com/blobs/4da0b741-22b1-4df2-905d-f135fffda295";
-    hash = "sha256-BPKsuyiLYsv7nFqpDY5+35isRC/WRnurqErrVI/7CnE=";
-  };
-  seed = pkgs.runCommand "steam-clean-gameview-seed" {
+  themeArchives = map (theme: pkgs.fetchurl {
+    url = "https://api.deckthemes.com/blobs/${theme.id}";
+    inherit (theme) hash;
+  }) [
+    { # Clean Gameview
+      id = "4da0b741-22b1-4df2-905d-f135fffda295";
+      hash = "sha256-BPKsuyiLYsv7nFqpDY5+35isRC/WRnurqErrVI/7CnE=";
+    }
+    { # Art Hero
+      id = "692d427e-eda3-4a13-ac49-c8ad5455e1b3";
+      hash = "sha256-IpJT47R5dUAbIzQlt98unDtHRCHFSU/OdX1V0qSEAec=";
+    }
+    # Art Hero requires these three themes; Mini Carousel defaults to its
+    # requested Size=0.7. Keep the dependency closure pinned with the theme.
+    { # Mini Carousel
+      id = "4685f114-9ee8-4869-97ce-6f1ae0e351f9";
+      hash = "sha256-YRfsF3ZSVQXZsjolSUwYjNK20nwnW47oTBvdzYc/9wU=";
+    }
+    { # Game Header Text Stroke
+      id = "0475e0ef-ec4b-4800-a1d8-d110b159a25d";
+      hash = "sha256-++SV2U43AySBuESb/JKpPXcnDf6yLQa5sRpBSrVL4lM=";
+    }
+    { # Centered Game Text
+      id = "8f452b28-e3ce-4314-a08f-68b0a9e8e415";
+      hash = "sha256-D//myXIbu+UELekFb436jKvPJ47oxLe22JlhXZU26us=";
+    }
+  ];
+  seed = pkgs.runCommand "steam-big-picture-theme-seed" {
     nativeBuildInputs = [ pkgs.unzip ];
   } ''
     mkdir -p "$out/plugins" "$out/themes"
     unzip -q ${cssArchive} -d "$out/plugins"
-    unzip -q ${themeArchive} -d "$out/themes"
-    echo '{"active":true}' > "$out/themes/Clean Gameview/config_USER.json"
+    ${lib.concatMapStringsSep "\n" (archive: ''unzip -q ${archive} -d "$out/themes"'') themeArchives}
+    for theme in "$out/themes/"*; do
+      echo '{"active":true}' > "$theme/config_USER.json"
+    done
   '';
   state = "/var/lib/decky-loader";
   userHome = config.users.users.${user}.home;
@@ -48,11 +73,14 @@ in
         chmod -R u+w ${state}/plugins/SDH-CssLoader
         chown -R ${user}:users ${state}/plugins/SDH-CssLoader
       fi
-      if [ ! -e '${state}/themes/Clean Gameview' ]; then
-        cp -R '${seed}/themes/Clean Gameview' ${state}/themes/
-        chmod -R u+w '${state}/themes/Clean Gameview'
-        chown -R ${user}:users '${state}/themes/Clean Gameview'
-      fi
+      for theme in ${seed}/themes/*; do
+        destination="${state}/themes/$(basename "$theme")"
+        if [ ! -e "$destination" ]; then
+          cp -R "$theme" "$destination"
+          chmod -R u+w "$destination"
+          chown -R ${user}:users "$destination"
+        fi
+      done
       # Steam reads this on its next launch; never restart the live client.
       install -d -o ${user} -g users '${userHome}/.local/share/Steam'
       touch '${userHome}/.local/share/Steam/.cef-enable-remote-debugging'
