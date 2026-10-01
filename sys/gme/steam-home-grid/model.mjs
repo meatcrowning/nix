@@ -34,6 +34,20 @@ export function metadataLine(app, details = {}) {
   if (!app) return '';
   const timestamp = app.rt_original_release_date || app.rt_steam_release_date;
   const year = details.year || (timestamp ? new Date(timestamp * 1000).getUTCFullYear() : '');
-  const platform = details.console || (app.BIsShortcut?.() ? '' : 'PC');
+  const platform = systemName(app, details);
   return [platform, year, details.developer].filter(Boolean).join(' · ');
+}
+
+// Strip only explicit platform suffixes, preserving years and edition names.
+export function displayTitle(app) {
+  return (app?.display_name || '').replace(/\s*[([{](?:PC|PS1|PS2|PS3|PSP|PlayStation(?: 2| 3| Portable)?|GameCube|GC|NES|SNES|Nintendo 64|N64|Game Boy(?: Advance| Color)?|GBA|GBC|GB)[)\]}]\s*$/i, '').trim();
+}
+
+export function systemName(app, details = {}) {
+  return details.console || (app && !app.BIsShortcut?.() ? 'PC' : '');
+}
+
+export function adjacentApp(apps, appid, step) {
+  const index = apps.findIndex(app => app.appid === appid);
+  return index < 0 ? undefined : apps[index + step];
 }

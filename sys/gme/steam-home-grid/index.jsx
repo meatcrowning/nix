@@ -2,8 +2,9 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { findFocusable, steamNavigation } from './steam.mjs';
 import { afterPatch } from '@decky/ui/dist/utils/patcher';
 import { definePlugin, routerHook, callable } from '@decky/api';
-import { libraryGroups, edgeFades, revealScroll, metadataLine } from './model.mjs';
+import { libraryGroups, edgeFades, revealScroll, metadataLine, displayTitle, systemName, adjacentApp } from './model.mjs';
 import css from './style.css';
+import { SystemIcon } from './system-icon.jsx';
 
 let rememberedApp = null, rememberedScroll = 0;
 const store = () => window.appStore;
@@ -45,6 +46,13 @@ function HomeGrid() {
   const all = [...groups.ready, ...groups.available];
   const [selected, setSelected] = useState(() => all.find(a => a.appid === rememberedApp) || all[0]);
   const viewport = useRef(null);
+  const navigation = useRef(new Map());
+  const move = (app, step, detail) => {
+    const next = adjacentApp(all, app.appid, step);
+    // Consume horizontal movement at the library endpoints as well.
+    if (next) navigation.current.get(next.appid)?.TakeFocus(detail.button);
+    return true;
+  };
   const [edges, setEdges] = useState({ top: false, bottom: false });
   const measure = () => {
     const el = viewport.current;
@@ -85,14 +93,16 @@ function HomeGrid() {
   const renderGroup = (label, apps, downloadable) => apps.length ? <React.Fragment key={label}>
     {downloadable && <h2 className="hlg-section">{label}<span>{apps.length}</span></h2>}
     {apps.map(app => <Focusable key={app.appid} className="hlg-card" noFocusRing
-      data-appid={app.appid} aria-label={`${app.display_name}${downloadable ? ', available to install' : ''}`}
+      navRef={handle => { if (handle) navigation.current.set(app.appid, handle); else navigation.current.delete(app.appid); }}
+      onMoveRight={detail => move(app, 1, detail)} onMoveLeft={detail => move(app, -1, detail)}
+      data-appid={app.appid} aria-label={`${displayTitle(app)}${downloadable ? ', available to install' : ''}`}
       preferredFocus={app.appid === (rememberedApp || all[0]?.appid)}
       onGamepadFocus={e => select(app, e.currentTarget || e.target)}
       onFocus={e => select(app, e.currentTarget)}
       onActivate={() => steamNavigation().Navigate(`/library/app/${app.appid}`)}
       onOKActionDescription="Select" onCancelActionDescription="Back"
       onCancel={() => steamNavigation().NavigateBack()}>
-      <span className="hlg-fallback">{app.display_name}</span>
+      <span className="hlg-fallback">{displayTitle(app)}</span>
       <Picture key={`${app.appid}-${app.rt_custom_image_mtime}-${app.local_cache_version}`} sources={artwork(app, 'cover')} lazy />
       {downloadable && <span className="hlg-download" aria-hidden="true">↓</span>}
     </Focusable>)}
@@ -100,8 +110,8 @@ function HomeGrid() {
   return <div className="home-library-grid">
     <style>{css}</style>
     <div className="hlg-hero"><Picture key={`${selected?.appid}-${selected?.rt_custom_image_mtime}`} sources={artwork(selected, 'hero')} /></div>
-    <div className="hlg-heading"><h1>{selected?.display_name || 'Your library'}</h1>
-      <span>{metadataLine(selected, metadata[selected?.appid])}</span></div>
+    <div className="hlg-heading"><h1>{displayTitle(selected) || 'Your library'}</h1>
+      <span className="hlg-metadata"><SystemIcon system={systemName(selected, metadata[selected?.appid])} />{metadataLine(selected, metadata[selected?.appid])}</span></div>
     <div className="hlg-scroll" ref={viewport} onScroll={measure} data-fade-top={edges.top} data-fade-bottom={edges.bottom}>
       <Focusable className="hlg-covers" flow-children="grid" autoFocus>
         {renderGroup('Installed', groups.ready, false)}
