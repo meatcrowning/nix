@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { findFocusable, steamNavigation } from './steam.mjs';
 import { afterPatch } from '@decky/ui/dist/utils/patcher';
 import { definePlugin, routerHook, callable } from '@decky/api';
-import { libraryGroups, edgeFades, revealScroll, metadataLine, displayTitle, systemName, adjacentApp } from './model.mjs';
+import { libraryGroups, edgeFades, revealScroll, metadataLine, displayTitle, systemName, adjacentApp, librarySections, sortModes, validSort } from './model.mjs';
 import css from './style.css';
 import { SystemIcon } from './system-icon.jsx';
 
@@ -35,6 +35,14 @@ function Picture({ sources, className, lazy = false }) {
 }
 
 function HomeGrid() {
+  const [sortMode, setSortMode] = useState(() => { try { return validSort(localStorage.getItem('home-library-grid-sort')); } catch { return 'recent'; } });
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortButton = useRef(null), sortOption = useRef(null), returnToSort = useRef(false);
+  const closeSort = () => { returnToSort.current = true; setSortOpen(false); };
+  useLayoutEffect(() => {
+    if (sortOpen) sortOption.current?.TakeFocus();
+    if (!sortOpen && returnToSort.current) { returnToSort.current = false; sortButton.current?.TakeFocus(); }
+  }, [sortOpen]);
   const [metadata, setMetadata] = useState({});
   useEffect(() => {
     let active = true;
@@ -43,7 +51,8 @@ function HomeGrid() {
     return () => { active = false; };
   }, []);
   const [groups, setGroups] = useState(() => libraryGroups(store().allApps));
-  const all = [...groups.ready, ...groups.available];
+  const sections = librarySections(groups, metadata, sortMode);
+  const all = sections.flatMap(section => section.apps);
   const [selected, setSelected] = useState(() => all.find(a => a.appid === rememberedApp) || all[0]);
   const viewport = useRef(null);
   const navigation = useRef(new Map());
@@ -90,8 +99,15 @@ function HomeGrid() {
       measure();
     }
   };
-  const renderGroup = (label, apps, downloadable) => apps.length ? <React.Fragment key={label}>
-    {downloadable && <h2 className="hlg-section">{label}<span>{apps.length}</span></h2>}
+  const chooseSort = mode => {
+    setSortMode(mode);
+    try { localStorage.setItem('home-library-grid-sort', mode); } catch {}
+    rememberedScroll = 0;
+    viewport.current.scrollTop = 0;
+    closeSort();
+  };
+  const renderGroup = ({key, label, apps, downloadable, system}) => apps.length ? <React.Fragment key={key}>
+    {label && <h2 className="hlg-section">{system && <SystemIcon system={system} />}{label}<span>{apps.length}</span></h2>}
     {apps.map(app => <Focusable key={app.appid} className="hlg-card" noFocusRing
       navRef={handle => { if (handle) navigation.current.set(app.appid, handle); else navigation.current.delete(app.appid); }}
       onMoveRight={detail => move(app, 1, detail)} onMoveLeft={detail => move(app, -1, detail)}
@@ -101,6 +117,7 @@ function HomeGrid() {
       onFocus={e => select(app, e.currentTarget)}
       onActivate={() => steamNavigation().Navigate(`/library/app/${app.appid}`)}
       onOKActionDescription="Select" onCancelActionDescription="Back"
+      onOptionsButton={() => { setSortOpen(true); return true; }} onOptionsActionDescription="Sort"
       onCancel={() => steamNavigation().NavigateBack()}>
       <span className="hlg-fallback">{displayTitle(app)}</span>
       <Picture key={`${app.appid}-${app.rt_custom_image_mtime}-${app.local_cache_version}`} sources={artwork(app, 'cover')} lazy />
@@ -111,11 +128,28 @@ function HomeGrid() {
     <style>{css}</style>
     <div className="hlg-hero"><Picture key={`${selected?.appid}-${selected?.rt_custom_image_mtime}`} sources={artwork(selected, 'hero')} /></div>
     <div className="hlg-heading"><h1>{displayTitle(selected) || 'Your library'}</h1>
-      <span className="hlg-metadata"><SystemIcon system={systemName(selected, metadata[selected?.appid])} />{metadataLine(selected, metadata[selected?.appid])}</span></div>
+      <span className="hlg-metadata"><SystemIcon system={systemName(selected, metadata[selected?.appid])} />{metadataLine(selected, metadata[selected?.appid])}</span>
+      <Focusable className="hlg-sort-button" navRef={sortButton} focusable={!sortOpen} noFocusRing
+        aria-haspopup="menu" aria-expanded={sortOpen} aria-label="Sort games"
+        onActivate={() => sortOpen ? closeSort() : setSortOpen(true)} onOKActionDescription="Sort">
+        Sort: {sortModes.find(([id]) => id === sortMode)[1]} ▾
+      </Focusable></div>
+    {sortOpen && <>
+      <div className="hlg-sort-backdrop" onClick={closeSort} />
+      <Focusable className="hlg-sort-menu" flow-children="column" role="menu" aria-label="Sort games" autoFocus
+        onCancel={() => { closeSort(); return true; }} onCancelActionDescription="Close"
+        onMoveUp={() => true} onMoveDown={() => true} onMoveLeft={() => true} onMoveRight={() => true}>
+        <div className="hlg-sort-note">Installed games first</div>
+        {sortModes.map(([id, label]) => <Focusable key={id} className="hlg-sort-option" role="menuitemradio"
+          aria-checked={id === sortMode} preferredFocus={id === sortMode} navRef={id === sortMode ? sortOption : undefined} noFocusRing
+          onActivate={() => chooseSort(id)} onOKActionDescription="Apply">
+          {label}<span aria-hidden="true">{id === sortMode ? '✓' : ''}</span>
+        </Focusable>)}
+      </Focusable>
+    </>}
     <div className="hlg-scroll" ref={viewport} onScroll={measure} data-fade-top={edges.top} data-fade-bottom={edges.bottom}>
-      <Focusable className="hlg-covers" flow-children="grid" autoFocus>
-        {renderGroup('Installed', groups.ready, false)}
-        {renderGroup('Available to install', groups.available, true)}
+      <Focusable className="hlg-covers" flow-children="grid" autoFocus childFocusDisabled={sortOpen}>
+        {sections.map(renderGroup)}
         {!all.length && <div className="hlg-empty">Your library is loading…</div>}
       </Focusable>
     </div>
