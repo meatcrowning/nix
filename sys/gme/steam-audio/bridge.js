@@ -1,3 +1,12 @@
+// Desktop Steam does not serve AudioLoader's sounds_custom symlink.
+// Decky's existing loopback asset route provides CORS and range requests.
+function homeAudioURL(path) {
+  const prefix = '/sounds_custom/';
+  if (!path.startsWith(prefix)) return path;
+  return 'http://127.0.0.1:1337/plugins/Audio%20Loader/assets/sounds/'
+    + path.slice(prefix.length).split('/').map(encodeURIComponent).join('/');
+}
+
 // The pinned AudioLoader owns playback and persistence; Home supplies another UI.
 function installHomeAudioBridge(state, { setConfig, changeMenuMusic }, target) {
   let pending = Promise.resolve();
@@ -6,7 +15,9 @@ function installHomeAudioBridge(state, { setConfig, changeMenuMusic }, target) {
     return { sounds: s.soundPacks.filter(p => !p.music).map(p => p.name),
       musicPacks: s.soundPacks.filter(p => p.music).map(p => p.name),
       sound: s.activeSound, soundVolume: s.soundVolume, music: s.selectedMusic,
-      musicVolume: s.musicVolume, musicEnabled: s.legacyEnabled };
+      musicVolume: s.musicVolume, musicEnabled: s.legacyEnabled,
+      playback: s.menuMusic ? { paused: s.menuMusic.paused, readyState: s.menuMusic.readyState,
+        currentTime: s.menuMusic.currentTime, error: s.menuMusic.error?.message || null } : null };
   };
   const api = { read, write(changes) {
     pending = pending.catch(() => {}).then(async () => {
