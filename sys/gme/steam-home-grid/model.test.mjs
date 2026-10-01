@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { libraryGroups, edgeFades, revealScroll, metadataLine } from './model.mjs';
+import { libraryGroups, edgeFades, revealScroll, metadataLine, displayTitle, adjacentApp } from './model.mjs';
 const game = (id, extra = {}) => ({ appid: id, display_name: `Game ${id}`, app_type: 1,
   subscribed_to: true, visible_in_game_list: true,
   per_client_data: [{ clientid: '0', is_available_on_current_platform: true }], ...extra });
@@ -50,4 +50,19 @@ test('metadata uses console-specific credits and omits unknown shortcut details'
   assert.equal(metadataLine({BIsShortcut: () => true}, {console: 'Game Boy Advance'}), 'Game Boy Advance');
   assert.equal(metadataLine({rt_original_release_date: 946684800}), 'PC · 2000');
   assert.equal(metadataLine(null), '');
+});
+
+test('titles lose only console suffixes, not years or editions', () => {
+  assert.equal(displayTitle({display_name:'Example (GameCube)'}), 'Example');
+  assert.equal(displayTitle({display_name:'Example [PSP]'}), 'Example');
+  assert.equal(displayTitle({display_name:'Example (2005)'}), 'Example (2005)');
+  assert.equal(displayTitle({display_name:'Example (Special Edition)'}), 'Example (Special Edition)');
+});
+test('horizontal navigation follows adjacent games across rows and group headings', () => {
+  const apps = Array.from({length:25}, (_,i) => ({appid:i+1}));
+  assert.equal(adjacentApp(apps,11,1).appid,12);
+  assert.equal(adjacentApp(apps,12,-1).appid,11);
+  assert.equal(adjacentApp(apps,25,1),undefined);
+  assert.equal(adjacentApp(apps,1,-1),undefined);
+  assert.equal(adjacentApp(apps,99,1),undefined);
 });
