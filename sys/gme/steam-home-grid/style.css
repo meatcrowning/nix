@@ -12,6 +12,9 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hlg-heading span { font-size: 12px; color: #aaa; max-width: 52%; text-align: right; display: flex; align-items: center; gap: 7px; }
 .hlg-system-icon { width: 72px; height: 24px; object-fit: contain; flex: 0 0 72px; }
+.hlg-controller { width: 22px; height: 22px; flex: 0 0 22px; fill: none;
+  stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: auto; }
+.hlg-controller[data-support='partial'] { stroke-dasharray: 2 1; }
 .hlg-scroll { position: absolute; top: calc(50% + 44px); bottom: 30px; left: 0; right: 0;
   overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
   scrollbar-width: none; scroll-padding: 24px; padding: 8px 3.5% 22px;
