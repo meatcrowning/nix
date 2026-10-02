@@ -109,6 +109,18 @@ test('release sorting puts unknown dates last in either direction; developer gro
   assert.equal(validSort('console'),'console');
 });
 
+test('controller sort uses badge evidence, ranks partial next, and retains installed-first ordering', async () => {
+  const { librarySections, validSort } = await import('./model.mjs');
+  const groups = { ready: [game(1), game(2, {store_category: [18]}),
+    game(3, {store_category: [28]}), game(4, {app_type: 1073741824}),
+    game(5, {store_category: [28]})], available: [game(6, {store_category: [28]})] };
+  const metadata = {4: {controllerSupport: 'emulated'}, 5: {controllerSupport: 'none'}};
+  const sections = librarySections(groups, metadata, 'controller');
+  assert.deepEqual(sections.map(s => s.apps.map(a => a.appid)), [[3, 4, 2, 1, 5], [6]]);
+  assert.deepEqual(groups.ready.map(a => a.appid), [1, 2, 3, 4, 5]);
+  assert.equal(validSort('controller'), 'controller');
+});
+
 test('vertical navigation keeps the nearest column through short rows and group headings', () => {
   const cards = [{appid:1,top:0,left:0,width:90},{appid:2,top:0,left:100,width:90},
     {appid:3,top:150,left:0,width:90},{appid:4,top:350,left:0,width:90},{appid:5,top:350,left:100,width:90}];
