@@ -15,7 +15,7 @@ let
     fceumm
     ppsspp
   ]);
-  python = pkgs.python3.withPackages (ps: [ ps.pyyaml ps.vdf ]);
+  python = pkgs.python3.withPackages (ps: [ ps.pyyaml ps.vdf ps.msgpack ]);
   games = pkgs.writeShellApplication {
     name = "games";
     runtimeInputs = [ python pkgs.icoutils pkgs.libnotify pkgs.hostname pkgs.procps ]
@@ -24,7 +24,7 @@ let
       export GAMES_MANIFEST="''${GAMES_MANIFEST:-${config.home.homeDirectory}/nix/docs/games.$(hostname).json}"
       export GAMES_BIN=${config.home.profileDirectory}/bin/games
       export GAMES_RETROARCH_CORES=${if isX86 then "${retroarch}/lib/retroarch/cores" else "/nonexistent"}
-      exec python3 ${./games-files/games.py} "$@"
+      exec python3 ${./games-files}/games.py "$@"
     '';
   };
 in
