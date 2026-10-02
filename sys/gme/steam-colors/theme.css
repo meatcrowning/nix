@@ -1,0 +1,142 @@
+/* Web surfaces copy KDE roles verbatim. The existing OLED theme is the
+   fallback outside Plasma or when the bridge is stopped before Steam starts. */
+:root[data-steam-system-palette] {
+  --gpBackground-DarkSofter: var(--steam-system-window);
+  --gpBackground-DarkSoft: var(--steam-system-window);
+  --gpBackground-DarkMedium: var(--steam-system-base);
+  --gpBackground-DarkHard: var(--steam-system-base);
+  --gpBackground-LightSoft: var(--steam-system-button);
+  --gpBackground-LightMedium: var(--steam-system-highlight);
+  --gpSystemLightestGrey: var(--steam-system-text);
+  --gpSystemLighterGrey: var(--steam-system-secondary);
+  --gpSystemLightGrey: var(--steam-system-secondary);
+  color: var(--steam-system-text);
+}
+html[data-steam-system-palette] {{gamepadui.BasicUiRoot}},
+html[data-steam-system-palette] {{gamepadui.OpaqueBackground}},
+html[data-steam-system-palette] {{gamepadtabbedpage.TabHeaderRowWrapper}},
+html[data-steam-system-palette] {{mainmenu.Menu}},
+html[data-steam-system-palette] {{quickaccessmenu.Menu}},
+html[data-steam-system-palette] {{quickaccessmenu.AllTabContents}},
+html[data-steam-system-palette] {{quickaccessmenu.Tabs}},
+html[data-steam-system-palette] {{gamepadpagedsettings.PagedSettingsDialog_PageListColumn}},
+html[data-steam-system-palette] {{pagedsettings.PagedSettingsDialog_PageListColumn}},
+html[data-steam-system-palette] {{gamelistbar.Container}},
+html[data-steam-system-palette] {{steamdesktop.TopBar}},
+html[data-steam-system-palette] {{steamdesktop.RootMenuBar}},
+html[data-steam-system-palette] {{steamdesktop.SuperNavBar}},
+html[data-steam-system-palette] #global_header {
+  background: var(--steam-system-window) !important;
+  color: var(--steam-system-window-text) !important;
+}
+html[data-steam-system-palette] {{gamepadlibrary.GamepadLibrary}},
+html[data-steam-system-palette] {{gamepadtabbedpage.TabContents}},
+html[data-steam-system-palette] {{gamepadpage.DialogBackground}},
+html[data-steam-system-palette] {{gamepadpage.GamepadPageDialogContent}},
+html[data-steam-system-palette] {{gamepadhome.TabbedContent}},
+html[data-steam-system-palette] {{gamepadpagedsettings.PagedSettingsDialog_PageContent}},
+html[data-steam-system-palette] {{gamepadpagedsettings.PagedSettingDialog_ContentColumn}},
+html[data-steam-system-palette] {{pagedsettings.PagedSettingsDialog_PageContent}},
+html[data-steam-system-palette] {{appdetails.Container}},
+html[data-steam-system-palette] {{libraryhome.Container}},
+html[data-steam-system-palette] {{libraryhome.InnerContainer}},
+html[data-steam-system-palette] {{steamdesktop.Library}},
+html[data-steam-system-palette] .DialogContent,
+html[data-steam-system-palette] .ModalPosition_Content,
+html[data-steam-system-palette] body.v6,
+html[data-steam-system-palette] .responsive_page_frame,
+html[data-steam-system-palette] .responsive_page_content,
+html[data-steam-system-palette] .home_page_body_ctn,
+html[data-steam-system-palette] .page_content_ctn,
+html[data-steam-system-palette] .home-library-grid,
+html[data-steam-system-palette] .hlg-card img,
+html[data-steam-system-palette] .hlg-card {
+  background: var(--steam-system-base) !important;
+  color: var(--steam-system-text) !important;
+}
+html[data-steam-system-palette] {{gamepadui.BackgroundAnimation}},
+html[data-steam-system-palette] {{gamepadlibrary.BackgroundAnimation}},
+html[data-steam-system-palette] {{gamepadtabbedpage.BackgroundAnimation}},
+html[data-steam-system-palette] {{mainmenu.BackgroundAnimation}},
+html[data-steam-system-palette] {{quickaccessmenu.BackgroundAnimation}},
+html[data-steam-system-palette] {{gamepadpagedsettings.BackgroundAnimation}},
+html[data-steam-system-palette] {{appdetails.BackgroundAnimation}} {
+  background: var(--steam-system-window) !important;
+  background-image: none !important;
+}
+html[data-steam-system-palette] .DialogButton,
+html[data-steam-system-palette] .hlg-sort-button,
+html[data-steam-system-palette] .hlg-audio-value button {
+  background: var(--steam-system-button) !important;
+  color: var(--steam-system-button-text) !important;
+}
+html[data-steam-system-palette] .hlg-sort-menu,
+html[data-steam-system-palette] .hlg-download {
+  background: var(--steam-system-window) !important;
+  color: var(--steam-system-window-text) !important;
+  border-color: var(--steam-system-secondary) !important;
+}
+html[data-steam-system-palette] .hlg-heading span,
+html[data-steam-system-palette] .hlg-section,
+html[data-steam-system-palette] .hlg-section span,
+html[data-steam-system-palette] .hlg-empty,
+html[data-steam-system-palette] .hlg-sort-note {
+  color: var(--steam-system-secondary) !important;
+}
+html[data-steam-system-palette] .hlg-sort-option[aria-checked='true'],
+html[data-steam-system-palette] .hlg-sort-option:hover,
+html[data-steam-system-palette] .DialogButton.gpfocus {
+  background: var(--steam-system-highlight) !important;
+  color: var(--steam-system-highlight-text) !important;
+}
+html[data-steam-system-palette] .hlg-sort-button.gpfocus,
+html[data-steam-system-palette] .hlg-sort-button:focus-visible,
+html[data-steam-system-palette] .hlg-sort-option.gpfocus,
+html[data-steam-system-palette] .hlg-sort-option:focus-visible,
+html[data-steam-system-palette] .hlg-audio-row.gpfocus,
+html[data-steam-system-palette] .hlg-audio-row:focus-visible {
+  outline-color: var(--steam-system-highlight) !important;
+}
+html[data-steam-system-palette] .hlg-card.gpfocus,
+html[data-steam-system-palette] .hlg-card:focus-visible {
+  box-shadow: 0 0 0 3px var(--steam-system-highlight), 0 5px 18px #0009 !important;
+}
+html[data-steam-system-palette] .hlg-card:hover {
+  box-shadow: 0 0 0 2px var(--steam-system-highlight) !important;
+}
+html[data-steam-system-palette] .hlg-hero::after {
+  background: linear-gradient(180deg, rgba(var(--steam-system-base-rgb), .33),
+    transparent 25%, transparent 55%, var(--steam-system-base) 100%) !important;
+}
+html[data-steam-system-palette] .hlg-audio-error { color: var(--steam-system-error) !important; }
+
+html[data-steam-system-palette] .DialogHeader,
+html[data-steam-system-palette] .DialogLabel,
+html[data-steam-system-palette] .DialogLabelStrong,
+html[data-steam-system-palette] .DialogBodyText,
+html[data-steam-system-palette] {{controls.FieldLabel}},
+html[data-steam-system-palette] {{controls.FieldLabelValue}},
+html[data-steam-system-palette] {{gamepadtabbedpage.TabTitle}} {
+  color: var(--steam-system-text) !important;
+}
+html[data-steam-system-palette] {{controls.FieldDescription}} {
+  color: var(--steam-system-secondary) !important;
+}
+html[data-steam-system-palette] {{mainmenu.ItemLabel}},
+html[data-steam-system-palette] {{quickaccessmenu.Label}},
+html[data-steam-system-palette] {{quickaccessmenu.Text}},
+html[data-steam-system-palette] {{quickaccessmenu.PanelSectionTitle}} {
+  color: var(--steam-system-window-text) !important;
+}
+html[data-steam-system-palette] .DialogBody a {
+  color: var(--steam-system-link) !important;
+}
+html[data-steam-system-palette] {{mainmenu.ItemOuter}}.gpfocus,
+html[data-steam-system-palette] {{mainmenu.ItemOuter}}.gpfocus {{mainmenu.ItemLabel}},
+html[data-steam-system-palette] {{quickaccessmenu.ActiveTab}},
+html[data-steam-system-palette] {{controls.Field}}.gpfocus,
+html[data-steam-system-palette] {{controls.Field}}.gpfocus {{controls.FieldLabel}},
+html[data-steam-system-palette] {{controls.Field}}.gpfocus {{controls.FieldDescription}} {
+  background-color: var(--steam-system-highlight) !important;
+  color: var(--steam-system-highlight-text) !important;
+}
