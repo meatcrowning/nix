@@ -109,16 +109,22 @@ test('release sorting puts unknown dates last in either direction; developer gro
   assert.equal(validSort('console'),'console');
 });
 
-test('controller sort uses badge evidence, ranks partial next, and retains installed-first ordering', async () => {
-  const { librarySections, validSort } = await import('./model.mjs');
+test('controller filter composes with every sort and keeps installed-first ordering', async () => {
+  const { librarySections, sortModes, validSort } = await import('./model.mjs');
   const groups = { ready: [game(1), game(2, {store_category: [18]}),
     game(3, {store_category: [28]}), game(4, {app_type: 1073741824}),
-    game(5, {store_category: [28]})], available: [game(6, {store_category: [28]})] };
-  const metadata = {4: {controllerSupport: 'emulated'}, 5: {controllerSupport: 'none'}};
-  const sections = librarySections(groups, metadata, 'controller');
-  assert.deepEqual(sections.map(s => s.apps.map(a => a.appid)), [[3, 4, 2, 1, 5], [6]]);
+    game(5, {store_category: [28]})], available: [game(6, {store_category: [28]}), game(7)] };
+  const metadata = {2: {year: 2000, developer: 'A'}, 3: {year: 2020, developer: 'B'},
+    4: {controllerSupport: 'emulated', console: 'GameCube'}, 5: {controllerSupport: 'none'}};
+  for (const [mode] of sortModes) {
+    const before = librarySections(groups, metadata, mode).flatMap(s => s.apps.map(a => a.appid));
+    const after = librarySections(groups, metadata, mode, true).flatMap(s => s.apps.map(a => a.appid));
+    assert.deepEqual(after, before.filter(id => [2, 3, 4, 6].includes(id)));
+    assert.equal(after.at(-1), 6);
+  }
+  assert.equal(validSort('controller'), 'recent');
+  assert.deepEqual(librarySections({ready: [game(1)], available: []}, {}, 'console', true), []);
   assert.deepEqual(groups.ready.map(a => a.appid), [1, 2, 3, 4, 5]);
-  assert.equal(validSort('controller'), 'controller');
 });
 
 test('vertical navigation keeps the nearest column through short rows and group headings', () => {
@@ -129,4 +135,13 @@ test('vertical navigation keeps the nearest column through short rows and group 
   assert.equal(verticalNeighbor(cards,5,-1),3);
   assert.equal(verticalNeighbor(cards,1,-1),undefined);
   assert.equal(verticalNeighbor(cards,5,1),undefined);
+});
+
+test('native text field discovery never reads component context getters', async () => {
+  const { findTextField } = await import('./steam.mjs');
+  const field = () => {};
+  field.validateUrl = () => true; field.validateEmail = () => true;
+  Object.defineProperty(field, 'contextType', {get() { throw Error('must not read'); }});
+  const requireModule = () => ({field}); requireModule.m = {1: {}};
+  assert.equal(findTextField(requireModule), field);
 });

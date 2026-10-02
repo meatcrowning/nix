@@ -18,3 +18,18 @@ export function steamNavigation() {
   if (!win) throw new Error('No active Steam window');
   return win;
 }
+
+// Native text fields provide Steam's controller keyboard without the SDK's
+// CommonUIModule scan (see the contextType getter constraint above).
+export function findTextField(requireModule) {
+  for (const id of Object.keys(requireModule.m)) {
+    let module;
+    try { module = requireModule(id); } catch { continue; }
+    for (const candidate of [module, ...Object.values(module || {})]) {
+      if (!candidate || !['function', 'object'].includes(typeof candidate)) continue;
+      if (typeof Object.getOwnPropertyDescriptor(candidate, 'validateUrl')?.value === 'function'
+        && typeof Object.getOwnPropertyDescriptor(candidate, 'validateEmail')?.value === 'function') return candidate;
+    }
+  }
+  return null;
+}

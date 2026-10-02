@@ -5,6 +5,8 @@ names the user's own files) says where each game is and how it runs. `sync`
 turns it into desktop entries with icons and keeps Steam ROM Manager's and
 Ludusavi's configs in step; `steam` adds every game to Steam, with artwork; `run` starts one
 game; `check` reports which entries would launch without starting anything.
+The Big Picture importer uses `rom` JSON commands and stores local additions
+in $XDG_DATA_HOME/games/imports.json, merged by slug over the private manifest.
 
 Games stay where they are, often on removable drives, so `run` names the
 missing drive instead of failing silently when one is unplugged.
@@ -76,9 +78,11 @@ SYSTEM_LABELS = {
 
 
 def load():
-    if not MANIFEST.exists():
-        return []
-    return json.loads(MANIFEST.read_text())["games"]
+    base = json.loads(MANIFEST.read_text())["games"] if MANIFEST.exists() else []
+    imports = DATA / "games/imports.json"
+    local = json.loads(imports.read_text())["games"] if imports.exists() else []
+    # Runtime imports can enrich an existing launcher without editing private docs.
+    return list({g["slug"]: g for g in [*base, *local]}.values())
 
 
 def load_extra_saves():
@@ -282,7 +286,7 @@ def icon_for(game, offline):
         return str(out)
     if "thumb" in game:
         return "retroarch" if game["runner"] == "retroarch" else "PCSX2"
-    return RUNNER_LABELS[game["runner"]][1]
+    return "retroarch" if game["runner"] == "retroarch" else RUNNER_LABELS[game["runner"]][1]
 
 
 def comment(game):
@@ -473,7 +477,7 @@ def steam(games):
         grid = user / "config/grid"
         grid.mkdir(parents=True, exist_ok=True)
         for game in games:
-            app = srm_app_id(game["name"])
+            app = game.get("steamAppIdRuntime") or srm_app_id(game["name"])
             kept.append({
                 "appid": app - (1 << 32),
                 "AppName": game["name"],
@@ -540,7 +544,15 @@ def write_ludusavi(games):
 
 def main():
     args = sys.argv[1:]
-    if args[:1] == ["run"] and len(args) == 2:
+    if args[:1] == ["rom"] and len(args) == 2:
+        import rom_import
+        try:
+            request = json.load(sys.stdin)
+            print(json.dumps(rom_import.dispatch(args[1], request)))
+        except Exception as error:
+            print(json.dumps({"error": str(error)}))
+            sys.exit(1)
+    elif args[:1] == ["run"] and len(args) == 2:
         run(args[1])
     elif args[:1] == ["sync"]:
         sync(offline="--offline" in args)
@@ -549,7 +561,7 @@ def main():
     elif args == ["steam"]:
         steam(load())
     else:
-        sys.exit("usage: games run SLUG | games sync [--offline] | games check | games steam")
+        sys.exit("usage: games run SLUG | games sync [--offline] | games check | games steam | games rom systems|search|prepare|finish (JSON stdin)")
 
 
 if __name__ == "__main__":

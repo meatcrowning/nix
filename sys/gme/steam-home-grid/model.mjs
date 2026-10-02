@@ -72,12 +72,11 @@ export function adjacentApp(apps, appid, step) {
 
 export const sortModes = [
   ['recent', 'Recently played'], ['title', 'Title A–Z'], ['console', 'Console'],
-  ['controller', 'Controller support'],
   ['newest', 'Newest first'], ['oldest', 'Oldest first'], ['developer', 'Developer'],
 ];
 export const validSort = value => sortModes.some(([id]) => id === value) ? value : 'recent';
 
-export function librarySections(groups, metadata, mode) {
+export function librarySections(groups, metadata, mode, controllersOnly = false) {
   const title = (a, b) => displayTitle(a).localeCompare(displayTitle(b)) || a.appid - b.appid;
   const details = app => metadata[app.appid] || {};
   const year = app => Number(details(app).year) || new Date((app.rt_original_release_date || app.rt_steam_release_date || 0) * 1000).getUTCFullYear();
@@ -86,13 +85,6 @@ export function librarySections(groups, metadata, mode) {
     : details(app).developer || 'Unknown developer';
   const compare = (a, b) => {
     if (mode === 'recent') return (b.rt_last_time_played || 0) - (a.rt_last_time_played || 0) || title(a, b);
-    if (mode === 'controller') {
-      const rank = app => {
-        const support = controllerSupport(app, details(app));
-        return !support ? 2 : support.level === 'partial' ? 1 : 0;
-      };
-      return rank(a) - rank(b) || title(a, b);
-    }
     if (mode === 'newest' || mode === 'oldest') {
       const ay = release(a), by = release(b);
       return (ay === null) - (by === null) || (ay !== null && by !== null ? (ay - by) * (mode === 'newest' ? -1 : 1) : 0) || title(a, b);
@@ -101,7 +93,7 @@ export function librarySections(groups, metadata, mode) {
   };
   const sections = [];
   for (const [key, downloadable] of [['ready', false], ['available', true]]) {
-    const apps = [...groups[key]];
+    const apps = groups[key].filter(app => !controllersOnly || controllerSupport(app, details(app)));
     if (mode === 'console' || mode === 'developer') {
       const buckets = new Map();
       for (const app of apps) {
