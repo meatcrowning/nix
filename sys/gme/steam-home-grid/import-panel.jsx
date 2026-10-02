@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { callable, openFilePicker } from '@decky/api';
+import { callable } from '@decky/api';
 import { importRom } from './import-client.mjs';
+import { RomBrowser } from './rom-browser.jsx';
 
 const backend = callable('rom_import');
 export function ImportPanel({ Focusable, TextField, close, imported }) {
   const [config, setConfig] = useState(null), [systemIndex, setSystemIndex] = useState(0);
+  const [browsing, setBrowsing] = useState(false), [confirmRegionMismatch, setConfirmRegionMismatch] = useState(false);
   const [path, setPath] = useState(''), [query, setQuery] = useState('');
   const [matches, setMatches] = useState(null), [match, setMatch] = useState(null);
   const [year, setYear] = useState(''), [developer, setDeveloper] = useState('');
@@ -17,7 +19,7 @@ export function ImportPanel({ Focusable, TextField, close, imported }) {
       .catch(e => { if (active.current) setError(e.message); });
     return () => { active.current = false; };
   }, []);
-  useLayoutEffect(() => { if (!busy) first.current?.TakeFocus(); }, [!!config, !!match, !!result, busy]);
+  useLayoutEffect(() => { if (!busy) first.current?.TakeFocus(); }, [!!config, !!match, !!result, busy, browsing]);
   const job = async (label, action) => {
     if (locked.current) return;
     locked.current = true; setBusy(label); setError('');
@@ -31,30 +33,27 @@ export function ImportPanel({ Focusable, TextField, close, imported }) {
     setSystemIndex((systemIndex + step + config.systems.length) % config.systems.length); reset();
     return true;
   };
-  const browse = () => job('Choose a ROM…', async () => {
-    let picked;
-    try { picked = await openFilePicker(0 /* FileSelectionType.FILE */, config.home, true, true,
-      undefined, system.extensions.map(ext => ext.slice(1)), false, false); }
-    catch { return; } // Decky's picker rejects its promise on Cancel.
-    if (!active.current) return;
-    const filename = picked.realpath || picked.path;
-    setPath(filename); setQuery(filename.split('/').pop().replace(/\.[^.]+$/, '')); reset();
-  });
+  const browse = () => setBrowsing(true);
+  const pickFile = filename => {
+    setPath(filename); setQuery(filename.split('/').pop().replace(/\.[^.]+$/, '')); reset(); setBrowsing(false);
+  };
   const search = () => job('Searching game catalog…', async () => {
     const found = await backend('search', { system: system.id, path, query });
     if (active.current) { setMatches(found.matches); setPath(found.path); }
   });
-  const choose = entry => { setMatch(entry); setYear(entry.year); setDeveloper(entry.developer); };
+  const choose = entry => { setMatch(entry); setYear(entry.year); setDeveloper(entry.developer); setConfirmRegionMismatch(false); };
   const add = () => job('Adding game and artwork…', async () => {
-    const added = await importRom({ system: system.id, path, match: match.id, year, developer },
+    const added = await importRom({ system: system.id, path, match: match.id, year, developer, confirmRegionMismatch },
       { backend, apps: window.SteamClient.Apps, allApps: window.appStore.allApps, refresh: imported,
-        hasArtwork: app => !!window.appStore.GetCustomVerticalCapsuleURLs(app).length });
+        hasArtwork: (app, type) => !!(type === 1 ? window.appStore.GetCustomHeroImageURLs(app) : window.appStore.GetCustomVerticalCapsuleURLs(app)).length });
     if (active.current) setResult(added);
   });
   const back = () => { if (!locked.current) { if (match && !result) setMatch(null); else close(); } return true; };
   const button = (label, action, primary = false) => <Focusable className="hlg-sort-option" noFocusRing
     focusable={!busy} aria-disabled={!!busy} role="button" onActivate={() => { if (!locked.current) action(); }}
     navRef={primary ? ref => { first.current = ref; } : undefined} onOKActionDescription="Select">{label}</Focusable>;
+  if (browsing) return <RomBrowser Focusable={Focusable} backend={backend} system={system}
+    home={config.home} pick={pickFile} close={() => setBrowsing(false)} />;
   if (!TextField) return <Focusable className="hlg-sort-menu hlg-import-menu" autoFocus onCancel={back}>
     <div className="hlg-audio-error">Steam’s text input is unavailable. Reopen Steam to retry.</div>{button('Back', close, true)}
   </Focusable>;
@@ -74,7 +73,12 @@ export function ImportPanel({ Focusable, TextField, close, imported }) {
         <TextField label="Release year" value={year} disabled={!!busy} onChange={e => setYear(e.target.value)} />
       </div>
       <div className="hlg-sort-note">Confirm the console version and credits. Fill in any missing fields before adding.</div>
-      {button('Add to library', add, true)}
+      {match.regionMismatch && <>
+        <div className="hlg-audio-error">This region does not match the ROM filename.</div>
+        {button(confirmRegionMismatch ? 'Use different region: confirmed' : 'Confirm using this different region',
+          () => setConfirmRegionMismatch(value => !value), true)}
+      </>}
+      {(!match.regionMismatch || confirmRegionMismatch) && button('Add to library', add, !match.regionMismatch)}
       {button('Choose a different match', () => setMatch(null))}
     </> : config ? <>
       <Focusable className="hlg-sort-option" noFocusRing focusable={!busy} role="button"
@@ -93,7 +97,7 @@ export function ImportPanel({ Focusable, TextField, close, imported }) {
       </>}
       {matches && <div className="hlg-sort-note">{matches.length ? 'Choose the matching game and region:' : 'No matches. Try a shorter title or check the console.'}</div>}
       {matches?.map(entry => <React.Fragment key={entry.id}>{button(
-        `${entry.title} — ${entry.year || 'Year unknown'} · ${entry.developer || 'Developer unknown'}`, () => choose(entry))}</React.Fragment>)}
+        `${entry.regionMismatch ? 'Different region · ' : ''}${entry.title} — ${entry.year || 'Year unknown'} · ${entry.developer || 'Developer unknown'}`, () => choose(entry))}</React.Fragment>)}
       {button('Back', close)}
     </> : <div className="hlg-sort-note">Loading import settings…</div>}
     {busy && <div className="hlg-sort-note" role="status">{busy}</div>}
