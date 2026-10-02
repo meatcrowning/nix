@@ -31,7 +31,12 @@ export function AudioPanel({ Focusable, close }) {
     write({sound: choices[(i + step + choices.length) % choices.length]}); return true;
   };
   const volume = (key, step) => { write({[key]: Math.max(0, Math.min(1, Math.round(latest.current[key] * 10 + step) / 10))}); return true; };
-  const ambience = () => { const a = latest.current; write({music:'PS2 Ambience',musicEnabled: !(a.musicEnabled && a.music !== 'None')}); return true; };
+  const ambience = step => {
+    const a = latest.current, choices = ['None', ...a.musicPacks];
+    const i = choices.indexOf(a.musicEnabled ? a.music : 'None');
+    const music = choices[(Math.max(0,i) + step + choices.length) % choices.length];
+    write({music, musicEnabled: music !== 'None'}); return true;
+  };
   const row = (index, label, value, left, right, slider = false) => <Focusable key={index}
     className="hlg-audio-row" focusable noFocusRing navRef={ref => { if (ref) rows.current.set(index,ref); else rows.current.delete(index); }}
     onMoveUp={detail => { rows.current.get(Math.max(0,index-1))?.TakeFocus(detail.button); return true; }}
@@ -51,7 +56,7 @@ export function AudioPanel({ Focusable, close }) {
     {audio ? <>
       {row(0,'Menu sounds',labels[audio.sound] || audio.sound,()=>sound(-1),()=>sound(1))}
       {row(1,'Sound volume',`${Math.round(audio.soundVolume*100)}%`,()=>volume('soundVolume',-1),()=>volume('soundVolume',1),true)}
-      {row(2,'PS2 ambience',audio.musicEnabled && audio.music!=='None' ? 'On' : 'Off',ambience,ambience)}
+      {row(2,'Ambience',audio.musicEnabled && audio.music!=='None' ? audio.music : 'Off',()=>ambience(-1),()=>ambience(1))}
       {row(3,'Ambience volume',`${Math.round(audio.musicVolume*100)}%`,()=>volume('musicVolume',-1),()=>volume('musicVolume',1),true)}
       <div className="hlg-sort-note">Choose Steam default to disable a sound pack. Volume 0 mutes menu sounds. Ambience is experimental.</div>
     </> : <div className="hlg-sort-note">Audio settings are loading…</div>}
