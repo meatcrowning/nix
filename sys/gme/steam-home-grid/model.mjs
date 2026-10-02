@@ -37,6 +37,25 @@ export function metadataLine(app, details = {}) {
   return [year, details.developer].filter(Boolean).join(' · ');
 }
 
+// Capability, not an assertion that a controller is connected or in use.
+// Steam Input mappings and Deck compatibility alone do not prove support.
+export function controllerSupport(app, details = {}) {
+  if (!app) return null;
+  const labels = {
+    full: 'Full controller support',
+    partial: 'Partial controller support — keyboard or mouse may be needed',
+    emulated: 'Controller support through the emulator',
+  };
+  // Explicit local knowledge also handles mods and controller-mapping wrappers.
+  if (['full', 'partial', 'emulated', 'none'].includes(details.controllerSupport))
+    return labels[details.controllerSupport] ? { level: details.controllerSupport, label: labels[details.controllerSupport] } : null;
+  if (app.BIsShortcut?.() || app.app_type === 1073741824) return null;
+  const categories = new Set(app.store_category || []);
+  const level = categories.has(28) || app.xbox_controller_support === 2 ? 'full'
+    : categories.has(18) || app.xbox_controller_support === 1 ? 'partial' : null;
+  return level ? { level, label: labels[level] } : null;
+}
+
 // Strip only explicit platform suffixes, preserving years and edition names.
 export function displayTitle(app) {
   return (app?.display_name || '').replace(/\s*[([{](?:PC|PS1|PS2|PS3|PSP|PlayStation(?: 2| 3| Portable)?|GameCube|GC|NES|SNES|Nintendo 64|N64|Game Boy(?: Advance| Color)?|GBA|GBC|GB)[)\]}]\s*$/i, '').trim();

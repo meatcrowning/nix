@@ -2,7 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { findFocusable, steamNavigation } from './steam.mjs';
 import { afterPatch } from '@decky/ui/dist/utils/patcher';
 import { definePlugin, routerHook, callable } from '@decky/api';
-import { libraryGroups, edgeFades, revealScroll, metadataLine, displayTitle, systemName, adjacentApp, librarySections, sortModes, validSort, verticalNeighbor } from './model.mjs';
+import { libraryGroups, edgeFades, revealScroll, metadataLine, controllerSupport, displayTitle, systemName, adjacentApp, librarySections, sortModes, validSort, verticalNeighbor } from './model.mjs';
 import css from './style.css';
 import { SystemIcon } from './system-icon.jsx';
 import { AudioPanel } from './audio-panel.jsx';
@@ -53,6 +53,7 @@ function HomeGrid() {
   const sections = librarySections(groups, metadata, sortMode);
   const all = sections.flatMap(section => section.apps);
   const [selected, setSelected] = useState(() => all.find(a => a.appid === rememberedApp) || all[0]);
+  const controller = controllerSupport(selected, metadata[selected?.appid]);
   const viewport = useRef(null);
   const navigation = useRef(new Map());
   const focusGrid = detail => {
@@ -149,7 +150,13 @@ function HomeGrid() {
     <div className="hlg-hero"><Picture key={`${selected?.appid}-${selected?.rt_custom_image_mtime}`} sources={artwork(selected, 'hero')} /></div>
     <Focusable className="hlg-heading" flow-children="row" childFocusDisabled={!!panel}>
       <h1>{displayTitle(selected) || 'Your library'}</h1>
-      <span className="hlg-metadata">{sortMode !== 'console' && <SystemIcon system={systemName(selected, metadata[selected?.appid])} />}{metadataLine(selected, metadata[selected?.appid])}</span>
+      <span className="hlg-metadata">{sortMode !== 'console' && <SystemIcon system={systemName(selected, metadata[selected?.appid])} />}{metadataLine(selected, metadata[selected?.appid])}
+        {controller && <svg className="hlg-controller" data-support={controller.level} viewBox="0 0 24 24"
+          role="img" aria-label={controller.label}><title>{controller.label}</title>
+          <path d="M7 6h10c2 0 3 2 3.5 4l1 6c.5 3-2 4-3.5 2l-2-2H8l-2 2c-1.5 2-4 1-3.5-2l1-6C4 8 5 6 7 6Z" />
+          <path d="M8 9v5m-2.5-2.5h5" /><circle cx="16" cy="10" r=".8" /><circle cx="18" cy="13" r=".8" />
+        </svg>}
+      </span>
       {['sort','audio'].map(name => <Focusable key={name} className={`hlg-sort-button hlg-${name}-button`}
         navRef={ref => {if(ref) toolbar.current.set(name,ref); else toolbar.current.delete(name);}} focusable={!panel} noFocusRing
         aria-haspopup={name==='sort'?'menu':'dialog'} aria-expanded={panel===name} aria-label={name==='sort'?'Sort games':'Audio settings'}

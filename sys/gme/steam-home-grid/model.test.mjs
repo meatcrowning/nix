@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { libraryGroups, edgeFades, revealScroll, metadataLine, displayTitle, adjacentApp, verticalNeighbor } from './model.mjs';
+import { libraryGroups, edgeFades, revealScroll, metadataLine, controllerSupport, displayTitle, adjacentApp, verticalNeighbor } from './model.mjs';
 const game = (id, extra = {}) => ({ appid: id, display_name: `Game ${id}`, app_type: 1,
   subscribed_to: true, visible_in_game_list: true,
   per_client_data: [{ clientid: '0', is_available_on_current_platform: true }], ...extra });
@@ -50,6 +50,26 @@ test('metadata uses console-specific credits and omits unknown shortcut details'
   assert.equal(metadataLine({BIsShortcut: () => true}, {console: 'Game Boy Advance'}), '');
   assert.equal(metadataLine({rt_original_release_date: 946684800}), '2000');
   assert.equal(metadataLine(null), '');
+});
+
+test('controller badges distinguish full and partial support using Steam capability data', () => {
+  assert.equal(controllerSupport(game(1, {store_category: [28]})).level, 'full');
+  assert.equal(controllerSupport(game(2, {store_category: [18]})).level, 'partial');
+  assert.equal(controllerSupport(game(3, {xbox_controller_support: 2})).level, 'full');
+  assert.equal(controllerSupport(game(4, {xbox_controller_support: 1})).level, 'partial');
+  assert.equal(controllerSupport(game(5, {store_category: [18, 28]})).level, 'full');
+  assert.equal(controllerSupport(game(6, {steam_deck_compat_category: 3, store_category: [29]})), null);
+  assert.equal(controllerSupport(undefined), null);
+});
+
+test('shortcuts require explicit support metadata, and local corrections override store claims', () => {
+  const shortcut = game(1, {app_type: 1073741824, xbox_controller_support: 2});
+  assert.equal(controllerSupport(shortcut), null);
+  assert.equal(controllerSupport(shortcut, {console: 'PC'}), null);
+  assert.equal(controllerSupport(shortcut, {controllerSupport: 'partial'}).level, 'partial');
+  assert.equal(controllerSupport(shortcut, {controllerSupport: 'emulated'}).level, 'emulated');
+  assert.equal(controllerSupport(game(2, {store_category: [28]}), {controllerSupport: 'none'}), null);
+  assert.equal(controllerSupport(shortcut, {controllerSupport: 'unknown'}), null);
 });
 
 test('titles lose only console suffixes, not years or editions', () => {
