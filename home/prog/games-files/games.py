@@ -561,7 +561,7 @@ def main():
     elif args == ["steam"]:
         steam(load())
     else:
-        sys.exit("usage: games run SLUG | games sync [--offline] | games check | games steam | games rom systems|search|prepare|finish (JSON stdin)")
+        sys.exit("usage: games run SLUG | games sync [--offline] | games check | games steam | games rom systems|browse|search|prepare|record|finish (JSON stdin)")
 
 
 if __name__ == "__main__":

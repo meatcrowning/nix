@@ -16,7 +16,7 @@ class Plugin:
             return {}
 
     async def rom_import(self, action, request):
-        if action not in ('systems', 'search', 'prepare', 'finish'):
+        if action not in ('systems', 'browse', 'search', 'prepare', 'record', 'finish'):
             raise ValueError('Unknown import action')
         home = Path(decky.DECKY_USER_HOME)
         executable = Path('/etc/profiles/per-user') / home.name / 'bin/games'

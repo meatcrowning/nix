@@ -31,7 +31,7 @@ class ImportTests(unittest.TestCase):
         self.path = root/'Example (USA).nes'; self.path.write_bytes(b'NES\x1aexample')
         self.entry = {'name':'Example (USA)', 'developer':'Studio', 'releaseyear':1991}
         self.request = {'path':str(self.path), 'system':'nes', 'match':self.entry['name']}
-        for target, value in [('shutil.which','/test/emulator'), ('games.artwork',{}), ('rom_import.catalog',[self.entry])]:
+        for target, value in [('shutil.which','/test/emulator'), ('games.artwork',{}), ('games.fetch',False), ('rom_import.catalog',[self.entry])]:
             p=patch(target,return_value=value); p.start(); self.addCleanup(p.stop)
 
     def test_prepare_finish_retry_preserves_metadata_and_manifest(self):
@@ -40,7 +40,11 @@ class ImportTests(unittest.TestCase):
         rom.atomic_json(rom.DETAILS, {'42':{'developer':'Unrelated'}})
         first=rom.prepare(self.request)
         self.assertEqual(first['details']['controllerSupport'],'emulated')
+        rom.record({'slug':first['slug'],'appid':2147483650})
+        self.assertFalse(games.load()[0]['importComplete'])
+        self.assertFalse((games.ENTRIES / (f"game-{first['slug']}.desktop")).exists())
         rom.finish({'slug':first['slug'],'appid':2147483650})
+        self.assertTrue(games.load()[0]['importComplete'])
         second=rom.prepare(self.request)
         self.assertEqual(first['slug'],second['slug'])
         self.assertEqual(second['existingAppId'],2147483650)
@@ -101,6 +105,57 @@ class ImportTests(unittest.TestCase):
         result=rom.search({**self.request,'query':'Example'})
         self.assertEqual(result['matches'][0]['console'],'NES')
         self.assertFalse(rom.IMPORTS.exists())
+
+    def test_region_ranking_keeps_filename_region_even_when_query_is_shortened(self):
+        europe={'name':'Example (Europe)', 'developer':'Wrong', 'releaseyear':1991}
+        with patch('rom_import.catalog',return_value=[europe,self.entry]):
+            result=rom.search({**self.request,'query':'Example'})
+            self.assertEqual(result['matches'][0]['title'],'Example (USA)')
+            self.assertFalse(result['matches'][0]['regionMismatch'])
+            self.assertTrue(result['matches'][1]['regionMismatch'])
+            with self.assertRaisesRegex(ValueError,'selected region'):
+                rom.prepare({**self.request,'match':'Example (Europe)'})
+            self.assertFalse(rom.IMPORTS.exists())
+            result=rom.prepare({**self.request,'match':'Example (Europe)','confirmRegionMismatch':True})
+            self.assertEqual(result['details']['catalogTitle'],'Example (Europe)')
+
+    def test_file_browser_filters_extensions_hides_dotfiles_and_paginates(self):
+        root=self.path.parent
+        (root/'Folder').mkdir();(root/'wrong.iso').touch();(root/'.hidden.nes').touch()
+        for i in range(110):(root/f'Game {i:03}.nes').touch()
+        result=rom.browse({'system':'nes','path':str(root)})
+        names=[e['name'] for e in result['entries']]
+        self.assertNotIn('wrong.iso',names);self.assertNotIn('.hidden.nes',names)
+        self.assertTrue(result['entries'][0]['directory'])
+        self.assertEqual(len(result['entries']),100)
+        more=rom.browse({'system':'nes','path':str(root),'offset':100})
+        self.assertTrue(more['entries']);self.assertFalse(set(names)&{e['name'] for e in more['entries']})
+
+    def test_background_uses_same_region_gameplay_and_exposes_both_asset_types(self):
+        portrait=self.path.parent/'p.png';portrait.write_bytes(b'portrait')
+        urls=[]
+        def fetch(url,path):urls.append(url);path.write_bytes(b'gameplay');return True
+        game={'slug':'example','thumb':'Nintendo_-_Nintendo_Entertainment_System/Example (USA)'}
+        with patch('games.artwork',return_value={'p':portrait}),patch('games.fetch',side_effect=fetch):
+            assets,warning=rom.import_artwork(game)
+        self.assertEqual([a['type'] for a in assets],[0,1]);self.assertEqual(warning,'')
+        self.assertIn('/Named_Snaps/Example%20%28USA%29.png',urls[0])
+        self.assertNotIn('Named_Titles',urls[0])
+
+    def test_curated_hero_is_preserved_and_missing_art_is_reported(self):
+        hero=self.path.parent/'hero.jpg';hero.write_bytes(b'curated')
+        game={'slug':'example','thumb':'Console/Example (USA)'}
+        with patch('games.artwork',return_value={'_hero':hero}),patch('games.fetch') as fetch:
+            assets,warning=rom.import_artwork(game)
+            fetch.assert_not_called()
+        self.assertEqual(assets[0]['type'],1);self.assertEqual(assets[0]['extension'],'jpg')
+        self.assertIn('Box art',warning)
+
+    def test_unrecorded_shortcut_cannot_be_marked_complete(self):
+        prepared=rom.prepare(self.request)
+        with self.assertRaisesRegex(ValueError,'does not match'):
+            rom.finish({'slug':prepared['slug'],'appid':42})
+        self.assertFalse(rom.DETAILS.exists())
 
     def test_finish_rejects_invalid_or_unknown_id(self):
         for appid in [0,-1,2**32,True]:
