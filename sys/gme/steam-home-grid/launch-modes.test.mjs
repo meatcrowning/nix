@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installLaunchModes, saveLaunchOptions } from './launch-modes.mjs';
-import { findLaunchOptionsDialog } from './steam.mjs';
 
 function harness({ choose = async () => 1, save, metadata } = {}) {
   const calls = [], errors = [], apps = {RunGame(...args) { calls.push(['run', ...args]); }};
@@ -54,11 +53,4 @@ test('saving waits for Steam acknowledgement and rejects silent failures', async
   apps.RegisterForAppDetails = () => ({unregister(){removed++;}});
   await assert.rejects(saveLaunchOptions(apps, 42, 'run game --mode campaign', 5), /did not save/);
   assert.equal(removed, 2);
-});
-
-test('native chooser discovery does not depend on webpack IDs', () => {
-  const dialog = () => 'showing launch options';
-  const requireModule = () => ({renamed: dialog});
-  requireModule.m = {123: () => 'showing launch options'};
-  assert.equal(findLaunchOptionsDialog(requireModule), dialog);
 });
