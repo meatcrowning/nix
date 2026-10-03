@@ -26,7 +26,7 @@ let
   '';
   launcher = pkgs.writeShellApplication {
     name = "black-ops";
-    runtimeInputs = [ wine pkgs.cabextract pkgs.coreutils pkgs.gnused pkgs.util-linux pkgs.python3 ];
+    runtimeInputs = [ wine pkgs.cabextract pkgs.coreutils pkgs.gnused pkgs.util-linux pkgs.python3 pkgs.bubblewrap ];
     text = ''
       game="''${BLACK_OPS_GAME_DIR:-$HOME/.wine/drive_c/Program Files (x86)/Activision/Call of Duty - Black Ops}"
       if [[ ! -f "$game/BlackOps.exe" ]]; then
@@ -121,7 +121,9 @@ let
           fi
           game_windows=$(winepath -w "$game")
           cd "$client"
-          exec wine bin/plutonium-bootstrapper-win32.exe "$mode" "$game_windows" -lan +name Player "''${extra[@]}" +set gpad_enabled 1 "$@"
+          # LAN mode still permits network traffic; enforce offline play at the OS boundary.
+          exec bwrap --unshare-net --bind / / --dev-bind /dev /dev --proc /proc \
+            wine bin/plutonium-bootstrapper-win32.exe "$mode" "$game_windows" -lan +name Player "''${extra[@]}" +set gpad_enabled 1 "$@"
           ;;
       esac
       # DLC updates target the LAN client, not the original campaign executable.
@@ -130,7 +132,8 @@ let
       campaign=$(python3 ${./black-ops-campaign.py} "$game" "$logdir/dlc-backups" \
         "''${XDG_DATA_HOME:-$HOME/.local/share}/black-ops/campaign")
       cd "$campaign"
-      exec wine BlackOps.exe +set gpad_enabled 1 "$@"
+      exec bwrap --unshare-net --bind / / --dev-bind /dev /dev --proc /proc \
+        wine BlackOps.exe +set gpad_enabled 1 "$@"
     '';
   };
 in
