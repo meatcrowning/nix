@@ -5,7 +5,9 @@ import { importRom, verifyShortcut } from './import-client.mjs';
 const prepared = {slug:'rom-1', title:'Example (NES)', exe:'/bin/games', options:'run rom-1',
   startDir:'/tmp/home', expectedAppId:2147483649, artwork:[
     {type:0,label:'Box art',extension:'png',data:'cover'},
-    {type:1,label:'Background artwork',extension:'png',data:'hero'}], warning:''};
+    {type:1,label:'Background artwork',extension:'png',data:'hero'},
+    {type:2,label:'Game logo',extension:'png',data:'logo'},
+    {type:3,label:'Wide artwork',extension:'png',data:'header'}], warning:''};
 function harness(existing = [], artFails = false) {
   const calls = [], details = {};
   const deps = {allApps: existing,
@@ -20,6 +22,7 @@ function harness(existing = [], artFails = false) {
       SetShortcutExe: async (_,value) => {calls.push(['exe',value]);details.strShortcutExe=value;},
       SetShortcutStartDir: async (_,value) => {calls.push(['dir',value]);details.strShortcutStartDir=value;},
       SetShortcutLaunchOptions: async (_,value) => {calls.push(['options',value]);details.strShortcutLaunchOptions=value;},
+      SetThirdPartyControllerConfiguration: async (...args) => calls.push(['steam-input', ...args]),
       RegisterForAppDetails: (_,callback) => {calls.push(['verify']);callback(details);return {unregister(){calls.push(['unregister']);}};},
       SetCustomArtworkForApp: async (...args) => { calls.push(['art', ...args]); if (artFails) throw Error('offline'); }
     },
@@ -36,7 +39,8 @@ test('realistic Steam name/quoting behavior is corrected and verified before suc
   const names=calls.map(c=>c[0]);
   assert.ok(names.indexOf('record')<names.indexOf('verify'));
   assert.ok(names.indexOf('verify')<names.indexOf('finish'));
-  assert.deepEqual(calls.filter(c=>c[0]==='art').map(c=>c.at(-1)),[0,1]);
+  assert.deepEqual(calls.filter(c=>c[0]==='art').map(c=>c.at(-1)),[0,1,2,3]);
+  assert.deepEqual(calls.find(c=>c[0]==='steam-input'),['steam-input',2147483649,2]);
   assert.equal(names.at(-1),'refresh');
 });
 test('retry reuses shortcut and preserves existing user artwork', async () => {
@@ -64,9 +68,9 @@ test('invalid native result cannot write metadata for a nonexistent shortcut', a
 });
 test('retry fills a missing hero without overwriting the existing cover', async () => {
   const {calls, deps} = harness([{appid:2147483649, display_name:prepared.title, BIsShortcut:()=>true}]);
-  deps.hasArtwork = (_, type) => type === 0;
+  deps.hasArtwork = async (_, type) => type === 0;
   await importRom({}, deps);
-  assert.deepEqual(calls.filter(c=>c[0]==='art').map(c=>c.at(-1)),[1]);
+  assert.deepEqual(calls.filter(c=>c[0]==='art').map(c=>c.at(-1)),[1,2,3]);
   assert.ok(!calls.some(c=>c[0]==='add'));
 });
 test('setter rejection leaves a retryable ID but never reports completion', async () => {

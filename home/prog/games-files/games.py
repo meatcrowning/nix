@@ -150,14 +150,8 @@ def run(slug):
     env = dict(os.environ)
     # Per-game compatibility settings also apply when launched outside Steam.
     env.update(game.get("env", {}))
-    if "SteamGameId" in env and game["runner"] in ("retroarch", "pcsx2", "steam-run"):
-        # Steam turns on its Vulkan overlay layer for everything it launches,
-        # and that layer only handles X11 windows: a Vulkan emulator on a
-        # native Wayland surface runs but never shows. Use XWayland, as
-        # Proton games already do, so the overlay and the window both work.
-        env.pop("WAYLAND_DISPLAY", None)
-        env["QT_QPA_PLATFORM"] = "xcb"
-        env["SDL_VIDEODRIVER"] = "x11"
+    import steam_session
+    argv = steam_session.configure(game, argv, env, LOGS)
     if game["runner"] == "retroarch":
         argv.insert(1, "--verbose")
     LOGS.mkdir(parents=True, exist_ok=True)
@@ -165,7 +159,8 @@ def run(slug):
     os.write(log, (f"$ {' '.join(argv)}\n" + "".join(
         f"{k}={env[k]}\n" for k in sorted(env)
         if k in ("SteamGameId", "WAYLAND_DISPLAY", "DISPLAY", "QT_QPA_PLATFORM", "SDL_VIDEODRIVER",
-                 "LD_PRELOAD", "ENABLE_VK_LAYER_VALVE_steam_overlay_1"))).encode())
+                 "LD_PRELOAD", "ENABLE_VK_LAYER_VALVE_steam_overlay_1",
+                 "SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT", "SDL_JOYSTICK_HIDAPI"))).encode())
     os.dup2(log, 1)
     os.dup2(log, 2)
     if game["runner"] == "proton":
@@ -430,6 +425,7 @@ def fetch(url, out):
 
 def artwork(game):
     """Portrait, wide, hero and logo images for Steam's library, cached."""
+    from steam_art import complete
     art = ART / game["slug"]
     art.mkdir(parents=True, exist_ok=True)
     found = {}
@@ -446,16 +442,66 @@ def artwork(game):
             if curated.exists():
                 found["_hero"] = curated
                 break
-        return found
+        return complete(game, found, art)
     app = steam_store_id(game)
     if not app:
-        return found
+        return complete(game, found, art)
     cdn = f"https://cdn.akamai.steamstatic.com/steam/apps/{app}"
     for key, remote, local in (("p", "library_600x900.jpg", "p.jpg"), ("", "header.jpg", "wide.jpg"),
                                ("_hero", "library_hero.jpg", "hero.jpg"), ("_logo", "logo.png", "logo.png")):
         if fetch(f"{cdn}/{remote}", art / local):
             found[key] = art / local
-    return found
+    return complete(game, found, art)
+
+
+def repair_steam(games):
+    """Fill missing artwork and enable Steam Input for managed emulators."""
+    import shlex
+    import vdf
+    if subprocess.run(['pgrep', '-x', 'steam'], stdout=subprocess.DEVNULL).returncode == 0:
+        sys.exit('games: quit Steam before repairing shortcuts')
+    by_slug = {game['slug']: game for game in games}
+    for path in STEAM.glob('userdata/*/config/shortcuts.vdf'):
+        shortcuts = vdf.binary_loads(path.read_bytes()).get('shortcuts', {})
+        grid = path.parent / 'grid'
+        grid.mkdir(parents=True, exist_ok=True)
+        emulator_ids = []
+        for shortcut in shortcuts.values():
+            if shortcut.get('Exe', '').strip('"') != GAMES_BIN:
+                continue
+            args = shlex.split(shortcut.get('LaunchOptions', ''))
+            if len(args) != 2 or args[0] != 'run' or args[1] not in by_slug:
+                continue
+            app = shortcut['appid'] & 0xffffffff
+            if by_slug[args[1]]['runner'] in ('retroarch', 'pcsx2'):
+                emulator_ids.append(str(app))
+            missing = [suffix for suffix in ('p', '', '_hero', '_logo')
+                       if not any(grid.glob(f'{app}{suffix}.*'))]
+            if not missing:
+                continue
+            for suffix, source in artwork(by_slug[args[1]]).items():
+                if suffix in missing:
+                    shutil.copyfile(source, grid / f'{app}{suffix}{source.suffix}')
+                    print(f'games: added {suffix or "header"} for {shortcut["AppName"]}')
+        if emulator_ids:
+            local_path = path.with_name('localconfig.vdf')
+            local = vdf.loads(local_path.read_text()) if local_path.exists() else {}
+            apps = local.setdefault('UserLocalConfigStore', {}).setdefault('apps', {})
+            changed = False
+            for app in emulator_ids:
+                settings = apps.setdefault(app, {})
+                if settings.get('UseSteamControllerConfig') != '2':
+                    settings['UseSteamControllerConfig'] = '2'  # Steam's On enum
+                    changed = True
+            if changed:
+                if subprocess.run(['pgrep', '-x', 'steam'], stdout=subprocess.DEVNULL).returncode == 0:
+                    sys.exit('games: Steam started during repair; controller settings were not written')
+                if local_path.exists():
+                    shutil.copyfile(local_path, local_path.with_suffix('.vdf.before-games-input'))
+                temp = local_path.with_suffix('.vdf.games-tmp')
+                temp.write_text(vdf.dumps(local, pretty=True))
+                temp.replace(local_path)
+                print(f'games: enabled Steam Input for {len(emulator_ids)} emulators')
 
 
 def steam(games):
@@ -500,6 +546,7 @@ def steam(games):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(vdf.binary_dumps({"shortcuts": {str(i): v for i, v in enumerate(kept)}}))
         print(f"games: {len(games)} shortcuts in {path}")
+    repair_steam(games)
 
 
 def write_ludusavi(games):
@@ -560,8 +607,10 @@ def main():
         sys.exit(check())
     elif args == ["steam"]:
         steam(load())
+    elif args == ["steam-repair"]:
+        repair_steam(load())
     else:
-        sys.exit("usage: games run SLUG | games sync [--offline] | games check | games steam | games rom systems|browse|search|prepare|record|finish (JSON stdin)")
+        sys.exit("usage: games run SLUG | games sync [--offline] | games check | games steam | games steam-repair | games rom systems|browse|search|prepare|record|finish (JSON stdin)")
 
 
 if __name__ == "__main__":

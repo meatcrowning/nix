@@ -241,7 +241,8 @@ def import_artwork(game):
         if games.fetch(url, hero):
             assets['_hero'] = hero
     result = []
-    for key, asset_type, label in [('p', 0, 'Box art'), ('_hero', 1, 'Background artwork')]:
+    for key, asset_type, label in [('p', 0, 'Box art'), ('_hero', 1, 'Background artwork'),
+                                  ('_logo', 2, 'Game logo'), ('', 3, 'Wide artwork')]:
         image = assets.get(key)
         if image and image.stat().st_size <= 10 * 1024 * 1024:
             result.append({'type': asset_type, 'label': label, 'extension': image.suffix.lstrip('.'),

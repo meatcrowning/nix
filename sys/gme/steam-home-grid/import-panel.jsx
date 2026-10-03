@@ -45,7 +45,18 @@ export function ImportPanel({ Focusable, TextField, close, imported }) {
   const add = () => job('Adding game and artwork…', async () => {
     const added = await importRom({ system: system.id, path, match: match.id, year, developer, confirmRegionMismatch },
       { backend, apps: window.SteamClient.Apps, allApps: window.appStore.allApps, refresh: imported,
-        hasArtwork: (app, type) => !!(type === 1 ? window.appStore.GetCustomHeroImageURLs(app) : window.appStore.GetCustomVerticalCapsuleURLs(app)).length });
+        // Steam returns candidate jpg/png URLs even when that asset is absent.
+        // Check that an image actually loads before preserving it on retry.
+        hasArtwork: async (app, type) => (await Promise.all(window.appStore[
+          ['GetCustomVerticalCapsuleURLs', 'GetCustomHeroImageURLs',
+            'GetCustomLogoImageURLs', 'GetCustomLandcapeImageURLs'][type]](app)
+          .map(url => new Promise(resolve => {
+            const image = new Image();
+            const timer = setTimeout(() => resolve(true), 3000); // preserve on uncertainty
+            image.onload = () => { clearTimeout(timer); resolve(true); };
+            image.onerror = () => { clearTimeout(timer); resolve(false); };
+            image.src = url;
+          })))).some(Boolean) });
     if (active.current) setResult(added);
   });
   const back = () => { if (!locked.current) { if (match && !result) setMatch(null); else close(); } return true; };

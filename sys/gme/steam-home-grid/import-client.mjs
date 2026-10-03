@@ -38,10 +38,12 @@ export async function importRom(request, { backend, apps, allApps, refresh, hasA
   await apps.SetShortcutLaunchOptions(appid, prepared.options);
   await apps.SetShortcutName(appid, prepared.title);
   await verify(apps, appid, prepared);
+  // The launcher exposes only Steam's virtual gamepad to emulators.
+  await apps.SetThirdPartyControllerConfiguration(appid, 2);
   // Required properties are verified before committing metadata or reporting success.
   const warnings = prepared.warning ? [prepared.warning] : [];
   for (const asset of prepared.artwork || []) {
-    if (existing && hasArtwork(existing, asset.type)) continue;
+    if (existing && await hasArtwork(existing, asset.type)) continue;
     try { await apps.SetCustomArtworkForApp(appid, asset.data, asset.extension, asset.type); }
     catch { warnings.push(`${asset.label} could not be applied. Retry the import to fill it in.`); }
   }
