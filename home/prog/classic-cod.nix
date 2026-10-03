@@ -17,7 +17,7 @@ let
       args=(${lib.escapeShellArgs campaignArgs})
       if [[ "$mode" == multiplayer ]]; then
         executable=${lib.escapeShellArg multiplayer}
-        args=(${lib.optionalString (name == "modern-warfare-3") "-multiplayer"})
+        args=(${lib.optionalString (name == "modern-warfare-3") "-multiplayer -nosteam"})
       fi
       for file in "$executable" main/iw_00.iwd zone/english/common.ff; do
         [[ -f "$game/$file" ]] || { echo "Incomplete ${name} installation: $game/$file" >&2; exit 1; }
@@ -59,7 +59,7 @@ in
       (makeLauncher {
         name = "modern-warfare-3";
         campaign = "iw5-mod.exe";
-        campaignArgs = [ "-singleplayer" ];
+        campaignArgs = [ "-singleplayer" "-nosteam" ];
         multiplayer = "iw5-mod.exe";
       })
     ];
