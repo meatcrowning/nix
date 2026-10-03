@@ -143,8 +143,10 @@ class ImportTests(unittest.TestCase):
         self.assertNotIn('Named_Titles',urls[0])
 
     def test_curated_hero_is_preserved_and_missing_art_is_reported(self):
-        hero=self.path.parent/'hero.jpg';hero.write_bytes(b'curated')
+        from PIL import Image
+        hero=self.path.parent/'hero.jpg';Image.new('RGB',(100,30),'blue').save(hero)
         game={'slug':'example','thumb':'Console/Example (USA)'}
+        (games.ART / game['slug']).mkdir(parents=True)
         with patch('games.artwork',return_value={'_hero':hero}),patch('games.fetch') as fetch:
             assets,warning=rom.import_artwork(game)
             fetch.assert_not_called()

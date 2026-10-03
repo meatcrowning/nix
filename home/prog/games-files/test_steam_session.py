@@ -47,21 +47,20 @@ class SteamTests(unittest.TestCase):
                 self.assertIn('config_save_on_exit = "false"', config)
                 self.assertNotIn('input_player1_start_btn = "5"', config)  # SDL Guide
 
-    def test_artwork_fallbacks_decode_and_keep_curated_assets(self):
-        cover = self.root / 'p.png'
-        Image.new('RGB', (100, 200), 'red').save(cover)
-        assets = steam_art.complete({'name': 'Example Game'}, {'p': cover}, self.root)
-        with Image.open(assets['_logo']) as logo:
-            self.assertEqual(logo.mode, 'RGBA')
-            self.assertEqual(logo.getpixel((0, 0))[3], 0)
-            self.assertIsNotNone(logo.getbbox())
-        with Image.open(assets['']) as header:
-            self.assertEqual(header.size, (920, 430))
-        curated = self.root / 'logo-curated.png'
-        Image.new('RGBA', (40, 20), 'blue').save(curated)
-        completed = steam_art.complete({'name': 'Example'}, {'': cover}, self.root)
-        self.assertEqual(completed['_logo'], curated)
-        self.assertEqual(completed[''], cover)
+    def test_menu_uses_curated_artwork_without_text_or_cropping(self):
+        hero = self.root / 'hero-curated.png'
+        Image.new('RGB', (920, 300), 'red').save(hero)
+        header = self.root / 'wide.jpg'
+        Image.new('RGB', (460, 215), 'blue').save(header)
+        assets = steam_art.complete({'name': 'Example Game'}, {'': header}, self.root)
+        with Image.open(assets['_logo']) as image:
+            self.assertEqual(image.size, (920, 300))
+            self.assertEqual(image.getcolors(), [(920 * 300, (255, 0, 0))])
+        self.assertEqual(assets[''], header)
+
+    def test_missing_art_is_not_replaced_with_generated_text(self):
+        self.assertEqual(steam_art.complete({'name': 'Example'}, {}, self.root), {})
+        self.assertEqual(list(self.root.iterdir()), [])
 
     def test_repair_preserves_shortcuts_art_and_unrelated_settings(self):
         config = self.root / 'userdata/123/config'
@@ -77,14 +76,20 @@ class SteamTests(unittest.TestCase):
             str(2**32-10): {'OtherSetting': 'keep'}}}}))
         grid = config / 'grid'; grid.mkdir()
         portrait = grid / f'{2**32-10}p.png'; portrait.write_bytes(b'user-art')
+        legacy = self.root / 'art/example/logo-fallback.png'
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b'generated-title')
+        (grid / f'{2**32-10}_logo.png').write_bytes(legacy.read_bytes())
+        header = grid / f'{2**32-10}.png'; header.write_bytes(b'user-banner')
         logo = self.root / 'logo.png'; Image.new('RGBA', (10, 10)).save(logo)
-        with patch.object(games, 'STEAM', self.root), patch.object(games, 'GAMES_BIN', '/bin/games'), \
-             patch.object(games, 'artwork', return_value={'p': logo, '_logo': logo}), \
+        with patch.object(games, 'STEAM', self.root), patch.object(games, 'ART', self.root/'art'), patch.object(games, 'GAMES_BIN', '/bin/games'), \
+             patch.object(games, 'artwork', return_value={'p': logo, '_logo': logo, '': logo}), \
              patch('subprocess.run') as run:
             run.return_value.returncode = 1
             games.repair_steam([{'slug': 'example', 'name': 'Example', 'runner': 'retroarch'}])
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(portrait.read_bytes(), b'user-art')
+        self.assertEqual(header.read_bytes(), b'user-banner')
         self.assertEqual((grid / f'{2**32-10}_logo.png').read_bytes(), logo.read_bytes())
         apps = vdf.loads(local.read_text())['UserLocalConfigStore']['apps']
         self.assertEqual(apps['123']['UseSteamControllerConfig'], '0')

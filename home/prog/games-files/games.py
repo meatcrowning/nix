@@ -475,8 +475,13 @@ def repair_steam(games):
             app = shortcut['appid'] & 0xffffffff
             if by_slug[args[1]]['runner'] in ('retroarch', 'pcsx2'):
                 emulator_ids.append(str(app))
-            missing = [suffix for suffix in ('p', '', '_hero', '_logo')
-                       if not any(grid.glob(f'{app}{suffix}.*'))]
+            missing = []
+            for suffix in ('p', '', '_hero', '_logo'):
+                installed = list(grid.glob(f'{app}{suffix}.*'))
+                legacy = ART / args[1] / ('logo-fallback.png' if suffix == '_logo' else 'header-fallback.png')
+                if not installed or (suffix in ('', '_logo') and legacy.is_file()
+                                     and all(file.read_bytes() == legacy.read_bytes() for file in installed)):
+                    missing.append(suffix)
             if not missing:
                 continue
             for suffix, source in artwork(by_slug[args[1]]).items():

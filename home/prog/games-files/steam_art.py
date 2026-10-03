@@ -1,49 +1,26 @@
-"""Complete shortcut artwork without depending on a game's Steam store listing."""
+"""Use real game artwork for Steam's running-game menu image slot."""
 from pathlib import Path
 
 
 def complete(game, assets, directory):
-    from PIL import Image, ImageDraw, ImageFont, ImageOps
+    from PIL import Image
 
     directory = Path(directory)
-    # Steam's running-game menu requires a logo even if the shortcut already
-    # has a portrait and hero. Its image component has no title-text fallback.
-    for suffix, name in [('_logo', 'logo'), ('', 'header')]:
-        if suffix in assets:
-            continue
-        for extension in ('png', 'jpg'):
-            curated = directory / f'{name}-curated.{extension}'
-            if curated.is_file():
-                assets[suffix] = curated
-                break
-        if suffix in assets:
-            continue
-        canvas = Image.new('RGBA', (920, 300 if suffix else 430),
-                           (0, 0, 0, 0) if suffix else (18, 21, 27, 255))
-        draw = ImageDraw.Draw(canvas)
-        left = 24
-        if not suffix and assets.get('p'):
-            with Image.open(assets['p']) as source:
-                cover = ImageOps.contain(source.convert('RGBA'), (260, 382))
-            canvas.alpha_composite(cover, (24, (430 - cover.height) // 2))
-            left = 310
-        width = canvas.width - left - 24
-        for size in range(68, 15, -2):
-            font = ImageFont.load_default(size=size)
-            lines = ['']
-            for word in game['name'].split():
-                candidate = (lines[-1] + ' ' + word).strip()
-                if draw.textlength(candidate, font=font) > width and lines[-1]:
-                    lines.append(word)
-                else:
-                    lines[-1] = candidate
-            text = '\n'.join(lines)
-            box = draw.multiline_textbbox((0, 0), text, font=font, spacing=10)
-            if box[2] - box[0] <= width and box[3] - box[1] <= canvas.height - 48:
-                break
-        draw.multiline_text((left, (canvas.height - (box[3] - box[1])) // 2 - box[1]),
-                            text, font=font, fill='white', spacing=10)
-        path = directory / f'{name}-fallback.png'
-        canvas.save(path)
-        assets[suffix] = path
+    # Steam calls the menu slot a logo, but the desktop uses a wide artwork
+    # banner there. Keep the original image's composition and aspect ratio.
+    curated = [directory / f'{name}.{ext}'
+               for name in ('header-curated', 'hero-curated')
+               for ext in ('png', 'jpg', 'webp')]
+    banner = next((path for path in curated if path.is_file()), None)
+    banner = banner or assets.get('') or assets.get('_hero')
+    if banner is None:
+        gameplay = directory / 'hero-gameplay.png'
+        banner = gameplay if gameplay.is_file() else None
+    if banner is None:
+        return assets  # Report missing art; never disguise title text as artwork.
+    image_path = directory / 'menu-banner.png'
+    with Image.open(banner) as image:
+        image.convert('RGB').save(image_path)
+    assets['_logo'] = image_path
+    assets.setdefault('', image_path)
     return assets
