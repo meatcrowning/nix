@@ -1,1491 +1,194 @@
-# `painter` — text-to-image app
+# painter — ComfyUI desktop client
 
-Vendored source of the standalone Qt/QML text-to-image app (`main.py`, `qml/`,
-`families/`, `graphs/`, `tools/`), same live-source pattern as the rest of
-[`apps/`](../AGENTS.md). Built/installed by `home/prog/painter.nix` (mirrors
-`player.nix`, plus `qt6.qtwebsockets`); runs the **live** source, so `.py`/`.qml`
-edits need no rebuild.
+Read [the shared app guide](../AGENTS.md) for desktop detection, native controls,
+live-source packaging, and isolation. `home/prog/painter.nix` owns the wrapper
+and backend service integration; `main.py`, `qml/`, `families/`, `graphs/`,
+and `tools/` are live app source on both hosts.
 
-Front end for a **headless ComfyUI** — the app speaks only the HTTP/ws API
-(`/prompt`, `/object_info`, `/ws`, `/view`, `/history`, `/interrupt`, `/queue`),
-so a Comfy update cannot break the UI, only individual node contracts (which
-`graph.py` checks against the live `/object_info` at build time and reports as a
-per-family reason string rather than a silent failure). Chrome is hyprvtb
-titlebar buttons (generate/cancel/view switch + bottom-anchored settings
-drawer).
+The private [historical reference](../../docs/agents/painter-legacy-reference.md)
+has an indexed record of detailed implementation rationale and older findings.
+It is not a current runbook: backend versions, model counts, performance figures,
+and some launcher descriptions are historical. Check source and current
+read-only state before using them.
 
-Prompt boxes expand app-local `wildcards/*.txt` through `__name__` tokens in
-`main.py`, after each queued job receives its concrete global seed. A wildcard
-name is selected deterministically from `"<seed>:<name>"`, matching old CTE;
-the same name therefore agrees across both boxes, fixed/reused seeds reproduce,
-and batch items follow Painter's normal per-job seed progression. Missing or
-empty wildcard files leave the token literal. Output parameters retain the
-expanded conditioning while `prompt_boxes` retains the literal text for
-injection. `tools/wildcards-test.py` is the focused headless harness.
+## Owners and test routing
 
-For retained resource sampling, `tools/resource-fixture.py` fills a scratch
-gallery with synthetic PNGs. Its normal/stress/clear protocol is offscreen-only
-and never acquires the warden, backend, network, clipboard, or notification
-seams.
+| Area | Owner | Focused harnesses under `tools/` |
+| --- | --- | --- |
+| Window/actions/settings | `qml/Root.qml`, `main.py` | `ui-test.py` |
+| Gallery, filtering, thumbnails | `gallery.py` | `ui-test.py`, `gallery-bench.py` |
+| Model identification/pairing | `fingerprint.py`, `registry.py`, `families/` | family-specific tests |
+| Graph construction | `graph.py`, `registry.py`, `graphs/` | family-specific tests, `validate-graphs.py` |
+| Saved generation settings | `userprefs.py` | `prefs-test.py` |
+| Wildcards/prompt representation | `main.py`, QML prompt controls | `wildcards-test.py`, `promptdoc-test.py` |
+| Tag completion | shared `pylib/boorutags.py`, QML prompt controls | `anima-test.py` |
+| Backend transport | `comfy.py` | inspect matching client/UI stubs |
+| Book launcher/forward/mounts | `tools/comfy-tunnel.sh` | `tunnel-test.sh` is a live integration test |
+| Retained resources | `tools/resource-fixture.py` | synthetic offscreen fixture |
+
+Read each harness before running it. `validate-graphs.py` contacts a backend;
+`coverage-test.py` actually loads models, generates outputs, and writes a real
+gallery by default. `tunnel-test.sh` can start services and create forwards or
+mounts. They are not routine isolated smoke tests. Use stubbed/offscreen tests
+for local app changes and obtain any required authorization for live effects.
 
 ## Session shells and controls
 
-Root.qml is an Item shared by Main.qml's Hyprland Window and Plasma's
-QMainWindow/QQuickWidget (pylib/kdeshell.py; see ../AGENTS.md). Window-only
-operations go through root.Window.*, a window Connection, or wrapper signals.
-Theme.windowFill/paneFill let the Plasma background show through; fields and
-tiles retain their inset colours. DeskMenuBar is systemBar: true, and QueueBar
-has zero height under Plasma, which uses statusLine/statusProgress instead.
-
-The actions table owns menus/toolbars; tbButtons filters rows marked tb: for
-hyprvtb. Missing targets disable their actions. Plasma QAction shortcuts must
-disable duplicate QML Shortcuts with !root.plasma, or neither owner fires.
-ResultsPane.qml and ParamsPane.qml forward app properties explicitly; extend
-those forwarding blocks when adding properties used by their children.
-Both panes share one scene and splitter; parameters are not a QDockWidget.
-showParams/F7 must also switch view when the window is too narrow to split.
-
-Keep the background MouseArea at z: -1000: it consumes unclaimed content
-presses so Oxygen cannot drag the window from between controls. The native
-chrome still drags; the shared shell excludes the status bar.
-
-### Gallery
-
-gallery.py owns discovery, deduplication, filtering, live rows, and bounded
-thumbnail/poster workers; main.py re-exports its public names. Keep all outputs
-in the virtualized grid. Gallery._all and _rows share row dicts; QML indices
-refer to the filtered rows. setFilter matches every word against filename and
-cached prompt metadata.
-
-- Tiles use local cached JPEGs, never full outputs. Stills use _ThumbJob and
-  requestThumb (three workers, bounded LIFO queue); clips use requestPoster
-  after 250 ms of delegate dwell. Do not eagerly decode during the scan.
-- Cache keys use scan-time mtime/size (Gallery._ck, cache_stamp).
-  Do not stat files on the scroll/selection path: peer roots can be sshfs.
-- Gate PreviewPane media sources on pane.open, not only visible, to stop
-  hidden decoders.
-- Verify with tools/ui-test.py:test_thumb_cache and tools/gallery-bench.py
-  against synthetic local/peer roots.
-
-### Parameter layout
-
-ParamsPane.builtinOrder and Prefs["sections"] define one order across modes.
-Use a ListModel and move(), since replacing an array destroys dragged delegates.
-Reinsert new keys at their built-in positions. sectionVisible(key) owns each
-gate; deriving Loader.visible from item.visible latches effective visibility
-false.
-
-Collapsed sections retain their pinned, interactive rows. Pinning is a named
-context-menu action. Park unpinned rows in stash without assigning visible,
-which would destroy caller bindings. Capture rowOrder at completion; restore
-order by bouncing rows through stash, never null (children use parent.width).
-Rows containing Repeaters use selfHides: true, remain parented, and must be
-first in their section.
-
-### Output view and actions
-
-OutputView shows selOne; selection is the single current-output cursor.
-Return/double-click enters View, Escape leaves it, and Back/Forward switch
-Browse/View without changing selection. PgUp/PgDown walk outputs only in View;
-the Go-menu equivalents must not duplicate those shortcuts. Open in Viewer
-remains a separate action. Grid columns use gridColumns (0 automatic), clamped
-to a 60px minimum cell width.
-
-Stills zoom through WheelNotch and pan with the left button; disable the
-flickable's wheel handler. Clips disable zoom actions. CompareView.qml is
-shared with viewer. Offer compare only for an edit whose before-image resolves;
-changes to available action IDs must rebuild the native chrome.
-_keep_before stores the source at <output root>/.before/<output stem>.<ext>,
-outside the gallery globs. _compare_source tries that copy, the recorded path,
-then the filename in output roots, including peer history.
-
-Completed stills offer clipfile.py --image-only; sampler frames and videos do
-not. OutputView.infoText uses decoded dimensions/duration and stays empty until
-known; statusRight adds output/selection/queue counts. Generate remains enabled
-while busy so _start_jobs can enqueue more work.
-
-### Shared controls
-
-Use TextButton for custom clickable labels, ToolTipArea for clipped-panel
-tooltips, WheelNotch for Spin, and shared Kinetic* views for scrolling.
-The custom Hyprland controls have no corner radius; native Plasma variants
-follow their style. Do not assign lineHeight/lineHeightMode to TextEdit: those
-Text-only properties prevent PromptBox from loading. Backend controls must
-report polled unitState/backendRunning and check command results.
-
-## Generation settings and bindings
-
-Use root.set(key, value), root.setMs(key, value), and root.clone(o) to replace
-gen objects. Reassigning the same object after mutation emits no change signal.
-
-Controls emit edited/picked instead of assigning their own bound values.
-PromptBox's syncing flag distinguishes model updates from user edits, avoiding
-a two-way binding loop. tools/ui-test.py covers these paths.
-
-## The four modes are shortcuts to four models
-
-`ModeSwitcher.qml` offers anime (Anima), real (Krea 2), edit (Qwen 2.1), and
-video (MiniMax H3). `registry.MODES` owns their model choices; `App.modes()`
-exposes them, and nothing in QML decides them.
-
-- **A mode is a selection, not a fifth kind of model.** Turning one on selects
-  its file and greys the list (`enabled: false` *and* dimmed — docs/DESIGN.md
-  §10.1); turning it off hands the list back with that model still selected.
-- **`prefer` is exact-name, then substring, then any model of the family**, so
-  a re-quantised or renamed file lands on its sibling instead of the button
-  going dark. Which file each mode means is HIS choice — `real` is krea 2 raw
-  fp8 (2026-08-06), not whatever looks newest.
-- **A mode with nothing to select stays in the row, disabled.** `App.modes()`
-  reports availability per button and `setMode` refuses rather than lighting up
-  over an unchanged selection; a mode whose model disappears on a rescan clears
-  itself rather than greying a list it no longer overrides.
-- The mode is remembered (`Prefs` key `mode`) and applied when the rows land —
-  after the remembered model name, which it outranks.
-- Edit selects Qwen Image 2.1, including when restoring an older Klein preset.
-
-## Editing is a different pipeline, not a flag on the image one
-
-`edit` is the one mode that changes more than the selection: a family may
-declare an `edit` block (`families/flux2.json` or `llada_image_ckpt.json`) and
-`registry.build()` chooses that family's pipeline. Klein uses `_build_edit()`
-on `graphs/edit_flux2.json`,
-**transcribed from the workflow behind the `Flux2-Klein_0000*.png` outputs**
-(their embedded `prompt` chunk is where to look if a node contract moves).
-
-For Flux 2 Klein, what is different and what the left column stops offering
-— [his] *"the left side of the program when edit is selected should really just
-be a box to drop the image in and a prompt box"*:
-
-- **The image decides the size, and one control scales it.** The dropped
-  image's own dimensions size the output — the primary `scale_image` node's
-  output `GetImageSize` reads to feed both the latent (`EmptyFlux2LatentImage`)
-  and `Flux2Scheduler`, so there is no aspect and no width/height.
-  `EditScalePanel.qml` (shown only in edit mode) is the one control: a
-  **no-scaling** toggle (`gen.editNoScale`, default on → `_build_edit` swaps
-  `scale_image` to `ImageScaleBy` at `scale_by` 1.0, output = original
-  dimensions) and, when it is off, a **megapixel budget** field
-  (`gen.editMegapixels`, clamped 0.1–8.0) applied through the base graph's
-  `ImageScaleToTotalPixels` — the same MP control the image and video paths
-  offer, so the image is scaled to that many pixels with its own aspect kept,
-  NOT multiplied by a scale factor. The reference latent (the primary's
-  `VAEEncode`) reads the SAME scaled node, so it and the output latent stay the
-  same size by construction. The additional reference images keep the family's
-  pixel budget (`ImageScaleToTotalPixels`) since they never size the output.
-  `submit()` sends `editNoScale`/`editMegapixels` for the edit path.
-- **One prompt.** The negative conditioning is the positive one zeroed out
-  (`ConditioningZeroOut` -> `ReferenceLatent`), which is what CFG 1.0 wants —
-  so the negative box is hidden rather than typed into nothing, exactly as for
-  video. A second `CLIPTextEncode` in that template is a bug, and
-  `validate-graphs.py`'s `check_edit` fails on one.
-- **The numbers come from the family**, not from `gen`: steps 15, cfg 1.0,
-  shift 6.0 (and the reference budget, 1.5MP). Their controls are off screen, so
-  `submit()` sends only the prompt, the seed and the output-scale choice — sending
-  `gen`'s values would run the job at whatever the last image family left behind.
-  `_build_edit` also strips
-  `scheduler`/`denoise`/`add_noise`/`width`/`height` from the recorded
-  parameters, since Flux2Scheduler reads none of them and a PNG must not claim
-  settings that were not used.
-- **The seed IS one of them, so edit has its own seed control.** `_build_edit`
-  feeds `gen.seed` into the noise node, so an edit is as reproducible as any
-  other generation — but the sampling panel that normally carries the seed is
-  one of the ones `visible: !App.isEdit` hides. `SeedPanel.qml` (edit-only)
-  brings just that one row back, using the shared `SeedField.qml` the sampling
-  panel also uses, so the seed behaves identically in every preset.
-  `SeedField` follows rgthree's three explicit seed choices: **random** writes
-  `-1` (fresh seed on every queued batch), **new fixed** rolls one concrete
-  number into the box, and **last** writes the previous queued base seed. The
-  number spans the right-hand controls column above three equal-width buttons
-  using rgthree's faces (**randomize each time**, **new fixed random**, and the
-  queued seed itself); **last** stays visible but disabled until it exists and
-  differs from the displayed seed. The numeric editor has ordinary
-  cut/copy/paste/select-all actions. An output's right-click menu
-  offers **copy seed**, which puts only its recorded number on the clipboard.
-  Plasma's `SeedInput` is deliberately a styled `TextField`, not its native
-  `SpinBox`: that control is 32-bit and Comfy seeds are safe 53-bit integers.
-  Painter-generated random seeds use rgthree's `2**50` positive range; pasted
-  fixed seeds remain accepted through the full safe-integer range.
-  `_start_jobs` remembers that base as `App.lastSeed` (persisted as `lastSeed`);
-  `gen.reuseSeed` remains the command/API compatibility route.
-- **The PRIMARY image is the same slot as the video first frame**
-  (`App.inputImage`), uploaded the same way, and required: with nothing dropped
-  `generate()` refuses before uploading anything.
-- **N images, not one.** Flux 2 Klein takes multiple reference images —
-  `comfy/model_base.py`'s `Flux.extra_conds` collects `reference_latents` into a
-  `CONDList`, and `ReferenceLatent`'s own schema says *"chain multiple to set
-  multiple reference images"*. So `_build_edit` chains one `ReferenceLatent` per
-  image (each its own `LoadImage → ImageScaleToTotalPixels → VAEEncode`) onto
-  BOTH conditioning tails, and repoints the guider to the tail. **Only the
-  primary sizes the output** (`GetImageSize` still feeds the latent and the
-  scheduler off image #1); the rest are references. The extras are their own
-  list (`App.editExtraImages`, kept separate from `inputImage` so the video path
-  is untouched); the UI is a stack of used wells under the primary plus a compact
-  `+` target for dropping or pasting another reference. `submit()` passes
-  `input_images` (primary first);
-  `input_image` stays as `input_images[0]` for the single-image case.
-- **LoRAs work here too.** The one panel edit mode keeps below the prompt (the
-  drop wells and prompt box aside) is the LoRA stack: an edit model takes a LoRA
-  exactly as an image one does. `_build_edit` chains the `LoraLoader` onto the
-  loader→`ModelSampling` seam with the same `insert_lora_chain` the image path
-  uses, `_start_jobs` sends `loras.active()` for all three pipelines, and the
-  picker's choices come from the same `compatible_loras` match — so the edit
-  family shows only its own compatible LoRAs (a Klein LoRA on Flux 2 Klein). No
-  new matching: the alias map is the family's `lora` block like any other.
-- A family with no `edit` block **refuses** an edit build. That refusal is what
-  the mode button relies on.
-
-## A clip tile plays on hover
-
-Hovering a video in the gallery plays it, muted and looped, over its own poster
-frame (docs/DESIGN.md §5 — the desktop rule, not a painter widget). The player
-lives in a `Loader` gated on `tileMa.containsMouse`, so it is **created on
-arrival and destroyed on leaving**: at most one decoder exists at a time, and
-none survives the pointer moving on. The play marker stands down while it
-plays. `test_hover_play` builds a two-second clip with ffmpeg and asserts all of
-that, including the muting — an `AudioOutput` is a plain QObject rather than an
-Item, so nothing walking the scene can find it and the holder aliases `muted` /
-`volume` for the harness.
-
-Bindings inside that delegate use `isVideo === true`, not a bare role: a tile
-torn down while the pointer is on it evaluates them once with its model context
-already gone, and `undefined` assigned to a bool is a QML warning — which fails
-`ui-test.py`.
-
-## Several outputs are selected, and drag as ONE collage
-
-Click, ctrl-click and shift-click select in the gallery exactly as they do in a
-file manager ([his] *"make it so i can shift / cntrl shift a selection of
-outputs"*), and dragging a set out hands over **one picture with all of them in
-it, under 4MB** — *"what gets put down where the cursor lies is a collage of
-them in the highest quality under 4mb"*. Five files land five different ways
-depending on what catches them; one picture lands the same way everywhere.
-
-- **The selection is kept as PATHS, never indices.** A finished job inserts a
-  row at 0, which would renumber a set of indices under him mid-selection; the
-  same `Connections` drops a path whose row has gone.
-- **A press inside an existing multi-selection does not collapse it** — the drag
-  that may follow has to carry the whole set, so that click is deferred to the
-  release and applied only if no drag happened (filer's rule, docs/DESIGN.md §13).
-- **Shift is the RANGE key here, so it cannot also mean "with the sound"**: a
-  lone clip still drags muted-unless-shift, but once a selection is in play the
-  original-audio drag is ctrl+shift.
-- **The layout is `collage.py`; the budget is `pylib/imgfit.py`** — the same
-  search filer's "copy under 4MB" uses. What is painter's is the arrangement: a
-  grid whose cell takes the mean SHAPE of its contents (a set of 2:3 portraits
-  in square cells is mostly background), each image fitted and never cropped,
-  row-major in the gallery's own order. **It never upscales into a cell** — the
-  budget buys real pixels or interpolated ones at the same price, and the
-  interpolated ones carry nothing. Measured on six real Klein outputs: 2.0MB,
-  3776x2072, quality 92, 0.3s.
-- **It is built when the SELECTION changes, on a thread**, and the press joins
-  that thread (bounded, 25s) rather than starting the work. A payload has to be
-  ready in the same event as the press, and decoding six PNGs plus half a dozen
-  JPEG encodes is not. Cached under `~/.cache/painter/collage/<key>/`, keyed by
-  every source's path+mtime+size, so a re-generated output cannot be served from
-  the old picture, and written through a `.part` rename so a drag can never
-  catch a half-written file.
-- A selection of ONE is not a collage: it drags as the file itself, clip muting
-  included.
-
-## An output is dragged out of the window
-
-The gallery's tiles are a drag SOURCE (docs/DESIGN.md §13), in filer's idiom and
-for its reasons: `Drag.active` bound to a MouseArea dragging an invisible proxy
-(a bare `Drag.startDrag()` does not start a cross-app drag on Wayland), the
-payload built on PRESS, a chip grabbed into `Drag.imageSource`.
-
-**A clip goes out MUTED**, with Shift at the press for the original ([his],
-2026-08-06): the model generates sound with the picture and the case he named is
-dropping one into surfer, which plays it. `App.dragUriList()` decides that at
-the press, because Wayland cannot tell what is under the cursor and the file has
-to exist before the drop lands — which is why it holds **the one synchronous
-subprocess in this app**. A `-c copy` remux is tens of milliseconds; it is
-bounded, and a failure hands over the original with a toast rather than a drag
-that quietly does nothing.
-
-Where that copy goes differs from the clipboard's on purpose: a fresh
-`<name>-muted.mp4` sitting beside the original is reused, but a new one is made
-under `~/.cache/painter/muted/<mtime>-<size>/` — same filename, so the receiving
-app shows a sensible one, without leaving a second file in the gallery folder
-for every clip he happens to drag.
-
-## One dropdown, at the top of the scene
-
-`Picker` is the box; **the list is `pickerOverlay`** (`PickerOverlay.qml`), a
-single instance in `Main.qml` beside `CtxMenu` and for the same reason. A popup
-parented to its own picker cannot rise above what follows it — `z` orders
-siblings, not strangers — so it was clipped by the left column's Flickable and
-drawn under the panels below it, worse the deeper the picker sat. The overlay
-positions itself in scene coordinates, clamps into the window (flipping above
-the box near the bottom edge), and closes on an outside click, Escape or a
-wheel, since a list pinned to the scene would otherwise float away from a
-scrolling column.
-
-## Results left, controls right
-
-The two panes swapped on 2026-08-05 [his] *"switch the left and right sections
-with eachother"*, so `paneLeadW` sizes the RESULTS pane and the floors went with
-it (`minLead` 200 for the gallery, `minTrail` 300 for the controls). A
-`splitRatio` saved before the swap describes the other pane, so `restoreState`
-inverts it once and records that under `splitSwapped` — without that the divider
-comes back mirrored on the first launch after the change.
-
-## The preview viewport
-
-Above the history, off by default, toggled from the titlebar's `pv` cell
-(`PreviewPane.qml`, height dragged by the same grip a prompt box has, remembered
-as `preview.h`). **It shows WHAT IS SELECTED — and the running job is one of the
-things that can be selected.**
-
-Finished edits with a resolvable source use the shared CompareView in Browse
-as well as View. Both follow `showCompare`; the Compare action is available
-for whichever visible pane can compare. Preview comparison stays inside its
-zoom/pan transform, with pointer coordinates mapped through that transform.
-Closed previews, live sampler frames and clips do not load comparison images.
-
-It was the running job and nothing else until 2026-08-28, deliberately: [his]
-*"it should only show the preview frames of the generating image or video and
-when complete should just show that image or video, no clicking on other outputs
-or anything"*. What replaced that is his too, and it keeps both halves rather
-than trading one for the other — *"make it so the preview element displays the
-currently selected output, so the user can select what's being shown ... i
-propose that the preview of the current step of the currently processing
-generation get added to the history section and then get replaced with the full
-output when its finished"*. So:
-
-1. **the generation in flight is a ROW in the history** — `Gallery.begin_live()`
-   at `_on_started`, a sentinel path (`LIVE_PATH`, `live://generating`) that is
-   not a file, drawing the sampler's own preview frames in its tile. `main.py`'s
-   `LivePreview` (a `QQuickImageProvider`) feeds them from
-   `ComfyClient.jobPreview`, addressed as `image://livepreview/<tick>` because
-   an `Image` whose URL never changes never reloads.
-2. **the output it produced takes that row over** — `Gallery.add(path, job)`
-   ends the live row and inserts the file, `liveReplaced` moves the selection
-   with it. A job that produced nothing (cancelled, failed, no images) gives the
-   row back at `_on_finished`/`_on_failed`/`cancel` instead.
-3. **the pane draws the selection**: the running job's frames, one output, or —
-   with nothing selected, or a set — the newest output. A clip plays looped and
-   **muted**, a preview beside a music player, not playback. Playback is viewer,
-   on a double-click in the grid.
-
-Three rules hold that together, and each one is a bug that was found:
-
-- **A job in flight is not a file, and nothing may treat it as one.** Its path
-  exists nowhere, so `indexOf`/`has_path`/the thumbnail cache never match it —
-  and `Root.selOne` excludes it explicitly, which is what makes every verb that
-  needs a file (open, view, inject, reuse, copy prompt, the walk keys) grey out
-  with no branch of its own. Its tile has no drag, no double-click and a
-  one-verb menu: **cancel generation**.
-- **`followLive` is the way back, and QUEUEING RE-ARMS IT.** The selection
-  moves onto each job as it starts and onto the file it produced when it lands,
-  until he picks something else himself; clicking the running job's tile re-arms
-  it, and so does pressing generate — [his] *"ensure the live step/frame preview
-  replaces whatever is being previewed in the preview pane when the user queues
-  something new"*. That grab is armed **once per `generate()`, i.e. per press**
-  (`_live_grab`, carried to QML as `Gallery.liveGrab`), not per job: four images
-  asked for in one press are one request, and yanking him off an output
-  mid-batch is what this pane stopped doing.
-- **The row appears at the PRESS, not at `execution_start`.** `_start_jobs`
-  calls `begin_live` once the batch is submitted and `_on_started` only re-keys
-  that row with the prompt id — a prompt queued behind another job would
-  otherwise leave him looking at the old output with nothing saying his had been
-  taken. Until the backend starts it the tile and the pane say **queued**. `GalleryView`'s
-  `selectSingle` decides the flag, `followTo` is the automatic move and must
-  never touch it.
-- **`Gallery.isLive` is a CALL, not a notifying property**, so nothing may hold
-  a binding over it: `PreviewPane.selLive` is set inside `refresh()`, which runs
-  from the `selPath` change handler — one step before any binding on `selPath`
-  has re-run. A binding there drew the previous selection, which is exactly how
-  the sentinel path ended up in a `file://` URL.
-- **The last frame stays until the new file can be DRAWN, not until it
-  exists.** [his, twice] *"when a gen finishes, it briefly flashes the previous
-  gen before showing the new output"*. Three separate things produced that one
-  flash, and all three had to go:
-    - `App.hasPreview` goes false the moment the job reports finished, a beat
-      before its output has been downloaded;
-    - `Gallery.add` used to end the live row BEFORE inserting the file, so the
-      pane heard "the job is over" while its replacement did not exist and fell
-      back to the newest output — the previous one. It inserts first now, and
-      `refresh` never hands the `live://` sentinel to an `Image` either;
-    - and an `Image` whose source has just changed **still holds the last
-      picture it decoded**. Made visible in that gap it draws the previous
-      generation, whatever `source` says. So `PreviewPane.handover` keeps the
-      sampler's last frame up until the new file's `Image.status` is Ready (or
-      the clip is playing), with a 4s guard and a `handoverPath` so the
-      selection landing on that same file does not read as him picking
-      something else and cancel it. **The still's `source` must not be gated on
-      `visible`** — it is deliberately hidden while it loads, and a source bound
-      to `visible` would never load at all.
-- **A new sampler tick retains the old tick while it loads.** Both the pane and
-  the live history tile use an asynchronous, uncached provider URL whose tick
-  changes every frame. Without `retainWhileLoading`, that source change clears
-  the drawable for the provider's Loading beat and both surfaces flash their
-  empty backgrounds together. The old step is the honest picture until the new
-  one is Ready, so both live Images retain it.
-- **Neither a filter nor a rescan may take the job off the screen.** It has no
-  filename or prompt to match (`_matches` exempts it) and it is not in the
-  output directory (`load_existing` puts it back).
-
-**The wheel zooms it and the wheel BUTTON drags it** [his, 2026-08-28] — the
-pane is a few hundred pixels tall and an output is a megapixel, so this is the
-difference between "is that hand right" and opening the file in something else.
-One `viewport` clips, one `canvas` carries the scale and the offset over all
-three layers, and one `MouseArea` takes everything: two overlapping ones meant
-the top one swallowed the wheel. The zoom is about the POINTER (that is the
-whole point of a wheel zoom), 1.0-8.0, no easing (docs/DESIGN.md §6.4 — a
-direct-manipulation drag has none); the picture cannot be dragged off its own
-pane (`clampPan`, and at 1:1 it is pinned); a wheel click that went nowhere puts
-it back to fit; and a different picture starts at fit. The tag at the corner
-says the percentage while there is one.
-
-Harness: `tools/ui-test.py` → `test_live_row`, `test_preview_zoom`.
-
-**A video job WALKS the clip, and that walk is a local backend patch.** [his]
-*"why will sampling previews only show the first frame from the generation"* —
-measured 2026-08-06: painter's side was never the problem. Three synthetic
-frames pushed through `_on_preview` were each grabbed off the real pane
-offscreen, so the `image://livepreview/<tick>` URL does reload per frame.
-Upstream ComfyUI slices the temporal axis to index 0 in every video previewer
-(`Latent2RGBPreviewer` `x0[0, :, 0]`, `TAEHVPreviewerImpl` `x0[:1, :, :1]`) and
-hands back exactly ONE image per sampler step, so no client — its own web UI
-included — can be shown more. He ruled a patch out once (*"just remove that
-stuff for previewing, i think doing it how i want would kill inference
-speeds"*), then asked for *"frame X of Y"* in the tag, which is what made the
-slice index worth moving: the cost is nil, because the slice happens either way
-and only the index changes.
-
-So `/home/lam/comfy/latent_preview.py` carries a local commit (a fourth, on a
-checkout maintained by rebasing onto upstream tags) that makes the slice a
-cursor and carries the position out with the image as a fourth element of the
-preview tuple, merged into the event-4 metadata by a matching patch to
-`comfy_execution/progress.py`. `comfy.py`'s `_on_binary` handles BOTH shapes and
-`_on_connected` announces `supports_preview_metadata`, because that is the only
-channel that can say which frame a preview is; `PreviewPane`'s tag reads
-`sampling · frame X of Y`.
-
-**The cursor is paced by the STEP COUNT, not incremented by one.** [his] *"itll
-only show like half the frames preview and then the gen will be finished"*
-(2026-08-22) — one preview arrives per sampler step, so a one-frame-per-preview
-cursor walks exactly `steps` frames and a 20-step job over a 41-frame clip ends
-at frame 20. `prepare_callback` now hands the previewer its `steps` and
-`_pick_frame` maps the cursor onto the whole clip: frame 1 on the first preview,
-the last frame on the last, evenly spaced in between, whatever the ratio. Fewer
-steps than frames means a sparser sweep — one image per step is the API's
-ceiling, not something painter can raise.
-
-If previews ever appear to stop rather than merely repeat a frame, the place to
-look is `comfy.py`'s `_on_binary`: it keeps only `BinaryEventTypes.PREVIEW_IMAGE`
-(event 1), and ComfyUI sends the newer `PREVIEW_IMAGE_WITH_METADATA` (event 4)
-shape instead to any client that announced `supports_preview_metadata` in the
-websocket handshake. painter announces nothing, which is exactly what keeps the
-backend on the old shape.
-
-Two things about the backend, both worth knowing before debugging an empty pane:
-
-- **ComfyUI sends nothing without `--preview-method`** (its default is
-  `NoPreviews`), which `home/prog/painter.nix` now passes — but the unit is
-  `X-RestartIfChanged=false`, so a backend that was already up keeps running
-  without it until it is restarted. That is why the pane says so once a job has
-  been going 45s with no frame, rather than "waiting" forever.
-- **A video preview is one still frame per step, not a moving clip.** The local
-  patch chooses WHICH frame each step shows (above); it cannot make the backend
-  send two. `MiniMaxH3AV` carries the RGB factors, so `auto` works with no extra
-  files; the `taehv` route (a real decode rather than the RGB approximation)
-  needs `models/vae_approx/taehv*`, which is not installed.
-
-That pane is why `painter.nix` carries `qtmultimedia` — and with it viewer's
-NVDEC pin, for the reason measured there.
-
-## A muted copy is a derivative, not an output
-
-The model generates sound with the picture, so the gallery's right-click menu
-offers **copy muted copy** on a clip: `<name>-muted.mp4` beside the original,
-made with `-map 0 -map -0:a -c copy` (no re-encode, IO speed), **reused when it
-is already there and not older than its source** so asking twice cannot leave
-three files behind, and hidden from the history — `is_muted_copy()` filters both
-the initial scan and anything that lands while running, or every clip would be
-listed twice.
-
-**COPYING OUT goes through `pylib/clipfile.py`, never `QClipboard`** (reading
-the clipboard, which is what the frame wells' paste does, is ordinary
-`QClipboard` — see "A frame well takes a PASTE" below). A
-Wayland selection dies with the process that offered it, so the copy is owned by
-a forked holder that outlives painter; and `QClipboard.setMimeData` takes a
-Python-built `QMimeData` whose wrapper Qt's global-static clipboard frees AFTER
-the interpreter is gone — a SIGSEGV in `__run_exit_handlers` on the way out of
-any run that had copied something, which the harness caught as exit 139 with
-every check passing.
-
-It was `wl-copy --type text/uri-list` until 2026-08-05, and that pasted the
-copy as TEXT rather than as the file into anything GTK-flavoured: wl-copy offers
-exactly ONE mime type, and a file paste in GTK (so also Chromium/Electron — a
-browser, a chat client) is recognised by `x-special/gnome-copied-files`.
-clipfile owns the selection itself and offers both. The whole argument, and the
-headless-sway harness that proves it, is in `apps/AGENTS.md` → `pylib/`.
-
-**`copy prompt` is the one clipboard action that is TEXT, so it is `wl-copy -n`
-and not clipfile** — one mime type is all a string needs, and `-n` because
-wl-copy appends a newline to argv content otherwise. Same Wayland rule though:
-the holder wl-copy forks is what makes the prompt still pasteable after painter
-closes. It reads the words out of the FILE, not out of the boxes, so an output
-from three sessions ago hands back what IT was asked for — a clip included
-(see "A clip carries its job too"). It is still offered only where there is a
-prompt to take (`GalleryView.commonItems`, gated on the params the menu already
-read — docs/DESIGN.md §10, an action with nothing to act on is not offered
-greyed, it is not offered).
-
-## A clip carries its job too
-
-[his] *"give the user the ability to copy and inject prompts / settings of
-videos like they can images"* (2026-08-21). A still has always carried the
-generation that made it in its PNG `painter` chunk; the gallery's inject menu
-and `copy prompt` read it. A clip carried only ComfyUI's graph, so both were
-refused in front of one.
-
-**`outmeta.params_for(path)` is now the ONE way anything here asks a file what
-made it**, and it answers from three places so nothing else has to know which:
-
-1. a still — the PNG chunk (`pylib/pngmeta.py`), unchanged;
-2. a clip painter saved from 2026-08-21 — the same JSON as an `mdta` tag in the
-   MP4's own metadata box (`pylib/mp4meta.py`), written in the download
-   callback beside the graph `SaveVideo` already put there;
-3. **an older clip — read back out of that graph** (`params_from_graph`).
-   Without it the feature would do nothing for the 288 clips already on top and
-   only start working on the next generation. Measured over them: 245 hand back
-   their prompt and numbers, the rest are muted derivatives, a truncated file,
-   or jobs whose prompt really was empty.
-
-Three things worth knowing before touching it:
-
-- **No ffmpeg.** The tag is written in pure Python because that code runs in the
-  download callback, on the GUI thread, for every finished clip; a subprocess
-  there would be a second way for a finished generation not to reach the disk.
-  A file that cannot take the tag is written VERBATIM and still lands.
-- **Writing it MOVES the media data.** ComfyUI emits faststart files, so `moov`
-  sits ahead of `mdat` and growing it slides every byte after it down the file;
-  `upsert_tags` patches each `stco`/`co64` entry by the same delta. The harness
-  pins it the only way that means anything — an ffmpeg-written clip, tagged,
-  and the decoded video hashed before and after.
-- **The graph reading recovers only what the graph holds.** The prompt, the
-  sampling numbers, the seed, the frame count (as seconds) and the pixel budget
-  — not the frames' local paths, which is why an old clip's first-frame toggle
-  injects as OFF. A clip painter tagged itself DOES carry
-  `input_image_local` / `last_image_local`, and `injectParams` puts the picture
-  back with the toggle — or leaves the toggle off when that file has since
-  moved, rather than arming a generate that could only refuse (§10 again).
-
-`injectParams` branches on `kind === "video"` for the controls a clip has and an
-image does not: seconds and a frame rate instead of a batch, and the megapixel
-budget taken from the job rather than backed out of a width and height an
-image-to-video clip never had.
-
-
-## A frame well takes a PASTE as well as a drop
-
-`FrameWell.qml` is the drop target for the video's first/last frame and for
-edit mode's image, and the clipboard reaches all three. Two routes, because
-they fail differently:
-
-- **`[ paste ]`, in the well.** Needs no keyboard and cannot be aimed at the
-  wrong well. Always offered, never greyed: whether there is anything to paste
-  is only knowable once the compositor has handed the offer to a focused
-  window, so a disabled state would grey a button that is about to work — and a
-  paste with nothing behind it toasts (docs/DESIGN.md §10).
-- **Ctrl+V, with the pointer wherever it happens to be.** A window-level
-  `Shortcut` sees a key before the focused item does, so the guard is
-  `!textFocused` — the active focus item having a `selectedText` — and nothing
-  else. It was *also* gated on hovering a well for a few hours on 2026-08-07,
-  and that made the shortcut do nothing at all for anyone pressing Ctrl+V the
-  way people press Ctrl+V, **silently**, because a disabled shortcut has no
-  failure to report. Discoverability beat the tidier rule.
-  `root.pasteWell()` picks the target: the hovered well, else the only one on
-  screen, else the empty one, else the first frame; no well on screen (plain
-  text-to-video, or an image family) means the shortcut is not enabled at all.
-  **A focused text box still wins** — a `QQuickTextEdit` accepts the
-  ShortcutOverride for Ctrl+V — which is deliberate, and is why the button
-  exists. `ui-test.py`'s `test_paste` pins every branch of it.
-
-**Reading the clipboard IS `QClipboard`** — only *owning* a selection needs
-`pylib/clipfile.py`, for the reasons above. `App._clipboard_offer()` answers
-what a paste means without writing anything: **files** first (`text/uri-list`,
-what clipfile and every file manager put there — the picture is already on disk
-under its own name, so nothing is copied), then **pixels** (a screenshot, a
-browser's "copy image"), then **text that names an image** (filer's "copy
-path"). `_usable_image()` is the one rule the drop and the paste share, so the
-two cannot come to disagree about what an image is.
-
-Pixels have no file, so `_paste_target()` writes one into
-`~/.cache/painter/pasted` **named by content** (`pasted-<sha1[:12]>.png`):
-pasting the same screenshot twice is one file, and — since the upload cache is
-keyed on the path — one upload to the backend. They are pruned to the newest 20,
-and cannot simply be temporary: the backend uploads the file at generate time,
-and prefs remember it across a launch.
-
-## The history is BOTH machines', with nothing shown twice
-
-**top's backend files every result on top, whichever machine asked for it** —
-book generates through the tunnel and keeps only the copy it downloads
-afterwards. So top's gallery has always been the whole history and book's was
-the tail of it.
-
-`comfy-tunnel.sh` therefore mounts `top:~/Pictures/painter/out` read-only beside
-the models (0.14s, and a failure is a stderr line rather than a notification:
-it costs the older half of a list, not the ability to generate) and exports
-`PAINTER_PEER_OUT`. `main.py`'s `PEER_OUTS` is that, colon-separated like a
-PATH; `Gallery.load_existing` globs every root in turn and `Gallery.add` drops a
-peer row for the local file that replaces it. **On top it is unset and nothing
-changes** — there is no second root to add, because top already holds
-everything. Measured on book 2026-08-06: 132 rows, 31 local, 101 from top, no
-duplicates.
-
-Two rules, both load-bearing, both regression-tested by `tools/ui-test.py`'s
-`test_peer_history`:
-
-- **The dedupe key is the NAME, never the size.** book injects painter's
-  parameter chunk into the PNG it downloads and top's copy has none, so the same
-  still is ~600 bytes bigger on book (a clip, downloaded verbatim, does match to
-  the byte — but half a rule is no rule). Names cannot collide: the backend that
-  numbers an output is top's whoever asked for it.
-- **The local root is scanned FIRST and its copy wins.** Not tidiness: that
-  chunk is only in the local copy, so `inject` reads a file that has parameters
-  in it instead of one that does not.
-
-The asymmetry that leaves: on TOP, a still book generated shows up but says *no
-parameters stored in this file*, because nothing ever wrote painter's chunk into
-top's copy of it. Fixing that means writing back over the tunnel, i.e. an `rw`
-sshfs mount of his `Pictures` — not taken.
-
-A remote row is not marked as remote in the grid, on purpose: it is an output of
-his either way, and the tile says what it is. It does go away when the tunnel
-does, which is the same thing the model picker already does.
-
-## The layout holds at every width
-
-Both panes used to vanish below 900px unless selected, so in the parameters view
-a narrower window had **no results pane at all**. `root.split` (≥`splitFloor`,
-560) keeps the two-pane layout at every usable width; the controls take
-`max(300, min(520, …))` and the gallery takes the rest, adapting to a single
-column if that is what fits — its cell can never be wider than its pane, which
-is what made a narrow pane look empty. Below the floor it is one pane at a time
-on the `p`/`g` buttons.
-
-## Text boxes take a click anywhere in them, and he sets how tall
-
-A `TextEdit` is only as tall as its content, so a 130px prompt box holding one
-line accepted clicks in a 16px strip and ignored the rest. The editor now fills
-the viewport (`height: Math.max(implicitHeight, flick.height)`), which hands the
-empty space to Qt itself — caret at the nearest position, drag-select from
-nowhere — rather than to a MouseArea imitating it. `Spin` covers its own padding
-strips with an I-beam MouseArea under the input.
-
-The caret keeps itself visible while typing. `TextEdit` does not scroll an
-enclosing `Flickable`, so `PromptBox.revealCursor()` follows
-`cursorRectangle`/`implicitHeight` one event after layout and moves only enough
-to reveal the new wrapped or explicit line. A manual wheel scroll does not move
-the caret and therefore is not snapped back.
-
-**A panel follows its content DOWN as well as up.** `Panel.qml` sizes itself
-from the inner Column's `implicitHeight`, never from `childrenRect.height`: an
-invisible child keeps the y the Column last laid it out at and `childrenRect`
-still spans to it, so with the negative prompt box hidden (any video or edit
-family) a panel could only ever GROW — dragging the prompt box smaller left a
-blank the height of the drag ([his], 2026-08-06; measured offscreen against his
-own prefs, box 392 -> 242 with the panel stuck at 435). `test_video` checks the
-shrink in the state that was broken, with the box hidden by its real binding.
-
-**The bottom 5px of a prompt box is a RESIZE GRIP**, not text — dragged, clamped
-to 40-600px, and remembered per box (`prompt.posH` / `prompt.negH` in `Prefs`,
-written on release). A prompt here runs from four words to the multi-paragraph
-shot description a video model wants, and a fixed 130px box meant scrolling a
-window through the second kind. The drag writes `boxHeight`, never `height`:
-`height` is bound to `visible ? boxHeight : 0`, and writing it directly would
-destroy that binding — which is what folds the negative box to nothing for a
-video family. Hidden is not enough on its own: a `Column` skips an invisible
-child when it POSITIONS, but `Panel` sizes itself from `childrenRect`, so the
-box that was not there still left a hand-sized blank under the prompt.
-
-## The size is derived, never typed
-
-Aspect is **two integers you type** (any ratio, not a fixed list) plus MP;
-`recomputeDims()` is the one place width and height are computed, so the header
-badge, the `= WxH` readout and the submitted job are the same numbers by
-construction. The width/height boxes are gone — they were a second, contradicting
-source of truth. Injecting an image's parameters therefore restores its *ratio
-and MP* (reduced by gcd), not raw pixels, which the next recompute would have
-overwritten.
-
-## Escape is for letting go of a text box
-
-It used to cancel every queued job — a destructive action on the key people
-press to back out of one — while there was no way to leave a text box at all.
-Now `Escape` moves focus to `Main.qml`'s `focusSink` (focus has to LAND
-somewhere; clearing it outright leaves the window with no focus item and the
-next keystroke going nowhere), handled on the editors themselves as well as at
-the window, because a focused text item is where a window-level `Shortcut` is
-least reliable. Cancelling is the titlebar's `x`: a click, not a reflex.
-
-**That Shortcut decides what Escape means for the whole window**, innermost
-thing first: open dropdown → context menu → settings drawer → release the text
-box. A window-level `Shortcut` sees a key before any focused item's `Keys`
-handler, so adding one for the text boxes alone silently took Escape away from
-the dropdown and the menu, which had been closing on it perfectly well — caught
-by the harness, not by looking.
-
-## An output is LEFT-clicked to open, right-clicked to choose
-
-Left-click hands the file to `viewer`; right-click opens the shared `CtxMenu`
-with **inject all / inject prompt / inject params**, plus `open in viewer`. Both
-buttons used to raise the menu, which put a question between him and the thing
-he had just made. An output carries the whole job that made it — a still and a
-clip alike — and which part you want is a decision (§7.1: everything is still right-clickable). The three
-actions live on the window (`injectPrompt` / `injectParams` / `injectAll`), so
-the menu has no logic of its own; `injectParams` restores size as **aspect +
-MP**, never raw pixels (see above).
-
-For a NegPip image, `positive` / `negative` in the `painter` chunk still say
-what the graph actually ran — the folded positive and an empty negative — but
-`prompt_boxes` carries the two editor values from before that fold.
-`injectPrompt` prefers `prompt_boxes`, so a new output restores both boxes; an
-older output without it falls back to the execution prompt it has always
-carried. Do not try to unfold old text: a real negative-weight group in the
-positive prompt is indistinguishable from one Painter appended for NegPip.
-
-Because a left-click LAUNCHES something, `tools/ui-test.py` replaces
-`main.subprocess` with a recorder — it spawned two real `viewer` windows on his
-desktop the first time that click was exercised, which is the one thing a
-harness here may never do.
-
-## The window comes back the way it was left
-
-Persisted through `Prefs` (`~/.local/state/painter/prefs.json`): window size,
-which view, the split ratio, the prompts and every number in `gen` (so every
-sampling setting, including the video preset's — steps, sampler, `ms`'s shift
-curve — comes back too), the selected model, the LoRA chain, and each panel's
-collapsed state (`Panel.persistKey`). Three traps:
-
-- **Writes are debounced** (700ms) — `gen` changes on every keystroke — but
-  `onClosing` flushes a still-pending write immediately, so a setting changed
-  right before closing (typical of video: tweak, hit generate, close while the
-  long job runs) is not lost to a timer the process does not live to see fire.
-- **`applyDefaults()` is guarded by `defaultsFor`.** The startup selection fires
-  `modelChanged`, and without that guard a family's defaults would overwrite the
-  session that had just been restored, every launch. It holds the name of the
-  model whose defaults `gen` reflects; a restore sets it to the remembered one.
-- **The LoRA chain needs the same guard, on `lorasRestored`.** `selectModel`
-  (Python) always clears the stack on every switch — a model's LoRAs are not
-  generally valid for another one — so a plain restore-on-launch would be wiped
-  the instant the startup selection lands. `Main.qml`'s `onModelChanged` applies
-  the remembered chain (`App.restoreLoras`, names not on disk anymore dropped)
-  exactly once, when `App.selectedName` first matches the remembered `model`;
-  a later in-session switch clears same as always. `App.lorasSnapshot()` is the
-  save side — the WHOLE stack, unlike `loras.active()` (enabled-only, what a
-  submit sends).
-
-The divider between the panes is dragged (`splitRatio`, saved on release,
-double-click to reset), clamped so neither side starves — the same shape as
-filer's splitter.
-
-## A batch he cannot see finishes as a TOAST, with the picture on it
-
-A generation is a wait long enough to walk away from, so painter says so
-itself rather than leaving the result to be discovered: when a batch finishes
-behind a window he is not looking at, one desktop toast — `completed in 1:23`
-(the queue bar's own m:ss clock), the output's name, and a **48px thumbnail of
-what it made**, which clicking opens (docs/DESIGN.md §8.1, the same
-`x-download-image` hint surfer's downloads and the screenshots wear).
-
-Four rules hold it together, and each is a way of not being noise:
-
-- **"He cannot see it" is `isActive() and isExposed()`, on the window** —
-  unfocused, or not on screen at all. `isExposed()` is false for a window
-  rolled up, minimised or on another workspace, because a compositor sends no
-  frame callbacks to a surface nobody can see: it is the same test viewer
-  refuses a handoff on (`pylib/handoff.py`), and **the only way a rolled-up
-  window is visible to the app at all** — hyprvtb tells a client when it is
-  UN-hidden (vtbclient's `WAKE`), never when it is rolled away. `main()` hands
-  the window to the controller; **no window means no toast**, which is what
-  keeps every harness off his screen.
-- **One toast per BATCH, not per image**, timed from the press rather than
-  from the last job's own start (`_batch_start`) — four images asked for in
-  one click are one wait. Four outputs read as `4 outputs, newest <name>`.
-- **It waits for the file.** The toast carries a path, so it cannot go out
-  until every download has landed; `_maybe_notify` is called from both ends
-  (the last download, and the last job to finish) because either can be the
-  one that completes the batch. A clip additionally waits up to
-  `POSTER_WAIT_MS` for the poster frame the gallery is already extracting —
-  QML cannot decode an mp4, so a clip thumbnails the poster and `x-open-path`
-  points the click at the video. Whichever arrives first, the timeout or the
-  frame, takes the pending toast with it, so it is sent exactly once.
-- **A failure gets that one toast instead**, at critical urgency — the outputs
-  that did land are still in the gallery, but the thing worth coming back for
-  is that it stopped.
-
-The in-window `done in 4.0s` still fires either way; it is simply invisible
-when he is elsewhere, which is the whole reason this exists. `notify-send`
-comes from `libnotify` on the wrapper's PATH (`home/prog/painter.nix`) because
-painter is launched from a .desktop entry / the runner, whose PATH need not
-carry the profile dirs; book takes Fedora's, and a missing one degrades to no
-toast rather than to an error.
-
-## Starting fast is a property of the launch path
-
-~0.45s from click to window on book (0.23s launcher + 0.22s app), against a
-window that used to wait for ComfyUI to finish loading. Four things keep it
-there, and each was worth measuring:
-
-- **`top` before `top.local`.** Resolving the mDNS name takes ~5s on book
-  (measured) against 0.04s for `top`. It was the single largest cost in the
-  whole path — and the same ordering bug was in player's `air-launch.sh`.
-- **The launcher waits for the PORT, not the backend.** ComfyUI can take minutes
-  cold; the window opens as soon as the forward binds and says what it is
-  waiting for.
-- **Nothing blocks the GUI thread.** `systemctl` is an ssh round trip on book,
-  so `startBackend`/`stopBackend`/`is-active` all go through `QProcess`
-  (`_run_async`), never `subprocess.run`.
-- **A memory reservation is visible.** Painter does not claim `busy` until a
-  job is actually submitted (cancel cannot cancel an in-flight warden HTTP
-  request), but the status bar says `making room...` while `/reserve` is
-  pending and `queueing...` while the accepted graph is being submitted.
-- **The model list does not need the backend.** The registry scan runs in its
-  own one-thread pool on the first tick and retries while it comes up empty,
-  because the sshfs mount may still be landing. Never move its remote walk and
-  stats back onto the GUI thread; even a cached scan can block on SSHFS.
-
-## `tools/smoke.py` — the app without the window, and chatter's generator
-
-The registry/graph/client path with the GUI taken off, so a failure in it is a
-failure in painter proper rather than in the interface. It is also **the
-generator chatter shells out to** (`make_image`/`make_video` in
-`apps/oracle/main.py`), which is why it carries painter's WHOLE surface rather
-than just text-to-image:
-
-- `--mode anime|real|edit|video` is painter's own shortcut table
-  (`registry.MODES`) — it resolves to HIS canonical file for that mode, so a
-  caller naming "anima" or "klein" lands on exactly what the button would have.
-  `--model` is a substring of a filename and still wins over it.
-- `--image PATH` (repeatable) is the edit subject and its references, or a
-  clip's first frame; `--last-frame PATH` is the other end of one. Each is
-  UPLOADED to the backend (`ComfyClient.upload_image`) rather than passed by
-  path, because ComfyUI loads only out of its own input directory and the
-  backend is not necessarily on this filesystem.
-- `--aspect W:H` + `--megapixels N` go through the registry's own `calc_dims`,
-  so the shorthand and the sliders produce the same numbers. Neither applies to
-  an edit or to a clip with a frame in hand — the picture decides the size —
-  and `--megapixels` on an edit means RESIZE to that budget (given none, the
-  original's exact pixels are kept, which is painter's own default).
-- `--seconds` is a duration; `registry.video_frames` turns it into the frame
-  count the model will accept.
-- `--set KEY=VALUE` (repeatable) writes ANY graph param by its own name, read
-  as JSON when it parses and as a string otherwise, applied LAST so it beats
-  both the flags and his saved prefs. It is the escape hatch for a knob with no
-  flag: chatter's `make_image`/`make_video` pass their `extra` object straight
-  through it [his, 2026-08-24 — "wire it up so agents can change not only cfg
-  but any other param open in a workflow"]. What a key DOES is the family
-  template's business: `steps` lands, `shift` on a family that has
-  `shift_start`/`shift_end` does nothing.
-- `--dry-run` builds the graph, prints the plan and submits nothing — no
-  backend, no upload, no weights. That is how the parameter surface is checked
-  without a render.
-- `--progress` adds two MACHINE-READABLE lines to the prose: `::progress FRAC
-  LABEL` as it runs, and one `::result JSON` at the end naming the model, seed,
-  size, steps and sampler the graph ACTUALLY ran with. chatter draws the first
-  as a bar and writes the second under the picture as its caption, and neither
-  may be read only at the end (`readyReadStandardOutput`, not `finished`). The
-  bar is a **high-water mark**: ComfyUI reports a `0/1 … 1/1` for every node,
-  not just the sampler, and does not walk the graph in the order a bar is drawn
-  in, so an unguarded mapping runs backwards several times a render. Only the
-  sampler's own steps move it (10%–85%); everything else is a fixed station.
-
-**HIS OWN SETTINGS ARE THE FLOOR** (`userprefs.py`, his 2026-08-24 rule: use
-what he set in painter as the reference, and something else only when he says
-so). painter remembers a whole block per model under `genByModel` in
-`~/.local/state/painter/prefs.json` — steps, cfg, sampler, scheduler, his
-negative prompt, the resolution, the clip length, the toggles and the shift
-block — and restores it when that model is selected again. So a generation
-started anywhere else lays those UNDER whatever it was told, and a caller only
-has to name what differs. `--no-prefs` opts out.
-
-- **It mirrors what painter itself would SEND**, mode by mode (`Root.qml`'s
-  `submit()`), not the whole saved block: an edit takes only the scale keys
-  because the family's edit block supplies steps/cfg/shift, and a video job has
-  no CFG at all. Sending the image fields into either would claim settings that
-  graph never reads.
-- **The positive prompt is never carried over** — it is the last thing he typed
-  into the window, not a default.
-- **The seed is a policy, not a value.** `randomSeed` means a fresh one every
-  time, `reuseSeed` re-runs the last batch's base seed, otherwise it is the seed
-  in the box (`_start_jobs`' own rule). An explicit `--seed` beats all three;
-  with no prefs at all it falls back to 12345, so a bare run is still
-  reproducible.
-- **An aspect or a budget named on the command line REPLACES the remembered
-  width/height** — he asked for that shape, not the last one.
-- The LoRA stack is one list, not one per model, so it is carried only through
-  the same filter painter's own restore uses (applicable to this model, and
-  `lora_compat`).
-- The file is the window's; nothing here writes to it, and a missing, corrupt
-  or model-less prefs document is simply no defaults. Harness:
-  `tools/prefs-test.py` (pure, fabricated document, no backend).
-
-Outputs are saved under their own subfolder (a clip lands in `video/`) and
-tagged the way the app tags them — a PNG in a tEXt chunk, an MP4 as an `mdta`
-tag — with a file that cannot take the tag written verbatim rather than not
-written.
-
-## `tools/tunnel-test.sh` — the LAUNCHER's harness
-
-`ui-test.py` can see nothing outside the window, and **both bugs that left
-painter unusable on book were in the launcher**, not the QML: the readiness
-probe's unset variable killing the script a second after it started the backend,
-and the reuse check reading OUR OWN forward as somebody else's and killing it —
-after which the app talked to a closed port for ever and said *backend is not
-ready yet*. That second one is why the reuse test now comes BEFORE the forward
-is started, and why this file exists.
-
-```bash
-apps/painter/tools/tunnel-test.sh      # on book; uses the real top, no GUI
-```
-
-It asserts the one thing that matters — **when the launcher hands over, the app
-can GET /system_stats through the port** — in both the fresh and the
-already-forwarded case, that a borrowed forward is not killed, that the model
-mount is visible to the app, and that neither the mount nor a forward is left
-behind. Re-run it after touching `comfy-tunnel.sh`.
-
-## `tools/ui-test.py` — the offscreen UI harness
-
-Hundreds of checks over the real `qml/Main.qml` under `QT_QPA_PLATFORM=offscreen`, with a
-synthetic model root and no backend (`unit_cmd` neutered, client stubbed), so it
-can never start ComfyUI on top or open a window on his screen:
-
-```bash
-/usr/bin/python3 apps/painter/tools/ui-test.py     # on book
-```
-
-It covers the mode switcher (which file each of the four lands on, the greyed
-list, the mode that has no model staying disabled rather than vanishing), the
-edit column and what an edit job submits, dragging an output out (the payload
-for a still, a clip muted, Shift for the original, and the copy reused rather
-than remade),
-click-anywhere text boxes, the collapsible model panel, the pane split
-at seven widths, aspect+MP → pixels → header → submitted job, the dropdown
-overlay (opens, stays inside the window, picks, and the binding SURVIVES the
-pick), the live-binding regressions above, Escape (releases the box, cancels
-NOTHING), the inject menu and its three subsets, the draggable divider and its
-clamps, the furniture (an elided panel badge, the splitter stopping above the
-status bar, the one scrollbar being on the results side, a prompt box taking a
-dragged height), `copy prompt` (offered wherever there are words — a still, a
-tagged clip — and not on a file with none, and what reaches `wl-copy`), a
-clip's parameters (its own tag written without disturbing a byte of the
-pictures, read back through `paramsAt`, injected as seconds/fps/budget, the
-first frame restored only when it is still on disk, and an untagged clip read
-out of ComfyUI's graph), the merged history (`PAINTER_PEER_OUT` globbed
-beside the local root, the file both machines hold shown once and shown as the
-LOCAL copy, an unmountable peer root costing the local scan nothing), the video
-column (a synthetic video family written into the scratch
-root and removed again — a fully paired model sorts to the top of the list and
-would otherwise be every later test's selection), pasting into a frame well
-(each of the three clipboard shapes, both refusals, the content-named file for
-pixels, and that Ctrl+V reaches a well only under the pointer and never out of
-a focused prompt box — the offscreen platform's clipboard is in-process, so it
-cannot touch his), save-and-restore through a
-SECOND window on the same prefs file, the completion toast (silent while the
-window is focused, sent when it is unfocused OR unexposed, one per batch
-whatever it made, a clip waiting for its poster frame, a failure taking that
-one toast — all against a stand-in window and the harness's recorded
-`subprocess`, so nothing reaches a real notification server), that
-`startBackend` returns immediately, and a wiring audit that submits a job and
-compares every field. **A QML warning fails the run** — a binding loop shows
-as nothing at all on screen.
-
-## The prompt boxes are spellchecked
-
-A prompt is prose, so both `PromptBox`es carry a `SpellMarks` overlay
-(`apps/AGENTS.md` → `SpellMarks.qml`; the mark itself is docs/DESIGN.md §3.7) and
-right-clicking a marked word offers hunspell's corrections. Two things about the
-wiring are deliberate:
-
-- **The menu is Main.qml's, not the box's.** A `PromptBox` is 64-130px tall and
-  `CtxMenu` clamps itself into its own root, so a menu parented inside one would
-  be trimmed to a couple of rows. `PromptBox` emits `menuRequested(sx, sy,
-  items)` in **scene** coordinates (`mapToItem(null, ...)`), `PromptEditor`
-  forwards it, and the one `CtxMenu` at the bottom of `Main.qml` opens it.
-- **`qml/CtxMenu.qml` is a verbatim sixth copy** of the file filer, player,
-  reader, editor and board each have. painter had no context menu at all before
-  this; folding the six into `qmlcommon/` is docs/DESIGN.md Open question 3 and is
-  blocked on `PixelText`, which a shared component cannot reach. Do not "improve"
-  this copy — retune all six or none.
-- **A row acts on a box that still has the keyboard.** The menu takes the active
-  focus while it is open, so the box takes it on the right-press and the menu
-  hands it back on close, and `persistentSelection` keeps the selection alive
-  across that — otherwise `select all` selected text nothing could then delete,
-  and `cut`/`copy` ran against an emptied selection. The contract is
-  `apps/AGENTS.md` → `CtxMenu.qml`; the regression is `ui-test.py`'s
-  `menu_pick`, which picks the ROW rather than calling the editor's method (the
-  check that did the latter passed throughout the bug).
-
-The numeric `Spin`/`Field` controls are not spellchecked and must not be.
-
-## LLaDA-Image Base
-
-`families/llada_image_ckpt.json` identifies the native T8 AIO checkpoint by
-tensor keys and its embedded Base variant metadata, not its filename. It bundles
-the diffusion model, MoE text encoder, SigVQ and VAE. Turbo is not supported.
-`Registry._build_llada()` adapts the checkpoint template, defaulting to Euler
-with the native LLaDA scheduler. Sampler, scheduler and denoise are experimental
-overrides; generic schedules use BasicScheduler, and the native schedule uses
-SplitSigmas to retain the requested step count when denoise is reduced (at most
-1000 schedule points). Denoise truncates the schedule, not image-edit strength.
-Unsupported patches and LoRAs stay hidden. Base defaults to 50 steps / CFG 5.
-
-The optional source-image box is always available for LLaDA. Empty means
-text-to-image; a chosen, dropped or pasted image automatically enables native
-`T8LLaDAImageEditConditioning`. Clear returns to text-to-image without switching
-models or resetting sampling settings. Editing rounds source dimensions down
-to multiples of 32 and uses the source-size controls rather than t2i resolution.
-`editStateChanged` joins model, mode and input-image notifications; explicit
-Edit mode remains required for Klein, not LLaDA. ParamsPane forwards the file
-picker action to Root; tests must never open a real portal/file picker.
-
-Backend installation is top-only; both top and book use the same stdlib/Qt
-frontend code. Run `bash apps/painter/tools/install-llada.sh /home/lam/comfy`.
-The installer pins T8's standalone nodes and applies `tools/llada-compat.patch`:
-the older Comfy RMS-weight API plus per-LLaDA static, unpinned CPU offloading.
-Do not remove that memory policy without retesting the AIO under a memory cap;
-its MoE encoder cannot be dynamically staged in top's available RAM. Other
-model loaders and the global Comfy memory policy are untouched. Restart the
-backend only while idle, then relaunch the frontend manually / rescan models.
-
-The tested checkpoint is
-`t8star/LLaDa-Image-Comfy` revision `7727757`, file
-`LLaDA-Image-Base-INT8-ConvRot-Mixed-AIO.safetensors`, installed under
-`/home/lam/models/checkpoints`. Its SHA256 is
-`4766571e1fc6ac8bc16940e46b91083b1a9a7a00f42750165b852e07a95e36fc`.
-This is an experimental community quantization, not the official BF16 weights.
-The frontend reserves 20 GiB plus warden overhead for this mixed-INT8 size class;
-other quantizations retain the raw-size estimate. This is a working-set estimate,
-not the checkpoint's disk size or a promise that every resolution fits.
-
-Verify graph/detection with `python3 apps/painter/tools/llada-test.py` and the
-offscreen UI with `PAINTER_UI_ONLY=llada painter-qtenv python3
-apps/painter/tools/ui-test.py` after the offscreen session guard. Inference
-verification uses a separate loopback Comfy process with scratch input, output,
-user directory **and explicit `--database-url`**, a warden lease, and a memory
-cap; never submit smoke jobs into the user's active Painter queue.
-
-## Qwen-Image 2.1
-
-`families/qwen_image21.json` uses native `TextEncodeQwenImage21` joint
-conditioning for generation and up to 16 ordered edit references. Reference 1
-sizes the edit canvas. The shared Reference & Output Size control sends one
-MP budget to every reference, preserving each aspect ratio; no-scaling keeps
-each original size rounded to multiples of 32. Filled reference wells replace
-their own image on drop, Paste, or hovered Ctrl+V; the compact add well appends.
-Generation and editing retain the per-model sampler, scheduler, CFG, steps,
-negative prompt, and seed. The optional source-image well selects editing, as with LLaDA.
-Both patch controls are available in generation and editing, defaulting off.
-Model sampling uses multiplier 1 and a starting rational shift of exp(0.69),
-matching the native Flux-style shift's scale. `PainterQwen21NegPip` in
-`comfy_nodes/painter_qwen21.py` applies signed token weights to attention values
-through native hooks, preserving Q/K and neutral reference-image tokens. The
-encoder adapter mirrors native system/vision trimming; negative-box text folds
-into the positive prompt while metadata retains both editor values. Attention
-hooks disable native prefix caching. This is a Qwen-specific adapter: ppm's
-`CLIPNegPip` does not support this encoder/model and silently skips them.
-
-Install on top with `python3 apps/painter/tools/install-qwen21.py /home/lam/comfy`.
-The installer applies the native upstream support commit
-`6bfaacc67c2103481e5f0c84d75257cd0581d86a` as a checked, repeatable backport,
-preserving the checkout's unrelated changes. It downloads checksum-pinned INT8
-ConvRot diffusion and Qwen3-VL-8B weights plus the BF16 RGBA VAE; the manifest
-is `tools/qwen21-models.json`. Book uses top's existing model mount and backend.
-It neither restarts the backend nor generates images. Before a future upstream
-rebase, account for `tools/qwen21-backend.patch`, which upstream already includes.
-`tools/qwen21-test.py` checks detection and graph wiring without inference.
-Run `tools/qwen21-patches-test.py` inside Comfy's `nix-shell` for CPU-only
-tokenizer, attention-weight, sampler-scale, and native node-contract checks.
-
-## The backend is NOT packaged
-
-ComfyUI stays the venv+`nix-shell` checkout at `/home/lam/comfy` (symlink →
-`Downloads/git/ComfyUI`, v0.30.0); its `shell.nix` already pins nixpkgs-24.11,
-installs torch cu128 and patchelfs Triton's `ptxas` for NixOS, which is the
-hard-won part. `home/prog/painter.nix` only adds a `systemd --user` unit
-`comfy-painter.service` (no `[Install]`, never starts at boot) that painter
-starts for the first renewable painter client lease and stops after the last
-window closes plus ai-warden's short grace. Multiple windows and book/top share
-that one lease set, so one close cannot stop another client's backend. Logs:
-`journalctl --user -u comfy-painter -f`.
-
-**Upgrading it** is a rebase, not a pull — the checkout carries three local
-`shell.nix` commits that must stay on top: `git fetch && git rebase v<tag>`.
-Two things bite:
-
-- **The venv does not follow the rebase.** `shell.nix` installs deps once and
-  guards on `.venv/.comfy_deps_installed`; delete that marker and re-enter
-  `nix-shell` or the new `requirements.txt` pins never land. torch is unpinned
-  there, so this does *not* disturb the cu128 build.
-- **`models/` on disk is a symlink to `/home/lam/models`**, so upstream's
-  placeholder files under it read as 36 deletions and any checkout would write
-  into the real 246G root. They are `--skip-worktree` as of 2026-08-05; leave
-  them that way.
-
-Then gate it on the three harnesses in this order, each of which catches a
-different kind of breakage: `tools/validate-graphs.py` (node contracts, every
-family × all four toggles), `tools/coverage-test.py` (every base model actually
-loads and decodes — 19/19 on v0.30.0), and the custom-node import block in the
-startup log, since a bump silently disables a node that fails to import rather
-than refusing to start. `coverage-test.py` writes its PNGs into the real
-gallery (`~/Pictures/painter/out`, prefix `painter_cov_`) — delete them after,
-and note that since the history merged they show up in BOOK's gallery too,
-because that root is top's.
-
-The unit passes `--listen 127.0.0.1`, and that is a **security boundary, not a
-default**: ComfyUI has no authentication and a workflow graph is arbitrary code
-with filesystem access. Never rebind it to `0.0.0.0`, and never add 8188 to the
-tailnet allowlist in `sys/net/tailscale.nix`. To drive top's backend from book,
-tunnel it behind ssh's key auth:
-
-```bash
-apps/painter/tools/comfy-tunnel.sh            # start it on top, forward 8188
-apps/painter/tools/comfy-tunnel.sh -- painter # ...and run painter over it
-```
-
-**On book that is not a manual step: it IS painter's launcher.** `painter.nix`'s
-`air` branch execs `comfy-tunnel.sh -- python3 main.py`, so opening painter
-there probes top (`top.local`, then the tailnet name `top`), starts
-`comfy-painter.service` over ssh if it is not already active, forwards 8188,
-waits until the backend actually serves `/system_stats`, and only then opens the
-window; the forward dies with the app. An unreachable top is **fatal with a
-notification** rather than a window that can only fail on the first Generate —
-same rule as player's `air-launch.sh`. `PAINTER_NO_TUNNEL=1` launches plainly
-against whatever is on the local port, for UI work with no top;
-`COMFY_HOST`/`COMFY_PORT`/`COMFY_READY_TIMEOUT`/`COMFY_CONNECT_TIMEOUT` pin the
-rest.
-
-**The app's own start/stop/status controls follow the tunnel.** `main.py` drives
-`systemctl --user` on `comfy-painter.service`, including once unconditionally at
-startup — and on book that unit does not exist, so every one of those calls
-failed with "unit not found" and painter opened saying *backend failed to start*
-while the backend it was tunnelled to sat there serving. `unit_cmd()` sends them
-over ssh to the host the launcher resolved, via `PAINTER_BACKEND_SSH` /
-`_SSH_BIN` / `_SSH_CTL` (the launcher's own control socket, because `is-active`
-polls every 3s and a fresh handshake each time is ~0.2s of network). Unset — on
-top, or under `PAINTER_NO_TUNNEL=1` — it stays a plain local `systemctl`.
-
-Two traps that cost a debugging session and must not be reintroduced into the
-readiness probe: while the backend warms, ssh **accepts** the local connection
-and only then learns the far end refuses — so a port check is not a readiness
-check (hence the HTTP probe), and the read that fails with ECONNRESET leaves
-`line` unset, which under `set -u` killed the launcher one second after it had
-started the backend, silently. Hence `local line=""` and `trap '' PIPE`.
-
-`comfy.py`'s `DEFAULT_URL` stays `http://127.0.0.1:8188` so the app needs no
-configuration — it talks to the local end of the forward. `PAINTER_COMFY_URL`
-overrides it, for a forward parked on another *local* port; pointing it at a
-remote host would put the unauthenticated API on the wire.
-
-## Models live at `/home/lam/models`
-
-~246G — consolidated 2026-07-25 from the two former roots,
-`Downloads/git/ComfyUI/models` and `Projects/cte/app/models`, both of which are
-now **symlinks** to it; that keeps cte working without editing its `config.py`,
-which regenerates its own `extra_model_paths.yaml` on every import. Never in
-git. Reached only via `/home/lam/models/extra_model_paths.yaml`.
-
-**On top. book has no copy, and cannot fake one from a file list** — the
-registry *reads* every model (tensor headers, then a second read per file for
-LoRA target matching), so painter there mounts top's model root read-only over
-sshfs at `~/.cache/painter/models-top` and points `PAINTER_MODELS` at it;
-`comfy-tunnel.sh` does the mount and unmounts on exit. Only headers cross the
-wire — 57 files, ~2.6s for a cold scan, near-free afterwards from
-`fingerprint.py`'s size+mtime cache — never the 249G. Verified identical
-identification to top's for all 57 files (role, family, loader, quant).
-`PAINTER_NO_MODELS_MOUNT=1` skips it. An unmountable root is **not** fatal (the
-backend is the precondition, not the picker), but it says so in a toast rather
-than leaving an empty list that reads as "top has no models". Generated images
-still land locally: the app downloads each result over the tunnel's `/view` and
-writes it to book's own `OUT_DIR` — and since 2026-08-06 the same script mounts
-top's OUTPUT root beside the model one, so book's gallery shows what BOTH
-machines made rather than only what book downloaded. See "The history is both
-machines'" above; `mount_ro`/`unmount_ours` are shared by the two mounts and
-only ever give back what this run took, so a second painter's mount survives.
-`PAINTER_NO_PEER_OUT=1` skips the output one.
-
-## Model identification is by tensor header, not filename
-
-`fingerprint.py`, pure stdlib, whole 246G collection in ~0.2s: safetensors' JSON
-header and GGUF's KV block give tensor names and shapes, and the rules mirror
-`comfy/model_detection.py` — which is the authority to re-check when a Comfy
-bump moves a signal. Consequences worth remembering:
-
-- GGUF `general.architecture` **lies** (both Krea 2 GGUFs claim `qwen_image`),
-  so never key on it.
-- `qwen_image_vae` and `wan21-vae` are structurally identical, so VAE identity
-  needs a hash/name fallback.
-- LoRA compatibility is scored by recovering the target key namespace and
-  intersecting it with the base model's, which needs a per-family **alias map**
-  (Krea 2 LoRAs say `text_fusion`/`to_k`/`to_gate` where the base says
-  `txtfusion`/`wk`/`gate`; Z-Image LoRAs address `to_q`/`to_k`/`to_v` that the
-  base keeps fused as `attention.qkv`).
-
-Unrecognised files stay visible in the picker with a family dropdown;
-assignments persist in `~/.local/state/painter/overrides.json`.
-
-## Video is a different pipeline, not a flag on the image one
-
-A family may declare `"kind": "video"` (`families/minimax_h3.json`, the MiniMax
-H3 model that generates picture and sound together). That is one branch in
-`registry.build()` — `_build_video()` — and one extra template,
-`graphs/video_minimax.json`, transcribed from the workflow that produced the
-first outputs (its API graph is embedded in every `MiniMax_H3_*.mp4`, which is
-where to look if the node contract ever moves).
-
-What is genuinely different, and therefore what the left column stops offering:
-
-- **One prompt.** `MiniMaxH3ImageToVideo` takes the text itself and emits
-  conditioning *and* latent, so there is no `CLIPTextEncode` and **no negative
-  prompt** — the box is hidden rather than typed into nothing. `BasicGuider`
-  takes **no CFG** for the same reason, and the frame count replaces the batch.
-- **Two VAEs.** Video and audio latents decode separately and `CreateVideo`
-  muxes them, so `pair()` resolves a `vae_audio` as well and a missing one is a
-  problem reported up front.
-- **Four modes, one template.** `first_frame` and `last_frame` are both
-  **optional** inputs on the node and `VideoPanel` offers them as two
-  independent toggles, each with its own well: first only, last only, both (the
-  same file in both is what looping is — there is no loop toggle), or neither.
-  With either frame the size comes **out of the image** — `ImageScaleToTotalPixels
-  -> GetImageSize`, which is why `ResolutionPanel` drops to the MP box alone —
-  and the measuring chain runs off the FIRST frame when there is one, off the
-  last when there is not (`_build_video` repoints `scale_image`). With neither,
-  it drops that chain (`Graph.drop`, which refuses while anything still reads
-  the node) and feeds painter's own aspect + MP. **Each `LoadImage` is dropped
-  when its end was not dropped on**: an unwired one with an empty filename fails
-  Comfy's own validation.
-- **Each frame is uploaded, not read.** `ComfyClient.upload_image` PUTs it
-  under the input directory's `painter/` subfolder and the graph names
-  `painter/<file>` — on book the backend is top's and the socket is all they
-  share. Once per file, not once per job. `LoadImage`'s `image` enum is a live
-  directory listing, so it is in `graph.LIVE_ENUMS` and not validated against the
-  `/object_info` painter fetched at startup.
-- **Frame counts are quantised.** `registry.video_frames()`: seconds × fps,
-  rounded up to the next length congruent to 5 mod 17 — 5s at 24fps is 124
-  frames, matching the source workflow's `ComfyMathExpression`. Done in python so
-  the graph needs no custom math node.
-- **Outputs are clips.** `SaveVideo` writes them under `video/` in the output
-  directory (which IS `~/Pictures/painter/out` — the backend is launched with
-  `--output-directory`), the gallery globs that too, and each tile wears a
-  poster frame extracted once by ffmpeg into `~/.cache/painter/posters` plus the
-  drawn play marker (docs/DESIGN.md §2.3). A video carries ComfyUI's graph in its
-  container metadata, **not** painter's parameters, so "inject" has nothing to
-  offer for one and says so.
-
-`tools/ui-test.py`'s `test_video` covers the whole column reshaping and what
-`submit()` sends; `tools/validate-graphs.py` builds all four modes (`i2v`,
-`l2v`, `fl2v`, `t2v`) against the live `/object_info`, and its `=== edit ===`
-section does the same for the Klein edit graph plus the refusal every other
-family owes it.
-
-## One graph, not one per model
-
-`graphs/universal.json`; the exceptions are `universal_ckpt.json` for bundled
-checkpoints, which need `CheckpointLoaderSimple` instead of the loader/clip/vae
-trio, and `video_minimax.json` above. Per-family difference is expressed three ways only: a value, an optional
-node spliced in/out, or a node-class swap at one role
-(`UNETLoader`/`UnetLoaderGGUF`/`OTUNetLoaderW8A8` — a GGUF physically cannot
-load on the plain loader).
-
-Nodes are addressed by `_meta.painter_role`, **never by node id**, and
-`_meta.painter_bypass` maps an output back to the input that replaces it when a
-node is removed.
-
-Two optional nodes are user toggles: `CLIPNegPip` (from `ComfyUI-ppm` — it is
-what makes `(tag:-1.0)` work *inside* the positive prompt, and note the positive
-encode reads the patched CLIP while the negative reads the raw one) and
-`ModelSamplingSD3Advanced` with its full parameter set. **Chroma must keep
-NegPip off**: ppm patches Flux's forward, which expects a `time_in` layer Chroma
-replaces with `distilled_guidance_layer`, and enabling it aborts the sampler.
-
-## Per-family prompt transforms
-
-Anima's prompts are flattened to a single line on the way out and **spelled the
-way Danbooru spells them** (`prompt_transform: danbooru`) while the editor keeps
-your line breaks; everything else is passed through verbatim (Krea 2's
-`<think>…</think>` prose must not be touched). The string actually sent is what
-gets recorded in the PNG.
-
-`danbooru` is `single_line` plus the three things a model writing the prompt
-gets wrong most often, all mechanical [his, 2026-08-24]: **underscores become
-spaces**, a near-miss becomes **the tag the site actually has**
-(`one girl` → `1girl`, `amber eyes` → `yellow eyes`, via `pylib/boorutags`'s
-`canonical` — which returns nothing rather than a guess, because a wrong tag
-fires something and an unknown one does not), and an artist becomes **`@name`** (`artist:x`, and `by x` when x is
-one token — "by the window" is a sentence, and this transform must never
-rewrite his prose). It normalises SPELLING and edits nothing else. Three things
-keep their underscores because they are not word separators: `score_*`, the
-emoticon tags (`^_^`, `>_<` — one character either side and nothing else), and
-whatever is inside a weight group, which is normalised tag by tag with the
-weight untouched, so `(lowres, low_quality:-1.0)` stays a weight group.
-
-## Tag completion in the prompt boxes
-
-[his, 2026-08-28] tag autocomplete *"a la those comfyui extensions and what the
-og cte does"*. The vocabulary was already here — the transform above spells a
-WRITTEN prompt with it — so this is the other half: the tag offered while it is
-being typed, so a near-miss is never written in the first place.
-
-- **The gate is the family's `prompt_transform`.** `danbooru` means this prompt
-  is written in the site's tags, which is the only prompt a tag list belongs
-  over; on Krea's `<think>` prose or a video shot description the whole feature
-  is off, not merely unhelpful. Both boxes get it — a negative is tags too.
-- **`Tags` (main.py) is the context property**, `pylib/boorutags` behind it. It
-  answers or it says nothing: until the index is built `complete()` returns
-  nothing and the popup is not there, and the build runs on a `QThreadPool`
-  worker started when a box that wants completions takes the keyboard — never in
-  front of him, and never in a session that types no Anima prompt.
-- **What it inserts is what will be SENT.** `graph.spell_tag` is the same
-  `_danbooru_tag` the transform uses, so the box and the wire cannot disagree:
-  underscores become spaces, `score_*` and the emoticon tags keep theirs, and an
-  artist is inserted as `@name`.
-- **An artist is inserted `@name` and a bracket is ESCAPED** [his] — half of
-  Danbooru's characters carry their series in brackets (`rebecca_(cyberpunk)`)
-  and a bare bracket in a prompt opens a weight group, so an unescaped one does
-  not merely fail to fire: it swallows the rest of the tag. `_danbooru_tag`
-  escapes on the way out, `danbooru_prompt`'s scanner does not count an escaped
-  bracket as depth — and a bracket welded to the end of a word is read as part
-  of the tag rather than as a group, so the same thing typed by hand comes out
-  right too. `boorutags._norm` strips the backslashes again, so the vocabulary
-  recognises what it told the caller to write.
-- **The comma and the space come with it** [his] — typing the separator after
-  every completion is the thing being automated. Three tails take none, because
-  in all three one is there already or would be wrong: a comma already
-  following, a weight (`(lowres` + `:-1.0)`, the token ending at the colon), and
-  a closing bracket. At the end of a LINE it takes the comma without the space,
-  so nothing trails the line.
-- **The list is `TagPopup.qml`, one per scene** — same argument as `CtxMenu` and
-  `PickerOverlay` (a prompt box is 64-130px tall), reached through
-  `ParamsPane.tagPopup` the way the other two are. **It never takes the
-  keyboard**: `PromptBox` drives it from the editor's own key handler, because
-  the point is that typing continues underneath it.
-- **Tab flushes pending completion queries before accepting.** It must not
-  depend on the popup's debounce having fired, and an already-current list
-  must retain its highlighted row.
-- **Escape is spent by whichever handler reaches it first.** A window-level
-  `Shortcut` fires AND the key still reaches the editor's `Keys.onEscapePressed`
-  — measured. That is invisible while the two agree and it is the bug when they
-  do not (the shortcut closes the list, the editor then sees no list and lets go
-  of the box he is typing in), so `TagPopup.justClosed` is true for the rest of
-  that event.
-- **Re-completing what was just accepted is suppressed by POSITION**, not by a
-  flag: `PromptBox.skipAt` is where the caret was left, and any key at all moves
-  off it. The flag it replaced swallowed whichever refresh came first, which was
-  sometimes the next word he typed.
-
-**How it FEELS is the feature** [his, 2026-08-28: *"its just generally poor to
-use, feeling wise ... look up how the top autocomplete custom nodes for comfyui
-do it"*]. What the ones people actually use (a1111-tagcomplete and its
-descendants, pysssss's custom-scripts, Autocomplete-Plus) all do, and what this
-now does:
-
-- **One character is enough**, and the debounce is 12ms — long enough to
-  coalesce a keystroke's text change with its cursor move and nothing more. It
-  was 2 characters and 80ms, which is a tenth of a second of nothing happening
-  between the letter and the list.
-- **Post count is the ranking**, not the bucket: `boorutags.search(...,
-  order="posts")` merges the whole-word and prefix buckets and reads them by
-  count, so `sol` answers `solo` and not `sol_badguy`. The default `order="word"`
-  is unchanged for the LOOKUP, where a whole-word match beating a prefix is what
-  puts `iwakura_lain` above six tags with `lain` buried in them.
-- **A typo still answers**: when the strict search comes back empty,
-  `boorutags.loose` runs a subsequence pass (`lookingat`, `cybrpnk`) — capped at
-  the 40,000 most-used tags, because it is a fallback and not a search.
-- **Every row explains itself.** `Tags._why` names the alias that put it there,
-  so `blue` offering `earrings` reads `earrings (blue_earrings)` rather than
-  looking random.
-- **A tag already in the box is drawn spent** (`Theme.inactive`), not hidden.
-- **The list is anchored at the tag, not at the caret**, so it sits still while
-  the word is typed rather than stepping right on every letter; it is
-  re-anchored on a 60ms tick so it follows the word when the box or the column
-  scrolls, and closes when the word scrolls out of the box. The pointer moves
-  the same selection the arrow keys do.
-- **Typing asks for the list; moving the caret does not** [his, 2026-08-28:
-  *"how the cursor functions and moves around ... it still feels loose and not
-  very sharp"*]. Arrowing through a prompt, clicking into it, selecting — none
-  of those are a question, and a list that opened on all of them was most of
-  what felt loose. **`cursorPositionChanged` fires BEFORE `textChanged` for an
-  ordinary keystroke, with the text not yet updated** (measured — comparing the
-  text there, or trusting the order, closed the list on every letter typed), so
-  the close is deferred one turn through a 0ms timer and `textTouch`, set by the
-  text change and cleared by a second 0ms timer. Timers of equal interval fire
-  in the order they were started, which is what makes that reliable.
-- **Escape means "not for this tag"**, not "not for this keystroke":
-  `dismissedAt` + `dismissedWord` keep the list shut while the token still
-  starts with what it said when Escape was pressed. Deleting it, replacing it or
-  starting the next tag asks again.
-
-**Ctrl+Up / Ctrl+Down weights what is under the caret**, the way ComfyUI's own
-prompt boxes and every webui do it — `PromptBox.adjustWeight`, 0.05 a step
-(ComfyUI's default), on the selection when there is one and on the tag under the
-caret otherwise. It reuses the group already around the tag rather than nesting
-a second one, takes the group away again at exactly 1.0 so a prompt does not
-silt up with `(x:1.00)`, clamps to ±4 (what `graph._WEIGHTED` reads as a weight
-at all), leaves the body selected so a run of presses keeps adjusting the same
-thing, and knows an escaped bracket is part of a name and not a group. It is on
-in every prompt box on every family: it is prompt syntax, not a tag feature.
-
-Harness: `tools/ui-test.py` → `test_tag_complete`.
-Focused runs use `PAINTER_UI_ONLY=tags` or `tab`; add `PAINTER_UI_NATIVE=1`
-for the Tab regression through the Plasma shell's real widget event path.
-Use the offscreen session guard and `painter-qtenv python3` on top.
-
-## Prompt pills are a lossless view, not a formatter
-
-On a `danbooru` family the prompt panel's compact pill-icon header action changes
-both prompt boxes from their ordinary `TextEdit` to `PromptPills.qml`; the choice is
-remembered as `Prefs["prompt.pills"]`. Prose families neither show nor enter the
-mode. The interaction follows Physton Prompt All-in-One and the old CTE editor:
-compact wrapping tags, hover remove, double-click inline edit, an end add
-control, open/closed-hand dragging after a 10px threshold, and an insertion
-rule at the target pill's midpoint.
-
-**The literal prompt remains the source of truth.** `PromptPills` keeps stable
-tag payloads separate from the exact separators between their slots. Commas,
-spaces, CR/LF and blank lines are serialized unchanged; newline separators are
-also drawn as first-class row breaks. A drag performs a stable move of tag
-payloads through those fixed slots, so the line structure stays where the user
-wrote it. Merely switching text → tags → text must be byte-for-byte inert.
-Never replace this with split/trim/`", ".join()`; that is the old CTE behavior
-this model exists to avoid. External model writes reparse the pill view, while
-pill edits emit through `PromptBox.edited` and come back through the existing
-guarded model binding rather than assigning the bound `value` locally.
-
-Pure lossless-model coverage is `tools/promptdoc-test.py`; the actual two-box,
-family-gated view and return to ordinary editing are in `tools/ui-test.py` →
-`test_prompt_pills`. Both are offscreen only.
-
-## NegPip: the negative goes IN the positive
-
-`CLIPNegPip` is what makes a NEGATIVE weight work inside the positive prompt,
-and on a family that has it on that is the stronger control — it rides the same
-patched CLIP the positive does, while the negative box is encoded through the
-raw one. So `smoke.py` **folds** the negative into the positive as
-`(…:-1.0)` and leaves the negative box empty, for image jobs on a NegPip
-family, unless `--no-negpip-fold`. The caller writes a prompt and a negative
-like anywhere else; the syntax — and the SIGN, since a positive weight there
-emphasises the very thing it was meant to remove — is done here rather than
-asked for. **painter's own window is unchanged**: the fold is the headless
-path's, so the two boxes on screen still mean what they always did. The
-execution prompt and the original boxes are both recorded; see the gallery
-injection contract above.
-
-## Adding a family
-
-Drop a `families/<id>.json`. No code, no new graph — unless it is a `kind`
-the app does not have yet, which is what video cost (see above). Verify with
-`tools/validate-graphs.py` (every family × all four toggle combinations, plus
-both video modes, checked against live `/object_info`), `registry.py --pair-all`,
-`registry.py --lora-matrix`, and `tools/coverage-test.py`, which actually runs
-**every** base model for one step — 19/19 as of 2026-07-25, including the
-int8-convrot loader, three GGUFs, both bundled checkpoints, and the pixel-space
-`zeta-chroma`, which needs the generated `vae/pixel_space_vae_stub.safetensors`
-(a 220-byte file whose only tensor is named `pixel_space_vae`; `comfy/sd.py`
-matches on that key alone). `tools/consolidate.py` did the model move and writes
-an inverse-`mv` rollback script before touching anything.
+Verify the desktop using the root guide. `Root.qml` is an Item shared by
+Hyprland's `Main.qml` Window and Plasma's native QMainWindow/QQuickWidget shell.
+Keep Window-only operations in wrapper signals, a window Connection, or
+`root.Window.*`. Native backgrounds and controls follow the shared app guide.
+
+One actions table owns menus/toolbars; `tbButtons` filters rows marked `tb:`
+for Hyprland. Missing targets disable actions. Plasma QAction shortcuts disable
+duplicate QML shortcuts with `!root.plasma`. ResultsPane/ParamsPane explicitly
+forward child properties; extend the forwarding blocks with new properties.
+Parameters and results share a scene/splitter, not a QDockWidget. F7/showParams
+must switch view when the width cannot hold both panes.
+
+Keep the content background MouseArea at `z: -1000`: unclaimed presses must not
+turn into Oxygen window drags. Native chrome retains its own dragging. Under
+Plasma, QueueBar has zero height and statusLine/statusProgress carry its state.
+
+Use `root.set`, `root.setMs`, and `root.clone` to replace generation objects;
+mutating and reassigning the same object does not notify bindings. Controls
+emit edited/picked rather than assigning bound values. PromptBox's syncing flag
+separates programmatic updates from edits. TextEdit does not support Text-only
+lineHeight properties. Escape releases a text box without cancelling a job.
+
+Shared TextButton, ToolTipArea, WheelNotch, Kinetic views, spelling, context
+menus, and scrollbar contracts apply. Native Plasma controls follow the native
+style; custom Hyprland controls do not impose that style on Plasma.
+
+## Gallery, output, and layout
+
+`gallery.py` owns discovery, deduplication, filtering, and bounded workers;
+`main.py` re-exports public names. `_all` and `_rows` share row dictionaries,
+and QML indexes refer to filtered rows. Filter all words against cached filename
+and prompt metadata. Peer outputs merge with local outputs without duplicate
+rows; prefer the local copy. An unavailable peer cannot block local discovery.
+
+Tiles use cached JPEGs, not full outputs. Still thumbnails have a bounded LIFO
+worker queue; video posters are requested after delegate dwell. Use scan-time
+mtime/size cache keys and never stat sshfs paths on selection/scroll paths.
+Gate hidden PreviewPane media sources on `pane.open` to stop decoders.
+
+`ParamsPane.builtinOrder` and saved sections define one order across modes.
+Move ListModel rows without replacing dragged delegates. `sectionVisible` owns
+visibility gates; deriving visibility from an effectively hidden child can latch
+it false. Collapsed sections retain pinned interactive rows. Park others in
+stash without overwriting their visibility bindings or using a null parent.
+Repeater-containing rows use `selfHides` and remain first in their section.
+
+Selection is the single current-output cursor (`selOne`). Return/double-click
+enters View; Escape leaves it; Back/Forward switch Browse/View without changing
+selection. PgUp/PgDown walk outputs only in View. Open in Viewer is separate.
+Stills zoom/pan; clips disable zoom. Generate stays enabled while busy so jobs
+can be queued. Actual decoded dimensions/duration drive output information.
+
+Shared CompareView is available for an edit with a resolvable source. Preserve
+before-images under `.before/` outside gallery globs; resolve the saved copy,
+recorded path, then output-root filename. Changed action IDs require native
+chrome rebuilding. Completed stills may copy pixels through `clipfile.py
+--image-only`; sampler frames and videos do not.
+
+Keep native drag payloads valid for stills, clips, and multi-output collages.
+Muted video copies are cached derivatives; never overwrite the original or
+insert the derivative into generation history. Output PNG/MP4 metadata uses
+the shared `pngmeta.py`/`mp4meta.py` implementations. Metadata failure must not
+discard an otherwise valid downloaded output.
+
+## Models, prompts, and graphs
+
+`registry.MODES` owns anime/real/edit/video shortcut choices; QML does not choose
+model files. A mode selects a model, disables manual selection while active,
+and stays visible but disabled if unavailable. Restore mode after model rows
+arrive; do not replace the user's preference with the newest model.
+
+`fingerprint.py` identifies tensors/headers instead of trusting filenames or
+GGUF architecture strings. Use current ComfyUI detection code when signals
+change. Structurally identical VAEs may need a hash/name fallback; LoRA matching
+uses namespace aliases and base-model compatibility. Unknown files remain
+visible and user assignments persist separately.
+
+Families are declarative under `families/`; shared graph kinds live in `graphs/`.
+Adding a family normally extends data, while a new pipeline kind can require
+code. Validate node contracts against `/object_info` and report unavailable
+family reasons explicitly. Image, edit, and video are separate pipelines;
+do not claim a setting applies when that graph never consumes it.
+
+Edit dimensions come from the source image unless the user requests a scale
+budget. Upload input/reference frames to the backend rather than assuming its
+filesystem matches the client. Video duration must go through the registry's
+valid frame-count conversion. Use per-family prompt transforms and keep tag
+storage underscore conventions distinct from displayed prompt spaces.
+
+Wildcards expand from app-local `wildcards/*.txt` after assigning the concrete
+per-job seed. Selection is deterministic for `<seed>:<name>` across both boxes;
+missing/empty files leave tokens literal. Store expanded conditioning in output
+parameters and literal text in `prompt_boxes` for lossless injection. Prompt
+pills/completion must not reformat arbitrary user text.
+
+## Headless generation and saved preferences
+
+`tools/smoke.py` is a real generation client used by Chatter, not automatically
+a harmless test. Its `--dry-run` builds a plan without submission/uploads.
+Mode/model selection, aspect/budget, frames, and arbitrary `--set KEY=VALUE`
+parameters must use the same registry/graph semantics as the GUI.
+
+`userprefs.py` reads saved per-model defaults beneath explicit caller overrides.
+The last positive prompt is not a default. Seeds follow random/reuse/fixed
+policy unless explicitly overridden. Explicit aspect/budget replaces remembered
+dimensions; only compatible LoRAs carry. Mirror what each mode actually submits
+rather than forwarding an entire remembered image block into edit/video.
+Never write the window's preferences from the headless client.
+
+Machine-readable progress/result lines describe the graph actually run. Stream
+them while the process runs, not only at exit; progress is a high-water mark
+rather than node-order progress that can move backwards.
+
+## Backend, hosts, and ownership
+
+ComfyUI is an external checkout/venv, not bundled app source. Inspect that
+checkout's current status and instructions before any upgrade; do not execute
+historical rebase/dependency-cleanup recipes. Its model symlink can target real
+user data, so upstream placeholder changes need an ownership review.
+
+Keep ComfyUI loopback-only. Book reaches top through the authenticated forward
+in `tools/comfy-tunnel.sh`; do not expose port 8188 on the tailnet. The normal
+GUI launcher tries `top` before `top.local` and waits for the local forward to
+bind, while the app reports backend warm-up asynchronously. The separate
+`COMFY_ENSURE_BACKEND` headless path waits for a serving backend. A bound port
+alone is not evidence that ComfyUI serves requests.
+
+Backend lifecycle uses renewable warden client leases shared across windows
+and hosts. Closing one window must not stop another client's work. Preserve
+reservation/refusal/status reporting and asynchronous unit commands. On book,
+backend commands follow the resolved SSH/control route; do not target a
+nonexistent local top-only service.
+
+Book uses read-only model/peer-output mounts where available. Model discovery
+reads tensor headers off the GUI thread and retries while mounts settle.
+Only release mounts/forwards owned by the current launcher. Missing model or
+peer roots must be reported without turning local history into a failure.
+Current roots, overrides, and lifecycle details belong to the launcher/module
+source, not copied inventory numbers.
+
+## Isolated verification and applying changes
+
+`tools/ui-test.py` uses offscreen Qt, synthetic models, a stubbed client, and
+neutered backend commands. Preserve those isolation seams; QML warnings fail
+its run. Use scratch preferences, output/cache roots, and stub clipboard,
+notifications, warden, transport, and unit control. `tools/resource-fixture.py`
+uses a synthetic gallery and never acquires those live seams.
+
+Apply the root/shared session guards and remove inherited display/compositor
+sockets. Never source an app wrapper, launch the user's Painter, or run a real
+generation merely to verify documentation/UI plumbing. Dependency or packaging
+changes require the appropriate host rebuild; Python/QML changes wait for the
+user's next launch.
+
+When inference verification is required, use a separate loopback Comfy process
+with scratch input/output/user directories and an explicit `--database-url`,
+a warden lease, and a memory cap. Never submit smoke jobs to the user's active
+Painter queue; follow the root rules for running inference alongside user work.
