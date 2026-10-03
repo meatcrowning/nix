@@ -44,7 +44,7 @@ function HomeGrid() {
   const [controllersOnly, setControllersOnly] = useState(() => { try { return localStorage.getItem('home-library-grid-controllers') === 'true'; } catch { return false; } });
   const [panel, setPanel] = useState(null);
   const menuButton = useRef(null), returnToGrid = useRef(false);
-  const openPanel = () => { setPanel('settings'); return true; };
+  const openPanel = () => { homeHistory.interact(); setPanel('settings'); return true; };
   const closePanel = () => { returnToGrid.current = true; setPanel(null); return true; };
   const [metadata, setMetadata] = useState({});
   const [metadataReady, setMetadataReady] = useState(false);
@@ -72,7 +72,7 @@ function HomeGrid() {
       // Steam can retain an inactive route's DOM. Only restore visible Home.
       if (!el.getClientRects().length || panel || !metadataReady) return;
       if (!all.some(app => app.appid === homeHistory.pending?.appid)) {
-        homeHistory.pending = null;
+        homeHistory.interact();
         return;
       }
       if (homeHistory.restore(navigation.current, el)) {
@@ -87,6 +87,7 @@ function HomeGrid() {
     return () => { if (restoreFrame.current !== null) win.cancelAnimationFrame(restoreFrame.current); };
   }, []);
   const focusGrid = detail => {
+    homeHistory.interact();
     (navigation.current.get(selected?.appid) || navigation.current.get(all[0]?.appid))?.TakeFocus(detail?.button);
     return true;
   };
@@ -97,14 +98,16 @@ function HomeGrid() {
     }
   }, [panel]);
   const verticalMove = (app, step, detail) => {
+    const origin = homeHistory.navigationOrigin(app.appid);
     const cards = [...viewport.current.querySelectorAll('.hlg-card')].map(el => ({appid:Number(el.dataset.appid),top:el.offsetTop,left:el.offsetLeft,width:el.offsetWidth}));
-    const next = verticalNeighbor(cards, app.appid, step);
+    const next = verticalNeighbor(cards, origin, step);
     if (next) navigation.current.get(next)?.TakeFocus(detail.button);
     else if (step < 0) menuButton.current?.TakeFocus(detail.button);
     return true;
   };
   const move = (app, step, detail) => {
-    const next = adjacentApp(all, app.appid, step);
+    const origin = homeHistory.navigationOrigin(app.appid);
+    const next = adjacentApp(all, origin, step);
     // Consume horizontal movement at the library endpoints as well.
     if (next) navigation.current.get(next.appid)?.TakeFocus(detail.button);
     return true;
@@ -136,7 +139,7 @@ function HomeGrid() {
     return () => observer.disconnect();
   }, []);
   const select = (app, element) => {
-    if (!homeHistory.select(app.appid)) return;
+    if (!homeHistory.select(app.appid)) { restoreReturn(); return; }
     setSelected(app);
     const el = viewport.current;
     if (el && element) {
@@ -147,14 +150,14 @@ function HomeGrid() {
     }
   };
   const chooseSort = mode => {
-    homeHistory.pending = null;
+    homeHistory.interact();
     setSortMode(mode);
     try { localStorage.setItem('home-library-grid-sort', mode); } catch {}
     homeHistory.scroll = 0;
     viewport.current.scrollTop = 0;
   };
   const toggleControllers = () => {
-    homeHistory.pending = null;
+    homeHistory.interact();
     const next = !controllersOnly; setControllersOnly(next);
     try { localStorage.setItem('home-library-grid-controllers', String(next)); } catch {}
     homeHistory.scroll = 0; viewport.current.scrollTop = 0;
@@ -175,18 +178,23 @@ function HomeGrid() {
       onGamepadFocus={e => select(app, e.currentTarget || e.target)}
       onFocus={e => select(app, e.currentTarget)}
       onActivate={() => {
-        homeHistory.leave(app.appid, viewport.current.scrollTop);
-        steamNavigation().Navigate(`/library/app/${app.appid}`);
+        const saved = homeHistory.pending || homeHistory.returned;
+        const appid = saved?.appid ?? app.appid;
+        homeHistory.leave(appid, saved?.scroll ?? viewport.current.scrollTop);
+        steamNavigation().Navigate(`/library/app/${appid}`);
       }}
       onOKActionDescription="Select" onCancelActionDescription="Back"
       onSecondaryButton={openPanel} onSecondaryActionDescription="Library settings"
-      onCancel={() => steamNavigation().NavigateBack()}>
+      onCancel={() => { homeHistory.interact(); steamNavigation().NavigateBack(); }}>
       <span className="hlg-fallback">{displayTitle(app)}</span>
       <Picture key={`${app.appid}-${app.rt_custom_image_mtime}-${app.local_cache_version}`} sources={artwork(app, 'cover')} lazy />
       {downloadable && <span className="hlg-download" aria-hidden="true">↓</span>}
     </Focusable>)}
   </React.Fragment> : null;
   return <Focusable className="home-library-grid" navKey="home-library-grid" flow-children="column"
+    onPointerDownCapture={() => homeHistory.interact()}
+    onWheelCapture={() => homeHistory.interact()}
+    onKeyDownCapture={event => { if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) homeHistory.interact(); }}
     onFocusWithin={focused => { if (focused) restoreReturn(); }}
     onSecondaryButton={!panel ? openPanel : undefined} onSecondaryActionDescription={!panel ? "Library settings" : undefined}>
     <style>{css}</style>
