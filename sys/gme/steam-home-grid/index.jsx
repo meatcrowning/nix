@@ -8,8 +8,9 @@ import { SystemIcon } from './system-icon.jsx';
 import { AudioPanel } from './audio-panel.jsx';
 import { SettingsPanel } from './settings-panel.jsx';
 import { ImportPanel } from './import-panel.jsx';
+import { createHomeHistory } from './home-history.mjs';
 
-let rememberedApp = null, rememberedScroll = 0;
+const homeHistory = createHomeHistory();
 const store = () => window.appStore;
 const readMetadata = callable('library_metadata');
 let Focusable, TextField;
@@ -46,19 +47,45 @@ function HomeGrid() {
   const openPanel = () => { setPanel('settings'); return true; };
   const closePanel = () => { returnToGrid.current = true; setPanel(null); return true; };
   const [metadata, setMetadata] = useState({});
+  const [metadataReady, setMetadataReady] = useState(false);
   useEffect(() => {
     let active = true;
     readMetadata().then(data => { if (active) setMetadata(data || {}); })
-      .catch(error => console.warn('[Home Library Grid] Metadata unavailable', error));
+      .catch(error => console.warn('[Home Library Grid] Metadata unavailable', error))
+      .finally(() => { if (active) setMetadataReady(true); });
     return () => { active = false; };
   }, []);
   const [groups, setGroups] = useState(() => libraryGroups(store().allApps));
   const sections = librarySections(groups, metadata, sortMode, controllersOnly);
   const all = sections.flatMap(section => section.apps);
-  const [selected, setSelected] = useState(() => all.find(a => a.appid === rememberedApp) || all[0]);
+  const [selected, setSelected] = useState(() => all.find(a => a.appid === homeHistory.appid) || all[0]);
   const controller = controllerSupport(selected, metadata[selected?.appid]);
   const viewport = useRef(null);
   const navigation = useRef(new Map());
+  const restoreFrame = useRef(null);
+  const restoreReturn = () => {
+    const el = viewport.current;
+    if (!el || !homeHistory.pending || restoreFrame.current !== null) return;
+    const win = el.ownerDocument.defaultView;
+    restoreFrame.current = win.requestAnimationFrame(() => {
+      restoreFrame.current = null;
+      // Steam can retain an inactive route's DOM. Only restore visible Home.
+      if (!el.getClientRects().length || panel || !metadataReady) return;
+      if (!all.some(app => app.appid === homeHistory.pending?.appid)) {
+        homeHistory.pending = null;
+        return;
+      }
+      if (homeHistory.restore(navigation.current, el)) {
+        setSelected(store().allApps.find(app => app.appid === homeHistory.appid));
+        measure();
+      }
+    });
+  };
+  useLayoutEffect(() => { restoreReturn(); }, [groups, metadata, metadataReady, panel]);
+  useEffect(() => {
+    const win = viewport.current.ownerDocument.defaultView;
+    return () => { if (restoreFrame.current !== null) win.cancelAnimationFrame(restoreFrame.current); };
+  }, []);
   const focusGrid = detail => {
     (navigation.current.get(selected?.appid) || navigation.current.get(all[0]?.appid))?.TakeFocus(detail?.button);
     return true;
@@ -86,7 +113,7 @@ function HomeGrid() {
   const measure = () => {
     const el = viewport.current;
     if (!el) return;
-    rememberedScroll = el.scrollTop;
+    homeHistory.measure(el.scrollTop);
     const next = edgeFades(el.scrollTop, el.clientHeight, el.scrollHeight);
     setEdges(old => old.top === next.top && old.bottom === next.bottom ? old : next);
   };
@@ -100,7 +127,7 @@ function HomeGrid() {
   }, [groups, metadata, controllersOnly, sortMode]);
   useLayoutEffect(() => {
     const el = viewport.current;
-    el.scrollTop = rememberedScroll;
+    el.scrollTop = homeHistory.scroll;
     const Observer = el.ownerDocument.defaultView.ResizeObserver;
     const observer = new Observer(measure);
     observer.observe(el);
@@ -109,7 +136,7 @@ function HomeGrid() {
     return () => observer.disconnect();
   }, []);
   const select = (app, element) => {
-    rememberedApp = app.appid;
+    if (!homeHistory.select(app.appid)) return;
     setSelected(app);
     const el = viewport.current;
     if (el && element) {
@@ -120,15 +147,17 @@ function HomeGrid() {
     }
   };
   const chooseSort = mode => {
+    homeHistory.pending = null;
     setSortMode(mode);
     try { localStorage.setItem('home-library-grid-sort', mode); } catch {}
-    rememberedScroll = 0;
+    homeHistory.scroll = 0;
     viewport.current.scrollTop = 0;
   };
   const toggleControllers = () => {
+    homeHistory.pending = null;
     const next = !controllersOnly; setControllersOnly(next);
     try { localStorage.setItem('home-library-grid-controllers', String(next)); } catch {}
-    rememberedScroll = 0; viewport.current.scrollTop = 0;
+    homeHistory.scroll = 0; viewport.current.scrollTop = 0;
     return true;
   };
   const imported = async () => {
@@ -137,15 +166,18 @@ function HomeGrid() {
   };
   const renderGroup = ({key, label, apps, downloadable, system}) => apps.length ? <React.Fragment key={key}>
     {label && <h2 className="hlg-section" aria-label={label}>{system ? <SystemIcon system={system} /> : label}{system && downloadable && <span>Available to install</span>}<span>{apps.length}</span></h2>}
-    {apps.map(app => <Focusable key={app.appid} className="hlg-card" noFocusRing
+    {apps.map(app => <Focusable key={app.appid} navKey={`game-${app.appid}`} className="hlg-card" noFocusRing
       navRef={handle => { if (handle) navigation.current.set(app.appid, handle); else navigation.current.delete(app.appid); }}
       onMoveRight={detail => move(app, 1, detail)} onMoveLeft={detail => move(app, -1, detail)}
       onMoveUp={detail => verticalMove(app, -1, detail)} onMoveDown={detail => verticalMove(app, 1, detail)}
       data-appid={app.appid} aria-label={`${displayTitle(app)}${downloadable ? ', available to install' : ''}`}
-      preferredFocus={app.appid === (rememberedApp || all[0]?.appid)}
+      preferredFocus={app.appid === (homeHistory.appid || all[0]?.appid)}
       onGamepadFocus={e => select(app, e.currentTarget || e.target)}
       onFocus={e => select(app, e.currentTarget)}
-      onActivate={() => steamNavigation().Navigate(`/library/app/${app.appid}`)}
+      onActivate={() => {
+        homeHistory.leave(app.appid, viewport.current.scrollTop);
+        steamNavigation().Navigate(`/library/app/${app.appid}`);
+      }}
       onOKActionDescription="Select" onCancelActionDescription="Back"
       onSecondaryButton={openPanel} onSecondaryActionDescription="Library settings"
       onCancel={() => steamNavigation().NavigateBack()}>
@@ -154,7 +186,8 @@ function HomeGrid() {
       {downloadable && <span className="hlg-download" aria-hidden="true">↓</span>}
     </Focusable>)}
   </React.Fragment> : null;
-  return <Focusable className="home-library-grid" flow-children="column"
+  return <Focusable className="home-library-grid" navKey="home-library-grid" flow-children="column"
+    onFocusWithin={focused => { if (focused) restoreReturn(); }}
     onSecondaryButton={!panel ? openPanel : undefined} onSecondaryActionDescription={!panel ? "Library settings" : undefined}>
     <style>{css}</style>
     <div className="hlg-hero"><Picture key={`${selected?.appid}-${selected?.rt_custom_image_mtime}`} sources={artwork(selected, 'hero')} /></div>
@@ -181,7 +214,8 @@ function HomeGrid() {
     {panel === 'audio' && <AudioPanel Focusable={Focusable} close={() => setPanel('settings')} />}
     {panel === 'import' && <ImportPanel Focusable={Focusable} TextField={TextField} close={() => setPanel('settings')} imported={imported} />}
     <div className="hlg-scroll" ref={viewport} onScroll={measure} data-fade-top={edges.top} data-fade-bottom={edges.bottom}>
-      <Focusable className="hlg-covers" flow-children="grid" autoFocus childFocusDisabled={!!panel}>
+      <Focusable className="hlg-covers" navKey="home-covers" flow-children="grid"
+        navEntryPreferPosition={4} autoFocus childFocusDisabled={!!panel}>
         {sections.map(renderGroup)}
         {!all.length && <Focusable className="hlg-empty" onActivate={openPanel} onOKActionDescription="Library settings">{controllersOnly ? 'No games with known controller support. Open Library settings to show all games.' : 'Your library is loading…'}</Focusable>}
       </Focusable>
