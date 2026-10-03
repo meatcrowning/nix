@@ -33,15 +33,3 @@ export function findTextField(requireModule) {
   }
   return null;
 }
-
-// Reuse Steam's own launch-options dialog, including its controller navigation.
-// Find the export by its purpose, not a webpack ID that changes between builds.
-export function findLaunchOptionsDialog(requireModule) {
-  for (const [id, factory] of Object.entries(requireModule.m)) {
-    if (!String(factory).includes('showing launch options')) continue;
-    for (const value of Object.values(requireModule(id))) {
-      if (typeof value === 'function' && String(value).includes('showing launch options')) return value;
-    }
-  }
-  throw new Error('Steam launch options dialog is unavailable');
-}

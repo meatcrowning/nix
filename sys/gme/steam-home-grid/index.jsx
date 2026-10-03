@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { findFocusable, findTextField, findLaunchOptionsDialog, steamNavigation } from './steam.mjs';
+import { findFocusable, findTextField, steamNavigation } from './steam.mjs';
+import { Menu, MenuItem, showContextMenu } from '@decky/ui/dist/components/Menu';
 import { afterPatch } from '@decky/ui/dist/utils/patcher';
 import { definePlugin, routerHook, callable } from '@decky/api';
 import { libraryGroups, edgeFades, revealScroll, metadataLine, controllerSupport, displayTitle, systemName, adjacentApp, librarySections, validSort, verticalNeighbor } from './model.mjs';
@@ -14,12 +15,11 @@ import { createHomeHistory } from './home-history.mjs';
 const homeHistory = createHomeHistory();
 const store = () => window.appStore;
 const readMetadata = callable('library_metadata');
-let Focusable, TextField, launchOptionsDialog;
+let Focusable, TextField;
 function resolveSteamUI() {
   window.webpackChunksteamui.push([[Symbol('home-library-grid')], {}, requireModule => {
     Focusable = findFocusable(requireModule);
     TextField = findTextField(requireModule);
-    launchOptionsDialog = () => findLaunchOptionsDialog(requireModule);
   }]);
 }
 
@@ -254,18 +254,24 @@ function replacePage(node) {
 
 export default definePlugin(() => {
   resolveSteamUI();
-  if (!Focusable || !store()) throw new Error('Steam library components are unavailable');
+  if (!Focusable || !store() || !Menu || !MenuItem || !showContextMenu) throw new Error('Steam library components are unavailable');
   const stopLaunchModes = installLaunchModes({
     apps: SteamClient.Apps,
     getApp: gameid => store().GetAppOverviewByGameID(gameid),
     metadata: readMetadata,
     choose: (appid, modes) => new Promise((resolve, reject) => {
       try {
-        Promise.resolve(launchOptionsDialog()({
-          appid, alwaysShowDialog: true,
-          continue: index => resolve(index), onCancel: () => resolve(null),
-          ownerWindow: window.SteamUIStore.GetFocusedWindowInstance()?.BrowserWindow,
-        }, modes.map((mode, nIndex) => ({ nIndex, strDescription: mode.label, eType: 0 })))).catch(reject);
+        const owner = window.SteamUIStore.GetFocusedWindowInstance()?.BrowserWindow;
+        if (!owner?.document) throw new Error('The Steam window is unavailable.');
+        let menu, done = false;
+        const finish = index => {
+          if (done) return;
+          done = true; resolve(index); menu?.Hide();
+        };
+        menu = showContextMenu(
+          <Menu label={`Play ${store().GetAppOverviewByAppID(appid).display_name}`} onCancel={() => finish(null)}>
+            {modes.map((mode, index) => <MenuItem key={mode.options} onSelected={() => finish(index)}>{mode.label}</MenuItem>)}
+          </Menu>, owner.document.documentElement, {onCancel: () => finish(null)});
       } catch (error) { reject(error); }
     }),
     reportError: error => {
