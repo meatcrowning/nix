@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { findFocusable, findTextField, steamNavigation } from './steam.mjs';
-import { Menu, MenuItem, showContextMenu } from '@decky/ui/dist/components/Menu';
+import { findFocusable, findTextField, findLaunchMenu, steamNavigation } from './steam.mjs';
 import { afterPatch } from '@decky/ui/dist/utils/patcher';
 import { definePlugin, routerHook, callable } from '@decky/api';
 import { libraryGroups, edgeFades, revealScroll, metadataLine, controllerSupport, displayTitle, systemName, adjacentApp, librarySections, validSort, verticalNeighbor } from './model.mjs';
@@ -15,11 +14,12 @@ import { createHomeHistory } from './home-history.mjs';
 const homeHistory = createHomeHistory();
 const store = () => window.appStore;
 const readMetadata = callable('library_metadata');
-let Focusable, TextField;
+let Focusable, TextField, Menu, MenuItem, showContextMenu;
 function resolveSteamUI() {
   window.webpackChunksteamui.push([[Symbol('home-library-grid')], {}, requireModule => {
     Focusable = findFocusable(requireModule);
     TextField = findTextField(requireModule);
+    ({Menu, MenuItem, showContextMenu} = findLaunchMenu(requireModule));
   }]);
 }
 
