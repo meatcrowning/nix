@@ -1150,9 +1150,8 @@ def test_video(win, ctl, tmp):
 
 
 # The four modes' models, headers only — enough for fingerprint.py to place
-# each one in its family, which is all `registry.mode_model` asks. There are TWO
-# krea2 files on purpose: `prefer` names the raw one exactly, and a mode that
-# quietly landed on turbo would generate at 8 steps for ever without saying so.
+# each one in its family, which is all `registry.mode_model` asks. Keep Krea
+# alternatives for manual selection and the per-model preference tests.
 MODE_FAKES = {
     "unet/qwen_image_2.1_test.safetensors": {
         "txt_in.text_norm.weight": [4096], "modulation.1.weight": [24576, 4096],
@@ -1637,8 +1636,10 @@ def test_modes(win, ctl, tmp):
     check("anime is anima's base model",
           modes["anime"]["available"] and modes["anime"]["model"] == "anima-base-v1.0.safetensors",
           modes["anime"])
-    check("real is krea 2 RAW, not the turbo beside it",
-          modes["real"]["model"] == "krea2_raw_fp8_scaled.safetensors", modes["real"])
+    check("real and edit share Qwen Image 2.1",
+          modes["real"]["available"]
+          and modes["real"]["model"] == modes["edit"]["model"]
+          and "qwen_image_2.1" in modes["real"]["model"], modes["real"])
     check("edit finds Qwen 2.1 even when its file is renamed",
           modes["edit"]["available"]
           and "qwen_image_2.1" in modes["edit"]["model"], modes["edit"])
@@ -1661,7 +1662,7 @@ def test_modes(win, ctl, tmp):
     spin(150)
     check("picking a mode selects its model",
           ctl.property("mode") == "real"
-          and ctl.property("selectedName") == "krea2_raw_fp8_scaled.safetensors",
+          and ctl.property("selectedName") == "qwen_image_2.1_test.safetensors",
           (ctl.property("mode"), ctl.property("selectedName")))
     check("...and greys the list out, clicks and all",
           not listview.isEnabled() and listview.parent().property("opacity") < 1,
@@ -1677,7 +1678,7 @@ def test_modes(win, ctl, tmp):
     spin(150)
     check("turning the mode off hands the list back",
           ctl.property("mode") == "" and listview.isEnabled()
-          and ctl.property("selectedName") == "krea2_raw_fp8_scaled.safetensors",
+          and ctl.property("selectedName") == "qwen_image_2.1_test.safetensors",
           (ctl.property("mode"), ctl.property("selectedName")))
 
     # A mode whose model is not here refuses and stays off, rather than lighting

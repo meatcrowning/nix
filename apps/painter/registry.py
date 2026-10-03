@@ -29,15 +29,14 @@ MODEL_ROOT = os.environ.get("PAINTER_MODELS", "/home/lam/models")
 # `prefer` is tried in order, first as an exact filename and then as a
 # substring, so a renamed or re-quantised file still lands somewhere sensible
 # instead of the mode going dark; the last resort is the first model of the
-# family. Which file each mode means is HIS choice (krea 2 raw fp8 for `real`,
-# 2026-08-06), not something to be re-derived from what looks newest.
+# family. Keep these explicit choices rather than selecting the newest model.
 MODES = [
     {"id": "anime", "label": "anime", "family": "anima",
      "prefer": ["anima-base-v1.0.safetensors", "base"],
      "tip": "Anima - the anime base model"},
-    {"id": "real", "label": "real", "family": "krea2",
-     "prefer": ["krea2_raw_fp8_scaled.safetensors", "raw_fp8", "raw"],
-     "tip": "Flux Krea 2, raw"},
+    {"id": "real", "label": "real", "family": "qwen_image21",
+     "prefer": ["qwen_image_2.1_int8_convrot.safetensors", "qwen_image_2.1"],
+     "tip": "Qwen Image 2.1"},
     {"id": "edit", "label": "edit", "family": "qwen_image21", "needs": "edit",
      "prefer": ["qwen_image_2.1_int8_convrot.safetensors", "qwen_image_2.1"],
      "tip": "Edit a dropped image - Qwen Image 2.1"},
