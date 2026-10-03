@@ -52,7 +52,7 @@ book's /usr/bin/python3 rather than a Nix interpreter.
 Dependencies must work on both top and book: adding a package only to the Nix
 pyEnv does not affect the air branch. Add the Fedora python3-* dependency too,
 or degrade cleanly; a genuinely machine-specific dependency must be called out.
-See the root guide's “Both machines by default” rule.
+See the root guide's “Applying changes” section.
 
 The default associations are deliberately centralized in
 home/prog/mime-defaults.nix; each app's .desktop entry and field codes are

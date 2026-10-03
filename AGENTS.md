@@ -204,6 +204,12 @@ also verifies the public noreply Git identity (home/git-privacy.nix).
 
 Keep guides to commands, ownership, architecture, and non-obvious constraints.
 Document a fact once, near its owner; comments explain reasons the code cannot.
+Keep auto-loaded guides focused on current contracts and task routing. Review
+ones that grow beyond a few hundred lines; put detailed references in private
+docs/agents/ and link the relevant sections. Label preserved historical notes
+with their scope/date and current owner. Memories should link to these rules,
+not duplicate changing commands, pins, or session state. The maintenance
+procedure is docs/agents/markdown-maintenance.md.
 Do not append incident transcripts, user quotes, completion reports, or
 before/after essays. Git preserves change history. Update guides when their
 contracts change, not for every fix. New reference/spec/inventory documents
