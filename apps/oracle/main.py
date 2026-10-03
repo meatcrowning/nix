@@ -1738,15 +1738,15 @@ FILE_OP = {"list_dir": "list", "read_file": "read", "write_file": "write",
 FILE_TOOL_NAMES = set(FILE_OP)
 
 #: The house rules of a directory tree, by filename. `~/nix` and every tree
-#: under it carries an `AGENTS.md` (the nearest one wins, and `CLAUDE.md` is its
-#: symlink at the repo root) stating how work is done there — the rebuild
+#: under it carries an `AGENTS.md` (the nearest one wins) stating how work
+#: is done there — the rebuild
 #: command, the commit rules, the things never to touch. A model that has not
 #: read it will cheerfully hand-edit a generated file or leave a change
 #: unrebuilt, and he should not have to say so on every request [his,
 #: 2026-08-22: *"i just want it to be easy for me to change things about chatter
 #: and the rest of the system without needing to point it to every little
 #: thing"*].
-HOUSE_FILES = ("AGENTS.md", "CLAUDE.md")
+HOUSE_FILES = ("AGENTS.md",)
 
 #: NAMED, never inlined. `~/nix/AGENTS.md` alone is 62 KB — a fifth of the
 #: 32k-token window — and there are three more of them in the trees oracle
@@ -2585,8 +2585,8 @@ BUILTIN_AGENTS = [
                 "only the parts that matter, and come back with the ANSWER — "
                 "the file paths and line numbers that establish it, and a "
                 "short explanation. Quote only the lines that carry the point; "
-                "never paste a whole file back. If a tree has an AGENTS.md or "
-                "CLAUDE.md, read it: it states the rules of that tree.")},
+                "never paste a whole file back. If a tree has an AGENTS.md, "
+                "read it: it states the rules of that tree.")},
     {"name": "coder",
      "description": ("Makes a scoped code change and verifies it: reads, "
                      "edits, runs it. Give it one concrete change with enough "
@@ -2598,7 +2598,7 @@ BUILTIN_AGENTS = [
                 "rewriting a file whole. After every change, CHECK it — run "
                 "it, import it, diff it — and report what the check actually "
                 "printed. Never delete or move anything you were not asked to. "
-                "If a tree has an AGENTS.md or CLAUDE.md, read it first and "
+                "If a tree has an AGENTS.md, read it first and "
                 "follow it. Report what you changed, file by file, and say so "
                 "plainly if you could not finish.")},
     {"name": "researcher",
