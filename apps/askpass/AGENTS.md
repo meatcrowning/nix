@@ -237,7 +237,7 @@ Two things fall out that are easy to break:
   its damage box ask `vtbHasBar()` now; before 2.94 they assumed a bar was there
   to span, which would have put a bar's width of shadow past the right edge with
   nothing drawn above it.
-- **The plugin focuses it explicitly.** On this desktop a newly opened floating
+- **The plugin focuses it explicitly.** Under Hyprland a newly opened floating
   window is handed the keyboard by the open reveal (`beginRollReveal()` →
   `Hl::focusWindow`), and a bar-less window plays no reveal. `onNewWindow` does
   the focus half itself instead. Measured, not assumed: with the bar, a

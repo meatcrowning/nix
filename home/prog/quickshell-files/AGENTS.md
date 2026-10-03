@@ -3,6 +3,10 @@
 QML for the bar, desktop widgets, wallpaper, and popups.
 Root AGENTS.md owns host, Git, and test safety rules. Read ../AGENTS.md for
 compositor changes and private docs/DESIGN.md for visual changes.
+This guide describes the Hyprland panel, not the user's current desktop.
+Follow the root host/session check before panel IPC or reloads. If this panel
+is inactive under Plasma, Labwc, or another desktop, do not launch it for
+verification or force a hot reload; use an isolated harness instead.
 
 ## Getting an edit live
 
@@ -1715,9 +1719,9 @@ makes a pointer x a screen x. Three traps it encodes:
 ### Growing the panel pushes floating windows out from under it
 
 `scripts/push-windows.py`, run from `applyReserve()` only when the reserve GREW.
-The exclusive zone reflows tiled windows only, and this desktop is almost
-entirely floating. It skips `hidden` windows — those are hyprvtb's rolled-up and
-minimized ones, parked off-screen deliberately.
+The exclusive zone reflows tiled windows only; the Hyprland configuration
+also supports floating windows. It skips `hidden` windows — those are
+hyprvtb's rolled-up and minimized ones, parked off-screen deliberately.
 
 - Pixel dispatchers under the Lua config are `hl.dsp.window.move({window=,x=,y=})`
   and `hl.dsp.window.resize({window=,x=,y=})`, both ABSOLUTE, and **resize must
@@ -1898,7 +1902,7 @@ and act on `notch.steps(wheel)`.
 
 ### Why the panel needs its own deceleration at all
 
-Momentum on this desktop is synthesized by the **compositor** — hyprvtb's
+Momentum under Hyprland is synthesized by the **compositor** — hyprvtb's
 `vtbKinetic` (≥2.78), `../AGENTS.md` and `docs/kinetic-scroll.md` — so it
 normally reaches every toolkit as ordinary high-resolution axis events and no
 client has to implement anything. **But hyprvtb refuses to coast over a layer

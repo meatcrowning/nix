@@ -2762,9 +2762,10 @@ after touching `apps/pylib/kdeshell.py`, since that file is shared with painter
 and player — `player/tools/plasma-chrome-test.py` is the same check from their
 side and covers the toolbar/transport half.
 
-What the 2026-08-23 sweep MEASURED as already correct, so nobody re-derives it:
-the live session resolves `widgetStyle=oxygen` (out of `kdedefaults/kdeglobals`
-— the user file has no such key, which is normal for a Global Theme), the QML
+The 2026-08-23 Plasma sweep measured the following; these observations do not
+identify the current session or its theme. That session resolved
+`widgetStyle=oxygen` (out of `kdedefaults/kdeglobals` — the user file had no such
+key, which is normal for a Global Theme), the QML
 font is `Oxygen-Sans` at 12px with `smooth` inverted for Plasma
 (`deskstyle._kde_type`), every toolbar icon name resolves in the oxygen icon
 theme at 16/22/32, and there is not one hardcoded colour literal in this app's
