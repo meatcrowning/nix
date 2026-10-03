@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { findFocusable, findTextField, steamNavigation } from './steam.mjs';
+import { findFocusable, findTextField, findLaunchOptionsDialog, steamNavigation } from './steam.mjs';
 import { afterPatch } from '@decky/ui/dist/utils/patcher';
 import { definePlugin, routerHook, callable } from '@decky/api';
 import { libraryGroups, edgeFades, revealScroll, metadataLine, controllerSupport, displayTitle, systemName, adjacentApp, librarySections, validSort, verticalNeighbor } from './model.mjs';
@@ -8,16 +8,18 @@ import { SystemIcon } from './system-icon.jsx';
 import { AudioPanel } from './audio-panel.jsx';
 import { SettingsPanel } from './settings-panel.jsx';
 import { ImportPanel } from './import-panel.jsx';
+import { installLaunchModes } from './launch-modes.mjs';
 import { createHomeHistory } from './home-history.mjs';
 
 const homeHistory = createHomeHistory();
 const store = () => window.appStore;
 const readMetadata = callable('library_metadata');
-let Focusable, TextField;
+let Focusable, TextField, launchOptionsDialog;
 function resolveSteamUI() {
   window.webpackChunksteamui.push([[Symbol('home-library-grid')], {}, requireModule => {
     Focusable = findFocusable(requireModule);
     TextField = findTextField(requireModule);
+    launchOptionsDialog = () => findLaunchOptionsDialog(requireModule);
   }]);
 }
 
@@ -253,6 +255,24 @@ function replacePage(node) {
 export default definePlugin(() => {
   resolveSteamUI();
   if (!Focusable || !store()) throw new Error('Steam library components are unavailable');
+  const stopLaunchModes = installLaunchModes({
+    apps: SteamClient.Apps,
+    getApp: gameid => store().GetAppOverviewByGameID(gameid),
+    metadata: readMetadata,
+    choose: (appid, modes) => new Promise((resolve, reject) => {
+      try {
+        Promise.resolve(launchOptionsDialog()({
+          appid, alwaysShowDialog: true,
+          continue: index => resolve(index), onCancel: () => resolve(null),
+          ownerWindow: window.SteamUIStore.GetFocusedWindowInstance()?.BrowserWindow,
+        }, modes.map((mode, nIndex) => ({ nIndex, strDescription: mode.label, eType: 0 })))).catch(reject);
+      } catch (error) { reject(error); }
+    }),
+    reportError: error => {
+      console.error('[Home Library Grid] Launch mode', error);
+      window.DeckyPluginLoader?.toaster?.toast({title: 'Could not launch game', body: error.message});
+    },
+  });
   const patches = [], patched = new WeakSet();
   const patchType = (object, handler) => {
     if (!object || typeof object.type !== 'function' || patched.has(object)) return;
@@ -272,6 +292,7 @@ export default definePlugin(() => {
   return { name: 'Home Library Grid', titleView: <div>Home Library Grid</div>,
     content: <div style={{ padding: 16 }}>Installed games and shortcuts first, then your games available to install.</div>,
     icon: <span>▦</span>, onDismount() {
+      stopLaunchModes();
       routerHook.removePatch('/library/home', patch);
       for (const handle of patches.reverse()) handle.unpatch();
     } };
