@@ -10,7 +10,7 @@ seven apps, and `~/nix/docs/DESIGN.md` before you draw anything.
 Two jobs, and the code splits along them: **read** a document (`mdparse.py` →
 blocks → `qml/Block.qml`) and **browse** the documents around it (`Library` →
 `qml/Sidebar.qml`). It was written for this repo's own corpus — a 2300-line
-`docs/DESIGN.md`, nine `AGENTS.md`/`CLAUDE.md` files and fifteen under `docs/`
+`docs/DESIGN.md`, nine `AGENTS.md` files and fifteen under `docs/`
 — and every layout decision below was made against that, not against markdown
 in the abstract.
 

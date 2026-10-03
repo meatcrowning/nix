@@ -8,9 +8,9 @@ rebuild; live app source exceptions are listed under Applying changes. Keep
 replies concise; report the result and commit, plus any problem the user needs
 to know about.
 
-This guide applies to every agent. CLAUDE.md is its symlink; edit this file.
+This guide applies to every agent. Use AGENTS.md for repository instructions.
 Read the relevant nested guide before editing; the closest guide wins, and
-explicit user instructions take precedence. Do not add nested CLAUDE.md files.
+explicit user instructions take precedence.
 
 ## Ownership and permissions
 

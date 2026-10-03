@@ -476,20 +476,8 @@ re-reads all of it, and what fills it is **the agents' own output — 81% of the
 growth, nearly all of it thinking**; tool results are the other 19%. Shortening
 sessions is the other lever and it is not this one.
 
-**The floor is not the whole STARTUP either — a nested `CLAUDE.md` used to
-double it, silently.** [measured on `top`, 2026-07-30] A spirit's floor is
-36.5k, of which 16.5k is the CLI itself (system prompt + the nine `--tools`
-schemas) and ~20k is repo context — the root `AGENTS.md` (11.7k), `~/CLAUDE.md`
-(1.2k) and `MEMORY.md` (3.7k). But **the nested `CLAUDE.md` symlinks were
-injected in full the moment an agent opened any file beneath them**, and then
-re-read every turn for the rest of the session. Reading a 3.6 KB
-`home/prog/quickshell-files/Theme.qml` cost **45.8k tokens**; the identical
-read of a file outside those trees cost 27.7k, the difference being
-`home/prog/AGENTS.md` and `quickshell-files/AGENTS.md` swallowed whole for a
-900-token file. The three nested symlinks are gone (same measurement after:
-**27.9k**, -17.9k *per turn*); the guides themselves are untouched and rule 5
-still sends every spirit to the nearest one, in slices. **Never re-add a
-nested `CLAUDE.md`** — see `~/nix/AGENTS.md` -> "How to work here".
+Claude Code loads nested `AGENTS.md` instructions when it reads files beneath
+them. Keep those guides focused: their contents remain in the session context.
 
 **And a guide can be a token bomb on its own.** This one was a single
 2,598-line file until 2026-07-30 — past `Read`'s 2,000-line cap, so a spirit
