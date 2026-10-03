@@ -8,6 +8,14 @@ honesty-of-controls rules. This guide owns implementation mechanics. Read the
 nearest app guide before editing an app; the app guide wins for app-specific
 details.
 
+Verify the active desktop using the root AGENTS.md host/session procedure
+before choosing an app face or interpreting a UI report. Hyprland titlebars,
+wal palettes, and compositor gestures describe that face only; Plasma uses
+its native shell, palette, and controls. On another desktop, inspect the app's
+actual selection/fallback logic rather than assuming either face. Pin the
+intended desktop explicitly in isolated harnesses; a harness choice does not
+establish the user's live session.
+
 | directory | program | package module |
 | --- | --- | --- |
 | filer/ | file browser | home/prog/filer.nix |

@@ -6,6 +6,11 @@ at `quickshell-files/AGENTS.md`; repo-wide rebuild, git, safety, and host rules
 are in `~/nix/AGENTS.md`. Read `hyprvtb/PORTING.md` before changing the plugin
 ABI or either compositor pin.
 
+Follow the root host/session check before live IPC or reloads. The Hyprland
+commands below apply only to a verified Hyprland target session or an isolated
+Hyprland harness. Under Plasma, Labwc, or another desktop, leave inactive
+Hyprland components stopped; rebuilt changes take effect next Hyprland login.
+
 Anything the plugin draws is governed by `~/nix/docs/DESIGN.md`, including
 titlebar cells, labels, tooltips, shadows, animation, glyphs, and colours. The
 plugin's roll animation is the desktop reference: the
@@ -25,7 +30,7 @@ preserving named runtime values and copying the old live file to
 
 ```bash
 sudo rebuild-top
-hyprctl reload
+hyprctl reload  # only when the verified target session is Hyprland
 ~/nix/tools/seed-drift.sh
 ```
 

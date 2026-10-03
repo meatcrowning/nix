@@ -64,10 +64,21 @@ import paths. seed-drift.sh --pre-switch reports expected reconciliation.
 
 ## Host and commands
 
-Use the measured host/session from ~/.config/scripts/claude-host-id.sh; if
-absent, run hostname. top is NixOS; book is Fedora Asahi, flake host air.
-Do not infer the active compositor from defaults or the host from the kernel.
-Name hosts explicitly in synced notes and hardware/rebuild dispatches.
+Before desktop-specific work, run ~/.config/scripts/claude-host-id.sh.
+The user may be running Plasma, Hyprland, Labwc, or another desktop on either
+host; installed packages, greeter defaults, and previous observations do not
+identify the active session. If the helper is absent, run hostname for the
+host and inspect XDG_CURRENT_DESKTOP, XDG_SESSION_DESKTOP, and XDG_SESSION_TYPE
+for the desktop. If those are missing, unknown, or conflict, use read-only
+loginctl session metadata and the target session's compositor process/socket
+to resolve it; a nested compositor or stale environment is not proof. Keep an
+unresolved desktop unknown rather than defaulting to Hyprland. Recheck after a
+session change, reconnect, or when evidence contradicts the earlier result.
+top is NixOS; book is Fedora Asahi, flake host air. Do not infer the host from
+the kernel. Match IPC, UI conventions, and reloads to the verified desktop;
+do not start an inactive desktop's components to apply or verify a change.
+Name hosts explicitly in synced notes and hardware/rebuild dispatches. Record
+session observations as host-specific, dated measurements, not permanent facts.
 
 Run from /home/lam/nix; choose the matching host rebuild only when required:
 
@@ -112,12 +123,14 @@ also verifies the public noreply Git identity (home/git-privacy.nix).
 - Edit sources for ~/.config/hypr/hyprland.lua and
   ~/.config/quickshell/Theme.qml. Activation reconciles the live files;
   run tools/seed-drift.sh afterward.
-- After a Hyprland config/plugin rebuild, run hyprctl reload. Bump
-  hyprvtb/main.cpp's version for every plugin change. Never use
+- After a Hyprland config/plugin rebuild, run hyprctl reload only when the
+  verified target session is Hyprland; otherwise it takes effect next Hyprland
+  login. Bump hyprvtb/main.cpp's version for every plugin change. Never use
   hyprctl plugin load or unload: unloading erases config keys that reload
   cannot restore. A Hyprland/hyprutils ABI change takes effect next login.
-- Quickshell needs a forced hot reload after symlink changes; use its nested
-  guide. Never run bare qs, which starts a second panel.
+- When the Hyprland panel is active, Quickshell needs a forced hot reload
+  after symlink changes; use its nested guide. Never run bare qs, which starts
+  another panel. Leave an inactive panel stopped.
 - Apps run live Python/QML source and need no rebuild unless packaging or
   dependencies change. Do not relaunch the user's apps for verification.
 - nix-pull [check|apply] is the only pull/apply path; it uses --ff-only.
@@ -157,7 +170,7 @@ also verifies the public noreply Git identity (home/git-privacy.nix).
   bootstrap. Never sync Plasma containments or ~/Pictures/Wallpapers.
 - Labwc is top-only (sys/dsk/labwc.nix, home/prog/labwc.nix).
   Its config is seeded once and owned by its tools; never reconcile it.
-  Hyprland remains the default greeter session.
+  The greeter default does not identify the active desktop.
 - Book's custom Hyprvtb, Konsole, and Nix Qt6 Oxygen use lib/air-offload.nix
   and top's restricted builder (sys/book-builder.nix).
   See tools/book-builder-setup.sh; cap local ARM jobs in rebuild-air.
