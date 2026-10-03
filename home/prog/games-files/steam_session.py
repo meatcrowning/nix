@@ -32,7 +32,7 @@ def retroarch_config():
 def configure(game, argv, env, cache):
     if not env.get('SteamGameId', '').isdigit() or int(env['SteamGameId']) == 0:
         return argv
-    if game['runner'] not in ('retroarch', 'pcsx2', 'steam-run'):
+    if game['runner'] not in ('retroarch', 'pcsx2', 'steam-run', 'native'):
         return argv
     # Unsetting WAYLAND_DISPLAY is insufficient: libwayland then tries
     # wayland-0. An absolute nonexistent socket also covers RetroArch's native

@@ -60,6 +60,7 @@ CORE_FILES = {
 # Shown as the launcher comment, and used as a fallback icon when neither the
 # game's executable nor the thumbnail archive provides one.
 RUNNER_LABELS = {
+    "native": ("PC", "applications-games"),
     "proton": ("Windows · Proton", "wine"),
     "steam-run": ("Linux", "applications-games"),
     "pcsx2": ("PlayStation 2 · PCSX2", "PCSX2"),
@@ -98,11 +99,18 @@ def find(slug):
     sys.exit(f"games: no game named {slug!r} in {MANIFEST}")
 
 
-def command(game):
+def command(game, mode=None):
     """The argv and working directory that start this game."""
     path = Path(game["path"])
     runner = game["runner"]
     args = game.get("args", [])
+    if mode is not None:
+        selected = next((item for item in game.get("modes", []) if item["id"] == mode), None)
+        if selected is None:
+            raise ValueError(f"Unknown launch mode {mode!r} for {game['name']}")
+        args = [*args, *selected.get("args", [])]
+    if runner == "native":
+        return [str(path), *args], None
     if runner == "proton":
         # Wine may reassign removable-drive letters during startup, invalidating
         # the inherited Windows cwd. Set it after startup through the stable Z:
@@ -138,7 +146,7 @@ def missing_file(game):
     return None
 
 
-def run(slug):
+def run(slug, mode=None):
     game = find(slug)
     missing = missing_file(game)
     if missing:
@@ -146,7 +154,7 @@ def run(slug):
         subprocess.run(["notify-send", "-a", "Games", "-i", "dialog-warning",
                         "--", game["name"], reason])
         sys.exit(reason)
-    argv, cwd = command(game)
+    argv, cwd = command(game, mode)
     env = dict(os.environ)
     # Per-game compatibility settings also apply when launched outside Steam.
     env.update(game.get("env", {}))
@@ -606,6 +614,8 @@ def main():
             sys.exit(1)
     elif args[:1] == ["run"] and len(args) == 2:
         run(args[1])
+    elif args[:1] == ["run"] and len(args) == 4 and args[2] == "--mode":
+        run(args[1], args[3])
     elif args[:1] == ["sync"]:
         sync(offline="--offline" in args)
     elif args == ["check"]:
@@ -615,7 +625,7 @@ def main():
     elif args == ["steam-repair"]:
         repair_steam(load())
     else:
-        sys.exit("usage: games run SLUG | games sync [--offline] | games check | games steam | games steam-repair | games rom systems|browse|search|prepare|record|finish (JSON stdin)")
+        sys.exit("usage: games run SLUG [--mode MODE] | games sync [--offline] | games check | games steam | games steam-repair | games rom systems|browse|search|prepare|record|finish (JSON stdin)")
 
 
 if __name__ == "__main__":

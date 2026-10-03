@@ -20,6 +20,15 @@ class SteamTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
 
+    def test_native_modes_use_existing_launcher_without_shell_parsing(self):
+        game = {'name': 'Example', 'runner': 'native', 'path': '/bin/example',
+                'modes': [{'id': 'campaign', 'args': ['--campaign']},
+                          {'id': 'zombies', 'args': ['--zombies']}]}
+        self.assertEqual(games.command(game, 'zombies'), (['/bin/example', '--zombies'], None))
+        self.assertEqual(games.command(game), (['/bin/example'], None))
+        with self.assertRaises(ValueError):
+            games.command(game, 'unrecognised')
+
     def test_direct_launch_is_unchanged_and_creates_no_files(self):
         env = {'WAYLAND_DISPLAY': 'wayland-0'}
         argv = ['retroarch', '-L', '/core.so', '/game.rom']
