@@ -4,6 +4,7 @@
 Manifest entries: path (relative to game), url, size, algorithm, hash.
 Keep manifests and downloaded game assets in the host-local installation cache.
 The IW4x r5149 layout is main/iw4x/x86 and zone/iw4x/x86/dlc.
+Custom maps also use usermaps/<map>/<map>.arena for menu and team dependencies.
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -18,7 +19,7 @@ import tempfile
 
 def destination(root, entry):
     path = PurePosixPath(entry['path'])
-    if path.is_absolute() or '..' in path.parts or path.suffix not in ('.ff', '.iwd'):
+    if path.is_absolute() or '..' in path.parts or path.suffix not in ('.ff', '.iwd', '.arena'):
         raise ValueError(f'Invalid asset path: {path}')
     target = root / path
     if not target.resolve().is_relative_to(root.resolve()):
