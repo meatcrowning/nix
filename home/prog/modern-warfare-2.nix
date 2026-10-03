@@ -138,6 +138,7 @@ let
       cp -f ${client} "$game/iw4x.dll"
       mkdir -p "$game/mods/mp_bots"
       cp -r --no-preserve=mode ${bots}/. "$game/mods/mp_bots/"
+      python3 ${./modern-warfare-2-maps.py} "$game"
       resolution=$(python3 ${./modern-warfare-2-settings.py} "$game")
       extra=()
       [[ -z "$resolution" ]] || extra+=(+set r_mode "$resolution")
