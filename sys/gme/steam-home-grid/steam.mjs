@@ -33,3 +33,28 @@ export function findTextField(requireModule) {
   }
   return null;
 }
+
+// Importing the SDK Menu also evaluates its CommonUIModule scan, which reads
+// trampoline contextType getters. Discover only the native menu exports here.
+export function findLaunchMenu(requireModule) {
+  let showContextMenu, Menu, MenuItem;
+  for (const id of Object.keys(requireModule.m)) {
+    let module;
+    try { module = requireModule(id); } catch { continue; }
+    const exports = Object.values(module || {});
+    for (const value of exports) {
+      const source = typeof value === 'function' ? String(value) : '';
+      if (source.includes('GetContextMenuManagerFromWindow(') && source.includes('.CreateContextMenuInstance(')) showContextMenu = value;
+      const render = value && Object.getOwnPropertyDescriptor(value, 'render')?.value;
+      if ((typeof render === 'function' && String(render).includes('bPlayAudio:'))
+        || (value?.prototype?.OnOKButton && value?.prototype?.OnMouseEnter)) {
+        MenuItem = value;
+        Menu ||= exports.find(candidate => typeof candidate === 'function'
+          && String(candidate).includes('useId') && String(candidate).includes('labelId'));
+      }
+      if (value?.prototype?.HideIfSubmenu && value?.prototype?.HideMenu) Menu = value;
+    }
+    if (showContextMenu && Menu && MenuItem) return {showContextMenu, Menu, MenuItem};
+  }
+  throw new Error('Steam mode menu components are unavailable');
+}

@@ -54,3 +54,14 @@ test('saving waits for Steam acknowledgement and rejects silent failures', async
   await assert.rejects(saveLaunchOptions(apps, 42, 'run game --mode campaign', 5), /did not save/);
   assert.equal(removed, 2);
 });
+
+test('menu discovery never invokes Decky trampoline context getters', async () => {
+  const {findLaunchMenu} = await import('./steam.mjs');
+  const show = () => 'GetContextMenuManagerFromWindow(.CreateContextMenuInstance(';
+  const item = {render: () => 'bPlayAudio:'};
+  const menu = () => 'useId labelId';
+  Object.defineProperty(menu, 'contextType', {get() {throw Error('React would be stubbed');}});
+  const requireModule = () => ({show, item, menu});
+  requireModule.m = {987: () => {}};
+  assert.deepEqual(findLaunchMenu(requireModule), {showContextMenu: show, Menu: menu, MenuItem: item});
+});
