@@ -11,10 +11,10 @@
     home-manager
     cava
     killall
-    codex
-    # claude-code, off numtide/llm-agents.nix instead of nixpkgs so it tracks
-    # Anthropic's releases (nixpkgs' copy lags days behind). system is derived
+    # Use the rolling agent packages so Codex and Claude track upstream
+    # releases. system is derived
     # from pkgs so this resolves on both `top` (x86_64) and `air` (aarch64).
+    inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.codex
     inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code
     # No built-in way to prune old Claude Code sessions (~/.claude/projects/*.jsonl)
     # or finished background agents (~/.claude/jobs/*); this adds an interactive
