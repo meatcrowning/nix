@@ -15,7 +15,7 @@ let
     fceumm
     ppsspp
   ]);
-  python = pkgs.python3.withPackages (ps: [ ps.pyyaml ps.vdf ps.msgpack ]);
+  python = pkgs.python3.withPackages (ps: [ ps.pyyaml ps.vdf ps.msgpack ps.pillow ]);
   games = pkgs.writeShellApplication {
     name = "games";
     runtimeInputs = [ python pkgs.icoutils pkgs.libnotify pkgs.hostname pkgs.procps ]

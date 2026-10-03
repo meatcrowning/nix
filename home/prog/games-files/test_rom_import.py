@@ -131,14 +131,14 @@ class ImportTests(unittest.TestCase):
         more=rom.browse({'system':'nes','path':str(root),'offset':100})
         self.assertTrue(more['entries']);self.assertFalse(set(names)&{e['name'] for e in more['entries']})
 
-    def test_background_uses_same_region_gameplay_and_exposes_both_asset_types(self):
+    def test_background_uses_same_region_gameplay_and_exposes_all_asset_types(self):
         portrait=self.path.parent/'p.png';portrait.write_bytes(b'portrait')
         urls=[]
         def fetch(url,path):urls.append(url);path.write_bytes(b'gameplay');return True
         game={'slug':'example','thumb':'Nintendo_-_Nintendo_Entertainment_System/Example (USA)'}
-        with patch('games.artwork',return_value={'p':portrait}),patch('games.fetch',side_effect=fetch):
+        with patch('games.artwork',return_value={'p':portrait, '_logo':portrait, '':portrait}),patch('games.fetch',side_effect=fetch):
             assets,warning=rom.import_artwork(game)
-        self.assertEqual([a['type'] for a in assets],[0,1]);self.assertEqual(warning,'')
+        self.assertEqual([a['type'] for a in assets],[0,1,2,3]);self.assertEqual(warning,'')
         self.assertIn('/Named_Snaps/Example%20%28USA%29.png',urls[0])
         self.assertNotIn('Named_Titles',urls[0])
 
