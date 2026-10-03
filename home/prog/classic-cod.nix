@@ -18,6 +18,10 @@ let
       if [[ "$mode" == multiplayer ]]; then
         executable=${lib.escapeShellArg multiplayer}
         args=(${lib.optionalString (name == "modern-warfare-3") "-multiplayer -nosteam"})
+        ${lib.optionalString (name == "call-of-duty-4") ''
+          # Retail anti-cheat is unnecessary for the isolated offline launcher.
+          args+=(+set cl_punkbuster 0 +set sv_punkbuster 0)
+        ''}
       fi
       for file in "$executable" main/iw_00.iwd zone/english/common.ff; do
         [[ -f "$game/$file" ]] || { echo "Incomplete ${name} installation: $game/$file" >&2; exit 1; }
