@@ -16,6 +16,7 @@ test('return restores the opened game by identity after cards reorder', () => {
   assert.equal(viewport.scrollTop, 360);
   assert.equal(memory.appid, 42);
   assert.equal(memory.pending, null);
+  memory.interact();
   assert.equal(memory.select(1), true); // ordinary navigation resumes
 });
 
@@ -35,9 +36,33 @@ test('return snapshots are consumed once and never pin later navigation', () => 
   const handles = new Map([[42, {TakeFocus() { calls++; return true; }}]]);
   memory.leave(42, 120);
   memory.restore(handles, viewport);
+  memory.interact();
   memory.select(99); memory.measure(800);
   assert.equal(memory.restore(handles, viewport), false);
   assert.equal(calls, 1);
   assert.equal(memory.appid, 99);
   assert.equal(memory.scroll, 800);
+});
+
+test('delayed Steam focus restoration cannot overwrite a successful return', () => {
+  const memory = createHomeHistory(), viewport = {scrollTop: 0};
+  const handles = new Map([[42, {TakeFocus: () => true}]]);
+  memory.leave(42, 360);
+  memory.restore(handles, viewport);
+  // A later native restoration arrives after our first animation frame.
+  viewport.scrollTop = 900;
+  memory.measure(900);
+  assert.equal(memory.select(99), false);
+  assert.equal(memory.appid, 42);
+  assert.equal(memory.scroll, 360);
+  assert.equal(memory.restore(handles, viewport), true);
+  assert.equal(viewport.scrollTop, 360);
+  // Directional input before the correction frame starts at the saved card.
+  memory.select(99);
+  assert.equal(memory.navigationOrigin(99), 42);
+  assert.equal(memory.pending, null);
+  assert.equal(memory.select(43), true);
+  memory.measure(400);
+  assert.equal(memory.scroll, 400);
+  assert.equal(memory.restore(handles, viewport), false);
 });
