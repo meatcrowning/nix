@@ -138,6 +138,12 @@ let
       cp -f ${client} "$game/iw4x.dll"
       mkdir -p "$game/mods/mp_bots"
       cp -r --no-preserve=mode ${bots}/. "$game/mods/mp_bots/"
+      # The private-match lobby is compiled into the local game's UI fastfile.
+      # Extract its source once so the random-map patch preserves that menu.
+      if [[ ! -f "$game/.nix-menu-source/ui_mp/menu_xboxlive_privatelobby.menu" ]]; then
+        (cd "$game"; wine Unlinker.exe --legacy-menus --skip-obj \
+          --include-assets menu,menufile -o .nix-menu-source zone/english/localized_ui_mp.ff)
+      fi
       python3 ${./modern-warfare-2-maps.py} "$game"
       resolution=$(python3 ${./modern-warfare-2-settings.py} "$game")
       extra=()
