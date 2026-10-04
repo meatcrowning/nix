@@ -24,6 +24,11 @@
     "frame_chunk": 17,
     "upscale_method": "nearest-exact"
   },
+  "still": {
+    "graph": "still_minimax.json",
+    "frames": 5,
+    "frame_index": 0
+  },
   "lora": {
     "aliases": {},
     "loader": "LoraLoaderModelOnly"

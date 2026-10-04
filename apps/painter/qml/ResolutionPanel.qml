@@ -20,7 +20,7 @@ Panel {
     // Whether the image, not this panel, is deciding the shape.
     // EITHER dropped frame decides it — the workflow measures whichever one is
     // there (the first when both are), so the aspect goes for both modes.
-    readonly property bool fromImage: App.isVideo
+    readonly property bool fromImage: App.isVideo && !root.gen.still
                                       && (root.gen.useInputImage || root.gen.useLastFrame)
     badge: fromImage ? "from the image" : (root.gen.width + "x" + root.gen.height)
 

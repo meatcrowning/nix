@@ -2009,12 +2009,18 @@ class Painter(QObject):
         """
         if self.preview is None:
             return
+        m = meta or {}
+        # A still keeps frame 1 of a 5-frame run; previews of the frame it
+        # throws away would flicker in and be wrong about what is coming.
+        if ((getattr(_job, "meta", None) or {}).get("params") or {}).get("still"):
+            if int(m.get("frame", 1) or 1) > 1:
+                return
+            m = {}
         img = QImage()
         if not img.loadFromData(data, fmt.upper()):
             return
         self.preview.image = img
         self._preview_tick += 1
-        m = meta or {}
         try:
             self._preview_frame = int(m.get("frame", 0) or 0)
             self._preview_frames = int(m.get("frames", 0) or 0)

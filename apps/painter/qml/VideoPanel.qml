@@ -11,28 +11,44 @@ import QtQuick
 // budget), which is why ResolutionPanel drops to the MP box alone; with neither
 // it is plain text-to-video and the normal aspect + MP controls come back.
 // Drop the same file in both wells for a clip that loops.
+//
+// STILL asks for one picture instead of a clip (registry._build_still). Time
+// and the frame wells go — a dropped first frame would simply BE the output —
+// and ResolutionPanel's aspect comes back; everything else is the same job.
 Panel {
     id: panel
     title: "Video"
-    badge: App.videoFrames(root.gen.duration) + "f"
-           + (root.gen.useInputImage ? " first" : "")
-           + (root.gen.useLastFrame ? " last" : "")
+    readonly property bool still: root.gen.still === true
+    badge: still ? "still"
+           : App.videoFrames(root.gen.duration) + "f"
+             + (root.gen.useInputImage ? " first" : "")
+             + (root.gen.useLastFrame ? " last" : "")
+
+    Toggle {
+        label: "Still"
+        checked: panel.still
+        onToggled: function (v) { root.set("still", v) }
+    }
 
     Toggle {
         label: "First Frame"
+        visible: !panel.still
         checked: root.gen.useInputImage
         onToggled: function (v) { root.set("useInputImage", v) }
     }
 
     Toggle {
         label: "Last Frame"
+        visible: !panel.still
         checked: root.gen.useLastFrame
         onToggled: function (v) { root.set("useLastFrame", v) }
     }
 
     PixelText {
-        text: "  drop or paste an image in a well below to start from it, end "
-              + "on it, or both; neither is text-to-video"
+        text: panel.still
+              ? "  one picture: the first frame of the shortest clip the model makes"
+              : "  drop or paste an image in a well below to start from it, end "
+                + "on it, or both; neither is text-to-video"
         color: Theme.dim
         width: parent.width
         wrapMode: Text.Wrap
@@ -43,11 +59,11 @@ Panel {
     PixelText {
         text: "  first frame"
         color: Theme.textDim
-        visible: root.gen.useInputImage
+        visible: root.gen.useInputImage && !panel.still
     }
 
     FrameWell {
-        active: root.gen.useInputImage
+        active: root.gen.useInputImage && !panel.still
         path: App.inputImage
         url: App.inputImageUrl
         emptyText: "drag or paste the frame to start from here"
@@ -66,11 +82,11 @@ Panel {
     PixelText {
         text: "  last frame"
         color: Theme.textDim
-        visible: root.gen.useLastFrame
+        visible: root.gen.useLastFrame && !panel.still
     }
 
     FrameWell {
-        active: root.gen.useLastFrame
+        active: root.gen.useLastFrame && !panel.still
         path: App.lastImage
         url: App.lastImageUrl
         emptyText: "drag or paste the frame to end on here"
@@ -88,6 +104,7 @@ Panel {
 
     Field {
         label: "Duration"
+        visible: !panel.still
         hint: "Seconds. The model takes frames in groups, so the count lands on the nearest length it accepts."
         Row {
             spacing: 6
