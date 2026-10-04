@@ -1,0 +1,94 @@
+{
+  "_comment": [
+    "MiniMax H3 as text-to-image: the video graph's front half, cut short.",
+    "",
+    "The node will not go below 5 frames (2 latent frames), so a still is the",
+    "shortest clip the model accepts with its FIRST frame kept.  Frame 0 is the",
+    "only latent frame that covers exactly one pixel frame, and it is the sharp",
+    "one: a 1-latent-frame run (the latent cut down before sampling) was 2-3x",
+    "faster but visibly softer at 1:1, measured on top 2026-10-03.",
+    "",
+    "Same contract as video_minimax.json otherwise: one prompt, no negative, no",
+    "CFG (BasicGuider), batch size 1.  The audio stream is still sampled -- the",
+    "packed DiT always carries it -- but it is never decoded, so there is no",
+    "audio VAE here."
+  ],
+  "1": {
+    "inputs": { "unet_name": "", "weight_dtype": "default" },
+    "class_type": "UNETLoader",
+    "_meta": { "title": "Load Diffusion Model", "painter_role": "loader" }
+  },
+  "2": {
+    "inputs": { "clip_name": "", "type": "minimax", "device": "default" },
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "Load CLIP", "painter_role": "clip" }
+  },
+  "3": {
+    "inputs": { "vae_name": "" },
+    "class_type": "VAELoader",
+    "_meta": { "title": "Load VAE (video)", "painter_role": "vae" }
+  },
+  "20": {
+    "inputs": {
+      "prompt": "",
+      "width": 1344,
+      "height": 768,
+      "length": 5,
+      "clip": ["2", 0],
+      "vae": ["3", 0]
+    },
+    "class_type": "MiniMaxH3ImageToVideo",
+    "_meta": { "title": "MiniMax H3 Image to Video", "painter_role": "video" }
+  },
+  "21": {
+    "inputs": { "sampler_name": "res_multistep" },
+    "class_type": "KSamplerSelect",
+    "_meta": { "title": "Sampler", "painter_role": "sampler_select" }
+  },
+  "22": {
+    "inputs": { "scheduler": "simple", "steps": 20, "denoise": 1.0, "model": ["1", 0] },
+    "class_type": "BasicScheduler",
+    "_meta": { "title": "Scheduler", "painter_role": "scheduler" }
+  },
+  "23": {
+    "inputs": { "noise_seed": 0 },
+    "class_type": "RandomNoise",
+    "_meta": { "title": "Noise", "painter_role": "noise" }
+  },
+  "24": {
+    "inputs": { "model": ["1", 0], "conditioning": ["20", 0] },
+    "class_type": "BasicGuider",
+    "_meta": { "title": "Guider", "painter_role": "guider" }
+  },
+  "25": {
+    "inputs": {
+      "noise": ["23", 0],
+      "guider": ["24", 0],
+      "sampler": ["21", 0],
+      "sigmas": ["22", 0],
+      "latent_image": ["20", 1]
+    },
+    "class_type": "PainterSamplerCustomAdvanced",
+    "_meta": { "title": "Sampler", "painter_role": "sampler" }
+  },
+  "26": {
+    "inputs": { "av_latent": ["25", 0] },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": { "title": "Separate AV Latent", "painter_role": "separate" }
+  },
+  "30": {
+    "inputs": { "samples": ["26", 0], "vae": ["3", 0] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "VAE Decode", "painter_role": "decode" }
+  },
+  "31": {
+    "inputs": { "image": ["30", 0], "batch_index": 0, "length": 1 },
+    "class_type": "ImageFromBatch",
+    "_meta": { "title": "First Frame", "painter_role": "pick_frame" }
+  },
+  "32": {
+    "inputs": { "filename_prefix": "painter", "images": ["31", 0] },
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save Image", "painter_role": "save" }
+  }
+}

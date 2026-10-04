@@ -147,6 +147,9 @@ Item {
         // text-to-video with painter's usual aspect + MP. The image itself is a
         // file path and lives on App, not in here.
         duration: 5.0, fps: 24.0, useInputImage: false, useLastFrame: false,
+        // `still` asks the video family for one frame instead of a clip
+        // (registry._build_still): no time, no frames, aspect + MP is back.
+        still: false,
         // Edit only. The output size is the dropped image's, scaled: `editNoScale`
         // keeps its exact width and height, otherwise `editMegapixels` is the
         // pixel budget the image is scaled to (its aspect kept), the same MP
@@ -378,6 +381,19 @@ Item {
         // prompt, a duration instead of a batch, no CFG and no patches. Sending
         // the image fields anyway would have painter claim settings the video
         // graph never reads.
+        // A still is the video controls minus time: no duration, no frames,
+        // and the size is painter's own aspect + MP.
+        if (App.isVideo && g.still) {
+            App.generate({
+                positive: g.positive, still: true,
+                steps: g.steps, denoise: g.denoise,
+                sampler_name: g.sampler_name, scheduler: g.scheduler,
+                seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed,
+                megapixels: g.megapixels,
+                width: g.width, height: g.height
+            }, g.count)
+            return
+        }
         if (App.isVideo) {
             App.generate({
                 positive: g.positive,
@@ -705,7 +721,7 @@ Item {
         // paste. Offered only where there IS a well to fill (docs/DESIGN.md §10).
         { id: "import", tip: "Import Image…", menu: "file",
           icon: "document-import", shortcut: "Ctrl+O",
-          state: (App.isEdit || App.isVideo || App.optionalEditImage) ? 0 : 2 },
+          state: (App.isEdit || (App.isVideo && !gen.still) || App.optionalEditImage) ? 0 : 2 },
         // ------------------------------------------------------------- edit
         // The gallery's right-click verbs, hoisted: the same three subsets of a
         // finished job (its words, its numbers, both) plus its prompt on the
@@ -1144,7 +1160,7 @@ Item {
     function pasteWell() {
         if (hoveredWell !== "") return hoveredWell
         if (App.isEdit || App.optionalEditImage) return "input"
-        if (!App.isVideo) return ""
+        if (!App.isVideo || gen.still) return ""
         var first = gen.useInputImage, last = gen.useLastFrame
         if (first !== last) return first ? "input" : "last"
         if (!first) return ""                       // text-to-video: no well
@@ -1221,6 +1237,10 @@ Item {
         // the two frame slots. `megapixels` is taken from the job rather than
         // backed out of width/height above — an image-to-video clip has no
         // width and height of its own, the dropped frame's budget IS the size.
+        if (p.kind === "still") {
+            if (p.megapixels > 0) g.megapixels = p.megapixels
+            g.still = true
+        } else if (p.kind === "video") g.still = false
         if (p.kind === "video") {
             if (p.duration !== undefined) g.duration = p.duration
             if (p.fps !== undefined) g.fps = p.fps

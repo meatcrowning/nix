@@ -68,6 +68,7 @@ Item {
         id: preview
         compare: root.app ? root.app.showCompare : true
         winActive: root.winActive
+        still: root.app ? root.app.gen.still === true : false
         // WHAT IS SELECTED, which is what this pane now shows. One output: a
         // set has no single thing to draw, and neither has none.
         selPath: galleryView.selection.length === 1 ? galleryView.selection[0] : ""

@@ -79,6 +79,8 @@ Item {
     property bool sourceIsVideo: false
     property bool compare: true
     property bool winActive: true
+    // A video family making one frame: the live label stops talking in frames.
+    property bool still: false
     readonly property string beforePath: (pane.open && !pane.showLive
         && pane.source !== "" && !pane.sourceIsVideo)
         ? App.compareSource(pane.source) : ""
@@ -487,7 +489,7 @@ Item {
                       ? (App.previewFrames > 1
                          ? "sampling · frame " + App.previewFrame
                            + " of " + App.previewFrames
-                         : (App.isVideo ? "sampling · frame 1" : "sampling"))
+                         : (App.isVideo && !pane.still ? "sampling · frame 1" : "sampling"))
                       : ((pane.sourceIsVideo ? "clip" : "still")
                          + (pane.zoom > 1.001
                             ? "  " + Math.round(pane.zoom * 100) + "%" : ""))

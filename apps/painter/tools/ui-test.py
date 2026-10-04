@@ -1113,6 +1113,44 @@ def test_video(win, ctl, tmp):
     spin(60)
     ctl.clearInputImage()
 
+    # STILL: one picture out of the video family. Time and the frame wells go,
+    # the aspect comes back even with a first frame armed (a dropped frame 0
+    # would just be the output), and the job carries no clip settings at all.
+    sent.clear()
+    g = prop(APP, "gen")
+    g.update({"still": True, "useInputImage": True, "duration": 3.0,
+              "aspectW": 16, "aspectH": 9, "megapixels": 1.0, "count": 2})
+    APP.setProperty("gen", g)
+    APP.metaObject().invokeMethod(APP, "recomputeDims")
+    spin(120)
+    vpanel = find(content, "VideoPanel")
+    dur = find(vpanel, "Field", pred=lambda it: it.property("label") == "Duration")
+    wells = [w for w in find_all(vpanel, "FrameWell") if w.isVisible()]
+    check("a still hides the duration and both frame wells",
+          not dur.isVisible() and not wells and vpanel.property("badge") == "still",
+          (dur.isVisible(), len(wells), vpanel.property("badge")))
+    check("...and gives the aspect back, first frame or not",
+          aspect.isVisible() and res.property("badge") != "from the image",
+          res.property("badge"))
+    gg = prop(APP, "gen")
+    APP.metaObject().invokeMethod(APP, "submit")
+    spin(200)
+    check("a still is submitted with painter's own size and sampling",
+          sent.get("_submitted") is True and sent.get("still") is True
+          and sent.get("width") == gg["width"] and sent.get("height") == gg["height"]
+          and sent.get("steps") == 12 and sent.get("sampler_name") == gg["sampler_name"]
+          and sent.get("scheduler") == gg["scheduler"] and "denoise" in sent
+          and "loras" in sent,
+          {k: sent.get(k) for k in ("_submitted", "still", "width", "height", "steps", "loras")})
+    check("...and no clip settings, frames, negative, CFG or batch",
+          not any(k in sent for k in ("duration", "fps", "use_input_image",
+                                      "use_last_frame", "negative", "cfg", "batch_size")),
+          sorted(sent))
+    g = prop(APP, "gen")
+    g.update({"still": False, "useInputImage": False})
+    APP.setProperty("gen", g)
+    spin(60)
+
     # An image-to-video job with nothing dropped must not be silently sent as
     # text-to-video: it says so and submits nothing (docs/DESIGN.md §10).
     sent.clear()

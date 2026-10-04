@@ -419,8 +419,18 @@ class Registry:
         if (params or {}).get("edit") and not espec:
             raise G.GraphError(f"{fam.get('label', fam['id'])} cannot edit an image")
 
+        # A STILL is a video family asked for one frame: its own short template
+        # (`still` block, MiniMax H3 only), same loaders and sampling.
+        sspec = fam.get("still") or {}
+        still = (not edit and fam.get("kind") == "video"
+                 and bool((params or {}).get("still")))
+        if still and not sspec:
+            raise G.GraphError(f"{fam.get('label', fam['id'])} cannot make a still")
+
         g = G.Graph(G.load_template(
-            espec["graph"] if edit else fam.get("graph", "universal.json")))
+            espec["graph"] if edit
+            else sspec["graph"] if still
+            else fam.get("graph", "universal.json")))
         defaults = self.defaults_for(entry)
         if edit:
             defaults = {**defaults, **(espec.get("defaults") or {})}
@@ -457,7 +467,7 @@ class Registry:
             g.set_input("clip", "clip_name", pairing["encoder"].name)
             g.set_input("clip", "type", te.get("clip_type", "stable_diffusion"))
             g.set_input("vae", "vae_name", pairing["vae"].name)
-            if pairing.get("vae_audio") is not None:
+            if pairing.get("vae_audio") is not None and g.has("vae_audio"):
                 g.set_input("vae_audio", "vae_name", pairing["vae_audio"].name)
 
         if fam["id"] == "llada_image_ckpt":
@@ -468,6 +478,9 @@ class Registry:
 
         if edit:
             return self._build_edit(entry, fam, g, p, pairing, object_info)
+
+        if still:
+            return self._build_still(entry, fam, g, p, pairing, object_info)
 
         if fam.get("kind") == "video":
             return self._build_video(entry, fam, g, p, pairing, object_info)
@@ -904,6 +917,58 @@ class Registry:
                   "last_image": last, "use_last_frame": bool(last)}
         if w and h:
             params["width"], params["height"] = int(w), int(h)
+        return {"prompt": prompt, "pairing": pairing, "params": params}
+
+
+    def _build_still(self, entry, fam, g, p, pairing, object_info):
+        """A video family's single frame: text-to-video at the shortest length
+        the node takes, keeping frame `frame_index`.
+
+        The controls are the video ones minus everything about time: one
+        prompt, no negative or CFG, aspect + MP for the size (no dropped
+        frames — a keyframe at frame 0 IS the output, so first-frame would just
+        hand the picture back), steps/denoise/sampler/scheduler/seed, LoRAs.
+        """
+        sspec = fam.get("still") or {}
+        res = fam.get("resolution") or {}
+        mp = float(p.get("megapixels") or res.get("megapixels", 1.0))
+
+        loras = p.get("loras") or []
+        if loras:
+            g.insert_lora_chain(loras, [g.id_of("loader"), 0], None)
+
+        pos = G.apply_prompt_transform(p.get("positive", ""), fam.get("prompt_transform"))
+        g.set_input("video", "prompt", pos)
+        g.set_input("video", "length", int(sspec.get("frames", 5)))
+        g.set_input("pick_frame", "batch_index", int(sspec.get("frame_index", 0)))
+
+        w, h = p.get("width"), p.get("height")
+        if not w or not h:
+            w, h = calc_dims(res.get("aspect", "1:1"), mp, res.get("multiple", 32))
+        g.set_input("video", "width", int(w))
+        g.set_input("video", "height", int(h))
+
+        g.set_input("sampler_select", "sampler_name", p.get("sampler_name", "res_multistep"))
+        g.set_input("scheduler", "scheduler", p.get("scheduler", "simple"))
+        g.set_input("scheduler", "steps", int(p.get("steps", 20)))
+        g.set_input("scheduler", "denoise", float(p.get("denoise", 1.0)))
+        g.set_input("noise", "noise_seed", int(p.get("seed", 0)))
+        g.set_input("save", "filename_prefix", p.get("filename_prefix", "painter"))
+
+        prompt = g.to_prompt()
+        if object_info is not None:
+            problems = G.validate(prompt, object_info)
+            if problems:
+                raise G.ValidationError(problems)
+        params = {**p, "positive": pos, "negative": "", "kind": "still",
+                  "still": True, "megapixels": mp,
+                  "width": int(w), "height": int(h)}
+        # Settings the PNG must not claim: no clip length, frame rate or frames
+        # went into this picture (docs/DESIGN.md §10).
+        for unused in ("duration", "fps", "frames", "cfg", "batch_size",
+                       "use_input_image", "use_last_frame", "input_image",
+                       "last_image", "toggles", "model_sampling"):
+            params.pop(unused, None)
         return {"prompt": prompt, "pairing": pairing, "params": params}
 
 
