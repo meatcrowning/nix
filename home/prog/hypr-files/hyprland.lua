@@ -20,6 +20,16 @@ hl.monitor({
     scale    = "1",
 })
 
+-- The Epson projector's EDID prefers 1920x1080, but it is a lower-resolution
+-- panel scaling that down; 1600x1200 is the mode Plasma keeps for it.
+-- Matched by description (prefix) so it follows the projector to any connector.
+hl.monitor({
+    output   = "desc:Seiko Epson Corporation EPSON PJ",
+    mode     = "1600x1200@60",
+    position = "auto",
+    scale    = "1",
+})
+
 if host.laptop then
     hl.monitor({
         output   = "eDP-1",
