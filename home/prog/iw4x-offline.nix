@@ -4,7 +4,7 @@ let
   launcher = pkgs.writeShellApplication {
     name = "iw4x-offline";
     runtimeInputs = [ pkgs.wineWow64Packages.stable pkgs.python3 pkgs.coreutils
-      pkgs.util-linux pkgs.bubblewrap ];
+      pkgs.util-linux pkgs.bubblewrap pkgs.imagemagick ];
     text = ''
       export IW4X_DXVK=${pkgs.dxvk.bin}
       exec bash ${lib.escapeShellArg "${project}/launch.sh"} "$@"
