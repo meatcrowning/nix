@@ -17,6 +17,9 @@ printf 'builders = ssh://nix-ssh@top x86_64-linux /etc/nix/book-builder-key 1 1 
 # download directly without filling book with x86 compiler toolchains.
 # Trust is scoped to this SSH store and the pinned host key, not all imports.
 printf 'extra-substituters = ssh://nix-ssh@top?ssh-key=/etc/nix/book-builder-key&base64-ssh-public-host-key=%s&trusted=true\n' "$hostkey" >> "$config"
+# top builds only x86, so ARM llm-agents (codex, claude-code) come prebuilt
+# from numtide's cache instead of compiling on book.
+printf 'extra-substituters = https://cache.numtide.com\nextra-trusted-public-keys = niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=\n' >> "$config"
 chmod 644 "$config"
 mv "$config" /etc/nix/book-builder.conf
 # Preserve Determinate's generated file and all unrelated custom settings.
