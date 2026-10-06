@@ -155,6 +155,9 @@ in
     vista-fonts
     noto-fonts-color-emoji
     oxygenfonts
+    # Menlo itself is Apple-licensed and not redistributable; Meslo LG is its
+    # Apache-2.0 customization (family "Meslo LG S/M/L" by line spacing).
+    meslo-lg
     # Terminus — the classic monospace BITMAP face (family "Terminus"). The
     # package ships PCF bitmaps at fixed pixel sizes (ter-x*.pcf.gz); it has
     # NO scalable outline, so it is served from its embedded bitmaps and its
