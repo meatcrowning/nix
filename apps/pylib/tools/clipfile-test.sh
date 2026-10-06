@@ -201,6 +201,30 @@ case "$(n wl-paste --list-types 2>/dev/null)" in
   *) ok "--image is dropped for a multi-file copy" ;;
 esac
 
+printf '\n\033[1m== a big image, through a reader with a non-blocking pipe ==\033[0m\n'
+# wl-clip-persist (the session's persist daemon, on both hosts) re-reads every
+# selection through a NON-blocking pipe. A payload larger than the pipe buffer
+# used to hit EAGAIN, be taken for a vanished paster and arrive truncated.
+# Bytes need not be a real PNG: --image-only keys the mime off the extension.
+if command -v wl-clip-persist >/dev/null 2>&1; then
+  BIG="$RUN/big.png"
+  head -c 3000000 /dev/urandom > "$BIG"
+  n wl-clip-persist --clipboard regular >/dev/null 2>&1 &
+  PERSISTPID=$!
+  sleep 0.5
+  n python3 "$CLIPFILE" --image-only "$BIG" 2>/dev/null
+  sleep 1.5
+  n wl-paste --no-newline --type image/png > "$RUN/big-pasted.png" 2>/dev/null
+  if cmp -s "$BIG" "$RUN/big-pasted.png"; then
+    ok "3 MB arrives whole after wl-clip-persist takes it over"
+  else
+    bad "persisted copy is $(stat -c%s "$RUN/big-pasted.png") of $(stat -c%s "$BIG") bytes"
+  fi
+  kill "$PERSISTPID" 2>/dev/null
+else
+  printf '   skip wl-clip-persist is not installed\n'
+fi
+
 printf '\n'
 [ "$FAILED" = 0 ] && { printf '\033[32mall good\033[0m\n'; exit 0; }
 printf '\033[31msomething failed\033[0m\n'; exit 1
