@@ -148,6 +148,11 @@ let
 in
 
 {
+  # Points fontconfig at the profile's share/fonts. Fedora's fonts.conf only
+  # reaches it through XDG_DATA_DIRS, which book's Plasma session lacks, so
+  # without this every package font below is invisible to Plasma on book.
+  fonts.fontconfig.enable = true;
+
   home.packages = with pkgs; [
     cascadia-code
     source-code-pro
