@@ -1,13 +1,19 @@
 """What an output says about the job that made it.
 
 One entry point, `params_for(path)`, so nothing outside this file has to know
-which of the three ways a result carries its parameters it used:
+which of the ways a result carries its parameters it used:
 
 1. **a still** — painter's `painter` tEXt chunk in the PNG (`pylib/pngmeta.py`);
 2. **a clip painter saved since 2026-08-21** — the same JSON as an `mdta` tag in
    the MP4's `moov/udta/meta` (`pylib/mp4meta.py`), written on download;
-3. **a clip from before that** — reconstructed from ComfyUI's OWN `prompt` graph,
-   which `SaveVideo` has always written into the same metadata box.
+3. **anything without painter's own record** — reconstructed from ComfyUI's OWN
+   `prompt` graph, which `SaveImage` and `SaveVideo` always write.
+
+A still lacks (1) far more often than its age suggests: on top, ComfyUI saves
+into the same directory the gallery reads, and painter tags a still only by
+overwriting that file with the copy it downloaded. A job book submitted through
+the tunnel is downloaded and tagged on BOOK, so top keeps ComfyUI's untagged
+original — as do outputs queued from ComfyUI's own web UI.
 
 (3) is why the gallery's inject menu works on the whole existing history rather
 than only on what is generated from now on. It is a reading of the graph, not a
@@ -19,6 +25,7 @@ it does not.
 from __future__ import annotations
 
 import json
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 import mp4meta
@@ -40,7 +47,18 @@ def params_for(path) -> dict | None:
                 except ValueError:
                     return None
             return params_from_graph(tags.get("prompt"))
-        return pngmeta.load_params(p.read_bytes())
+        text = pngmeta.read_text(p.read_bytes())
+        own = text.get("painter")
+        if own:
+            try:
+                return json.loads(own)
+            except ValueError:
+                return None
+        out = params_from_graph(text.get("prompt"))
+        # A video graph that saved a PNG is the still mode of a video model.
+        if out and out.get("kind") == "video":
+            out["kind"] = "still"
+        return out
     except (OSError, ValueError):
         return None
 
@@ -50,10 +68,69 @@ def _nodes_of(graph: dict, *class_names):
         if not isinstance(node, dict):
             continue
         cls = str(node.get("class_type", ""))
-        for want in class_names:
-            if want.endswith("*") and cls.startswith(want[:-1]) or cls == want:
-                yield node.get("inputs") or {}
-                break
+        if any(fnmatchcase(cls, want) for want in class_names):
+            yield node.get("inputs") or {}
+
+
+def _first(graph: dict, *class_names):
+    """The inputs of the first node of any of these classes, or {}."""
+    for inputs in _nodes_of(graph, *class_names):
+        return inputs
+    return {}
+
+
+def _cond_text(graph: dict, link, depth=0):
+    """The prompt text a conditioning wire was encoded from, or None.
+
+    Follows the wire back through whatever sits between the encoder and the
+    sampler (ReferenceLatent and its kin pass `conditioning` through). An
+    encoder with two outputs keeps the negative on its second slot, and a
+    ConditioningZeroOut is an empty negative rather than its source's words.
+    """
+    if not isinstance(link, list) or len(link) < 2 or depth > 16:
+        return None
+    node = graph.get(str(link[0]))
+    if not isinstance(node, dict):
+        return None
+    inputs = node.get("inputs") or {}
+    if node.get("class_type") == "ConditioningZeroOut":
+        return ""
+    if link[1] == 1 and isinstance(inputs.get("negative_prompt"), str):
+        return inputs["negative_prompt"]
+    for key in ("text", "prompt"):
+        if isinstance(inputs.get(key), str):
+            return inputs[key]
+    return _cond_text(graph, inputs.get("conditioning"), depth + 1)
+
+
+def _unfold_negpip(text: str):
+    """Split a NegPip-folded positive back into its two boxes, or None.
+
+    registry.py appends the negative to the positive as one final weighted
+    group, `pos, (neg:-1)`; a group ending the prompt with a negative weight is
+    that fold. Escaped parentheses (`\\(`, `\\)`) are literal tag text.
+    """
+    t = text.rstrip()
+    if not t.endswith(")") or t.endswith("\\)"):
+        return None
+    depth = 0
+    for i in range(len(t) - 1, -1, -1):
+        if i > 0 and t[i - 1] == "\\":
+            continue
+        if t[i] == ")":
+            depth += 1
+        elif t[i] == "(":
+            depth -= 1
+            if depth == 0:
+                inner = t[i + 1:-1]
+                body, sep, weight = inner.rpartition(":")
+                try:
+                    if not sep or float(weight) >= 0:
+                        return None
+                except ValueError:
+                    return None
+                return {"positive": t[:i].rstrip().rstrip(","), "negative": body}
+    return None
 
 
 def _lit(inputs, key, cast=None, default=None):
@@ -101,6 +178,17 @@ def params_from_graph(raw) -> dict | None:
         out["use_input_image"] = isinstance(inputs.get("first_frame"), list)
         out["use_last_frame"] = isinstance(inputs.get("last_frame"), list)
         break
+    # The prompt the SAMPLER was given, not whichever encoder comes first: a
+    # graph's node order says nothing about which box is which.
+    sampler = _first(graph, "*SamplerCustom", "KSampler", "KSamplerAdvanced",
+                     "CFGGuider")
+    if "positive" not in out and sampler:
+        pos = _cond_text(graph, sampler.get("positive"))
+        if isinstance(pos, str):
+            out["positive"] = pos
+            neg = _cond_text(graph, sampler.get("negative"))
+            if isinstance(neg, str):
+                out["negative"] = neg
     if "positive" not in out:
         texts = [t for inputs in _nodes_of(graph, "CLIPTextEncode")
                  if isinstance(t := _lit(inputs, "text"), str)]
@@ -109,7 +197,8 @@ def params_from_graph(raw) -> dict | None:
             if len(texts) > 1 and texts[1].strip():
                 out["negative"] = texts[1]
 
-    for inputs in _nodes_of(graph, "BasicScheduler", "KSampler", "KSamplerAdvanced"):
+    for inputs in _nodes_of(graph, "BasicScheduler", "Flux2Scheduler", "*ImageScheduler",
+                            "KSampler", "KSamplerAdvanced"):
         for key, cast in (("steps", int), ("denoise", float), ("cfg", float)):
             v = _lit(inputs, key, cast)
             if v is not None:
@@ -126,7 +215,13 @@ def params_from_graph(raw) -> dict | None:
         if isinstance(smp, str):
             out["sampler_name"] = smp
         break
-    for inputs in _nodes_of(graph, "RandomNoise", "KSampler", "KSamplerAdvanced"):
+    cfg = _lit(sampler, "cfg", float)
+    if cfg is not None:
+        out["cfg"] = cfg
+    if isinstance(sampler.get("add_noise"), bool):
+        out["add_noise"] = sampler["add_noise"]
+    for inputs in _nodes_of(graph, "RandomNoise", "*SamplerCustom", "KSampler",
+                            "KSamplerAdvanced"):
         seed = _lit(inputs, "noise_seed", int)
         if seed is None:
             seed = _lit(inputs, "seed", int)
@@ -143,7 +238,29 @@ def params_from_graph(raw) -> dict | None:
         if mp:
             out["megapixels"] = mp
         break
-    for inputs in _nodes_of(graph, "UNETLoader", "CheckpointLoaderSimple"):
+    if out.get("kind") != "video":
+        latent = _first(graph, "Empty*LatentImage")
+        w, h = _lit(latent, "width", int), _lit(latent, "height", int)
+        if w and h:
+            out["width"], out["height"] = w, h
+        batch = _lit(latent, "batch_size", int)
+        if batch:
+            out["batch_size"] = batch
+        # The toggles are the nodes they insert; a graph without one ran
+        # without it, so both are reported either way.
+        negpip = any(_nodes_of(graph, "CLIPNegPip", "*NegPip"))
+        ms = _first(graph, "ModelSamplingSD3Advanced", "*ModelSampling")
+        out["toggles"] = {"negpip": negpip, "model_sampling": bool(ms)}
+        if ms:
+            out["model_sampling"] = {k: v for k, v in ms.items()
+                                     if not isinstance(v, list)}
+        if negpip and not (out.get("negative") or "").strip():
+            boxes = _unfold_negpip(out.get("positive") or "")
+            if boxes:
+                out["prompt_boxes"] = boxes
+
+    for inputs in _nodes_of(graph, "UNETLoader", "UnetLoaderGGUF", "OTUNetLoaderW8A8",
+                            "CheckpointLoaderSimple", "*CheckpointLoader"):
         name = _lit(inputs, "unet_name") or _lit(inputs, "ckpt_name")
         if isinstance(name, str):
             out["model"] = name

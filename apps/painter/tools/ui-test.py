@@ -3391,6 +3391,51 @@ def test_clip_params(win, ctl, tmp):
           old and old.get("use_input_image") is True and not old.get("input_image_local"),
           old and old.get("input_image_local"))
 
+    # A STILL with only ComfyUI's graph — a job book submitted leaves exactly
+    # this in top's output directory — answers through the same graph reader,
+    # following the sampler's wires rather than trusting node order.
+    import pngmeta
+    still_graph = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "anima.safetensors"}},
+        "40": {"class_type": "CLIPNegPip", "inputs": {"model": ["1", 0], "clip": ["2", 0]}},
+        "39": {"class_type": "ModelSamplingSD3Advanced",
+               "inputs": {"model": ["40", 0], "shift_start": 3.5, "shift_end": 1.2}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "", "clip": ["2", 0]}},
+        "5": {"class_type": "CLIPTextEncode",
+              "inputs": {"text": "1girl, horror \\(theme\\), (lowres, text:-1)",
+                         "clip": ["40", 1]}},
+        "41": {"class_type": "EmptyLatentImage",
+               "inputs": {"width": 1152, "height": 1728, "batch_size": 2}},
+        "11": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler_cfg_pp"}},
+        "14": {"class_type": "BasicScheduler",
+               "inputs": {"scheduler": "beta", "steps": 50, "denoise": 1.0}},
+        "4": {"class_type": "PainterSamplerCustom",
+              "inputs": {"add_noise": True, "noise_seed": 4646, "cfg": 0.7,
+                         "positive": ["5", 0], "negative": ["6", 0]}}}
+    bare = os.path.join(tmp, "out", "bare_00001_.png")
+    noisy_png(bare, 8, 8)
+    with open(bare, "rb") as fh:
+        data = pngmeta.upsert_text(fh.read(), {"prompt": J.dumps(still_graph)})
+    with open(bare, "wb") as fh:
+        fh.write(data)
+    ctl.gallery.add(bare)
+    spin(150)
+    st = ctl.gallery.paramsAt(ctl.gallery.indexOf(bare))
+    check("a still with only ComfyUI's graph is injectable",
+          bool(st) and st.get("positive", "").startswith("1girl"), st and sorted(st))
+    check("...with its size, batch, seed and sampling numbers",
+          st and (st.get("width"), st.get("height"), st.get("batch_size"), st.get("seed"),
+                  st.get("cfg"), st.get("steps"), st.get("sampler_name"))
+          == (1152, 1728, 2, 4646, 0.7, 50, "euler_cfg_pp"), st)
+    check("...its toggles read off the nodes the graph ran",
+          st and st.get("toggles") == {"negpip": True, "model_sampling": True}
+          and st.get("model_sampling", {}).get("shift_start") == 3.5, st and st.get("toggles"))
+    check("...and the NegPip fold split back into its two boxes",
+          st and st.get("prompt_boxes") == {"positive": "1girl, horror \\(theme\\)",
+                                            "negative": "lowres, text"},
+          st and st.get("prompt_boxes"))
+    os.unlink(bare)
+
     for p in (src, tagged, legacy):
         os.unlink(p)
     ctl.gallery.load_existing()
