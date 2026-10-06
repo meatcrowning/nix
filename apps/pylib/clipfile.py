@@ -267,6 +267,13 @@ def serve(w, source, body):
                 continue
             data = body.get(mime, b"")
             try:
+                # The paster creates the pipe, and may hand us a NON-blocking
+                # write end (wl-clip-persist does). A payload bigger than the
+                # pipe buffer then raises EAGAIN mid-image, which the handler
+                # below would take for a paster that left: every multi-MB copy
+                # reached it truncated, with no PNG end, and a browser pasting
+                # from it got nothing. Blocking, the write waits for the reader.
+                os.set_blocking(fd, True)
                 while data:
                     data = data[os.write(fd, data):]
             except OSError:
