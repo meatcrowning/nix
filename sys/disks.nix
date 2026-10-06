@@ -169,10 +169,13 @@ in
   # failed "target is busy" on 2026-10-05), and the udev SYSTEMD_WANTS remounts
   # it at the same path the moment the disk reappears, fsck first. udiskie is
   # kept off it in home/srvs/udiskie.nix so it cannot win the race to SSD1.
-  environment.etc."systemd/system/run-media-lam-SSD.mount.d/lazy.conf".text = ''
-    [Mount]
-    LazyUnmount=yes
-  '';
+  systemd.units."run-media-lam-SSD.mount" = {
+    overrideStrategy = "asDropin";
+    text = ''
+      [Mount]
+      LazyUnmount=yes
+    '';
+  };
   services.udev.extraRules = ''
     ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="${musicUuid}", ENV{SYSTEMD_WANTS}+="run-media-lam-SSD.mount"
   '';
