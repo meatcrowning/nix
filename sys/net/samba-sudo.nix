@@ -19,11 +19,11 @@
 # pointed at a different system user.
 let
   sambaRestart = pkgs.writeShellScriptBin "samba-restart" ''
-    exec ${pkgs.systemd}/bin/systemctl restart smbd.service nmbd.service
+    exec ${pkgs.systemd}/bin/systemctl restart samba-smbd.service samba-nmbd.service
   '';
 
   sambaReload = pkgs.writeShellScriptBin "samba-reload" ''
-    exec ${pkgs.systemd}/bin/systemctl reload smbd.service nmbd.service
+    exec ${pkgs.systemd}/bin/systemctl reload samba-smbd.service samba-nmbd.service
   '';
 
   # Live config reload with no daemon restart (no dropped connections) — SIGHUP

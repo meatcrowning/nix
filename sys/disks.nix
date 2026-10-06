@@ -1,4 +1,4 @@
-{ pkgs, privateConfig, ... }:
+{ lib, pkgs, privateConfig, ... }:
 
 let
   # Relabel a filesystem (the "rename drive" action in the disk popup).
@@ -30,6 +30,37 @@ let
   # `-t` self-test, no `--set` toggle) and the device is constrained to a real
   # block node — closing the "arbitrary smartctl args as root" hole while
   # serving the only invocation quickshell actually makes (disk-smart.sh).
+  musicUuid = lib.removePrefix "/dev/disk/by-uuid/" privateConfig.devices.music;
+  musicMount = "/run/media/lam/SSD";
+
+  # Put the music SSD back at its one path after a pulled cable left the old
+  # mount stale (2026-10-05: the unmount failed "target is busy", the dead
+  # mount kept the path, and udiskie mounted the replugged disk at SSD1 —
+  # player and the share both broke). Detaches a mount whose source is no
+  # longer the live device, unmounts the disk from any other path, then starts
+  # the mount unit, which fscks it first (passno 2) and pulls smbd back up.
+  # Takes no arguments, so NOPASSWD below grants exactly this.
+  musicRemount = pkgs.writeShellScriptBin "music-ssd-remount" ''
+    set -eu
+    PATH=${lib.makeBinPath [ pkgs.util-linux pkgs.coreutils pkgs.systemd ]}
+    dev=$(realpath -e ${privateConfig.devices.music}) \
+      || { echo "music-ssd-remount: disk not attached" >&2; exit 1; }
+    src=$(findmnt -n -o SOURCE --mountpoint ${musicMount} || true)
+    if [ -n "$src" ] && [ "$src" != "$dev" ]; then
+      echo "detaching stale ${musicMount} ($src)"
+      umount -l ${musicMount}
+    fi
+    findmnt -n -o TARGET --source "$dev" | while read -r mp; do
+      [ "$mp" = ${musicMount} ] && continue
+      echo "unmounting $mp"
+      umount "$mp"
+    done
+    systemctl reset-failed run-media-lam-SSD.mount || true
+    systemctl start run-media-lam-SSD.mount
+    systemctl start samba-smbd.service
+    findmnt ${musicMount}
+  '';
+
   driveSmart = pkgs.writeShellScriptBin "drive-smart" ''
     [ "$#" -eq 1 ] || { echo "usage: drive-smart <device>" >&2; exit 2; }
     # Canonicalise (resolve symlinks + `..`) then require a real BLOCK device.
@@ -133,6 +164,19 @@ in
     "d /home/lam/drives/img 0755 lam users - -"
   ];
 
+  # A pulled cable must not strand the library. Lazy unmount lets systemd
+  # detach the dead mount even while player holds files open (a plain umount
+  # failed "target is busy" on 2026-10-05), and the udev SYSTEMD_WANTS remounts
+  # it at the same path the moment the disk reappears, fsck first. udiskie is
+  # kept off it in home/srvs/udiskie.nix so it cannot win the race to SSD1.
+  environment.etc."systemd/system/run-media-lam-SSD.mount.d/lazy.conf".text = ''
+    [Mount]
+    LazyUnmount=yes
+  '';
+  services.udev.extraRules = ''
+    ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="${musicUuid}", ENV{SYSTEMD_WANTS}+="run-media-lam-SSD.mount"
+  '';
+
   # SMART for the disk-hover popup. udisks2 could expose this over D-Bus but
   # the CLI is painful; a NOPASSWD rule is the simple path (quickshell runs as
   # lam, no TTY). Scoped to the fixed-arg `drive-smart` wrapper, not raw
@@ -142,8 +186,10 @@ in
     commands = [
       { command = "${driveSmart}/bin/drive-smart"; options = [ "NOPASSWD" ]; }
       { command = "${driveLabel}/bin/drive-label"; options = [ "NOPASSWD" ]; }
+      { command = "/run/current-system/sw/bin/music-ssd-remount"; options = [ "NOPASSWD" ]; }
+      { command = "${musicRemount}/bin/music-ssd-remount"; options = [ "NOPASSWD" ]; }
     ];
   }];
 
-  environment.systemPackages = [ pkgs.smartmontools pkgs.jq driveLabel driveSmart ];
+  environment.systemPackages = [ pkgs.smartmontools pkgs.jq driveLabel driveSmart musicRemount ];
 }

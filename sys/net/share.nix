@@ -129,9 +129,13 @@ in
   # samba.nix already defines that option (for /var/lib/samba) and a second
   # definition is an eval conflict, not a merge. requires+after on
   # run-media-lam-SSD.mount is exactly equivalent for a path inside it.
+  # wantedBy closes the other half: requires stops smbd when the disk drops
+  # (2026-10-05, pulled cable) but never starts it again, so the share stayed
+  # down after the disk came back. Now remounting the SSD restarts smbd.
   systemd.services.samba-smbd = {
     requires = [ "run-media-lam-SSD.mount" ];
     after = [ "run-media-lam-SSD.mount" ];
+    wantedBy = [ "run-media-lam-SSD.mount" ];
   };
 
   # Samba keeps its OWN password database, seeded once by hand:
