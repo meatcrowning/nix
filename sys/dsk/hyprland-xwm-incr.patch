@@ -1,0 +1,183 @@
+--- a/src/xwayland/XWM.cpp	2026-10-06 18:28:30.552312220 -0800
++++ b/src/xwayland/XWM.cpp	2026-10-06 18:28:53.889101151 -0800
+@@ -35,6 +35,67 @@
+ 
+ static int writeDataSource(int fd, uint32_t mask, void* data);
+ 
++// X owner -> Wayland client transfers ("incoming"). Each one is keyed by its own
++// incomingWindow, and every event is routed to the transfer whose window it
++// names — never to "the first pending transfer", which handed one reader's
++// bytes (or nothing) to another as soon as two reads overlapped. For INCR the
++// next chunk is only read once the previous one has been written out: the
++// property is deleted on read, which is what tells the owner to send more.
++// SXTransfer::propertySet  = the SelectionNotify for this transfer has arrived
++// SXTransfer::flushOnDelete = a new chunk arrived while the last was still
++//                             being written; read it when that write finishes
++static void incomingRead(SXSelection& sel, SXTransfer* t);
++static void incomingErase(SXSelection& sel, SXTransfer* t) {
++    std::erase_if(sel.transfers, [t](const auto& x) { return x.get() == t; });
++}
++static SXTransfer* incomingFind(SXSelection& sel, xcb_window_t w) {
++    auto it = std::ranges::find_if(sel.transfers, [w](const auto& x) { return x->incomingWindow && x->incomingWindow == w; });
++    return it == sel.transfers.end() ? nullptr : it->get();
++}
++// Write t's pending property bytes to its pipe; on completion move on to the
++// next chunk (INCR) or finish the transfer (EOF for the reader).
++static void incomingWrite(SXSelection& sel, SXTransfer* t) {
++    if (!t->propertyReply)
++        return;
++
++    auto* property  = sc<char*>(xcb_get_property_value(t->propertyReply));
++    int   remainder = xcb_get_property_value_length(t->propertyReply) - t->propertyStart;
++
++    while (remainder > 0) {
++        ssize_t len = write(t->wlFD.get(), property + t->propertyStart, remainder);
++        if (len < 0) {
++            if (errno == EINTR)
++                continue;
++            if (errno == EAGAIN) {
++                if (!t->eventSource)
++                    t->eventSource = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, t->wlFD.get(), WL_EVENT_WRITABLE, ::writeDataSource, &sel);
++                return;
++            }
++            Log::logger->log(Log::ERR, "[xwm] write died in transfer get");
++            incomingErase(sel, t);
++            return;
++        }
++        t->propertyStart += len;
++        remainder -= len;
++    }
++
++    free(t->propertyReply); // NOLINT(cppcoreguidelines-no-malloc)
++    t->propertyReply = nullptr;
++    t->propertyStart = 0;
++    if (t->eventSource) {
++        wl_event_source_remove(t->eventSource);
++        t->eventSource = nullptr;
++    }
++
++    if (!t->incremental) {
++        Log::logger->log(Log::DEBUG, "[xwm] cb transfer to wl client complete");
++        incomingErase(sel, t);
++    } else if (t->flushOnDelete) {
++        t->flushOnDelete = false;
++        incomingRead(sel, t);
++    }
++}
++
+ struct SFreeDeleter {
+     void operator()(void* ptr) const {
+         std::free(ptr); // NOLINT(cppcoreguidelines-no-malloc)
+@@ -657,12 +718,19 @@
+         return;
+     }
+ 
+-    if (e->property == XCB_ATOM_NONE) {
+-        auto it = std::ranges::find_if(sel->transfers, [](const auto& t) { return !t->propertyReply; });
+-        if (it != sel->transfers.end()) {
++    if (auto* t = incomingFind(*sel, e->requestor)) {
++        if (e->property == XCB_ATOM_NONE) {
+             Log::logger->log(Log::TRACE, "[xwm] converting selection failed");
+-            sel->transfers.erase(it);
++            incomingErase(*sel, t);
++            return;
+         }
++        t->propertySet = true;
++        incomingRead(*sel, t);
++        return;
++    }
++
++    if (e->property == XCB_ATOM_NONE) {
++        Log::logger->log(Log::TRACE, "[xwm] converting selection failed");
+     } else if (e->target == HYPRATOMS["TARGETS"]) {
+         if (!m_focusedSurface) {
+             Log::logger->log(Log::TRACE, "[xwm] denying access to write to clipboard because no X client is in focus");
+@@ -670,41 +738,51 @@
+         }
+ 
+         setClipboardToWayland(*sel);
+-    } else if (!sel->transfers.empty())
+-        getTransferData(*sel);
++    }
+ }
+ 
+ bool CXWM::handleSelectionPropertyNotify(xcb_property_notify_event_t* e) {
+     for (auto* sel : {&m_clipboard, &m_primarySelection, &m_dndSelection}) {
+-        auto it = std::ranges::find_if(sel->transfers, [e](const auto& t) { return t->incomingWindow == e->window; });
+-        if (it == sel->transfers.end())
++        auto* t = incomingFind(*sel, e->window);
++        if (!t)
+             continue;
+ 
+-        auto& transfer = *it;
++        // DELETE is our own read consuming a chunk. NEW_VALUE before the
++        // SelectionNotify (or of a non-INCR reply) is fetched by the notify.
++        if (e->state != XCB_PROPERTY_NEW_VALUE || !t->incremental || !t->propertySet)
++            return true;
++
++        if (t->propertyReply)
++            t->flushOnDelete = true; // still writing the last chunk
++        else
++            incomingRead(*sel, t);
++        return true;
++    }
+ 
+-        if (e->state == XCB_PROPERTY_NEW_VALUE) {
+-            if (!transfer->incremental) {
+-                getTransferData(*sel);
+-                return true;
+-            }
++    return false;
++}
+ 
+-            if (!transfer->getIncomingSelectionProp(true) || xcb_get_property_value_length(transfer->propertyReply) == 0) {
+-                sel->transfers.erase(it);
+-                return true;
+-            }
++static void incomingRead(SXSelection& sel, SXTransfer* t) {
++    if (!t->getIncomingSelectionProp(true)) {
++        Log::logger->log(Log::ERR, "[xwm] Failed to get property data");
++        incomingErase(sel, t);
++        return;
++    }
+ 
+-            int result = sel->onWrite();
++    if (!t->incremental && t->propertyReply->type == HYPRATOMS["INCR"]) {
++        t->incremental = true;
++        free(t->propertyReply); // NOLINT(cppcoreguidelines-no-malloc)
++        t->propertyReply = nullptr;
++        return;
++    }
+ 
+-            if (result == 1 && !transfer->eventSource) {
+-                transfer->eventSource = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, transfer->wlFD.get(), WL_EVENT_WRITABLE, ::writeDataSource, sel);
+-            }
+-        } else if (e->state == XCB_PROPERTY_DELETE) {
+-            getTransferData(*sel);
+-        }
+-        return true;
++    if (t->incremental && xcb_get_property_value_length(t->propertyReply) == 0) {
++        Log::logger->log(Log::DEBUG, "[xwm] incremental transfer to wl client complete");
++        incomingErase(sel, t);
++        return;
+     }
+ 
+-    return false;
++    incomingWrite(sel, t);
+ }
+ 
+ SXSelection* CXWM::getSelection(xcb_atom_t atom) {
+@@ -1326,8 +1404,11 @@
+ }
+ 
+ static int writeDataSource(int fd, uint32_t mask, void* data) {
+-    auto selection = sc<SXSelection*>(data);
+-    return selection->onWrite();
++    auto& sel = *sc<SXSelection*>(data);
++    auto  it  = std::ranges::find_if(sel.transfers, [fd](const auto& t) { return t->incomingWindow && t->wlFD.get() == fd; });
++    if (it != sel.transfers.end())
++        incomingWrite(sel, it->get());
++    return 0;
+ }
+ 
+ void CXWM::getTransferData(SXSelection& sel) {

@@ -1,7 +1,15 @@
 { config, lib, pkgs, inputs, ... }:
 
 let
-  hyprPkg = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland;
+  # XWayland -> Wayland clipboard: Hyprland's XWM truncated every INCR
+  # (chunked, >256K from Chromium) transfer at 128K, and to 0 bytes when two
+  # readers overlapped (wl-clip-persist + cliphist read every copy at once),
+  # so images copied in Vivaldi never pasted into Wayland apps. Still unfixed
+  # upstream as of 2026-10; the patch is .cpp-only, so hyprvtb's headers and
+  # ABI are untouched. Re-check it on every Hyprland bump.
+  hyprPkg = inputs.hyprland.packages.${pkgs.stdenv.hostPlatform.system}.hyprland.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./hyprland-xwm-incr.patch ];
+  });
 
   # The session's entry point, in place of Hyprland's own `start-hyprland`.
   #
