@@ -744,13 +744,18 @@ static void onWindowFocus(PHLWINDOW window) {
 // switcher walks focus history. Cycling the live history can only bounce
 // between the two most recent windows (focusing B puts it at the front, so the
 // "next" from B is A again), so Tab steps through a SNAPSHOT taken when the
-// walk begins, and nothing is focused or raised until the modifier that started
-// the walk (Alt or Meta) is released — that release commits the selection, and
-// Escape cancels it. Alt+` walks only the active application's windows. There
-// is no switcher UI yet, so the walk is blind; a quick Alt+Tab is still the
-// "previous window" toggle.
+// walk begins. Releasing the modifier that started the walk (Alt or Meta)
+// commits the selection, and Escape cancels it. Alt+` walks only the active
+// application's windows. There is no switcher UI yet; instead each step focuses
+// and raises the selected window as a preview (Plasma's "show selected
+// window"). Those previews must not reorder anything, so the walk keeps its
+// own recency list (s_altTabMru) that ignores focus changes made while a walk
+// is in progress; only the committed window moves to the front. A minimized window is selectable but
+// not previewed: focusing it slides it back in, and walking past it would
+// leave it restored.
 struct SAltTabWalk {
     std::vector<PHLWINDOWREF> ring;
+    PHLWINDOWREF              originWin;
     size_t                    pos       = 0;
     size_t                    origin    = 0;     // the window focused when the walk began
     bool                      hasOrigin = false; // false: nothing was focused
@@ -759,6 +764,18 @@ struct SAltTabWalk {
     bool                      eatEscUp  = false; // swallow the release of the Escape that cancelled
 };
 static SAltTabWalk s_altTab;
+
+// Newest-first focus order, as Plasma keeps it: Hyprland's own history would
+// take in every preview. Windows it has never seen focused (e.g. everything
+// after a plugin reload) fall back to Hyprland's order behind it.
+static std::vector<PHLWINDOWREF> s_altTabMru;
+
+static void altTabTrack(PHLWINDOW w) {
+    if (!w || s_altTab.active)
+        return;
+    std::erase_if(s_altTabMru, [&w](const auto& e) { return !e || e.lock() == w; });
+    s_altTabMru.insert(s_altTabMru.begin(), w);
+}
 
 // linux/input-event-codes.h values (avoid the include)
 static constexpr uint32_t ALTTAB_KEY_ESC = 1, ALTTAB_KEY_LEFTALT = 56, ALTTAB_KEY_RIGHTALT = 100, ALTTAB_KEY_LEFTMETA = 125, ALTTAB_KEY_RIGHTMETA = 126;
@@ -773,6 +790,14 @@ static bool altTabCycleable(const PHLWINDOW& w) {
     return true; // minimized windows stay in: focusing them slides them back
 }
 
+static bool altTabMinimized(const PHLWINDOW& w) {
+    for (auto& b : g_pGlobalState->bars) {
+        if (b && b->getOwner() == w)
+            return b->isMinimized();
+    }
+    return false;
+}
+
 static void altTabEnd(bool commit) {
     if (!s_altTab.active)
         return;
@@ -780,10 +805,23 @@ static void altTabEnd(bool commit) {
     PHLWINDOW target;
     if (commit && s_altTab.pos < s_altTab.ring.size())
         target = s_altTab.ring[s_altTab.pos].lock();
+    else if (!commit)
+        target = s_altTab.originWin.lock(); // undo the preview
     s_altTab.ring.clear();
     // raise + minimized-restore ride on the window.active listener
-    if (target && altTabCycleable(target) && target != Hl::focusedWindow())
+    if (target && (altTabCycleable(target) || !commit) && target != Hl::focusedWindow())
         Hl::focusWindow(target);
+    // already focused by its preview, so the listener did not see it
+    altTabTrack(target);
+}
+
+// Plasma's "show selected window": focus + raise the selection while walking.
+static void altTabPreview() {
+    if (!s_altTab.mods || s_altTab.pos >= s_altTab.ring.size())
+        return;
+    const auto w = s_altTab.ring[s_altTab.pos].lock();
+    if (w && !altTabMinimized(w) && w != Hl::focusedWindow())
+        Hl::focusWindow(w);
 }
 
 static void altTabStep(bool prev, bool sameApp) {
@@ -793,12 +831,21 @@ static void altTabStep(bool prev, bool sameApp) {
             return;
         s_altTab.ring.clear();
         s_altTab.hasOrigin = false;
-        // fullHistory() is oldest-first (focus appends), so walk it backwards:
-        // the ring must start at the most recent window, like Plasma's list
+        // our own newest-first list, then whatever only Hyprland's history
+        // knows (that is oldest-first: focus appends), newest first
+        std::vector<PHLWINDOWREF> order;
+        for (const auto& w : s_altTabMru) {
+            if (w)
+                order.push_back(w);
+        }
         const auto& HIST = Desktop::History::windowTracker()->fullHistory();
         for (auto it = HIST.rbegin(); it != HIST.rend(); ++it) {
-            const auto& w = *it;
-            const auto  l = w.lock();
+            if (*it && std::ranges::find(order, *it) == order.end())
+                order.push_back(*it);
+        }
+        s_altTab.originWin = CUR;
+        for (const auto& w : order) {
+            const auto l = w.lock();
             if (!l)
                 continue;
             if (l == CUR) {
@@ -831,6 +878,8 @@ static void altTabStep(bool prev, bool sameApp) {
     // wait for, so commit now.
     if (!s_altTab.mods)
         altTabEnd(true);
+    else
+        altTabPreview();
 }
 
 static void altTabOnKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info) {
@@ -1476,8 +1525,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             onCloseWindow(w);
     }));
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.window.active.listen([](PHLWINDOW w, Desktop::eFocusReason r) {
-        if (g_pGlobalState)
+        if (g_pGlobalState) {
+            altTabTrack(w);
             onWindowFocus(w);
+        }
     }));
     // After any mouse release: re-pin the scratchpad (a border-drag may have
     // moved edges other than the right one) and persist its dragged width.
@@ -1870,7 +1921,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + Plasma-style alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.53"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + Plasma-style alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.54"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
