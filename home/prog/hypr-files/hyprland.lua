@@ -927,19 +927,25 @@ hl.bind(mainMod .. " + CTRL + S", function()
     hl.exec_cmd("qs ipc call widgets save")
 end, { description = "Save window session + desktop widgets" })
 
--- Alt-Tab window switching, KDE-style most-recently-used order (hyprvtb
--- plugin). cycle_next walks the window LIST (creation order), which is why
--- tabbing felt out of order — cycle_hist walks focus history instead:
--- one alt-tab flips to the previous window; successive tabs within ~0.9s
--- keep digging into the same history snapshot (KDE's hold-Alt walk), and
--- pausing commits. Raise + minimized-restore ride on the plugin's focus
--- listener. Focusing a minimized window slides it back in.
-hl.bind("ALT + TAB", function()
-    hl.plugin.hyprvtb.cycle_hist_next()
-end, { description = "Next window (recent first)" })
-hl.bind("ALT + SHIFT + TAB", function()
-    hl.plugin.hyprvtb.cycle_hist_prev()
-end, { description = "Previous window" })
+-- Alt-Tab window switching, Plasma's task-switcher behaviour (hyprvtb
+-- plugin): recent-first, Tab walks while Alt is held, releasing Alt commits,
+-- Escape cancels. ` walks only the active application's windows. Meta+Tab
+-- and Meta+` are the same walks committing on Meta release, as in Plasma's
+-- default shortcuts. No switcher UI yet.
+for _, mod in ipairs({ "ALT", mainMod }) do
+    hl.bind(mod .. " + TAB", function()
+        hl.plugin.hyprvtb.cycle_hist_next()
+    end, { description = "Next window (recent first)" })
+    hl.bind(mod .. " + SHIFT + TAB", function()
+        hl.plugin.hyprvtb.cycle_hist_prev()
+    end, { description = "Previous window" })
+    hl.bind(mod .. " + grave", function()
+        hl.plugin.hyprvtb.cycle_app_next()
+    end, { description = "Next window of this application" })
+    hl.bind(mod .. " + SHIFT + grave", function()
+        hl.plugin.hyprvtb.cycle_app_prev()
+    end, { description = "Previous window of this application" })
+end
 
 -- Multimedia keys for volume and brightness.
 -- Volume: routed through quickshell's "volume" IpcHandler (optimistic
