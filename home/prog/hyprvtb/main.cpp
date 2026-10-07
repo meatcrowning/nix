@@ -738,21 +738,30 @@ static void onWindowFocus(PHLWINDOW window) {
     }
 }
 
-// ---- KDE-style alt-tab: most-recently-used window cycling -----------------
+// ---- Plasma-style alt-tab: most-recently-used window cycling --------------
 //
-// Hyprland's cyclenext walks the window LIST (creation order); KDE walks
-// focus history. Naively cycling the live history can only ever bounce
-// between the two most recent windows (focusing B puts it at the front, so
-// the "next" from B is A again — C is unreachable). KDE solves this with a
-// hold-Alt walk that commits on release; we approximate it: successive
-// calls within WALK_MS continue through a SNAPSHOT of the history taken
-// when the walk began, so tab-tab-tab digs deeper exactly like KDE's
-// switcher, and pausing (releasing Alt) naturally commits — the next
-// alt-tab starts a fresh walk from the new focus order.
-static std::vector<PHLWINDOWREF> s_altTabWalk;
-static size_t                    s_altTabPos  = 0;
-static Time::steady_tp           s_altTabLast = Time::steadyNow();
-static constexpr int             ALTTAB_WALK_MS = 900;
+// Hyprland's cyclenext walks the window LIST (creation order); Plasma's task
+// switcher walks focus history. Cycling the live history can only bounce
+// between the two most recent windows (focusing B puts it at the front, so the
+// "next" from B is A again), so Tab steps through a SNAPSHOT taken when the
+// walk begins, and nothing is focused or raised until the modifier that started
+// the walk (Alt or Meta) is released — that release commits the selection, and
+// Escape cancels it. Alt+` walks only the active application's windows. There
+// is no switcher UI yet, so the walk is blind; a quick Alt+Tab is still the
+// "previous window" toggle.
+struct SAltTabWalk {
+    std::vector<PHLWINDOWREF> ring;
+    size_t                    pos       = 0;
+    size_t                    origin    = 0;     // the window focused when the walk began
+    bool                      hasOrigin = false; // false: nothing was focused
+    uint32_t                  mods      = 0;     // ALT/META held when it began
+    bool                      active    = false;
+    bool                      eatEscUp  = false; // swallow the release of the Escape that cancelled
+};
+static SAltTabWalk s_altTab;
+
+// linux/input-event-codes.h values (avoid the include)
+static constexpr uint32_t ALTTAB_KEY_ESC = 1, ALTTAB_KEY_LEFTALT = 56, ALTTAB_KEY_RIGHTALT = 100, ALTTAB_KEY_LEFTMETA = 125, ALTTAB_KEY_RIGHTMETA = 126;
 
 static bool altTabCycleable(const PHLWINDOW& w) {
     if (!w || !w->m_isMapped || w->isHidden())
@@ -764,54 +773,117 @@ static bool altTabCycleable(const PHLWINDOW& w) {
     return true; // minimized windows stay in: focusing them slides them back
 }
 
-static void cycleHist(bool prev) {
-    const auto CUR = Hl::focusedWindow();
-    const bool CONTINUING =
-        std::chrono::duration_cast<std::chrono::milliseconds>(Time::steadyNow() - s_altTabLast).count() < ALTTAB_WALK_MS && !s_altTabWalk.empty();
-    s_altTabLast = Time::steadyNow();
+static void altTabEnd(bool commit) {
+    if (!s_altTab.active)
+        return;
+    s_altTab.active = false;
+    PHLWINDOW target;
+    if (commit && s_altTab.pos < s_altTab.ring.size())
+        target = s_altTab.ring[s_altTab.pos].lock();
+    s_altTab.ring.clear();
+    // raise + minimized-restore ride on the window.active listener
+    if (target && altTabCycleable(target) && target != Hl::focusedWindow())
+        Hl::focusWindow(target);
+}
 
-    if (!CONTINUING) {
-        s_altTabWalk.clear();
-        s_altTabPos = 0;
-        for (const auto& w : Desktop::History::windowTracker()->fullHistory()) {
-            const auto l = w.lock();
+static void altTabStep(bool prev, bool sameApp) {
+    if (!s_altTab.active) {
+        const auto CUR = Hl::focusedWindow();
+        if (sameApp && !CUR)
+            return;
+        s_altTab.ring.clear();
+        s_altTab.hasOrigin = false;
+        // fullHistory() is oldest-first (focus appends), so walk it backwards:
+        // the ring must start at the most recent window, like Plasma's list
+        const auto& HIST = Desktop::History::windowTracker()->fullHistory();
+        for (auto it = HIST.rbegin(); it != HIST.rend(); ++it) {
+            const auto& w = *it;
+            const auto  l = w.lock();
             if (!l)
                 continue;
-            if (l == CUR || altTabCycleable(l)) {
-                if (l == CUR)
-                    s_altTabPos = s_altTabWalk.size();
-                s_altTabWalk.push_back(w);
-            }
+            if (l == CUR) {
+                s_altTab.origin    = s_altTab.ring.size();
+                s_altTab.hasOrigin = true;
+                s_altTab.ring.push_back(w);
+            } else if (altTabCycleable(l) && (!sameApp || l->m_class == CUR->m_class))
+                s_altTab.ring.push_back(w);
         }
+        if (s_altTab.ring.size() < (s_altTab.hasOrigin ? 2u : 1u))
+            return;
+        s_altTab.pos    = s_altTab.hasOrigin ? s_altTab.origin : (prev ? 0 : s_altTab.ring.size() - 1);
+        s_altTab.mods   = Hl::modsAllKeyboards() & (HL_MODIFIER_ALT | HL_MODIFIER_META);
+        s_altTab.active = true;
     }
 
-    const size_t N = s_altTabWalk.size();
-    if (N < 2)
-        return;
-
-    // step around the frozen ring, skipping entries that died mid-walk
+    // step around the frozen ring, skipping entries that died mid-walk; the
+    // window the walk began on stays selectable, as in Plasma's switcher
+    const size_t N = s_altTab.ring.size();
     for (size_t i = 1; i <= N; i++) {
-        const size_t idx = (s_altTabPos + (prev ? N - (i % N) : i)) % N;
-        const auto   w   = s_altTabWalk[idx].lock();
-        if (!w || (w != CUR && !altTabCycleable(w)))
+        const size_t idx = (s_altTab.pos + (prev ? N - (i % N) : i)) % N;
+        const auto   w   = s_altTab.ring[idx].lock();
+        if (!w || (!(s_altTab.hasOrigin && idx == s_altTab.origin) && !altTabCycleable(w)))
             continue;
-        s_altTabPos = idx;
-        // raise + minimized-restore ride on the window.active listener
-        Hl::focusWindow(w);
+        s_altTab.pos = idx;
+        break;
+    }
+
+    // Called with no Alt/Meta held (hyprctl, a script): there is no release to
+    // wait for, so commit now.
+    if (!s_altTab.mods)
+        altTabEnd(true);
+}
+
+static void altTabOnKey(const IKeyboard::SKeyEvent& e, Event::SCallbackInfo& info) {
+    const bool UP = e.state == WL_KEYBOARD_KEY_STATE_RELEASED;
+    if (e.keycode == ALTTAB_KEY_ESC && UP && s_altTab.eatEscUp) {
+        s_altTab.eatEscUp = false;
+        info.cancelled    = true;
         return;
     }
+    if (!s_altTab.active)
+        return;
+    if (e.keycode == ALTTAB_KEY_ESC && !UP) {
+        info.cancelled    = true;
+        s_altTab.eatEscUp = true;
+        altTabEnd(false);
+        return;
+    }
+    if (!UP)
+        return;
+    // The key event fires before the depressed-modifier mask is updated, so
+    // decide from the keycode, not from the mask.
+    uint32_t mod = 0;
+    if (e.keycode == ALTTAB_KEY_LEFTALT || e.keycode == ALTTAB_KEY_RIGHTALT)
+        mod = HL_MODIFIER_ALT;
+    else if (e.keycode == ALTTAB_KEY_LEFTMETA || e.keycode == ALTTAB_KEY_RIGHTMETA)
+        mod = HL_MODIFIER_META;
+    if (mod & s_altTab.mods)
+        altTabEnd(true);
 }
 
 // lua: hyprvtb.cycle_hist_next() / cycle_hist_prev() — Alt(+Shift)+Tab.
 static int luaCycleHistNext(lua_State* L) {
     if (g_pGlobalState)
-        cycleHist(false);
+        altTabStep(false, false);
     return 0;
 }
 
 static int luaCycleHistPrev(lua_State* L) {
     if (g_pGlobalState)
-        cycleHist(true);
+        altTabStep(true, false);
+    return 0;
+}
+
+// lua: hyprvtb.cycle_app_next() / cycle_app_prev() — Alt+` / Alt+~.
+static int luaCycleAppNext(lua_State* L) {
+    if (g_pGlobalState)
+        altTabStep(false, true);
+    return 0;
+}
+
+static int luaCycleAppPrev(lua_State* L) {
+    if (g_pGlobalState)
+        altTabStep(true, true);
     return 0;
 }
 
@@ -1696,6 +1768,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }));
     // Only a MODIFIER change cancels — see CVtbKinetic::onKeyboardKey.
     g_pGlobalState->listeners.push_back(Event::bus()->m_events.input.keyboard.key.listen([](IKeyboard::SKeyEvent e, Event::SCallbackInfo& info) {
+        if (g_pGlobalState)
+            altTabOnKey(e, info);
+        if (info.cancelled)
+            return;
         if (g_pGlobalState && g_pGlobalState->kinetic)
             g_pGlobalState->kinetic->onKeyboardKey();
     }));
@@ -1728,6 +1804,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "toggle_scratch", ::luaToggleScratch);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_next", ::luaCycleHistNext);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_hist_prev", ::luaCycleHistPrev);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_app_next", ::luaCycleAppNext);
+        HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "cycle_app_prev", ::luaCycleAppPrev);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "save_session", ::luaSaveSession);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "session_probe", ::luaSessionProbe);
         HyprlandAPI::addLuaFunction(PHANDLE, "hyprvtb", "close_all", ::luaCloseAll);
@@ -1792,7 +1870,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // re-entrancy that segfaulted this plugin's v2. After a manual
     // `hyprctl plugin load`, run `hyprctl reload` yourself to apply colours.
 
-    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + MRU alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.52"};
+    return {"hyprvtb", "Vertical per-window titlebars (close / roll-up / maximize / minimize / pin / program icon / stacked title) + app-button column via socket + KDE-style edge resize + Plasma-style alt-tab + session save/restore + kinetic momentum scrolling", "lam", "3.53"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
