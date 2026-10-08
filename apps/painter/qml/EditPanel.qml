@@ -17,15 +17,15 @@ import QtQuick
 // The extras are their own list (App.editExtraImages).
 Panel {
     id: panel
-    title: App.optionalEditImage ? "Source image" : "Images"
-    badge: App.optionalEditImage ? (App.inputImage === "" ? "optional · text to image" : "editing") : (App.inputImage === "" ? "drop one" : "")
+    title: App.referenceImages ? "Reference images" : App.optionalEditImage ? "Source image" : "Images"
+    badge: App.referenceImages ? "encoder guidance" : App.optionalEditImage ? (App.inputImage === "" ? "optional · text to image" : "editing") : (App.inputImage === "" ? "drop one" : "")
 
     // The primary — it decides the output size, the rest are references.
     FrameWell {
         active: true
         path: App.inputImage
         url: App.inputImageUrl
-        emptyText: App.optionalEditImage ? "leave blank to generate; add an image to edit" : "drag or paste the image to edit here (this one sets the size)"
+        emptyText: App.referenceImages ? "reference for the encoder; output size stays independent" : App.optionalEditImage ? "leave blank to generate; add an image to edit" : "drag or paste the image to edit here (this one sets the size)"
         winActive: root.winActive
         accepts: function (u) { return App.setInputImage(u) }
         paste: function () { return App.pasteInputImage() }
@@ -40,7 +40,7 @@ Panel {
 
     TextButton {
         label: "[ Choose image… ]"
-        visible: App.optionalEditImage
+        visible: App.optionalEditImage || App.referenceImages
         winActive: root.winActive
         onClicked: root.importImage()
     }

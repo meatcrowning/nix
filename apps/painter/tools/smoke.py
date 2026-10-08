@@ -136,7 +136,7 @@ def main(argv=None):
                     help="edit the --image(s) instead of generating fresh")
     ap.add_argument("--image", action="append", default=[], metavar="PATH",
                     help="input image: the edit subject, or a video's FIRST "
-                         "frame. Repeatable (edit references).")
+                         "frame, or Krea encoder references. Repeatable.")
     ap.add_argument("--last-frame", dest="last_frame", metavar="PATH",
                     help="a video's last frame")
     ap.add_argument("--seconds", type=float, help="video duration")
@@ -308,6 +308,10 @@ def main(argv=None):
         params["editNoScale"] = mp is None
         if mp is not None:
             params["editMegapixels"] = mp
+    elif fam.get("reference_images"):
+        params["reference_images"] = refs
+        params["reference_images_local"] = list(args.image)
+        params["use_reference_images"] = bool(refs)
     elif video:
         if refs:
             params["use_input_image"] = True

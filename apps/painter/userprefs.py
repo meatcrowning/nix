@@ -132,6 +132,11 @@ def params_for(model_name, kind="image", doc=None):
         put("height", cast=int)
         return out
 
+    for key in ("system_prompt", "krea_sampling"):
+        if isinstance(g.get(key), str):
+            out[key] = g[key]
+    put("krea_shift")
+    put("reference_megapixels")
     put("cfg")
     put("batch_size", cast=int)
     put("width", cast=int)

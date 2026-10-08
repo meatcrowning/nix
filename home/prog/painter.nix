@@ -113,6 +113,8 @@ in
         ${comfyDir}/custom_nodes/painter_partial_stop.py
       $DRY_RUN_CMD ln -sfn ${../../apps/painter/comfy_nodes/painter_qwen21.py} \
         ${comfyDir}/custom_nodes/painter_qwen21.py
+      $DRY_RUN_CMD ln -sfn ${../../apps/painter/comfy_nodes/painter_krea.py} \
+        ${comfyDir}/custom_nodes/painter_krea.py
     fi
   '';
 
