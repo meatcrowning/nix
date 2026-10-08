@@ -33,6 +33,7 @@ let
   # the generic CLIPNegPip node. Upstream source includes its AGPL-3.0 license.
   kreaNegpip = pkgs.fetchzip {
     url = "https://codeload.github.com/blue-pen5805/ComfyUI-krea2-negpip/tar.gz/6e2a66505033e4359d69adf4813aa21b74ad01de";
+    extension = "tar.gz";
     hash = "sha256-4te3Ec0IXloASxteVdAlStmJGrRoZO+vcJyuI0qwuj8=";
   };
 
