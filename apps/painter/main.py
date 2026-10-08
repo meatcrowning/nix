@@ -1303,8 +1303,9 @@ class Painter(QObject):
         self.client.fetch_stats(got)
 
     def _on_ws_connected(self):
-        if self._object_info is None:
-            self.client.fetch_object_info(self._on_object_info)
+        # A restarted backend may have added or removed custom nodes. Refresh
+        # even when this window still holds the previous process's catalog.
+        self.client.fetch_object_info(self._on_object_info)
 
     def _on_log(self, line):
         self._log.append(time.strftime("%H:%M:%S") + "  " + line)
