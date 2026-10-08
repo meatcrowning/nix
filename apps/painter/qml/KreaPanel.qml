@@ -15,15 +15,20 @@ Panel {
         text: "Negative box is applied at CFG 1. Signed weights such as (blur:-1) also work in the positive prompt."
         color: Theme.textDim
     }
-    PixelText { text: "System prompt"; color: Theme.textDim }
-    PromptBox {
-        objectName: "kreaSystemPrompt"
+    // Keep the editor's visual parent stable when Panel parks collapsed rows.
+    Column {
         width: parent.width
-        boxHeight: 100
-        placeholder: "Encoder system prompt (empty for no instruction)"
-        value: root.gen.system_prompt
-        onEdited: function(t) { root.set("system_prompt", t) }
-        onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
+        spacing: 5
+        PixelText { text: "System prompt"; color: Theme.textDim }
+        PromptBox {
+            objectName: "kreaSystemPrompt"
+            width: parent.width
+            boxHeight: 100
+            placeholder: "Encoder system prompt (empty for no instruction)"
+            value: root.gen.system_prompt
+            onEdited: function(t) { root.set("system_prompt", t) }
+            onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
+        }
     }
     Field {
         label: "Schedule"
