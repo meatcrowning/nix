@@ -407,6 +407,8 @@ class LoraStack(QAbstractListModel):
 class LoraChoices(QAbstractListModel):
     """Every LoRA on disk, tagged with whether it fits the selected model."""
 
+    compatibleCountChanged = Signal()
+
     NameRole = Qt.UserRole + 1
     OkRole = Qt.UserRole + 2
     ReasonRole = Qt.UserRole + 3
@@ -437,6 +439,10 @@ class LoraChoices(QAbstractListModel):
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()
+        self.compatibleCountChanged.emit()
+
+    compatibleCount = Property(int, lambda self: sum(r["ok"] for r in self._rows),
+                               notify=compatibleCountChanged)
 
 
 

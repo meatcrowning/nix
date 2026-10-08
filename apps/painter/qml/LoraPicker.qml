@@ -16,14 +16,6 @@ Rectangle {
     border.color: Theme.border
     border.width: Theme.ctrlBorder
 
-    function compatCount() {
-        var n = 0
-        for (var i = 0; i < LoraChoices.rowCount(); i++) {
-            if (LoraChoices.data(LoraChoices.index(i, 0), 0x0102)) n++
-        }
-        return n
-    }
-
     Column {
         anchors.fill: parent
         anchors.margins: 4
@@ -54,6 +46,15 @@ Rectangle {
             clip: true
             model: LoraChoices
             ScrollBar.vertical: VScroll { id: lbar }
+
+            PixelText {
+                anchors.fill: parent
+                anchors.margins: 6
+                visible: !picker.showAll && LoraChoices.compatibleCount === 0
+                text: "No compatible LoRAs found. Add files to the model library's loras folder, then rescan."
+                wrapMode: Text.WordWrap
+                color: Theme.dim
+            }
 
             delegate: Item {
                 // clear of the scrollbar's gutter, never under it

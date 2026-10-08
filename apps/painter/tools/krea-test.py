@@ -12,6 +12,7 @@ sys.path.insert(0, str(HERE))
 import registry as R
 import graph as G
 import userprefs as UP
+import fingerprint as FP
 
 
 def fixture(path, shapes):
@@ -30,6 +31,40 @@ def models(root):
         "model.layers.0.post_attention_layernorm.weight": [2560],
         "visual.deepstack_merger_list.0.norm.weight": [4096]})
     fixture(root / "vae/qwen_image_vae.safetensors", {"conv1.weight": [32, 16, 1, 1, 1]})
+
+
+def lora_checks():
+    # Match Comfy's Krea2 Diffusers mapping, including SimpleTuner LyCORIS.
+    pairs = {
+        "transformer_blocks.0.attn.to_q": "blocks.0.attn.wq",
+        "transformer_blocks.0.attn.to_out": "blocks.0.attn.wo",
+        "transformer_blocks.0.attn.to_out.0": "blocks.0.attn.wo",
+        "transformer_blocks.0.ff.up": "blocks.0.mlp.up",
+        "text_fusion.refiner_blocks.0.attn.to_gate": "txtfusion.refiner_blocks.0.attn.gate",
+        "img_in": "first", "time_embed.linear_1": "tmlp.0",
+        "time_embed.linear_2": "tmlp.2", "time_mod_proj": "tproj.1",
+        "txt_in.linear_1": "txtmlp.1", "txt_in.linear_2": "txtmlp.3",
+        "final_layer.linear": "last.linear",
+    }
+    with tempfile.TemporaryDirectory(prefix="painter-krea-lora-") as tmp:
+        root = Path(tmp)
+        models(root)
+        path = root / "diffusion_models/kroma-v0.3.1-turbo-opd-int8-convrot.safetensors"
+        shapes = {k: v["shape"] for k, v in FP.read_header(str(path)).tensors.items()}
+        shapes.update({v + ".weight": [16, 16] for v in pairs.values()})
+        fixture(path, shapes)
+        for prefix in ("transformer.", "diffusion_model.", "lycoris_"):
+            fixture(root / "loras" / (prefix + ".safetensors"), {
+                prefix + (k.replace(".", "_") if prefix == "lycoris_" else k) + suffix: [4, 16]
+                for k in pairs for suffix in (".lora_A.weight", ".lora_B.weight")})
+        fixture(root / "loras/native.safetensors", {"img_in.lora_A.weight": [4, 64]})
+        fixture(root / "loras/flux-krea.safetensors", {
+            "lora_unet_double_blocks_0_img_attn_qkv.lora_down.weight": [4, 16]})
+        reg = R.Registry(tmp, R.Overrides(str(root / "overrides.json")), use_cache=False)
+        ok, no = reg.compatible_loras(reg.base_models()[0])
+        assert len(ok) == 4 and all(v["score"] == 1 for _, v in ok), (ok, no)
+        assert [e.name for e, _ in no] == ["flux-krea.safetensors"]
+    print("PASS Krea2 native, Diffusers and LyCORIS compatibility; FLUX adapters excluded")
 
 
 def graph_checks():
@@ -53,6 +88,9 @@ def graph_checks():
                 built = reg.build(entry, p)
                 g = G.Graph(built["prompt"])
                 assert g.node("loader")["inputs"]["enable_convrot"] is True
+                assert g.node("lora0")["class_type"] == "LoraLoaderModelOnly"
+                assert g.node("lora0")["inputs"]["model"] == [g.id_of("loader"), 0]
+                assert g.node("lora0")["inputs"]["strength_model"] == .6
                 assert g.node("clip")["inputs"]["type"] == "krea2"
                 for role in ("encode_pos", "encode_neg"):
                     node = g.node(role)
@@ -163,6 +201,7 @@ def backend_checks():
 
 
 if __name__ == "__main__":
+    lora_checks()
     graph_checks()
     if "--backend" in sys.argv:
         backend_checks()

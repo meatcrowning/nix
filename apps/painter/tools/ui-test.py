@@ -5159,6 +5159,16 @@ def test_krea(win, ctl, tmp):
     g = prop(APP, "gen")
     check("Kroma starts at author settings", g["steps"] == 8 and g["cfg"] == 1 and g["krea_shift"] == 1.15)
     check("Kroma has encoder controls and optional references", ctl.encoderControls and ctl.referenceImages and not ctl.isEdit)
+    check("Kroma exposes the LoRA panel", ctl.supportsLoras)
+    choices_before = ctl.choices._rows
+    try:
+        ctl.choices.set_rows([dict(ok=ok, name="fixture", reason="fixture", score=float(ok),
+                                  patches_clip=False) for ok in (True, False)])
+        check("LoRA picker counts compatible files", ctl.choices.compatibleCount == 1)
+        ctl.choices.set_rows([])
+        check("LoRA picker updates its empty state", ctl.choices.compatibleCount == 0)
+    finally:
+        ctl.choices.set_rows(choices_before)
     editor = find(win.contentItem(), "PromptEditor")
     prompts = find_all(editor, "PromptBox")
     check("Kroma completes both prompts without changing prose grammar",
