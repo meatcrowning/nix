@@ -83,6 +83,32 @@ def graph_checks():
         default_graph = G.Graph(reg.build(entry, {})["prompt"])
         assert default_graph.node("encode_neg")["class_type"] == "ConditioningZeroOut"
         assert default_graph.node("encode_neg")["inputs"] == {"conditioning": [default_graph.id_of("encode_pos"), 0]}
+        for cfg in (1.0, 1.5):
+            for mode in ("native", "turbo_fixed"):
+                for refs in ([], ["reference.png"]):
+                    request = dict(positive="red cube, (blue:-0.5)", negative="blur",
+                                   cfg=cfg, krea_sampling=mode, reference_images=refs,
+                                   toggles={"negpip": True},
+                                   loras=[{"name": "style.safetensors", "strength": .7}])
+                    built = reg.build(entry, request)
+                    patched = G.Graph(built["prompt"])
+                    patch = patched.node("negpip")
+                    assert patch["class_type"] == "ApplyKrea2NegPiP"
+                    assert patch["inputs"]["model"] == [patched.id_of("lora0"), 0]
+                    assert patch["inputs"]["value_strength"] == 1.0
+                    assert patch["inputs"]["debug"] == "off"
+                    assert patched.node("encode_pos")["inputs"]["clip"] == [patched.id_of("negpip"), 1]
+                    assert patched.node("encode_pos")["inputs"]["text"] == "red cube, (blue:-0.5), (blur:-1)"
+                    model_role = "sampler" if mode == "native" else "krea_sampling"
+                    assert patched.node(model_role)["inputs"]["model"] == [patched.id_of("negpip"), 0]
+                    assert built["params"]["prompt_boxes"]["negative"] == "blur"
+                    assert built["params"]["negative"] == ""
+                    if cfg == 1:
+                        assert patched.node("encode_neg")["class_type"] == "ConditioningZeroOut"
+                    else:
+                        assert patched.node("encode_neg")["inputs"]["text"] == ""
+                    if refs:
+                        assert "images.image_0" in patched.node("encode_pos")["inputs"]
         doc = {"genByModel": {entry.name: dict(system_prompt="", krea_sampling="turbo_fixed",
                                                 krea_shift=1.3, reference_megapixels=.5)}}
         prefs = UP.params_for(entry.name, doc=doc)
