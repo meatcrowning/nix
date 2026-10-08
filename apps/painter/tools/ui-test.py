@@ -5137,6 +5137,15 @@ def test_krea(win, ctl, tmp):
     from PySide6.QtCore import QMetaObject, Qt, Q_RETURN_ARG
     from PySide6.QtGui import QImage
     import importlib.util
+    old_info, old_fetch = ctl._object_info, ctl.client.fetch_object_info
+    try:
+        ctl._object_info = {"OldBackendNode": {}}
+        ctl.client.fetch_object_info = lambda callback: callback({"ApplyKrea2NegPiP": {}})
+        ctl._on_ws_connected()
+        check("backend reconnect replaces the stale node catalog",
+              "ApplyKrea2NegPiP" in ctl._object_info and "OldBackendNode" not in ctl._object_info)
+    finally:
+        ctl._object_info, ctl.client.fetch_object_info = old_info, old_fetch
     spec = importlib.util.spec_from_file_location("krea_checks", Path(__file__).with_name("krea-test.py"))
     checks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checks)
