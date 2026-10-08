@@ -5157,6 +5157,12 @@ def test_krea(win, ctl, tmp):
           and g["promptTransform"] == "none" and not editor.property("pillsAvailable"))
     panel = find(win.contentItem(), "KreaPanel")
     check("encoder panel is exposed", panel is not None and panel.isVisible())
+    negpip = next((item for item in find_all(panel, "Toggle")
+                   if item.objectName() == "kreaNegpip"), None)
+    check("Krea NegPiP toggle is exposed and initially off", negpip is not None and negpip.isVisible() and not negpip.property("checked"))
+    QMetaObject.invokeMethod(negpip, "toggled", Qt.DirectConnection, Q_ARG(bool, True))
+    g = prop(APP, "gen")
+    check("Krea NegPiP toggle reaches settings", g["negpip"] is True)
     check("encoder system instruction does not autocomplete tags",
           all(not box.property("tagsEnabled") for box in find_all(panel, "PromptBox")))
     pane = find(win.contentItem(), "ParamsPane")
@@ -5189,6 +5195,7 @@ def test_krea(win, ctl, tmp):
         check("references upload before submission", uploads == [source, second] and len(sent) == 1)
         if sent:
             params = sent[-1]
+            check("Krea NegPiP reaches the submitted graph", params["toggles"]["negpip"] is True)
             check("system prompt and schedule reach backend", params["system_prompt"] == "Keep {braces}" and params["krea_sampling"] == "turbo_fixed")
             check("reference metadata preserves local and remote names", params["reference_images_local"] == [source, second] and params["reference_images"] == ["remote/krea-reference.png", "remote/krea-second.png"])
             graph = ctl.reg.build(ctl.reg.find(model), params)
@@ -5205,6 +5212,7 @@ def test_krea(win, ctl, tmp):
         import userprefs
         saved = userprefs.params_for(model)
         check("encoder settings persist", saved.get("system_prompt") == "Keep {braces}" and saved.get("krea_sampling") == "turbo_fixed")
+        check("Krea NegPiP persists", saved.get("toggles", {}).get("negpip") is True)
         ctl.selectModelByName("alpha-model.safetensors"); spin(60)
         ctl.selectModelByName(model); spin(60)
         check("switching models preserves Kroma adjustments", prop(APP, "gen")["system_prompt"] == "Keep {braces}" and prop(APP, "gen")["steps"] == 1)

@@ -494,6 +494,11 @@ class Registry:
             g.remove("model_sampling")
         if not toggles.get("negpip", False):
             g.remove("negpip")
+        elif fam.get("encoder_controls"):
+            g.set_class("negpip", "ApplyKrea2NegPiP", inputs={
+                "value_strength": 1.0, "patch_txtfusion_refiners": False,
+                "block_start": 0, "block_end": 27, "block_stride": 1,
+                "debug": "off"})
 
         # --- LoRA chain ------------------------------------------------------
         loras = p.get("loras") or []
@@ -533,7 +538,7 @@ class Registry:
             if mode not in ("native", "manual", "turbo_fixed"):
                 raise G.GraphError(f"Unknown Krea sampling mode: {mode}")
             # Krea uses the Flux schedule, not the generic SD3 patch.
-            if toggles.get("negpip") or toggles.get("model_sampling"):
+            if toggles.get("model_sampling"):
                 raise G.GraphError("Use Krea's sampling controls instead of generic patches")
             if mode != "native":
                 source = list(g.node("sampler")["inputs"]["model"])

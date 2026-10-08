@@ -2,6 +2,19 @@ import QtQuick
 
 Panel {
     title: "Encoder and sampling"
+    Toggle {
+        objectName: "kreaNegpip"
+        label: "NegPiP"
+        checked: root.gen.negpip
+        onToggled: function(v) { root.set("negpip", v) }
+    }
+    PixelText {
+        visible: root.gen.negpip
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: "Negative box is applied at CFG 1. Signed weights such as (blur:-1) also work in the positive prompt."
+        color: Theme.textDim
+    }
     PixelText { text: "System prompt"; color: Theme.textDim }
     PromptBox {
         objectName: "kreaSystemPrompt"

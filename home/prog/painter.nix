@@ -29,6 +29,12 @@ let
 
   comfyDir = "/home/lam/comfy";
   modelsYaml = "/home/lam/models/extra_model_paths.yaml";
+  # Native Krea attention hooks support the INT8 path; keep this separate from
+  # the generic CLIPNegPip node. Upstream source includes its AGPL-3.0 license.
+  kreaNegpip = pkgs.fetchzip {
+    url = "https://codeload.github.com/blue-pen5805/ComfyUI-krea2-negpip/tar.gz/6e2a66505033e4359d69adf4813aa21b74ad01de";
+    hash = "sha256-4te3Ec0IXloASxteVdAlStmJGrRoZO+vcJyuI0qwuj8=";
+  };
 
   painter =
     if hostProfile.isBook then
@@ -115,6 +121,8 @@ in
         ${comfyDir}/custom_nodes/painter_qwen21.py
       $DRY_RUN_CMD ln -sfn ${../../apps/painter/comfy_nodes/painter_krea.py} \
         ${comfyDir}/custom_nodes/painter_krea.py
+      $DRY_RUN_CMD ln -sfn ${kreaNegpip} \
+        ${comfyDir}/custom_nodes/ComfyUI-krea2-negpip
     fi
   '';
 
