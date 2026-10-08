@@ -5166,6 +5166,31 @@ def test_krea(win, ctl, tmp):
           and g["promptTransform"] == "none" and not editor.property("pillsAvailable"))
     panel = find(win.contentItem(), "KreaPanel")
     check("encoder panel is exposed", panel is not None and panel.isVisible())
+    # Geometry alone missed an editor whose scene graph vanished after Panel
+    # parked and restored it. Inspect the rendered interior, not just visible.
+    panel.setProperty("collapsed", True)
+    spin(50)
+    panel.setProperty("collapsed", False)
+    spin(100)
+    system_box = next(box for box in find_all(panel, "PromptBox")
+                      if box.objectName() == "kreaSystemPrompt")
+    from PySide6.QtCore import QPointF
+    grab = panel.grabToImage()
+    end = time.time() + 3
+    while grab.image().isNull() and time.time() < end:
+        spin(30)
+    image = grab.image()
+    rendered = False
+    if not image.isNull():
+        origin = system_box.mapToItem(panel, QPointF(0, 0))
+        scale = image.width() / panel.width()
+        x, y = int((origin.x() + 8) * scale), int((origin.y() + 8) * scale)
+        w, h = int((system_box.width() - 24) * scale), int((system_box.height() - 24) * scale)
+        colors = {image.pixelColor(px, py).rgba()
+                  for py in range(y, min(image.height(), y + h), 2)
+                  for px in range(x, min(image.width(), x + w), 2)}
+        rendered = len(colors) > 1
+    check("system prompt text renders after collapsing and expanding", rendered)
     negpip = next((item for item in find_all(panel, "Toggle")
                    if item.objectName() == "kreaNegpip"), None)
     check("Krea NegPiP toggle is exposed and initially off", negpip is not None and negpip.isVisible() and not negpip.property("checked"))
