@@ -538,7 +538,7 @@ _ADAPTER_SUFFIXES = (
 
 _WRAPPER_PREFIXES = (
     "diffusion_model.", "transformer.", "model.diffusion_model.", "net.",
-    "lora_unet_", "lora_te_", "lora_te1_", "lora_te2_", "base_model.model.",
+    "lora_unet_", "lora_te_", "lora_te1_", "lora_te2_", "base_model.model.", "lycoris_",
 )
 
 
@@ -570,7 +570,7 @@ def lora_targets(header: Header):
             touches_te = True
         for pre in _WRAPPER_PREFIXES:
             if base.startswith(pre):
-                if pre.startswith("lora_"):
+                if pre.startswith("lora_") or pre == "lycoris_":
                     kohya = True
                 base = base[len(pre):]
                 break
@@ -606,9 +606,16 @@ def lora_match_score(targets, kohya: bool, base_keys, aliases: dict | None = Non
 
     hits, missed = 0, set()
     for t in targets:
+        # Native module names remain valid even when a family also provides
+        # aliases for training tools' alternative (Diffusers) namespaces.
+        if t in modules or (kohya and _dedot(t) in lookup):
+            hits += 1
+            continue
         cand = t
         if aliases:
             for src, dst in aliases.items():
+                if kohya:
+                    src, dst = _dedot(src), _dedot(dst)
                 if src in cand:
                     cand = cand.replace(src, dst)
         if kohya:

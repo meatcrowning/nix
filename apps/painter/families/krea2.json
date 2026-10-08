@@ -32,10 +32,18 @@
       "transformer_blocks.": "blocks.",
       "ff.": "mlp.",
       "to_out.0": "wo",
+      "to_out": "wo",
       "to_q": "wq",
       "to_k": "wk",
       "to_v": "wv",
-      "to_gate": "gate"
+      "to_gate": "gate",
+      "img_in": "first",
+      "time_embed.linear_1": "tmlp.0",
+      "time_embed.linear_2": "tmlp.2",
+      "time_mod_proj": "tproj.1",
+      "txt_in.linear_1": "txtmlp.1",
+      "txt_in.linear_2": "txtmlp.3",
+      "final_layer.linear": "last.linear"
     },
     "loader": "LoraLoaderModelOnly"
   },
