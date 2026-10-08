@@ -2,6 +2,7 @@
   "graph": "universal.json",
   "loader_shape": "unet",
   "prompt_transform": "none",
+  "tag_completion": true,
   "latent_class": "EmptyLatentImage",
   "toggles": {
     "negpip": false,

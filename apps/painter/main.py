@@ -893,6 +893,9 @@ class Painter(QObject):
     mode = Property(str, lambda self: self._mode, notify=modeChanged)
     isEdit = Property(bool, lambda self: bool(self._input_image) if self.optionalEditImage else self._mode == "edit", notify=editStateChanged)
     encoderControls = Property(bool, lambda self: bool(self._selected_family().get("encoder_controls")), notify=modelChanged)
+    tagCompletion = Property(bool, lambda self: bool(self._selected_family().get("tag_completion"))
+                             or self._selected_family().get("prompt_transform") == "danbooru",
+                             notify=modelChanged)
     referenceImages = Property(bool, lambda self: bool(self._selected_family().get("reference_images")), notify=modelChanged)
     optionalEditImage = Property(bool, lambda self: bool(self._selected_family().get("optional_edit_image")), notify=modelChanged)
     nativeScheduler = Property(str, lambda self: self._selected_family().get("native_scheduler", ""), notify=modelChanged)
