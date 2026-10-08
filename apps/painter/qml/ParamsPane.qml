@@ -99,7 +99,7 @@ Item {
     // (docs/painter-kde-layout.md phase 7).
     readonly property var builtinOrder: [
         "model", "edit", "video", "resolution", "editscale",
-        "prompt", "lora", "sampling", "patches", "editseed"
+        "prompt", "krea", "lora", "sampling", "patches", "editseed"
     ]
 
     // WHICH SECTIONS THIS MODE HAS, in one table rather than a `visible:` on each
@@ -109,7 +109,8 @@ Item {
     // (the loader hides the item, the item then reports hidden) and the whole
     // column stays empty. Measured exactly that way.
     function sectionVisible(key) {
-        return key === "edit" ? (App.isEdit || App.optionalEditImage)
+        return key === "edit" ? (App.isEdit || App.optionalEditImage || (App.referenceImages && root.gen.useReferences))
+             : key === "krea" ? App.encoderControls
              : key === "editscale" ? App.isEdit
              : key === "editseed" ? (App.isEdit && !App.editSampling)
              : key === "video" ? (App.isVideo && !App.isEdit)
@@ -126,6 +127,7 @@ Item {
              : key === "video" ? cVideo
              : key === "resolution" ? cResolution
              : key === "editscale" ? cEditScale
+             : key === "krea" ? cKrea
              : key === "prompt" ? cPrompt
              : key === "lora" ? cLora
              : key === "sampling" ? cSampling
@@ -207,6 +209,7 @@ Item {
     // The sections themselves. Each keeps the `visible` gate it had as a
     // declared child, because that gate is what makes one order serve all three
     // modes.
+    Component { id: cKrea; KreaPanel { width: parent.width; persistKey: "panel.krea" } }
     Component { id: cModel; ModelPicker { width: parent.width; persistKey: "panel.model" } }
     Component {
         id: cEdit

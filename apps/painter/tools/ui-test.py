@@ -5131,6 +5131,78 @@ def test_pairing(win, ctl, tmp):
     check("removed VAE leaves picker on rescan", vae.name not in prop(pickers[1], "options"))
 
 
+def test_krea(win, ctl, tmp):
+    from PySide6.QtCore import QMetaObject, Qt, Q_RETURN_ARG
+    from PySide6.QtGui import QImage
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("krea_checks", Path(__file__).with_name("krea-test.py"))
+    checks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checks)
+    checks.models(Path(os.environ["PAINTER_MODELS"]))
+    ctl.setMode("")
+    ctl.rescan()
+    spin(150)
+    model = "kroma-v0.3.1-turbo-opd-int8-convrot.safetensors"
+    ctl.selectModelByName(model)
+    spin(150)
+    g = prop(APP, "gen")
+    check("Kroma starts at author settings", g["steps"] == 8 and g["cfg"] == 1 and g["krea_shift"] == 1.15)
+    check("Kroma has encoder controls and optional references", ctl.encoderControls and ctl.referenceImages and not ctl.isEdit)
+    panel = find(win.contentItem(), "KreaPanel")
+    check("encoder panel is exposed", panel is not None and panel.isVisible())
+    pane = find(win.contentItem(), "ParamsPane")
+    visible = lambda key: QMetaObject.invokeMethod(pane, "sectionVisible", Qt.DirectConnection, Q_RETURN_ARG("QVariant"), Q_ARG("QVariant", key))
+    check("references begin off; normal dials remain exposed", not visible("edit") and visible("sampling") and visible("resolution"))
+    source = os.path.join(tmp, "krea-reference.png")
+    second = os.path.join(tmp, "krea-second.png")
+    image = QImage(64, 64, QImage.Format_RGB32)
+    image.fill(0xff224466)
+    image.save(source); image.save(second)
+    ctl.setInputImage(source)
+    ctl.addEditImage(second)
+    g.update(system_prompt="Keep {braces}", krea_sampling="turbo_fixed", krea_shift=2.0,
+             reference_megapixels=.3, useReferences=True, steps=1, cfg=1.4,
+             sampler_name="euler_ancestral", scheduler="normal", seed=42, randomSeed=False)
+    APP.setProperty("gen", g)
+    spin(100)
+    check("reference wells do not switch to editing or hide output size", visible("edit") and visible("resolution") and not ctl.isEdit)
+    sent, uploads = [], []
+    original_start, original_upload, original_oi = ctl._start_jobs, ctl.client.upload_image, ctl._object_info
+    ctl._object_info = {"stub": True}
+    ctl._start_jobs = lambda entry, params, count: sent.append(params)
+    def upload(path, cb):
+        uploads.append(path)
+        cb("remote/" + os.path.basename(path), None)
+    ctl.client.upload_image = upload
+    try:
+        APP.metaObject().invokeMethod(APP, "submit")
+        spin(80)
+        check("references upload before submission", uploads == [source, second] and len(sent) == 1)
+        if sent:
+            params = sent[-1]
+            check("system prompt and schedule reach backend", params["system_prompt"] == "Keep {braces}" and params["krea_sampling"] == "turbo_fixed")
+            check("reference metadata preserves local and remote names", params["reference_images_local"] == [source, second] and params["reference_images"] == ["remote/krea-reference.png", "remote/krea-second.png"])
+            graph = ctl.reg.build(ctl.reg.find(model), params)
+            check("submitted graph uses encoder references without edit sizing", graph["params"]["width"] == g["width"] and not graph["params"].get("edit"))
+            QMetaObject.invokeMethod(APP, "injectParams", Qt.DirectConnection, Q_ARG("QVariant", params))
+            spin(60)
+            check("gallery injection restores encoder controls and references", prop(APP, "gen")["useReferences"] and ctl.editExtraImages == [second])
+        g = prop(APP, "gen"); g["useReferences"] = False
+        APP.setProperty("gen", g)
+        APP.metaObject().invokeMethod(APP, "submit")
+        spin(60)
+        check("turning references off omits all image inputs", len(sent) == 2 and not sent[-1].get("reference_images") and len(uploads) == 2)
+        APP.metaObject().invokeMethod(APP, "saveState")
+        import userprefs
+        saved = userprefs.params_for(model)
+        check("encoder settings persist", saved.get("system_prompt") == "Keep {braces}" and saved.get("krea_sampling") == "turbo_fixed")
+        ctl.selectModelByName("alpha-model.safetensors"); spin(60)
+        ctl.selectModelByName(model); spin(60)
+        check("switching models preserves Kroma adjustments", prop(APP, "gen")["system_prompt"] == "Keep {braces}" and prop(APP, "gen")["steps"] == 1)
+    finally:
+        ctl._start_jobs, ctl.client.upload_image, ctl._object_info = original_start, original_upload, original_oi
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -5145,9 +5217,11 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab"):
+                "pairing", "source", "tags", "tab", "krea"):
         print("== %s ==" % only)
-        if only == "tab":
+        if only == "krea":
+            test_krea(win, ctl, tmp)
+        elif only == "tab":
             test_tab_complete(win, ctl, keep)
         elif only == "tags":
             test_tag_complete(win, ctl, keep)
@@ -5212,6 +5286,7 @@ def main():
     print("== live row ==");           test_live_row(win, ctl, tmp)
     print("== preview zoom ==");       test_preview_zoom(win, ctl, tmp)
     print("== source actions ==");     test_source_actions(win, ctl, tmp)
+    print("== krea ==");               test_krea(win, ctl, tmp)
 
     real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
     for w in real:

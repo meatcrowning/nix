@@ -528,6 +528,38 @@ class Registry:
         g.set_input("encode_pos", "text", pos)
         g.set_input("encode_neg", "text", neg)
 
+        if fam.get("encoder_controls"):
+            mode = p.get("krea_sampling", "native")
+            if mode not in ("native", "manual", "turbo_fixed"):
+                raise G.GraphError(f"Unknown Krea sampling mode: {mode}")
+            # Krea uses the Flux schedule, not the generic SD3 patch.
+            if toggles.get("negpip") or toggles.get("model_sampling"):
+                raise G.GraphError("Use Krea's sampling controls instead of generic patches")
+            if mode != "native":
+                source = list(g.node("sampler")["inputs"]["model"])
+                patch = g.add_node("PainterKreaSampling", {
+                    "model": source, "mode": mode, "shift": float(p["krea_shift"])}, "krea_sampling")
+                g.retarget(source, [patch, 0], skip={patch})
+            for role in ("encode_pos", "encode_neg"):
+                g.set_class(role, "PainterKreaEncode", inputs={
+                    "system_prompt": p["system_prompt"],
+                    "reference_megapixels": float(p["reference_megapixels"])})
+            refs = list(p.get("reference_images") or [])
+            if len(refs) > 100:
+                raise G.GraphError("ComfyUI accepts at most 100 reference inputs")
+            for i, ref in enumerate(refs):
+                image = g.add_node("LoadImage", {"image": ref}, f"reference_{i}")
+                # Both CFG branches see the same references; the negative text
+                # is the only difference. CFG 1 skips negative encoding in sampling.
+                for role in ("encode_pos", "encode_neg"):
+                    g.set_input(role, f"images.image_{i}", [image, 0])
+
+            if float(p["cfg"]) == 1.0:
+                # Comfy executes both conditioning branches before sampling.
+                # Avoid a second 4B/vision encode when CFG won't consume it.
+                g.node("encode_neg")["class_type"] = "ConditioningZeroOut"
+                g.node("encode_neg")["inputs"] = {"conditioning": [g.id_of("encode_pos"), 0]}
+
         # --- latent ----------------------------------------------------------
         latent_cls = fam.get("latent_class", "EmptyLatentImage")
         if latent_cls != "EmptyLatentImage":

@@ -131,6 +131,8 @@ Item {
     // Live generation settings, seeded from the selected model's family.
     property var gen: ({
         positive: "", negative: "",
+        system_prompt: "", krea_sampling: "native", krea_shift: 1.15,
+        reference_megapixels: 0.25, useReferences: false,
         steps: 20, cfg: 1.0, denoise: 1.0,
         sampler_name: "euler", scheduler: "simple",
         seed: -1, randomSeed: true, reuseSeed: false, batch_size: 1, count: 1,
@@ -311,6 +313,11 @@ Item {
         if (root.defaultsFor) root.genByModel[root.defaultsFor] = snapshotGen()
         root.defaultsFor = App.selectedName
         var g = clone(gen)
+        g.system_prompt = d.system_prompt !== undefined ? d.system_prompt : ""
+        g.krea_sampling = d.krea_sampling || "native"
+        g.krea_shift = d.krea_shift !== undefined ? d.krea_shift : 1.15
+        g.reference_megapixels = d.reference_megapixels || 0.25
+        g.useReferences = false
         g.steps = d.steps
         // A video family has no CFG at all (BasicGuider takes none), so it
         // declares no default for it — keep what was there rather than writing
@@ -408,7 +415,7 @@ Item {
             }, g.count)
             return
         }
-        App.generate({
+        var imageParams = {
             positive: g.positive, negative: g.negative,
             steps: g.steps, cfg: g.cfg, denoise: g.denoise,
             sampler_name: g.sampler_name, scheduler: g.scheduler,
@@ -417,7 +424,15 @@ Item {
             width: g.width, height: g.height,
             toggles: ({ negpip: g.negpip, model_sampling: g.modelSampling }),
             model_sampling: g.ms
-        }, g.count)
+        }
+        if (App.encoderControls) {
+            imageParams.system_prompt = g.system_prompt
+            imageParams.krea_sampling = g.krea_sampling
+            imageParams.krea_shift = g.krea_shift
+            imageParams.reference_megapixels = g.reference_megapixels
+            imageParams.use_reference_images = g.useReferences
+        }
+        App.generate(imageParams, g.count)
     }
 
     Connections {
@@ -721,7 +736,7 @@ Item {
         // paste. Offered only where there IS a well to fill (docs/DESIGN.md §10).
         { id: "import", tip: "Import Image…", menu: "file",
           icon: "document-import", shortcut: "Ctrl+O",
-          state: (App.isEdit || (App.isVideo && !gen.still) || App.optionalEditImage) ? 0 : 2 },
+          state: (App.isEdit || (App.isVideo && !gen.still) || App.optionalEditImage || App.referenceImages) ? 0 : 2 },
         // ------------------------------------------------------------- edit
         // The gallery's right-click verbs, hoisted: the same three subsets of a
         // finished job (its words, its numbers, both) plus its prompt on the
@@ -1078,7 +1093,12 @@ Item {
         nameFilters: ["Images (*.png *.jpg *.jpeg *.webp *.bmp)", "All files (*)"]
         onAccepted: {
             var u = "" + importDialog.selectedFile
-            if (App.isEdit) App.addEditImage(u)
+            if (App.referenceImages) {
+                if (App.inputImage) App.addEditImage(u)
+                else App.setInputImage(u)
+                root.set("useReferences", true)
+            }
+            else if (App.isEdit) App.addEditImage(u)
             else if (App.isVideo || App.optionalEditImage) App.setInputImage(u)
         }
     }
@@ -1159,7 +1179,7 @@ Item {
     // first, which is the one a single pasted image is nearly always for.
     function pasteWell() {
         if (hoveredWell !== "") return hoveredWell
-        if (App.isEdit || App.optionalEditImage) return "input"
+        if (App.isEdit || App.optionalEditImage || (App.referenceImages && gen.useReferences)) return "input"
         if (!App.isVideo || gen.still) return ""
         var first = gen.useInputImage, last = gen.useLastFrame
         if (first !== last) return first ? "input" : "last"
@@ -1204,6 +1224,15 @@ Item {
 
     function injectParams(p) {
         var g = clone(gen)
+        for (var key of ["system_prompt", "krea_sampling", "krea_shift", "reference_megapixels"])
+            if (p[key] !== undefined) g[key] = p[key]
+        if (App.referenceImages) {
+            App.clearEditImages()
+            var refs = p.reference_images_local || []
+            g.useReferences = p.use_reference_images === true && refs.length > 0
+                              && App.restoreInputImage(refs[0])
+            if (g.useReferences) App.restoreEditImages(refs.slice(1))
+        }
         if (p.steps !== undefined) g.steps = p.steps
         if (p.cfg !== undefined) g.cfg = p.cfg
         if (p.denoise !== undefined) g.denoise = p.denoise

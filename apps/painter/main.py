@@ -892,6 +892,8 @@ class Painter(QObject):
     # the list is greyed out — and `edit` decides which pipeline is built.
     mode = Property(str, lambda self: self._mode, notify=modeChanged)
     isEdit = Property(bool, lambda self: bool(self._input_image) if self.optionalEditImage else self._mode == "edit", notify=editStateChanged)
+    encoderControls = Property(bool, lambda self: bool(self._selected_family().get("encoder_controls")), notify=modelChanged)
+    referenceImages = Property(bool, lambda self: bool(self._selected_family().get("reference_images")), notify=modelChanged)
     optionalEditImage = Property(bool, lambda self: bool(self._selected_family().get("optional_edit_image")), notify=modelChanged)
     nativeScheduler = Property(str, lambda self: self._selected_family().get("native_scheduler", ""), notify=modelChanged)
     supportsPatches = Property(bool, lambda self: self._selected_family().get("supports_patches", True), notify=modelChanged)
@@ -1679,6 +1681,14 @@ class Painter(QObject):
         # EDITING NEEDS THE PICTURE, and it is the one input with no default —
         # so it is checked before anything is uploaded rather than failing as a
         # node error with an empty filename in it.
+        if self.referenceImages and params.get("use_reference_images"):
+            if not self._input_image:
+                self.toast.emit("add a reference image or turn references off", True)
+                return
+            paths = [self._input_image] + [p for p in self._edit_extra if p]
+            self._upload_edit_then_start(entry, dict(params), count, paths)
+            return
+
         if params.get("edit"):
             if not self._input_image:
                 self.toast.emit("drop an image to edit first", True)
@@ -1734,11 +1744,12 @@ class Painter(QObject):
             # takes): the output PNG keeps it so opening an edit result can show
             # the before/after in the viewer's compare mode. It never reaches
             # the graph — no node reads it — only the recorded parameters.
-            self._start_jobs(
-                entry,
-                dict(params, input_image=refs[0], input_images=list(refs),
-                     input_image_local=paths[0]),
-                count)
+            if params.get("use_reference_images"):
+                uploaded = dict(params, reference_images=list(refs), reference_images_local=list(paths))
+            else:
+                uploaded = dict(params, input_image=refs[0], input_images=list(refs),
+                                input_image_local=paths[0])
+            self._start_jobs(entry, uploaded, count)
             return
         path = paths[i]
         if i == 0 and self._uploaded[0] == path and self._uploaded[1]:

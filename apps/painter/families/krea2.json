@@ -7,26 +7,22 @@
     "negpip": false,
     "model_sampling": false
   },
-  "model_sampling": {
-    "shift_start": 3.5,
-    "shift_end": 1.2,
-    "start_percent": 0.0,
-    "end_percent": 0.5,
-    "curve": "ease_in",
-    "outside_window": "hold",
-    "multiplier": 1.0
-  },
+  "model_sampling": {},
   "defaults": {
-    "steps": 50,
-    "cfg": 0.5,
-    "sampler_name": "euler_cfg_pp",
-    "scheduler": "beta",
+    "steps": 8,
+    "cfg": 1.0,
+    "sampler_name": "euler",
+    "scheduler": "simple",
     "denoise": 1.0,
-    "add_noise": true
+    "add_noise": true,
+    "system_prompt": "Describe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:",
+    "krea_sampling": "native",
+    "krea_shift": 1.15,
+    "reference_megapixels": 0.25
   },
   "resolution": {
-    "megapixels": 2.7,
-    "multiple": 8,
+    "megapixels": 1.0,
+    "multiple": 16,
     "aspect": "2:3"
   },
   "lora": {
@@ -43,7 +39,7 @@
     "loader": "LoraLoaderModelOnly"
   },
   "id": "krea2",
-  "label": "Flux Krea 2",
+  "label": "Kroma / Krea 2",
   "detect": "krea2",
   "text_encoder": {
     "te_model": "QWEN3VL_4B",
@@ -69,5 +65,8 @@
       "steps": 8,
       "cfg": 1.0
     }
-  }
+  },
+  "supports_patches": false,
+  "reference_images": true,
+  "encoder_controls": true
 }
