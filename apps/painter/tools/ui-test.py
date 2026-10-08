@@ -4342,8 +4342,8 @@ def test_tag_complete(win, ctl, keep):
     [his, 2026-08-28] tag autocomplete "a la those comfyui extensions and what
     the og cte does". The vocabulary was already here — painter spells a written
     prompt with it on the way out (`pylib/boorutags`, `graph.danbooru_prompt`) —
-    so what is checked here is the half that is new: the gate (a prose family
-    gets no tag list at all), the index building OFF the GUI thread, the alias
+    so what is checked here is the family capability gate, the index building
+    OFF the GUI thread, the alias
     that makes a half-remembered tag land on the real one, and the four keys the
     list owns while it is open.
     """
@@ -4357,9 +4357,7 @@ def test_tag_complete(win, ctl, keep):
     if popup is None or ctl.reg is None:
         return
 
-    # An anima model and a krea one, exactly as the preset tests stage them:
-    # the gate is the FAMILY's `prompt_transform`, so the check needs a model
-    # of each kind on disk.
+    # Anima transforms tags; Krea offers completion while preserving prose.
     root = os.environ["PAINTER_MODELS"]
     staged = {k: MODE_FAKES[k] for k in
               ("unet/anima-base-v1.0.safetensors",
@@ -4378,11 +4376,11 @@ def test_tag_complete(win, ctl, keep):
             except OSError: pass
         fp.save_cache({}); ctl.rescan(); spin(120)
 
-    # --- the gate: tags are a DANBOORU-family feature ----------------------
+    # --- completion is independent of the prompt transform ---------------
     ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
     spin(200)
-    check("a prose family gets no completer at all",
-          box.property("tagsOn") is False, prop(APP, "gen").get("promptTransform"))
+    check("Krea offers completion while preserving prose",
+          box.property("tagsOn") is True and prop(APP, "gen").get("promptTransform") == "none")
     ctl.selectModelByName("anima-base-v1.0.safetensors")
     spin(200)
     if prop(APP, "gen").get("promptTransform") != "danbooru":
@@ -4407,6 +4405,8 @@ def test_tag_complete(win, ctl, keep):
         edit.setProperty("cursorPosition", len(text))
         spin(300)
 
+    ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
+    spin(200)
     type_into("1gi")
     check("a prefix opens the list", popup.property("visible") is True)
     check("...on the tag the site actually has, most-used first",
@@ -4422,6 +4422,8 @@ def test_tag_complete(win, ctl, keep):
           prop(APP, "gen").get("positive") == "1girl, ",
           prop(APP, "gen").get("positive"))
 
+    ctl.selectModelByName("anima-base-v1.0.safetensors")
+    spin(200)
     # An ALIAS is half the value: the tag a model half-remembers, resolved.
     type_into("sole_fem")
     check("an alias resolves to the canonical tag",
@@ -5148,8 +5150,15 @@ def test_krea(win, ctl, tmp):
     g = prop(APP, "gen")
     check("Kroma starts at author settings", g["steps"] == 8 and g["cfg"] == 1 and g["krea_shift"] == 1.15)
     check("Kroma has encoder controls and optional references", ctl.encoderControls and ctl.referenceImages and not ctl.isEdit)
+    editor = find(win.contentItem(), "PromptEditor")
+    prompts = find_all(editor, "PromptBox")
+    check("Kroma completes both prompts without changing prose grammar",
+          len(prompts) == 2 and all(box.property("tagsEnabled") for box in prompts)
+          and g["promptTransform"] == "none" and not editor.property("pillsAvailable"))
     panel = find(win.contentItem(), "KreaPanel")
     check("encoder panel is exposed", panel is not None and panel.isVisible())
+    check("encoder system instruction does not autocomplete tags",
+          all(not box.property("tagsEnabled") for box in find_all(panel, "PromptBox")))
     pane = find(win.contentItem(), "ParamsPane")
     visible = lambda key: QMetaObject.invokeMethod(pane, "sectionVisible", Qt.DirectConnection, Q_RETURN_ARG("QVariant"), Q_ARG("QVariant", key))
     check("references begin off; normal dials remain exposed", not visible("edit") and visible("sampling") and visible("resolution"))

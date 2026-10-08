@@ -12,11 +12,8 @@ Rectangle {
     signal edited(string text)
 
     // ------------------------------------------------------ tag completion
-    //: The scene's one `TagPopup` (see Root.qml), and whether this family's
-    //: prompt is written in Danbooru tags at all. On a prose family — Krea's
-    //: `<think>` paragraphs, a video shot description — a tag list popping up
-    //: mid-sentence is noise, so the whole feature is off there rather than
-    //: merely unhelpful.
+    // The scene's shared popup and the family's completion capability.
+    // Long prose clauses are filtered by the query rules below.
     property Item tagPopup: null
     property bool tagsEnabled: false
     readonly property bool tagsOn: box.tagsEnabled && box.tagPopup !== null
