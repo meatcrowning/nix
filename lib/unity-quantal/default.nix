@@ -8,6 +8,8 @@
 , xmessage, weston, xwayland, mesa-demos, xinput, xrandr, librsvg, imagemagick
 , pavucontrol, system-config-printer
 , cinnamon-desktop
+, xpra, zenity, closureInfo, writeText
+, libseccomp, gnutar, gzip, bzip2, xz, unzip, zip
 }:
 let
   iso = fetchurl {
@@ -29,6 +31,30 @@ let
     libXext libXdamage libXrandr libXrender libXcomposite
     libXinerama libXcursor libXi libxshmfence
   ];
+  # Quantal's final Archive Manager update fixes the ISO build's extraction
+  # crashes. Keep the other original applications and GTK libraries intact.
+  isolatedArchiveDeb = fetchurl {
+    url = "https://old-releases.ubuntu.com/ubuntu/pool/main/f/file-roller/file-roller_3.6.1.1-0ubuntu1.2_amd64.deb";
+    hash = "sha256-uHNnxJQ8bxdYnrDbVwdd4NFnHsSdeP/tQBk9Ut81XE4=";
+  };
+  isolatedArchive = runCommand "unity-isolated-file-roller-3.6.1.1" {
+    nativeBuildInputs = [ libarchive ];
+  } ''
+    mkdir -p "$out"
+    bsdtar -xOf ${isolatedArchiveDeb} data.tar.gz | bsdtar -xf - -C "$out"
+  '';
+  archivePath = lib.makeBinPath [ gnutar gzip bzip2 xz unzip zip ];
+  restrict = runCommand "unity-isolated-restrict" {
+    nativeBuildInputs = [ stdenv.cc ];
+    buildInputs = [ libseccomp ];
+  } ''
+    mkdir -p "$out/bin"
+    $CC -Wall -Wextra -Werror -O2 ${./restrict.c} -lseccomp -o "$out/bin/unity-isolated-restrict"
+  '';
+  isolatedClosure = closureInfo {
+    rootPaths = [ runtime isolatedArchive xpra xorg-server glibc bash dbus python3
+      restrict (writeText "unity-isolated-libraries" (modernLibraries + ":" + archivePath)) ];
+  };
 in
 stdenvNoCC.mkDerivation {
   pname = "unity-quantal-session";
@@ -38,10 +64,16 @@ stdenvNoCC.mkDerivation {
   dontBuild = true;
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
-    cp session.py bridge.py screensaver.py integration.py "$out/libexec/unity-quantal/"
+    cp session.py bridge.py screensaver.py integration.py isolated.py "$out/libexec/unity-quantal/"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
-      inherit runtime modernLibraries;
+      inherit runtime modernLibraries archivePath;
+      isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
+      isolatedClosure = "${isolatedClosure}/store-paths";
+      xpra = "${xpra}/bin/xpra";
+      xvfb = "${xorg-server}/bin/Xvfb";
+      zenity = "${zenity}/bin/zenity";
+      restrict = "${restrict}/bin/unity-isolated-restrict";
       loader = "${glibc}/lib/ld-linux-x86-64.so.2";
       bwrap = "${bubblewrap}/bin/bwrap";
       python = "${python3}/bin/python3";
@@ -90,6 +122,12 @@ stdenvNoCC.mkDerivation {
     EOF
       chmod +x "$out/bin/unity-quantal-$command"
     done
+    cat > "$out/bin/unity-quantal-isolated" <<EOF
+    #!${bash}/bin/bash
+    exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"
+    EOF
+    chmod +x "$out/bin/unity-quantal-isolated"
+    python "$out/libexec/unity-quantal/isolated.py" install "$out"
     cat > "$out/share/xsessions/unity-quantal.desktop" <<EOF
     [Desktop Entry]
     Name=Unity 12.10
