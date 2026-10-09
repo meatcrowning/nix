@@ -32,6 +32,20 @@ printf 'users:x:%s:unity-test\n' "$(id -g)" > "$run/group"
 printf 'passwd: files\ngroup: files\nhosts: files dns\n' > "$run/nsswitch.conf"
 printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$run/machine-id"
 printf 'nameserver 127.0.0.1\n' > "$run/resolv.conf"
+mkdir -p "$run/profile/bin"
+printf '#!%s/bin/bash\necho native-command-found\n' "$test_tools" > "$run/profile/bin/unity-host-cli"
+cat > "$run/home/host-shell" <<'SHELL'
+#!/bin/bash
+unity-host-cli > "$HOME/terminal-command-result"
+exec /bin/bash "$@"
+SHELL
+chmod +x "$run/profile/bin/unity-host-cli" "$run/home/host-shell"
+sed -i "1c#!$test_tools/bin/bash" "$run/home/host-shell"
+sed -i "s|exec /bin/bash|exec $test_tools/bin/bash|" "$run/home/host-shell"
+if command -v codex >/dev/null; then
+  ln -s "$(readlink -f "$(command -v codex)")" "$run/profile/bin/codex"
+  sed -i '/unity-host-cli/a codex --version > "$HOME/terminal-codex-version"' "$run/home/host-shell"
+fi
 cat > "$run/home/.local/share/applications/unity-quantal-probe.desktop" <<EOF
 [Desktop Entry]
 Type=Application
@@ -111,6 +125,58 @@ for app in gedit eog file-roller; do
   "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop "unity-original-$app.desktop" -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" "/usr/bin/$app"
 done
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gnome-terminal.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-terminal --disable-factory --command=/usr/local/bin/unity-native-shell
+for _ in {1..50}; do
+  if [ -f "$HOME/terminal-command-result" ]; then break; fi
+  sleep 0.1
+done
+if ! grep -qx native-command-found "$HOME/terminal-command-result"; then
+  import -silent -window root /work/terminal-failure.png
+  exit 1
+fi
+rm "$HOME/terminal-command-result"
+# The default shell path is also used by new tabs, without --command.
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-terminal --disable-factory >/work/terminal-default.log 2>&1 &
+for _ in {1..50}; do
+  if [ -f "$HOME/terminal-command-result" ]; then break; fi
+  sleep 0.1
+done
+grep -qx native-command-found "$HOME/terminal-command-result"
+echo 'PASS: native command lookup through explicit and default terminal shells'
+if command -v codex >/dev/null; then
+  grep -i codex "$HOME/terminal-codex-version"
+fi
+
+# Exercise the original overview's external-panel dispatch, with harmless
+# native probes in place of controls that require real system hardware.
+for panel in network sound-nua printers power screen datetime; do
+  entry="$session_dir/applications/gnome-$panel-panel.desktop"
+  id=$(sed -n 's/^X-GNOME-Settings-Panel=//p' "$entry")
+  case "$id" in unity-host-*) ;; *) exit 1 ;; esac
+  cp "$entry" /work/panel-original.desktop
+  sed -i "s|^Exec=.*|Exec=/usr/local/bin/unity-host-launch -- $UNITY_TEST_TOOLS/bin/touch /home/unity-test/panel-$panel|" "$entry"
+  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-control-center "$id" >/work/settings-dispatch.log 2>&1 &
+  for _ in {1..50}; do
+    if [ -f "$HOME/panel-$panel" ]; then break; fi
+    sleep 0.1
+  done
+  test -f "$HOME/panel-$panel"
+  cp /work/panel-original.desktop "$entry"
+done
+echo 'PASS: original Settings dispatches all six native control panels'
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-control-center unity-host-screen >/work/lock-panel.log 2>&1 &
+for _ in {1..50}; do
+  if xwininfo -root -tree | grep -q 'Screensaver.*cinnamon-settings'; then break; fi
+  sleep 0.1
+done
+xwininfo -root -tree | grep 'Screensaver.*cinnamon-settings'
+echo 'PASS: maintained screen-lock controls open through original Settings'
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-control-center indicator-datetime >/work/clock-panel.log 2>&1 &
+for _ in {1..50}; do
+  if xwininfo -root -tree | grep -q '"Clock & Calendar"'; then break; fi
+  sleep 0.1
+done
+xwininfo -root -tree | grep '"Clock & Calendar"'
+echo 'PASS: restored original clock panel opens'
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop gnome-control-center.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-control-center info
 gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify unity-test 0 notification-message-im 'Original notification' 'Isolated notification and icon check' '[]' '{}' 1500
 sleep 2
@@ -164,12 +230,14 @@ echo "Unity session test logs: $run"
   --ro-bind "$run/nsswitch.conf" /etc/nsswitch.conf \
   --ro-bind "$run/machine-id" /etc/machine-id \
   --ro-bind "$run/resolv.conf" /etc/resolv.conf \
+  --ro-bind "$run/profile" /etc/profiles/per-user/unity-test \
   --ro-bind /run/opengl-driver /run/opengl-driver \
   --ro-bind "$repo/tools/lib/session-guard.sh" /guard.sh \
   --clearenv --setenv HOME /home/unity-test --setenv USER unity-test \
   --setenv LOGNAME unity-test --setenv XDG_RUNTIME_DIR /run/user/1000 \
   --setenv XDG_DATA_DIRS "$test_tools/share" \
-  --setenv PATH "$test_tools/bin" --setenv LANG C.UTF-8 \
+  --setenv PATH "/etc/profiles/per-user/unity-test/bin:$test_tools/bin" --setenv LANG C.UTF-8 \
+  --setenv SHELL /home/unity-test/host-shell \
   --setenv QT_QPA_PLATFORM offscreen "${graphics[@]}" \
   --setenv UNITY_PACKAGE "$package" --setenv UNITY_TEST_TOOLS "$test_tools" \
   --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
