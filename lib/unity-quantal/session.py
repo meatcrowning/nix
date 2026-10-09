@@ -105,6 +105,8 @@ def prepare(directory, environment):
                     entry["StartupWMClass"] = "Gnome-control-center"
                 write_desktop(directory / "applications" / file.name, parser)
 
+    integration.settings_entries(directory, ROOT, CONFIG, RUNTIME)
+
     for name in ORIGINAL_APPS:
         source = ROOT / "usr/share/applications" / (name + ".desktop")
         if not source.exists():
@@ -119,6 +121,10 @@ def prepare(directory, environment):
         if name == "gnome-terminal":
             entry["Exec"] = "/usr/bin/gnome-terminal --disable-factory --command=/usr/local/bin/unity-native-shell"
         entry["Exec"] = "/usr/local/bin/unity-host-launch --desktop unity-original-" + name + ".desktop -- " + RUNTIME + " " + entry["Exec"]
+        if name == "gnome-terminal":
+            for section in parser.sections():
+                if section != "Desktop Entry" and "Exec" in parser[section]:
+                    parser[section]["Exec"] = entry["Exec"]
         entry["X-Unity-Original"] = "true"
         # The live shell may still have the previous read-only runtime mounted.
         # Absolute store paths let newly added original icons appear immediately.
@@ -132,7 +138,9 @@ def prepare(directory, environment):
     for profile, label in [("unity", "Unity default"), ("plasma", "Plasma feel")]:
         (directory / "applications" / ("unity-mouse-" + profile + ".desktop")).write_text(
             "[Desktop Entry]\nType=Application\nName=Mouse: " + label + "\nIcon=input-mouse\n"
-            "Categories=Settings;HardwareSettings;\nExec=/usr/local/bin/unity-host-launch -- "
+            "Categories=Settings;HardwareSettings;X-GNOME-Settings-Panel;\n"
+            "X-GNOME-Settings-Panel=unity-mouse-" + profile + "\n"
+            "OnlyShowIn=Unity;\nExec=/usr/local/bin/unity-host-launch -- "
             + str(PACKAGE / "bin/unity-quantal-mouse") + " " + profile + "\n"
         )
 
@@ -151,6 +159,7 @@ def prepare(directory, environment):
                      + "XDG_DATA_DIRS=" + shlex.quote(":".join(state["data_dirs"])) + " "
                      + "XDG_DATA_HOME=" + shlex.quote(state["data_home"]) + " "
                      + "XDG_CACHE_HOME=" + shlex.quote(state["cache_home"]) + " "
+                     + "SHELL=" + shlex.quote(state["host_shell"]) + " "
                      + shlex.quote(state["host_shell"]) + " \"$@\"\n")
     shell.chmod(0o755)
 
@@ -238,6 +247,7 @@ def runtime(arguments):
     for source, target in [
         ("timezone", "/etc/timezone"),
         ("info.ui", "/usr/share/gnome-control-center/ui/info.ui"),
+        ("clock.ui", "/usr/share/indicator-datetime/datetime-dialog.ui"),
         ("gtk3", state["config_home"] + "/gtk-3.0"),
         ("user-dirs.dirs", state["config_home"] + "/user-dirs.dirs"),
     ]:
@@ -282,6 +292,10 @@ def runtime(arguments):
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
         "GTK_THEME": "Ambiance",
     })
+    if arguments[0] == "/usr/bin/gnome-terminal":
+        # New tabs/windows do not inherit the initial --command override.
+        # GNOME Terminal consults SHELL before falling back to /etc/passwd.
+        environment["SHELL"] = "/usr/local/bin/unity-native-shell"
     # The runtime has no audio server of its own; speak to the host PipeWire socket.
     environment.setdefault("PULSE_SERVER", "unix:" + os.environ["XDG_RUNTIME_DIR"] + "/pulse/native")
     command += ["--clearenv"]
@@ -608,6 +622,11 @@ if __name__ == "__main__":
         refresh()
     elif sys.argv[1:] == ["window-icons"]:
         watch_windows()
+    elif sys.argv[1:2] == ["settings"] and len(sys.argv) == 3 and sys.argv[2] in CONFIG["settingsCommands"]:
+        environment = os.environ.copy()
+        environment["XDG_DATA_DIRS"] = CONFIG["settingsData"] + ":" + environment.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share")
+        command = CONFIG["settingsCommands"][sys.argv[2]]
+        os.execvpe(command[0], command, environment)
     elif sys.argv[1:2] == ["mouse"] and sys.argv[2:] in [["unity"], ["plasma"]]:
         if os.environ.get("XDG_CURRENT_DESKTOP") != "Unity" or os.environ.get("XDG_SESSION_TYPE") != "x11":
             raise SystemExit("Mouse profiles require the running Unity X11 session")

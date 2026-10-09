@@ -5,6 +5,7 @@ import copy
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
@@ -15,6 +16,60 @@ def parser(path):
     result.optionxform = str
     result.read(path, encoding="utf-8")
     return result
+
+
+def settings_entries(directory, root, config, runtime):
+    """Keep the old overview, using its external-panel support for host tools."""
+    apps = directory / "applications"
+    panels = {
+        "network": ("network", "Network", "HardwareSettings"),
+        "sound-nua": ("sound", "Sound", "HardwareSettings"),
+        "printers": ("printers", "Printers", "HardwareSettings"),
+        "power": ("power", "Power", "HardwareSettings"),
+        "screen": ("screen", "Screen Lock", "X-GNOME-PersonalSettings"),
+        "datetime": ("datetime", "Date & Time", "X-GNOME-SystemSettings"),
+    }
+    for original, (command, name, category) in panels.items():
+        path = apps / ("gnome-" + original + "-panel.desktop")
+        data = parser(path)
+        entry = data["Desktop Entry"]
+        # A distinct ID is essential: an original ID loads the old panel plugin
+        # in-process and ignores Exec, even if Exec points at a native tool.
+        entry["X-GNOME-Settings-Panel"] = "unity-host-" + command
+        entry["Exec"] = "/usr/local/bin/unity-host-launch -- " + shlex.quote(str(Path(runtime).with_name("unity-quantal-settings"))) + " " + command
+        entry["Name"] = name
+        entry["OnlyShowIn"] = "Unity;"
+        entry["Categories"] = "Settings;X-GNOME-Settings-Panel;" + category + ";"
+        for key in list(entry):
+            if key.startswith("Name[") or key in ["TryExec", "NoDisplay", "Hidden", "X-Unity-Original"]:
+                del entry[key]
+        temporary = path.with_suffix(".tmp")
+        with temporary.open("w") as stream:
+            data.write(stream, space_around_delimiters=False)
+        temporary.replace(path)
+
+    # Ubuntu's clock-format panel is supplied by indicator-datetime, not GCC;
+    # the old gnome-*.desktop filter omitted it entirely.
+    path = apps / "indicator-datetime-preferences.desktop"
+    data = parser(root / "usr/share/applications" / path.name)
+    entry = data["Desktop Entry"]
+    entry["Name"] = "Clock & Calendar"
+    entry["Exec"] = "/usr/local/bin/unity-host-launch -- " + shlex.quote(runtime) + " /usr/bin/gnome-control-center indicator-datetime"
+    entry["X-Unity-Original"] = "true"
+    entry.pop("TryExec", None)
+    for key in list(entry):
+        if key.startswith("Name["):
+            del entry[key]
+    with path.open("w") as stream:
+        data.write(stream, space_around_delimiters=False)
+
+    # Its clock-format controls still work; its date setters use Ubuntu's
+    # obsolete mechanism. Host Date & Time owns those controls instead.
+    ui = ET.parse(root / "usr/share/indicator-datetime/datetime-dialog.ui")
+    page = ui.find(".//object[@id='timeDateBox']")
+    page.find("property[@name='visible']").text = "False"
+    ET.SubElement(page, "property", name="no_show_all").text = "True"
+    ui.write(directory / "clock.ui", encoding="utf-8", xml_declaration=True)
 
 
 def host_icons(directory, state, config):

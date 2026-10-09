@@ -4,8 +4,10 @@
 , libXinerama, libXcursor, libXi, libxshmfence
 , dbus, dconf, gvfs, cinnamon, cinnamon-session, cinnamon-screensaver, cinnamon-settings-daemon, polkit_gnome
 , networkmanagerapplet, xdg-terminal-exec, xdg-utils, coreutils, bash, glib
-, symlinkJoin, findutils, gnugrep, xorg-server, xprop, xwininfo, xdpyinfo
+, symlinkJoin, findutils, gnugrep, gnused, xorg-server, xprop, xwininfo, xdpyinfo
 , xmessage, weston, xwayland, mesa-demos, xinput, xrandr, librsvg, imagemagick
+, pavucontrol, system-config-printer
+, cinnamon-desktop
 }:
 let
   iso = fetchurl {
@@ -62,6 +64,17 @@ stdenvNoCC.mkDerivation {
       screensaverCommand = "${cinnamon-screensaver}/bin/cinnamon-screensaver-command";
       polkit = "${polkit_gnome}/libexec/polkit-gnome-authentication-agent-1";
       network = "${networkmanagerapplet}/bin/nm-applet";
+      settingsData = lib.concatStringsSep ":" (map (p: "${p}/share/gsettings-schemas/${p.name}") [
+        cinnamon cinnamon-desktop cinnamon-settings-daemon
+      ]);
+      settingsCommands = {
+        network = [ "${networkmanagerapplet}/bin/nm-connection-editor" ];
+        sound = [ "${pavucontrol}/bin/pavucontrol" ];
+        printers = [ "${system-config-printer}/bin/system-config-printer" ];
+        power = [ "${cinnamon}/bin/cinnamon-settings" "power" ];
+        screen = [ "${cinnamon}/bin/cinnamon-settings" "screensaver" ];
+        datetime = [ "${cinnamon}/bin/cinnamon-settings" "calendar" ];
+      };
       mediaKeys = "${cinnamon-settings-daemon}/libexec/csd-media-keys";
       power = "${cinnamon-settings-daemon}/libexec/csd-power";
       terminal = "${xdg-terminal-exec}/bin/xdg-terminal-exec";
@@ -70,7 +83,7 @@ stdenvNoCC.mkDerivation {
     }}
     EOF
     printf 'user-db:unity_quantal\n' > "$out/libexec/unity-quantal/dconf-profile"
-    for command in session runtime refresh mouse; do
+    for command in session runtime refresh mouse settings; do
       cat > "$out/bin/unity-quantal-$command" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/session.py" $command "\$@"
@@ -90,7 +103,7 @@ stdenvNoCC.mkDerivation {
     inherit runtime;
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
-      paths = [ bash coreutils findutils gnugrep bubblewrap xorg-server xprop
+      paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
         xwininfo xdpyinfo xmessage glib dbus weston xwayland mesa-demos imagemagick ];
     };
     providedSessions = [ "unity-quantal" ];
