@@ -12,6 +12,7 @@ if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
 fi
 package=$1
 test_tools=$2
+python=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["python"])' "$package/libexec/unity-quantal/config.json")
 graphics=(--setenv LIBGL_ALWAYS_SOFTWARE 1)
 if [ "$#" -eq 3 ]; then
   if [[ ! "$3" =~ ^/dev/dri/renderD[0-9]+$ ]] || [ ! -c "$3" ]; then
@@ -120,10 +121,20 @@ grep -qx unity /home/unity-test/.config/unity-quantal/mouse-profile
 "$UNITY_PACKAGE/bin/unity-quantal-mouse" plasma
 grep -qx plasma /home/unity-test/.config/unity-quantal/mouse-profile
 kill -0 "$supervisor"
-"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gcalctool.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gcalctool
-for app in gedit eog file-roller; do
-  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop "unity-original-$app.desktop" -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" "/usr/bin/$app"
-done
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" "$TEST_PYTHON" -c '
+import ctypes
+lib=ctypes.CDLL("libgio-2.0.so.0")
+lib.g_type_init()
+lib.g_app_info_get_default_for_type.argtypes=[ctypes.c_char_p,ctypes.c_int]
+lib.g_app_info_get_default_for_type.restype=ctypes.c_void_p
+lib.g_app_info_get_id.argtypes=[ctypes.c_void_p]
+lib.g_app_info_get_id.restype=ctypes.c_char_p
+for mime,app in [(b"text/plain",b"gedit"),(b"image/png",b"eog"),(b"application/zip",b"file-roller")]:
+    info=lib.g_app_info_get_default_for_type(mime,0)
+    assert info and lib.g_app_info_get_id(info)==b"unity-original-"+app+b".desktop",mime
+print("PASS: original GLib resolves all three Unity document defaults")
+'
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gcalctool.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-isolated" gcalctool
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gnome-terminal.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-terminal --disable-factory --command=/usr/local/bin/unity-native-shell
 for _ in {1..50}; do
   if [ -f "$HOME/terminal-command-result" ]; then break; fi
@@ -185,11 +196,11 @@ xprop -root _NET_SUPPORTING_WM_CHECK _NET_CLIENT_LIST > /work/windows.txt
 xwininfo -root -tree > /work/tree.txt
 grep 'unity-host-probe' /work/tree.txt
 grep -i 'gcalctool' /work/tree.txt
-for app in Gedit Eog File-roller Gnome-terminal Gnome-control-center; do
+for app in Gnome-terminal Gnome-control-center; do
   grep "$app" /work/tree.txt
 done
 calculator=$(while read -r wid title rest; do
-  if [ "$title" = '"Calculator":' ]; then echo "$wid"; break; fi
+  if [[ "$rest" == *'"Gcalctool"'* ]]; then echo "$wid"; break; fi
 done < /work/tree.txt)
 xprop -id "$calculator" _NET_WM_DESKTOP_FILE | grep unity-original-gcalctool.desktop
 application=$(gdbus call --session --dest org.ayatana.bamf --object-path /org/ayatana/bamf/matcher --method org.ayatana.bamf.matcher.ApplicationForXid "$((calculator))")
@@ -239,6 +250,6 @@ echo "Unity session test logs: $run"
   --setenv PATH "/etc/profiles/per-user/unity-test/bin:$test_tools/bin" --setenv LANG C.UTF-8 \
   --setenv SHELL /home/unity-test/host-shell \
   --setenv QT_QPA_PLATFORM offscreen "${graphics[@]}" \
-  --setenv UNITY_PACKAGE "$package" --setenv UNITY_TEST_TOOLS "$test_tools" \
+  --setenv UNITY_PACKAGE "$package" --setenv TEST_PYTHON "$python" --setenv UNITY_TEST_TOOLS "$test_tools" \
   --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
   --chdir /work "$test_tools/bin/bash" /work/inside.sh

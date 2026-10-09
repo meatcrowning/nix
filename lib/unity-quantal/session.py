@@ -18,6 +18,7 @@ import threading
 import time
 from xml.sax.saxutils import escape
 import integration
+import isolated
 
 HERE = Path(__file__).resolve().parent
 PACKAGE = HERE.parent.parent
@@ -108,6 +109,14 @@ def prepare(directory, environment):
     integration.settings_entries(directory, ROOT, CONFIG, RUNTIME)
 
     for name in ORIGINAL_APPS:
+        if name in isolated.APPS:
+            file = "unity-original-" + name + ".desktop"
+            parser = desktop_parser(PACKAGE / "share/applications" / file)
+            entry = parser["Desktop Entry"]
+            entry["Exec"] = "/usr/local/bin/unity-host-launch --desktop " + file + " -- " + entry["Exec"]
+            entry["X-Unity-Original"] = "true"
+            write_desktop(directory / "applications" / file, parser)
+            continue
         source = ROOT / "usr/share/applications" / (name + ".desktop")
         if not source.exists():
             continue
@@ -145,6 +154,7 @@ def prepare(directory, environment):
         )
 
     integration.host_icons(directory, state, CONFIG)
+    isolated.install_defaults(state)
     integration.desktop_files(directory, state)
     integration.host_details(directory, ROOT)
     (directory / "gtk3").mkdir(exist_ok=True)

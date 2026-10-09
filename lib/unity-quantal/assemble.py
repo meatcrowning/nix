@@ -34,7 +34,7 @@ indicator-appmenu indicator-application indicator-session indicator-sound
 indicator-datetime indicator-messages notify-osd notify-osd-icons
 evolution-data-server zeitgeist-core zeitgeist-datahub
 gedit gnome-terminal gcalctool eog file-roller python-gi
-light-themes humanity-icon-theme ubuntu-mono ubuntu-wallpapers ubuntu-sounds
+light-themes gtk3-engines-unico humanity-icon-theme ubuntu-mono ubuntu-wallpapers ubuntu-sounds
 ttf-ubuntu-font-family python dbus-x11 dconf-tools bash dash coreutils
 """.split()
 selected = set()
