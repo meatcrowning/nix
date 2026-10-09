@@ -39,7 +39,7 @@ def configure(game, argv, env, cache):
     # Vulkan backend, which does not obey SDL_VIDEODRIVER.
     env.update(WAYLAND_DISPLAY='/nonexistent/games-steam-wayland',
                QT_QPA_PLATFORM='xcb', SDL_VIDEODRIVER='x11')
-    if game['runner'] in ('retroarch', 'pcsx2'):
+    if game['runner'] in ('retroarch', 'pcsx2') or game.get('steamInput', False):
         # Only Valve's virtual pad, never the physical pad alongside it. Both
         # SDL2 (RetroArch) and SDL3 (PCSX2) implement this VID/PID allowlist.
         env['SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT'] = '0x28de,0x11ff'

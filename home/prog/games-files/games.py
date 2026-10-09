@@ -463,7 +463,7 @@ def artwork(game):
 
 
 def repair_steam(games):
-    """Fill missing artwork and enable Steam Input for managed emulators."""
+    """Fill missing artwork and enable Steam Input for emulators and opted-in games."""
     import shlex
     import vdf
     if subprocess.run(['pgrep', '-x', 'steam'], stdout=subprocess.DEVNULL).returncode == 0:
@@ -473,7 +473,7 @@ def repair_steam(games):
         shortcuts = vdf.binary_loads(path.read_bytes()).get('shortcuts', {})
         grid = path.parent / 'grid'
         grid.mkdir(parents=True, exist_ok=True)
-        emulator_ids = []
+        controller_ids = []
         for shortcut in shortcuts.values():
             if shortcut.get('Exe', '').strip('"') != GAMES_BIN:
                 continue
@@ -481,8 +481,9 @@ def repair_steam(games):
             if len(args) != 2 or args[0] != 'run' or args[1] not in by_slug:
                 continue
             app = shortcut['appid'] & 0xffffffff
-            if by_slug[args[1]]['runner'] in ('retroarch', 'pcsx2'):
-                emulator_ids.append(str(app))
+            if (by_slug[args[1]]['runner'] in ('retroarch', 'pcsx2')
+                    or by_slug[args[1]].get('steamInput', False)):
+                controller_ids.append(str(app))
             missing = []
             for suffix in ('p', '', '_hero', '_logo'):
                 installed = list(grid.glob(f'{app}{suffix}.*'))
@@ -496,12 +497,12 @@ def repair_steam(games):
                 if suffix in missing:
                     shutil.copyfile(source, grid / f'{app}{suffix}{source.suffix}')
                     print(f'games: added {suffix or "header"} for {shortcut["AppName"]}')
-        if emulator_ids:
+        if controller_ids:
             local_path = path.with_name('localconfig.vdf')
             local = vdf.loads(local_path.read_text()) if local_path.exists() else {}
             apps = local.setdefault('UserLocalConfigStore', {}).setdefault('apps', {})
             changed = False
-            for app in emulator_ids:
+            for app in controller_ids:
                 settings = apps.setdefault(app, {})
                 if settings.get('UseSteamControllerConfig') != '2':
                     settings['UseSteamControllerConfig'] = '2'  # Steam's On enum
@@ -514,7 +515,7 @@ def repair_steam(games):
                 temp = local_path.with_suffix('.vdf.games-tmp')
                 temp.write_text(vdf.dumps(local, pretty=True))
                 temp.replace(local_path)
-                print(f'games: enabled Steam Input for {len(emulator_ids)} emulators')
+                print(f'games: enabled Steam Input for {len(controller_ids)} games')
 
 
 def steam(games):
