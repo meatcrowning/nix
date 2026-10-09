@@ -22,6 +22,10 @@ if [ "$#" -eq 3 ]; then
 fi
 run=$(mktemp -d /tmp/unity-session-test.XXXXXX)
 mkdir -p "$run/home/.local/share/applications" "$run/home/.config"
+mkdir -p "$run/home/.local/share/icons/hicolor/scalable/apps"
+cat > "$run/home/.local/share/icons/hicolor/scalable/apps/unity-quantal-probe.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#3498db"/></svg>
+SVG
 printf '[Default Applications]\ninode/directory=unity-quantal-probe.desktop\n' > "$run/home/.config/mimeapps.list"
 printf 'root:x:0:0:root:/root:/bin/sh\nunity-test:x:%s:%s:Unity Test:/home/unity-test:/bin/sh\n' "$(id -u)" "$(id -g)" > "$run/passwd"
 printf 'users:x:%s:unity-test\n' "$(id -g)" > "$run/group"
@@ -31,6 +35,7 @@ cat > "$run/home/.local/share/applications/unity-quantal-probe.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Unity Host Launch Probe
+Icon=unity-quantal-probe
 Exec=$test_tools/bin/xmessage -name unity-host-probe -buttons ok:0 host-application
 Terminal=false
 EOF
@@ -72,7 +77,7 @@ glxinfo -B > /work/graphics.txt
 if [ "${UNITY_TEST_ACCELERATED:-0}" = 1 ]; then
   grep 'Accelerated: yes' /work/graphics.txt
 fi
-"$UNITY_PACKAGE/bin/unity-quantal-session" >/work/supervisor.log 2>&1 &
+"$UNITY_BASE_PACKAGE/bin/unity-quantal-session" >/work/supervisor.log 2>&1 &
 supervisor=$!
 for _ in {1..200}; do
   session_dir=$(find "$XDG_RUNTIME_DIR/unity-quantal-session" -name state.json -printf '%h\n' 2>/dev/null | head -n1 || true)
@@ -90,11 +95,40 @@ for _ in {1..60}; do
   sleep 0.1
 done
 gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsSessionRunning | grep true
-"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-quantal-probe.desktop -- "$UNITY_TEST_TOOLS/bin/xmessage" -name unity-host-probe -buttons ok:0 host-application
+"$UNITY_BASE_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-quantal-probe.desktop -- "$UNITY_TEST_TOOLS/bin/xmessage" -name unity-host-probe -buttons ok:0 host-application
 sleep 3
+export XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11
+"$UNITY_PACKAGE/bin/unity-quantal-refresh"
+test -f /home/unity-test/.local/share/unity-quantal-session/icons/hicolor/96x96/apps/unity-quantal-probe.png
+"$UNITY_PACKAGE/bin/unity-quantal-mouse" unity
+grep -qx unity /home/unity-test/.config/unity-quantal/mouse-profile
+"$UNITY_PACKAGE/bin/unity-quantal-mouse" plasma
+grep -qx plasma /home/unity-test/.config/unity-quantal/mouse-profile
+kill -0 "$supervisor"
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gcalctool.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gcalctool
+for app in gedit eog file-roller; do
+  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop "unity-original-$app.desktop" -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" "/usr/bin/$app"
+done
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gnome-terminal.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-terminal --disable-factory --command=/usr/local/bin/unity-native-shell
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop gnome-control-center.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-control-center info
+gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify unity-test 0 notification-message-im 'Original notification' 'Isolated notification and icon check' '[]' '{}' 1500
+sleep 2
+import -silent -window root /work/screen.png
 xprop -root _NET_SUPPORTING_WM_CHECK _NET_CLIENT_LIST > /work/windows.txt
 xwininfo -root -tree > /work/tree.txt
 grep 'unity-host-probe' /work/tree.txt
+grep -i 'gcalctool' /work/tree.txt
+for app in Gedit Eog File-roller Gnome-terminal Gnome-control-center; do
+  grep "$app" /work/tree.txt
+done
+calculator=$(while read -r wid title rest; do
+  if [ "$title" = '"Calculator":' ]; then echo "$wid"; break; fi
+done < /work/tree.txt)
+xprop -id "$calculator" _NET_WM_DESKTOP_FILE | grep unity-original-gcalctool.desktop
+application=$(gdbus call --session --dest org.ayatana.bamf --object-path /org/ayatana/bamf/matcher --method org.ayatana.bamf.matcher.ApplicationForXid "$((calculator))")
+application=${application#*\'}
+application=${application%%\'*}
+gdbus call --session --dest org.ayatana.bamf --object-path "$application" --method org.ayatana.bamf.application.DesktopFile | grep unity-original-gcalctool.desktop
 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames > /work/bus-names.txt
 grep 'com.canonical.Unity.Panel.Service' /work/bus-names.txt
 grep 'Starting plugin: unityshell' /home/unity-test/.local/state/unity-quantal/session.log
@@ -136,4 +170,5 @@ echo "Unity session test logs: $run"
   --setenv PATH "$test_tools/bin" --setenv LANG C.UTF-8 \
   --setenv QT_QPA_PLATFORM offscreen "${graphics[@]}" \
   --setenv UNITY_PACKAGE "$package" --setenv UNITY_TEST_TOOLS "$test_tools" \
+  --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
   --chdir /work "$test_tools/bin/bash" /work/inside.sh

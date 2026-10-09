@@ -1,9 +1,11 @@
 """Native session supervisor and FHS compatibility runtime for Unity 6.8."""
 
 import configparser
+import ast
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import signal
@@ -15,6 +17,7 @@ import sys
 import threading
 import time
 from xml.sax.saxutils import escape
+import integration
 
 HERE = Path(__file__).resolve().parent
 PACKAGE = HERE.parent.parent
@@ -23,6 +26,7 @@ ROOT = Path(CONFIG["runtime"])
 RUNTIME = str(PACKAGE / "bin/unity-quantal-runtime")
 BRIDGES = ["unity-host-launch", "xdg-open", "gnome-session-quit",
            "gnome-screensaver-command", "x-terminal-emulator", "gnome-terminal"]
+ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller"]
 
 
 def desktop_parser(path):
@@ -34,8 +38,10 @@ def desktop_parser(path):
 
 def write_desktop(path, parser):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as stream:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w") as stream:
         parser.write(stream, space_around_delimiters=False)
+    temporary.replace(path)
 
 
 def prepare(directory, environment):
@@ -47,8 +53,11 @@ def prepare(directory, environment):
         "config_home": environment.get("XDG_CONFIG_HOME", str(Path.home() / ".config")),
         "data_home": data_home,
         "cache_home": environment.get("XDG_CACHE_HOME", str(Path.home() / ".cache")),
+        "host_path": environment.get("PATH", CONFIG["hostPath"]),
+        "host_shell": environment.get("SHELL", CONFIG["bash"]),
     }
-    (directory / "state.json").write_text(json.dumps(state))
+    (directory / "state.json.tmp").write_text(json.dumps(state))
+    (directory / "state.json.tmp").replace(directory / "state.json")
     for subdir in ["applications", "bridge-bin", "autostart", "native-data/dbus-1/services",
                    "native-data/cinnamon-session/sessions", "native-data/applications"]:
         (directory / subdir).mkdir(parents=True, exist_ok=True)
@@ -58,8 +67,10 @@ def prepare(directory, environment):
         target.chmod(0o755)
 
     seen = set()
-    for parent in [data_home, *data_dirs]:
-        for file in sorted((Path(parent) / "applications").glob("*.desktop")):
+    catalogs = [Path(parent) / "applications" for parent in [data_home, *data_dirs]]
+    catalogs.append(Path.home() / "Desktop")
+    for parent in catalogs:
+        for file in sorted(parent.glob("*.desktop")):
             if file.name in seen:
                 continue
             seen.add(file.name)
@@ -86,19 +97,80 @@ def prepare(directory, environment):
     for file in (ROOT / "usr/share/applications").glob("gnome-*.desktop"):
         if file.name == "gnome-control-center.desktop" or file.name.endswith("-panel.desktop"):
             if file.name not in seen:
-                (directory / "applications" / file.name).write_bytes(file.read_bytes())
+                parser = desktop_parser(file)
+                entry = parser["Desktop Entry"]
+                entry["Exec"] = "/usr/local/bin/unity-host-launch --desktop " + file.name + " -- " + RUNTIME + " /usr/bin/" + entry["Exec"]
+                entry["X-Unity-Original"] = "true"
+                if file.name == "gnome-control-center.desktop":
+                    entry["StartupWMClass"] = "Gnome-control-center"
+                write_desktop(directory / "applications" / file.name, parser)
+
+    for name in ORIGINAL_APPS:
+        source = ROOT / "usr/share/applications" / (name + ".desktop")
+        if not source.exists():
+            continue
+        parser = desktop_parser(source)
+        entry = parser["Desktop Entry"]
+        entry["Name"] = entry.get("Name", name) + " (Ubuntu 12.10)"
+        for key in list(entry):
+            if key.startswith("Name[") or key in ["OnlyShowIn", "NotShowIn", "TryExec", "NoDisplay"]:
+                del entry[key]
+        entry["Exec"] = "/usr/bin/" + entry["Exec"]
+        if name == "gnome-terminal":
+            entry["Exec"] = "/usr/bin/gnome-terminal --disable-factory --command=/usr/local/bin/unity-native-shell"
+        entry["Exec"] = "/usr/local/bin/unity-host-launch --desktop unity-original-" + name + ".desktop -- " + RUNTIME + " " + entry["Exec"]
+        entry["X-Unity-Original"] = "true"
+        # The live shell may still have the previous read-only runtime mounted.
+        # Absolute store paths let newly added original icons appear immediately.
+        icons = list((ROOT / "usr/share/icons").rglob(entry.get("Icon", name) + ".png"))
+        if icons:
+            icons.sort(key=lambda p: (0 if "48x48" in p.parts or "48" in p.parts else 1, str(p)))
+            entry["Icon"] = str(icons[0])
+        entry["StartupWMClass"] = {"gnome-terminal": "Gnome-terminal", "nautilus": "Nautilus"}.get(name, name)
+        write_desktop(directory / "applications" / ("unity-original-" + name + ".desktop"), parser)
+
+    for profile, label in [("unity", "Unity default"), ("plasma", "Plasma feel")]:
+        (directory / "applications" / ("unity-mouse-" + profile + ".desktop")).write_text(
+            "[Desktop Entry]\nType=Application\nName=Mouse: " + label + "\nIcon=input-mouse\n"
+            "Categories=Settings;HardwareSettings;\nExec=/usr/local/bin/unity-host-launch -- "
+            + str(PACKAGE / "bin/unity-quantal-mouse") + " " + profile + "\n"
+        )
+
+    integration.host_icons(directory, state, CONFIG)
+    integration.desktop_files(directory, state)
+    integration.host_details(directory, ROOT)
+    (directory / "gtk3").mkdir(exist_ok=True)
+    (directory / "gtk3/settings.ini").write_text(
+        "[Settings]\ngtk-theme-name=Ambiance\ngtk-icon-theme-name=ubuntu-mono-dark\n"
+        "gtk-font-name=Ubuntu 11\ngtk-application-prefer-dark-theme=false\n"
+    )
+    shell = directory / "bridge-bin/unity-native-shell"
+    shell.write_text("#!/bin/sh\nexec /usr/bin/env -u LD_LIBRARY_PATH -u GSETTINGS_SCHEMA_DIR "
+                     "-u GDK_PIXBUF_MODULE_FILE -u DCONF_PROFILE -u GTK_THEME "
+                     + "PATH=" + shlex.quote(state["host_path"]) + " "
+                     + "XDG_DATA_DIRS=" + shlex.quote(":".join(state["data_dirs"])) + " "
+                     + "XDG_DATA_HOME=" + shlex.quote(state["data_home"]) + " "
+                     + "XDG_CACHE_HOME=" + shlex.quote(state["cache_home"]) + " "
+                     + shlex.quote(state["host_shell"]) + " \"$@\"\n")
+    shell.chmod(0o755)
 
     for file in (ROOT / "usr/share/dbus-1/services").glob("*.service"):
         parser = desktop_parser(file)
         entry = parser["D-BUS Service"]
         name = entry.get("Name", "")
         # The native services handle modern apps and the host's user database.
-        if name == "ca.desrt.dconf" or name.startswith(("org.gtk.vfs.", "org.a11y.", "org.freedesktop.secrets")):
+        if name == "ca.desrt.dconf" or name.startswith(("org.gtk.vfs.", "org.gtk.Private.", "org.a11y.", "org.freedesktop.secrets")):
+            stale = directory / "native-data/dbus-1/services" / file.name
+            if stale.exists():
+                stale.unlink()
             continue
         if "Exec" in entry:
             entry["Exec"] = RUNTIME + " " + entry["Exec"]
             entry.pop("SystemdService", None)
             write_desktop(directory / "native-data/dbus-1/services" / file.name, parser)
+
+    for file in Path(CONFIG["lockerServices"]).glob("*.service"):
+        (directory / "native-data/dbus-1/services" / file.name).write_bytes(file.read_bytes())
 
     (directory / "native-data/cinnamon-session/sessions/unity-quantal.session").write_text(
         "[Cinnamon Session]\nName=Unity 12.10\n"
@@ -109,6 +181,7 @@ def prepare(directory, environment):
         "unity-quantal-shell": (RUNTIME + " /usr/bin/compiz --replace ccp", "WindowManager"),
         "unity-quantal-locker": (CONFIG["screensaver"], "Application"),
         "unity-quantal-lock-api": (CONFIG["bridgePython"] + " " + str(HERE / "screensaver.py"), "Application"),
+        "unity-quantal-window-icons": (CONFIG["python"] + " " + str(HERE / "session.py") + " window-icons", "Application"),
         "unity-quantal-polkit": (CONFIG["polkit"], "Application"),
         "unity-quantal-network": (CONFIG["network"] + " --indicator", "Application"),
         "unity-quantal-media-keys": (CONFIG["mediaKeys"], "Application"),
@@ -148,7 +221,10 @@ def runtime(arguments):
     data = Path(state["data_home"]) / "unity-quantal-session"
     for path in [cache, data, Path(state["config_home"]) / "dconf"]:
         path.mkdir(parents=True, exist_ok=True)
-    command = [CONFIG["bwrap"], "--die-with-parent", "--unshare-net", "--tmpfs", "/"]
+    command = [CONFIG["bwrap"], "--die-with-parent", "--tmpfs", "/"]
+    # The original terminal must give its native shell ordinary network access.
+    if arguments[0] != "/usr/bin/gnome-terminal":
+        command += ["--unshare-net"]
     for name in ["bin", "sbin", "usr", "lib", "lib64", "etc", "var"]:
         if (ROOT / name).exists():
             command += ["--ro-bind", str(ROOT / name), "/" + name]
@@ -159,12 +235,22 @@ def runtime(arguments):
                 "--ro-bind", "/tmp/.X11-unix", "/tmp/.X11-unix",
                 "--ro-bind", str(directory / "applications"), "/usr/share/applications",
                 "--ro-bind", str(directory / "bridge-bin"), "/usr/local/bin"]
+    for source, target in [
+        ("timezone", "/etc/timezone"),
+        ("info.ui", "/usr/share/gnome-control-center/ui/info.ui"),
+        ("gtk3", state["config_home"] + "/gtk-3.0"),
+        ("user-dirs.dirs", state["config_home"] + "/user-dirs.dirs"),
+    ]:
+        if arguments[0] == "/usr/bin/gnome-terminal" and source in ["gtk3", "user-dirs.dirs"]:
+            continue
+        if (directory / source).exists():
+            command += ["--ro-bind", str(directory / source), target]
     for path in ["/run/opengl-driver", "/run/current-system", "/run/dbus", "/run/udev", "/etc/profiles"]:
         if Path(path).exists():
             command += ["--ro-bind", path, path]
     if Path("/tmp/.ICE-unix").is_dir():
         command += ["--ro-bind", "/tmp/.ICE-unix", "/tmp/.ICE-unix"]
-    for path in ["/etc/passwd", "/etc/group", "/etc/machine-id", "/etc/localtime"]:
+    for path in ["/etc/passwd", "/etc/group", "/etc/machine-id", "/etc/localtime", "/etc/resolv.conf"]:
         if Path(path).exists():
             command += ["--ro-bind", path, path]
     if Path("/etc/machine-id").exists():
@@ -181,6 +267,7 @@ def runtime(arguments):
         "XDG_RUNTIME_DIR", "SESSION_MANAGER", "DESKTOP_AUTOSTART_ID", "DESKTOP_STARTUP_ID",
         "PULSE_SERVER", "PULSE_COOKIE", "LANG", "LC_ALL", "UNITY_QUANTAL_HOST_SOCKET",
         "LOCALE_ARCHIVE", "LOCALE_ARCHIVE_2_27",
+        "BAMF_DESKTOP_FILE_HINT",
     }}
     environment.update({
         "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -267,6 +354,8 @@ class LaunchRequest(socketserver.StreamRequestHandler):
                                      stdout=self.server.log, stderr=subprocess.STDOUT, start_new_session=True)
             self.server.children.append(child)
             threading.Thread(target=child.wait, daemon=True).start()
+            if environment.get("BAMF_DESKTOP_FILE_HINT"):
+                register_application(environment["BAMF_DESKTOP_FILE_HINT"], child.pid, environment)
             result = {"pid": child.pid}
         except (OSError, ValueError, KeyError, IndexError) as error:
             result = {"error": str(error)}
@@ -339,9 +428,10 @@ def session():
                            stdout=log, stderr=subprocess.STDOUT, check=True, timeout=10)
         # Hardware policy and media keys come from the native session. The old
         # daemon still supplies Unity's X settings, backgrounds, and keyboard.
-        for plugin in ["power", "media-keys", "sound", "housekeeping"]:
+        for plugin in ["power", "media-keys", "sound", "housekeeping", "mouse"]:
             subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.settings-daemon.plugins." + plugin,
                             "active", "false"], env=environment, stdout=log, stderr=subprocess.STDOUT, check=False, timeout=10)
+        apply_preferences(environment, log)
         manager = subprocess.Popen([CONFIG["session"], "--session=unity-quantal", "--autostart=" + str(directory / "autostart")],
                                    env=environment, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         def stop(_signum, _frame):
@@ -376,10 +466,152 @@ def session():
         log.close()
 
 
+def apply_preferences(environment, log=None):
+    # Work around stale partial repaints in the original Compiz/NVIDIA path.
+    providers = subprocess.run([CONFIG["xrandr"], "--listproviders"], env=environment,
+                               text=True, capture_output=True, timeout=5).stdout
+    if "NVIDIA" in providers:
+        for key in ["force-glx-sync", "force-swap-buffers"]:
+            subprocess.run([RUNTIME, "/usr/bin/gsettings", "set",
+                            "org.compiz.workarounds:/org/compiz/profiles/unity/plugins/workarounds/",
+                            key, "true"], env=environment, check=True, stdout=log, stderr=log)
+    integration.plasma_pointer(CONFIG, environment.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+
+
+def refresh():
+    if os.environ.get("XDG_CURRENT_DESKTOP") != "Unity" or os.environ.get("XDG_SESSION_TYPE") != "x11":
+        raise RuntimeError("Refresh requires the running Unity X11 session")
+    directory = Path(os.environ["UNITY_QUANTAL_SESSION_DIR"])
+    state = json.loads((directory / "state.json").read_text())
+    environment = os.environ.copy()
+    environment["XDG_DATA_DIRS"] = ":".join(state["data_dirs"])
+    prepare(directory, environment)
+    subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.settings-daemon.plugins.mouse",
+                    "active", "false"], env=environment, check=True)
+    apply_preferences(environment)
+    launcher = [RUNTIME, "/usr/bin/gsettings"]
+    result = subprocess.check_output([*launcher, "get", "com.canonical.Unity.Launcher", "favorites"], env=environment, text=True)
+    favorites = ast.literal_eval(result)
+    if (directory / "applications/org.kde.konsole.desktop").exists():
+        updated = ["application://org.kde.konsole.desktop" if value == "application://unity-quantal-terminal.desktop" else value for value in favorites]
+        if updated != favorites:
+            subprocess.run([*launcher, "set", "com.canonical.Unity.Launcher", "favorites", repr(updated)], env=environment, check=True)
+
+    def bus(method, *arguments):
+        return subprocess.run([CONFIG["gdbus"], "call", "--session", "--dest", "org.freedesktop.DBus",
+                               "--object-path", "/org/freedesktop/DBus", "--method", "org.freedesktop.DBus." + method,
+                               *arguments], env=environment, text=True, capture_output=True, timeout=10)
+
+    bus("ReloadConfig")
+    # Reapply app matching to windows already open, without moving them.
+    window_icons(directory)
+    clients = subprocess.check_output([CONFIG["xprop"], "-root", "_NET_CLIENT_LIST"], text=True)
+    nautilus_windows = False
+    for window in re.findall(r"0x[0-9a-fA-F]+", clients):
+        props = subprocess.check_output([CONFIG["xprop"], "-id", window, "WM_CLASS", "_NET_WM_WINDOW_TYPE"], text=True)
+        if '"Nautilus"' in props and "_NET_WM_WINDOW_TYPE_DESKTOP" not in props:
+            nautilus_windows = True
+
+    services = ["com.canonical.indicator.datetime", "org.freedesktop.Notifications", "org.ayatana.bamf", "com.canonical.Unity.Panel.Service"]
+    if not nautilus_windows:
+        services.append("org.gnome.Nautilus")
+    else:
+        print("Files windows are open; their desktop view will refresh when Files is next reopened")
+    for name in services:
+        owner = bus("GetConnectionUnixProcessID", name)
+        match = re.search(r"uint32 (\d+)", owner.stdout)
+        if match:
+            pid = int(match[1])
+            # Only terminate a service owned by our UID on this session's bus.
+            if Path(f"/proc/{pid}").stat().st_uid == os.getuid():
+                os.kill(pid, signal.SIGTERM)
+                for _ in range(40):
+                    if bus("GetConnectionUnixProcessID", name).stdout != owner.stdout:
+                        break
+                    time.sleep(0.05)
+        activated = bus("StartServiceByName", name, "0")
+        if activated.returncode:
+            print(activated.stderr, file=sys.stderr)
+    # The existing supervisor owns this helper, so logout still reaps it.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(10)
+        connection.connect(str(directory / "launch.sock"))
+        request = {"command": "unity-host-launch", "argv": ["--", CONFIG["python"], str(HERE / "session.py"), "window-icons"]}
+        connection.sendall((json.dumps(request) + "\n").encode())
+        response = json.loads(connection.makefile().readline())
+        if "error" in response:
+            raise RuntimeError(response["error"])
+    print("Updated Unity application catalog, icons, host details, and pointer settings")
+
+
+def register_application(desktop, pid, environment=None):
+    try:
+        subprocess.run([CONFIG["gdbus"], "call", "--session", "--dest", "org.ayatana.bamf",
+                        "--object-path", "/org/ayatana/bamf/control", "--method",
+                        "org.ayatana.bamf.control.RegisterApplicationForPid", desktop, str(pid)],
+                       env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except subprocess.TimeoutExpired:
+        pass  # Matching must not prevent an application from launching.
+
+
+def window_icons(directory):
+    matching = {}
+    for desktop in sorted((directory / "applications").glob("*.desktop")):
+        data = desktop_parser(desktop)
+        if "Desktop Entry" not in data:
+            continue
+        entry = data["Desktop Entry"]
+        if entry.get("NoDisplay", "false").lower() == "true":
+            continue
+        for name in [desktop.stem, desktop.stem.split(".")[-1]]:
+            matching.setdefault(name.lower(), desktop.name)
+    for desktop in sorted((directory / "applications").glob("*.desktop")):
+        data = desktop_parser(desktop)
+        name = data.get("Desktop Entry", "StartupWMClass", fallback="")
+        if name:
+            matching[name.lower()] = desktop.name
+    clients = subprocess.run([CONFIG["xprop"], "-root", "_NET_CLIENT_LIST"], capture_output=True, text=True).stdout
+    for window in re.findall(r"0x[0-9a-fA-F]+", clients):
+        props = subprocess.run([CONFIG["xprop"], "-id", window, "WM_CLASS", "_NET_WM_DESKTOP_FILE", "_NET_WM_PID"], capture_output=True, text=True).stdout
+        for name in re.findall(r'"([^"]+)"', props.splitlines()[0] if props else ""):
+            filename = matching.get(name.lower())
+            if filename:
+                hint = "/usr/share/applications/" + filename
+                if hint not in props:
+                    subprocess.run([CONFIG["xprop"], "-id", window, "-f", "_NET_WM_DESKTOP_FILE", "8s", "-set",
+                                    "_NET_WM_DESKTOP_FILE", hint], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    pid = re.search(r"_NET_WM_PID\(CARDINAL\) = (\d+)", props)
+                    if pid:
+                        register_application(hint, pid[1])
+                break
+
+
+def watch_windows():
+    directory = Path(os.environ["UNITY_QUANTAL_SESSION_DIR"])
+    lock = (directory / "window-icons.lock").open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return
+    # Watch window membership only, never input, focus, or selection events.
+    with subprocess.Popen([CONFIG["xprop"], "-spy", "-root", "_NET_CLIENT_LIST"], stdout=subprocess.PIPE, text=True) as watcher:
+        for _ in watcher.stdout:
+            window_icons(directory)
+
+
 if __name__ == "__main__":
     if sys.argv[1:2] == ["runtime"]:
         runtime(sys.argv[2:])
     elif sys.argv[1:] == ["session"]:
         sys.exit(session())
+    elif sys.argv[1:] == ["refresh"]:
+        refresh()
+    elif sys.argv[1:] == ["window-icons"]:
+        watch_windows()
+    elif sys.argv[1:2] == ["mouse"] and sys.argv[2:] in [["unity"], ["plasma"]]:
+        if os.environ.get("XDG_CURRENT_DESKTOP") != "Unity" or os.environ.get("XDG_SESSION_TYPE") != "x11":
+            raise SystemExit("Mouse profiles require the running Unity X11 session")
+        integration.plasma_pointer(CONFIG, os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")), sys.argv[2])
+        print("Mouse profile: " + sys.argv[2])
     else:
         raise SystemExit("Usage: unity-quantal-session | unity-quantal-runtime COMMAND [ARGS]")
