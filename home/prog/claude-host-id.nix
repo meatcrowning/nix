@@ -61,6 +61,7 @@ in
       case ":''${desktops^^}:" in
         *:KDE:*|*:PLASMA:*) desktop='Plasma (KDE)' ;;
         *:HYPRLAND:*)      desktop='Hyprland' ;;
+        *:UNITY:*)         desktop='Unity (X11)' ;;
         *)                 desktop="unknown (XDG_CURRENT_DESKTOP=''${desktops:-unset})" ;;
       esac
 
