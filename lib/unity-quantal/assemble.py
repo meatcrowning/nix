@@ -111,7 +111,7 @@ for name in ["unity", "compiz-core", "libnux-3.0-0", "unity-asset-pool", "unity-
 ))
 for directory in ["etc/profiles", "usr/local/bin", "usr/share/applications", "lib64", "var/lib/dbus"]:
     (target / directory).mkdir(parents=True, exist_ok=True)
-for filename in ["etc/passwd", "etc/group", "etc/machine-id", "etc/localtime", "etc/timezone", "var/lib/dbus/machine-id"]:
+for filename in ["etc/passwd", "etc/group", "etc/machine-id", "etc/localtime", "etc/timezone", "etc/resolv.conf", "var/lib/dbus/machine-id"]:
     file = target / filename
     if not file.exists() and not file.is_symlink():
         file.touch()

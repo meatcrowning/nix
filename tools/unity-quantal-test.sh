@@ -31,6 +31,7 @@ printf 'root:x:0:0:root:/root:/bin/sh\nunity-test:x:%s:%s:Unity Test:/home/unity
 printf 'users:x:%s:unity-test\n' "$(id -g)" > "$run/group"
 printf 'passwd: files\ngroup: files\nhosts: files dns\n' > "$run/nsswitch.conf"
 printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$run/machine-id"
+printf 'nameserver 127.0.0.1\n' > "$run/resolv.conf"
 cat > "$run/home/.local/share/applications/unity-quantal-probe.desktop" <<EOF
 [Desktop Entry]
 Type=Application
@@ -162,6 +163,7 @@ echo "Unity session test logs: $run"
   --ro-bind "$run/passwd" /etc/passwd --ro-bind "$run/group" /etc/group \
   --ro-bind "$run/nsswitch.conf" /etc/nsswitch.conf \
   --ro-bind "$run/machine-id" /etc/machine-id \
+  --ro-bind "$run/resolv.conf" /etc/resolv.conf \
   --ro-bind /run/opengl-driver /run/opengl-driver \
   --ro-bind "$repo/tools/lib/session-guard.sh" /guard.sh \
   --clearenv --setenv HOME /home/unity-test --setenv USER unity-test \
