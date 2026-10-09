@@ -5,7 +5,7 @@
 , dbus, dconf, gvfs, cinnamon, cinnamon-session, cinnamon-screensaver, cinnamon-settings-daemon, polkit_gnome
 , networkmanagerapplet, xdg-terminal-exec, xdg-utils, coreutils, bash, glib
 , symlinkJoin, findutils, gnugrep, xorg-server, xprop, xwininfo, xdpyinfo
-, xmessage, weston, xwayland, mesa-demos
+, xmessage, weston, xwayland, mesa-demos, xinput, xrandr, librsvg, imagemagick
 }:
 let
   iso = fetchurl {
@@ -36,7 +36,7 @@ stdenvNoCC.mkDerivation {
   dontBuild = true;
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
-    cp session.py bridge.py screensaver.py "$out/libexec/unity-quantal/"
+    cp session.py bridge.py screensaver.py integration.py "$out/libexec/unity-quantal/"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
       inherit runtime modernLibraries;
@@ -49,6 +49,12 @@ stdenvNoCC.mkDerivation {
       dbus = "${dbus}/bin/dbus-daemon";
       dconfServices = "${dconf}/share/dbus-1/services";
       vfsServices = "${gvfs}/share/dbus-1/services";
+      lockerServices = "${cinnamon-screensaver}/share/dbus-1/services";
+      xinput = "${xinput}/bin/xinput";
+      xrandr = "${xrandr}/bin/xrandr";
+      rsvg = "${librsvg}/bin/rsvg-convert";
+      gdbus = "${glib.bin}/bin/gdbus";
+      xprop = "${xprop}/bin/xprop";
       session = "${cinnamon-session}/bin/cinnamon-session";
       sessionData = "${cinnamon}/share/gsettings-schemas/${cinnamon.name}";
       sessionQuit = "${cinnamon-session}/bin/cinnamon-session-quit";
@@ -64,7 +70,7 @@ stdenvNoCC.mkDerivation {
     }}
     EOF
     printf 'user-db:unity_quantal\n' > "$out/libexec/unity-quantal/dconf-profile"
-    for command in session runtime; do
+    for command in session runtime refresh mouse; do
       cat > "$out/bin/unity-quantal-$command" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/session.py" $command "\$@"
@@ -85,7 +91,7 @@ stdenvNoCC.mkDerivation {
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep bubblewrap xorg-server xprop
-        xwininfo xdpyinfo xmessage glib dbus weston xwayland mesa-demos ];
+        xwininfo xdpyinfo xmessage glib dbus weston xwayland mesa-demos imagemagick ];
     };
     providedSessions = [ "unity-quantal" ];
   };

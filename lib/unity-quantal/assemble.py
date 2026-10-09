@@ -31,7 +31,9 @@ roots = """
 unity unity-services unity-lens-applications unity-lens-files
 compiz-gnome gnome-settings-daemon gnome-control-center nautilus
 indicator-appmenu indicator-application indicator-session indicator-sound
-indicator-datetime indicator-messages notify-osd
+indicator-datetime indicator-messages notify-osd notify-osd-icons
+evolution-data-server zeitgeist-core zeitgeist-datahub
+gedit gnome-terminal gcalctool eog file-roller python-gi
 light-themes humanity-icon-theme ubuntu-mono ubuntu-wallpapers ubuntu-sounds
 ttf-ubuntu-font-family python dbus-x11 dconf-tools bash dash coreutils
 """.split()
@@ -109,7 +111,7 @@ for name in ["unity", "compiz-core", "libnux-3.0-0", "unity-asset-pool", "unity-
 ))
 for directory in ["etc/profiles", "usr/local/bin", "usr/share/applications", "lib64", "var/lib/dbus"]:
     (target / directory).mkdir(parents=True, exist_ok=True)
-for filename in ["etc/passwd", "etc/group", "etc/machine-id", "etc/localtime", "var/lib/dbus/machine-id"]:
+for filename in ["etc/passwd", "etc/group", "etc/machine-id", "etc/localtime", "etc/timezone", "var/lib/dbus/machine-id"]:
     file = target / filename
     if not file.exists() and not file.is_symlink():
         file.touch()
