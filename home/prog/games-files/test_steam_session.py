@@ -56,6 +56,21 @@ class SteamTests(unittest.TestCase):
                 self.assertIn('config_save_on_exit = "false"', config)
                 self.assertNotIn('input_player1_start_btn = "5"', config)  # SDL Guide
 
+    def test_native_steam_input_is_opt_in_and_only_applies_inside_steam(self):
+        for runner in ('native', 'steam-run'):
+            game = {'runner': runner, 'steamInput': True}
+            env = {'DISPLAY': ':77', 'LD_PRELOAD': '/overlay.so'}
+            steam_session.configure(game, [runner], env, self.root)
+            self.assertNotIn('SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT', env)
+            env['SteamGameId'] = '123456789'
+            steam_session.configure(game, [runner], env, self.root)
+            self.assertEqual(env['SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT'], '0x28de,0x11ff')
+            self.assertEqual(env['SDL_JOYSTICK_HIDAPI'], '0')
+            self.assertEqual(env['LD_PRELOAD'], '/overlay.so')
+            unmanaged = {'SteamGameId': '123456789'}
+            steam_session.configure({'runner': runner}, [runner], unmanaged, self.root)
+            self.assertNotIn('SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT', unmanaged)
+
     def test_menu_uses_curated_artwork_without_text_or_cropping(self):
         hero = self.root / 'hero-curated.png'
         Image.new('RGB', (920, 300), 'red').save(hero)
@@ -95,7 +110,8 @@ class SteamTests(unittest.TestCase):
              patch.object(games, 'artwork', return_value={'p': logo, '_logo': logo, '': logo}), \
              patch('subprocess.run') as run:
             run.return_value.returncode = 1
-            games.repair_steam([{'slug': 'example', 'name': 'Example', 'runner': 'retroarch'}])
+            games.repair_steam([{'slug': 'example', 'name': 'Example',
+                                 'runner': 'steam-run', 'steamInput': True}])
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(portrait.read_bytes(), b'user-art')
         self.assertEqual(header.read_bytes(), b'user-banner')
