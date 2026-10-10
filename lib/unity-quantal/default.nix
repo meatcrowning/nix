@@ -69,7 +69,8 @@ stdenvNoCC.mkDerivation {
   dontBuild = true;
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
-    cp session.py bridge.py screensaver.py integration.py isolated.py "$out/libexec/unity-quantal/"
+    cp session.py bridge.py screensaver.py integration.py isolated.py display.py "$out/libexec/unity-quantal/"
+    cp -r display-icons "$out/libexec/unity-quantal/"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
       inherit runtime modernLibraries archivePath gtkTheme;
@@ -185,7 +186,7 @@ stdenvNoCC.mkDerivation {
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
-        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick ];
+        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr ];
     };
     providedSessions = [ "unity-quantal" ];
   };

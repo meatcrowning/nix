@@ -152,6 +152,14 @@ def prepare(directory, environment):
             + str(PACKAGE / "bin/unity-quantal-mouse") + " " + profile + "\n"
         )
 
+    (directory / "applications/unity-display.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Brightness & Night Light\nIcon=preferences-desktop-display\n"
+        "Categories=Settings;HardwareSettings;X-GNOME-Settings-Panel;\n"
+        "X-GNOME-Settings-Panel=unity-host-display\nX-Unity-Original=true\n"
+        "OnlyShowIn=Unity;\nExec=/usr/local/bin/unity-host-launch --desktop unity-display.desktop -- " + RUNTIME
+        + " /usr/bin/python2.7 " + str(HERE / "display.py") + " settings\n"
+    )
+
     integration.host_icons(directory, state, CONFIG)
     isolated.install_defaults(state)
     integration.desktop_files(directory, state)
@@ -204,6 +212,7 @@ def prepare(directory, environment):
         "unity-quantal-network": (CONFIG["network"] + " --indicator", "Application"),
         "unity-quantal-media-keys": (CONFIG["mediaKeys"], "Application"),
         "unity-quantal-power": (CONFIG["power"], "Application"),
+        "unity-quantal-display": (RUNTIME + " /usr/bin/python2.7 " + str(HERE / "display.py") + " indicator", "Application"),
     }
     for name, (command, phase) in components.items():
         text = (f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\n"
