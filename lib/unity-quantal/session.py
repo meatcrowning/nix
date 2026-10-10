@@ -385,6 +385,20 @@ class LaunchRequest(socketserver.StreamRequestHandler):
         self.wfile.write((json.dumps(result) + "\n").encode())
 
 
+def drop_theme_bridges():
+    # GTK 3.6 finds user themes only in ~/.themes. A live refresh onto a newer
+    # runtime may link a theme there for the shell still on the old one; the
+    # next login's runtime ships it, and a stale link would shadow updates.
+    themes = Path.home() / ".themes"
+    if not themes.is_dir():
+        return
+    for entry in themes.iterdir():
+        if entry.is_symlink() and "-unity-12.10-original-runtime/" in os.readlink(entry):
+            entry.unlink()
+    if not any(themes.iterdir()):
+        themes.rmdir()
+
+
 def session():
     if not os.environ.get("DISPLAY"):
         raise RuntimeError("Select Unity 12.10 at the greeter; an X11 display is required")
@@ -412,6 +426,7 @@ def session():
         "ICEAUTHORITY": str(directory / "ICEauthority"),
         "GI_TYPELIB_PATH": CONFIG["typelibs"] + ":" + environment.get("GI_TYPELIB_PATH", ""),
     })
+    drop_theme_bridges()
     favorites = prepare(directory, environment)
     environment["XDG_DATA_DIRS"] = ":".join([
         str(directory / "native-data"), CONFIG["sessionData"],
