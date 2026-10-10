@@ -63,8 +63,8 @@ style; custom Hyprland controls do not impose that style on Plasma.
 ## Unity frontend
 
 On top's native Unity session, `main.py` selects `unity_engine.py`: an offscreen
-Qt controller with one private, per-window Unix socket. `unity_frontend.py`
-runs with Python 2.7 / GTK 3.6 through `unity-quantal-runtime`; keep it compatible
+Qt controller with one private, per-window Unix socket. `unity_frontend.py` and `unity_widgets.py`
+run with Python 2.7 / GTK 3.6 through `unity-quantal-runtime`; keep it compatible
 with that runtime. No modern Qt/Python libraries enter the historical process.
 Book retains its existing desktop faces; the original Unity runtime is x86-only.
 
@@ -74,6 +74,16 @@ same contracts as `Root.qml.submit`; keep them in sync. Both faces use Painter's
 per-model preferences. GTK must merge unrelated preference keys, retain seed
 policy, and finish its final save before closing. Desktop opens use the saved
 launch environment, never the engine's offscreen environment.
+
+Aspect integers plus the MP budget use the controller's family-specific `dims`;
+never derive the saved ratio back from rounded pixels. Prompt bottom handles
+share `prompt.posH`/`prompt.negH` with QML; GTK's system editor uses
+`unity.systemH`. Save heights on release. Browse and View share one image
+widget and selection. Still zoom renders only the visible region; transient
+sampler/video frames cross the socket as bounded images. Clip decoding stays
+in the modern engine, with no audio output attached; clear the media source
+on selection changes and window close. Keep frame polling separate from
+gallery/settings snapshots.
 
 Use real GTK widgets, Ambiance, server decorations and the original appmenu
 exporter. `lib/unity-quantal/assemble.py` owns that runtime dependency. Verify with

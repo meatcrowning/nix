@@ -6,6 +6,7 @@ Only this file runs in the historical runtime. All generation, model discovery,
 metadata and persistence belong to the modern controller across the socket.
 """
 from __future__ import unicode_literals
+import base64
 import json
 import os
 import socket
@@ -27,6 +28,7 @@ if not os.path.exists('/usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules/im-ibus
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, GObject
+from unity_widgets import ResizableText, ImageView
 
 
 def local_path(uri):
@@ -45,9 +47,9 @@ class Connection:
         worker.start()
 
     def send(self, request):
-        if self.closed or (request['op'] == 'poll' and self.pending_poll):
+        if self.closed or (request['op'] in ('poll', 'frame') and self.pending_poll):
             return
-        if request['op'] == 'poll':
+        if request['op'] in ('poll', 'frame'):
             self.pending_poll = True
         self.requests.put(request)
 
@@ -67,7 +69,7 @@ class Connection:
                     raise IOError('Painter engine disconnected')
                 reply = json.loads(line.decode('utf-8'))
                 GLib.idle_add(self.deliver, request['op'], reply)
-                if request['op'] == 'poll':
+                if request['op'] in ('poll', 'frame'):
                     self.pending_poll = False
         except Exception as exc:
             if not self.closed:
@@ -112,8 +114,12 @@ class Window(Gtk.Window):
         self.rows = {}
         self.gallery_key = None
         self.selection = ''
-        self.preview_serial = 0
-        self.zoom = 1.0
+        self.text_boxes = {}
+        self.heights_loaded = False
+        self.frame_tick = ''
+        self.rebuilding_gallery = False
+        self.walk_pending = None
+        self.grabbed_live = False
         self.save_timer = None
         self.connected = True
         self.closing = False
@@ -135,9 +141,12 @@ class Window(Gtk.Window):
                        ('loras', '_LoRAs…', None, self.loras_dialog)]),
             ('_View', [('browse', '_Browse', 'Escape', self.browse),
                        ('preview', '_View Image', 'Return', self.view),
-                       ('zoom_in', 'Zoom _In', '<Control>plus', lambda: self.zoom_by(1.5)),
-                       ('zoom_out', 'Zoom _Out', '<Control>minus', lambda: self.zoom_by(1 / 1.5)),
+                       ('zoom_in', 'Zoom _In', '<Control>plus', lambda: self.zoom_by(1.25)),
+                       ('zoom_out', 'Zoom _Out', '<Control>minus', lambda: self.zoom_by(1 / 1.25)),
                        ('fit', '_Fit Image', '<Control>0', self.fit_image),
+                       ('actual', '_Actual Size', '<Control>1', lambda: self.viewer.set_zoom(1)),
+                       ('older', '_Previous Output', 'Page_Up', lambda: self.walk(-1)),
+                       ('newer', '_Next Output', 'Page_Down', lambda: self.walk(1)),
                        ('refresh', '_Refresh', 'F5', lambda: self.send('rescan'))]),
             ('_Generation', [('cancel', '_Cancel Jobs', None, lambda: self.send('cancel'))])]:
             top = Gtk.MenuItem.new_with_mnemonic(title)
@@ -149,6 +158,9 @@ class Window(Gtk.Window):
                 item.connect('activate', lambda _w, fn=callback: fn())
                 if accelerator:
                     code, mods = Gtk.accelerator_parse(accelerator)
+                    item.add_accelerator('activate', self.accels, code, mods, Gtk.AccelFlags.VISIBLE)
+                if key in ('browse', 'preview'):
+                    code, mods = Gtk.accelerator_parse('<Alt>Left' if key == 'browse' else '<Alt>Right')
                     item.add_accelerator('activate', self.accels, code, mods, Gtk.AccelFlags.VISIBLE)
                 menu.append(item)
                 self.actions.setdefault(key, []).append(item)
@@ -206,10 +218,9 @@ class Window(Gtk.Window):
         for key, title, height in [('positive', 'Prompt', 120), ('negative', 'Negative prompt', 65)]:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             box.pack_start(label(title), False, False, 0)
-            text = Gtk.TextView()
-            text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-            text.get_buffer().connect('changed', self.changed)
-            box.pack_start(scroll(text, height), True, True, 0)
+            editor = self.text_box(key, height)
+            text = editor.text
+            box.pack_start(editor, False, False, 0)
             params.pack_start(box, False, False, 0)
             self.controls[key] = text
             self.rows[key] = box
@@ -222,8 +233,23 @@ class Window(Gtk.Window):
         self.combo('seedPolicy', 'Seed', ['Random', 'Fixed', 'Reuse last'])
         self.entry('seed', 'Seed number')
         self.number('count', 'Jobs', 1, 100, 1)
-        self.number('width', 'Width', 64, 16384, 64)
-        self.number('height', 'Height', 64, 16384, 64)
+        aspect = Gtk.Box(spacing=6)
+        for key in ('aspectW', 'aspectH'):
+            if key == 'aspectH':
+                aspect.pack_start(label(':'), False, False, 0)
+            control = Gtk.SpinButton.new_with_range(1, 999, 1)
+            control.set_width_chars(3)
+            control.connect('value-changed', self.changed)
+            self.controls[key] = control
+            aspect.pack_start(control, True, True, 0)
+        self.grid.attach(label('Aspect'), 0, self.grid_row, 1, 1)
+        self.aspect_label = self.grid.get_child_at(0, self.grid_row)
+        self.grid.attach(aspect, 1, self.grid_row, 1, 1)
+        self.grid_row += 1
+        self.rows['aspectW'] = self.rows['aspectH'] = (self.aspect_label, aspect)
+        self.dimensions = label('')
+        self.grid.attach(self.dimensions, 0, self.grid_row, 2, 1)
+        self.grid_row += 1
         self.number('steps', 'Steps', 1, 1000, 1)
         self.number('cfg', 'Guidance', 0, 100, .5, 2)
         self.combo('sampler_name', 'Sampler', [])
@@ -233,7 +259,7 @@ class Window(Gtk.Window):
         self.check('still', 'Generate a still frame')
         self.number('duration', 'Seconds', .1, 120, .5, 1)
         self.number('fps', 'Frames per second', 1, 120, 1)
-        self.number('megapixels', 'Pixel budget (MP)', .1, 16, .1, 2)
+        self.number('megapixels', 'Megapixels', .1, 8, .1, 1)
         self.check('editNoScale', 'Keep source image size')
         self.number('editMegapixels', 'Edit pixel budget (MP)', .1, 16, .1, 2)
         self.check('useInputImage', 'Use first frame')
@@ -275,7 +301,13 @@ class Window(Gtk.Window):
             self.number('ms.' + key, title, low, high, step, 2)
         self.combo('ms.curve', 'Curve', [])
         self.combo('ms.outside_window', 'Outside interval', [])
-        self.entry('system_prompt', 'System prompt')
+        system_box = self.text_box('system_prompt', 90)
+        system_label = label('System prompt')
+        self.grid.attach(system_label, 0, self.grid_row, 2, 1)
+        self.grid.attach(system_box, 0, self.grid_row + 1, 2, 1)
+        self.grid_row += 2
+        self.rows['system_prompt'] = (system_label, system_box)
+        self.controls['system_prompt'] = system_box.text
         self.combo('krea_sampling', 'Krea sampling', ['native', 'manual', 'turbo_fixed'])
         self.number('krea_shift', 'Krea shift', .01, 100, .1, 2)
         self.number('reference_megapixels', 'Reference budget (MP)', .1, 16, .1, 2)
@@ -303,11 +335,17 @@ class Window(Gtk.Window):
         self.gallery.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.gallery.connect('selection-changed', self.selected)
         self.gallery.connect('item-activated', lambda *_: self.view())
-        self.pages.append_page(scroll(self.gallery), None)
-        self.picture = Gtk.Image()
-        picture_scroll = Gtk.ScrolledWindow()
-        picture_scroll.add_with_viewport(self.picture)
-        self.pages.append_page(picture_scroll, None)
+        self.browse_pane = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        self.browse_pane.set_position(300)
+        self.preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.browse_pane.pack1(self.preview_box, True, False)
+        self.browse_pane.pack2(scroll(self.gallery), True, False)
+        self.pages.append_page(self.browse_pane, None)
+        self.full_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.pages.append_page(self.full_box, None)
+        self.viewer = ImageView(self.message, lambda: self.send('playback'))
+        self.picture = self.viewer.picture
+        self.preview_box.pack_start(self.viewer, True, True, 0)
         nav = Gtk.Box(spacing=6)
         self.previous = Gtk.Button.new_from_stock(Gtk.STOCK_GO_BACK)
         self.previous.connect('clicked', lambda *_: self.change_page(-60))
@@ -331,7 +369,14 @@ class Window(Gtk.Window):
         self.loading = False
         self.update_actions()
         self.send('hello')
-        GLib.timeout_add(750, self.poll)
+        GLib.timeout_add(40, self.poll)
+        self.poll_count = 0
+
+    def text_box(self, key, height):
+        box = ResizableText(height, lambda value: self.send('settings', heights={key: value}))
+        box.text.get_buffer().connect('changed', self.changed)
+        self.text_boxes[key] = box
+        return box
 
     def add_row(self, key, title, control):
         text = label(title)
@@ -393,7 +438,7 @@ class Window(Gtk.Window):
     def send(self, op, save=False, **extra):
         if not self.connected:
             return
-        request = dict(op=op, offset=self.offset, filter=self.search.get_text())
+        request = dict(op=op, offset=self.offset, filter=self.search.get_text(), frameTick=self.frame_tick)
         if save and self.state.get('model'):
             try:
                 request.update(settings=self.values(), model=self.state['model'])
@@ -420,10 +465,16 @@ class Window(Gtk.Window):
     def poll(self):
         if not self.connected or self.closing:
             return False
-        self.send('poll')
+        self.poll_count += 1
+        if self.poll_count % 20 == 0:
+            self.send('poll')
+        elif self.viewer.video or (self.selection == 'live://generating' and self.poll_count % 4 == 0):
+            self.send('frame')
         return True
 
     def receive(self, op, reply):
+        if self.closing:
+            return False
         if not reply.get('ok'):
             self.message(reply.get('error', 'Painter failed'), True)
             if op == 'disconnected':
@@ -432,6 +483,9 @@ class Window(Gtk.Window):
                 self.update_actions()
             return False
         state = reply['state']
+        if op == 'frame':
+            self.receive_media(state['media'])
+            return False
         old = self.state
         self.state = state
         self.loading = True
@@ -466,6 +520,12 @@ class Window(Gtk.Window):
         if settings_changed:
             self.revision = state['revision']
             self.apply_settings(state['settings'])
+        if not self.heights_loaded:
+            for key, height in state['heights'].items():
+                self.text_boxes[key].set_height(height)
+            self.heights_loaded = True
+        g = state['settings']
+        self.dimensions.set_text('%d × %d pixels  ·  /%d' % (g['width'], g['height'], state['multiple']))
         self.loading = False
         self.visibility()
         self.update_actions()
@@ -474,10 +534,31 @@ class Window(Gtk.Window):
         self.progress.set_text('%d%%' % (state['progress'] * 100) if state['busy'] else '')
         self.progress.set_show_text(True)
         self.source_info.set_text('\n'.join([p for p in [state['input'], state['last']] + state['references'] if p]))
+        if op == 'generate':
+            self.grabbed_live = False
         self.update_gallery(state)
+        self.receive_media(state['media'])
         for message in state['messages']:
             self.message(message['text'], message['error'])
         return False
+
+    def receive_media(self, media):
+        if media['path'] == self.selection:
+            if media['before'] and self.viewer.path and self.viewer.path[1] != media['before']:
+                self.viewer.load(self.selection, media['before'])
+            if media['path'] == 'live://generating' and media['tick'] == 'live:0':
+                self.viewer.original = None
+                self.viewer.picture.clear()
+                self.viewer.info.set_text('Waiting for a preview frame…')
+            if media['data']:
+                try:
+                    loader = GdkPixbuf.PixbufLoader.new()
+                    loader.write(base64.b64decode(media['data']))
+                    loader.close()
+                    self.viewer.frame(loader.get_pixbuf(), media.get('size'), media.get('duration', 0))
+                except GLib.GError as exc:
+                    self.message(str(exc), True)
+            self.frame_tick = media['tick']
 
     def apply_settings(self, values):
         for key, control in self.controls.items():
@@ -517,13 +598,18 @@ class Window(Gtk.Window):
             self.visible(key, sampling and not flags.get('fixedSampling'))
         for key in ['cfg', 'negative']:
             self.visible(key, sampling and not video)
-        for key in ['width', 'height']:
-            self.visible(key, not edit)
+        from_image = video and not still and (self.controls['useInputImage'].get_active() or
+                                                self.controls['useLastFrame'].get_active())
+        for key in ['aspectW', 'aspectH']:
+            self.visible(key, not edit and not from_image)
+        self.dimensions.set_visible(not edit)
+        if from_image:
+            self.dimensions.set_text('Aspect from the source image')
         self.visible('batch_size', not edit and not video)
         self.visible('still', video)
         for key in ['duration', 'fps', 'useInputImage', 'useLastFrame']:
             self.visible(key, video and not still)
-        self.visible('megapixels', video)
+        self.visible('megapixels', not edit)
         self.visible('editNoScale', edit)
         self.visible('editMegapixels', edit and not self.controls['editNoScale'].get_active())
         patches = flags.get('editPatches') if edit else not video and flags.get('supportsPatches')
@@ -549,8 +635,12 @@ class Window(Gtk.Window):
                 enabled = enabled and bool(self.state.get('ready')) and bool(self.state.get('model'))
             elif key == 'cancel':
                 enabled = enabled and bool(self.state.get('busy') or self.state.get('queue'))
-            elif key in ('restore', 'open', 'preview', 'zoom_in', 'zoom_out', 'fit'):
+            elif key in ('restore', 'open', 'preview', 'zoom_in', 'zoom_out', 'fit', 'actual', 'older', 'newer'):
                 enabled = enabled and bool(self.selection)
+            if key in ('zoom_in', 'zoom_out', 'fit', 'actual') and self.viewer.video:
+                enabled = False
+            if key in ('open', 'restore') and self.selection == 'live://generating':
+                enabled = False
             elif key == 'loras':
                 enabled = enabled and self.state.get('flags', {}).get('supportsLoras', False)
             elif key == 'quit':
@@ -589,9 +679,23 @@ class Window(Gtk.Window):
 
     def update_gallery(self, state):
         rows = state['gallery']
+        selected = self.selection
+        if selected == 'live://generating' and not any(r['live'] for r in rows):
+            selected = state['replacement']
+        live = next((r for r in rows if r['live']), None)
+        if live and live['grab'] and not self.grabbed_live:
+            selected = live['path']
+            self.grabbed_live = True
+        elif not live:
+            self.grabbed_live = False
         key = [(r['path'], r['thumb'], r['poster']) for r in rows]
-        if key != self.gallery_key:
-            selected = self.selection
+        if key != self.gallery_key or selected != self.selection:
+            if self.walk_pending is not None and rows:
+                selected = rows[self.walk_pending]['path']
+                self.walk_pending = None
+            if not any(r['path'] == selected for r in rows):
+                selected = rows[0]['path'] if rows else ''
+            self.rebuilding_gallery = True
             self.tiles.clear()
             for row in rows:
                 pixbuf = None
@@ -604,58 +708,65 @@ class Window(Gtk.Window):
                 tree_iter = self.tiles.append([pixbuf, row['name'], row['path']])
                 if row['path'] == selected:
                     self.gallery.select_path(self.tiles.get_path(tree_iter))
+            self.rebuilding_gallery = False
             self.gallery_key = key
+            self.selected()
         self.tally.set_text('%d–%d of %d' % (state['offset'] + 1 if rows else 0,
                                             state['offset'] + len(rows), state['total']))
         self.previous.set_sensitive(state['offset'] > 0)
         self.next.set_sensitive(state['offset'] + 60 < state['total'])
 
     def selected(self, *_):
+        if self.rebuilding_gallery:
+            return
         items = self.gallery.get_selected_items()
-        self.selection = self.tiles[items[0]][2] if items else ''
+        path = self.tiles[items[0]][2] if items else ''
+        if path != self.selection:
+            self.selection = path
+            self.frame_tick = ''
+            row = next((r for r in self.state['gallery'] if r['path'] == path), {})
+            self.viewer.path = None
+            self.viewer.load('' if row.get('live') or row.get('is_video') else path,
+                             video=bool(row.get('is_video') and not row.get('live')))
+            if not path:
+                self.viewer.info.set_text('Select an output')
+            self.send('view', path=path)
         self.update_actions()
 
+    def move_viewer(self, box, page):
+        if self.viewer.get_parent() != box:
+            self.viewer.reparent(box)
+            box.set_child_packing(self.viewer, True, True, 0, Gtk.PackType.START)
+        self.pages.set_current_page(page)
+        self.viewer.resized()
+
     def browse(self):
-        self.pages.set_current_page(0)
+        self.move_viewer(self.preview_box, 0)
 
     def view(self):
-        if not self.selection:
+        if self.selection:
+            self.move_viewer(self.full_box, 1)
+
+    def walk(self, delta):
+        if self.pages.get_current_page() != 1:
             return
-        row = next((r for r in self.state['gallery'] if r['path'] == self.selection), None)
-        if not row:
-            return
-        path = local_path(row['poster']) if row['is_video'] else row['path']
-        if not path:
-            self.message('The video poster is still being prepared. Open plays the original clip.')
-            return
-        self.preview_serial += 1
-        serial = self.preview_serial
-        width = int(max(400, self.pages.get_allocated_width() - 24) * self.zoom)
-        height = int(max(300, self.pages.get_allocated_height() - 24) * self.zoom)
-        self.picture.clear()
-        self.pages.set_current_page(1)
-        def load():
-            try:
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, width, height, True)
-                GLib.idle_add(self.show_preview, serial, pixbuf)
-            except GLib.GError as exc:
-                GLib.idle_add(self.message, str(exc), True)
-        worker = threading.Thread(target=load)
-        worker.daemon = True
-        worker.start()
+        rows = self.state.get('gallery', [])
+        index = next((i for i, r in enumerate(rows) if r['path'] == self.selection), -1)
+        target = index + delta
+        if 0 <= target < len(rows):
+            self.gallery.select_path(Gtk.TreePath.new_from_string(str(target)))
+        elif target < 0 and self.offset > 0:
+            self.walk_pending = -1
+            self.change_page(-60)
+        elif target >= len(rows) and self.offset + len(rows) < self.state.get('total', 0):
+            self.walk_pending = 0
+            self.change_page(60)
 
     def zoom_by(self, multiplier):
-        self.zoom = max(.25, min(8, self.zoom * multiplier))
-        self.view()
+        self.viewer.zoom_by(multiplier)
 
     def fit_image(self):
-        self.zoom = 1.0
-        self.view()
-
-    def show_preview(self, serial, pixbuf):
-        if serial == self.preview_serial:
-            self.picture.set_from_pixbuf(pixbuf)
-        return False
+        self.viewer.set_zoom(0)
 
     def restore(self):
         if self.selection:
@@ -720,6 +831,7 @@ class Window(Gtk.Window):
             return True
         # Queue shutdown after the final settings acknowledgement, so quitting
         # immediately after typing still persists the edit.
+        self.send('view', path='')
         self.connection.requests.put(None)
         self.hide()
         GLib.timeout_add(250, self.finish_close)
