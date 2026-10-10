@@ -1,7 +1,6 @@
 """Native session supervisor and FHS compatibility runtime for Unity 6.8."""
 
 import configparser
-import ast
 import fcntl
 import json
 import os
@@ -215,7 +214,9 @@ def prepare(directory, environment):
 
     (directory / "applications/unity-quantal-terminal.desktop").write_text(
         "[Desktop Entry]\nType=Application\nName=Terminal\nIcon=utilities-terminal\n"
-        "Exec=/usr/local/bin/x-terminal-emulator\nCategories=System;TerminalEmulator;\n"
+        "Exec=/usr/local/bin/unity-host-launch --desktop unity-quantal-terminal.desktop -- "
+        + str(PACKAGE / "bin/unity-quantal-terminal") + "\n"
+        "Categories=System;TerminalEmulator;\nStartupWMClass=unity-terminal\n"
     )
     # Seed installed handlers once, instead of pinning missing 2012 applications.
     defaults = desktop_parser(Path(state["config_home"]) / "mimeapps.list")
@@ -544,13 +545,6 @@ def refresh():
     subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.settings-daemon.plugins.mouse",
                     "active", "false"], env=environment, check=True)
     apply_preferences(environment)
-    launcher = [RUNTIME, "/usr/bin/gsettings"]
-    result = subprocess.check_output([*launcher, "get", "com.canonical.Unity.Launcher", "favorites"], env=environment, text=True)
-    favorites = ast.literal_eval(result)
-    if (directory / "applications/org.kde.konsole.desktop").exists():
-        updated = ["application://org.kde.konsole.desktop" if value == "application://unity-quantal-terminal.desktop" else value for value in favorites]
-        if updated != favorites:
-            subprocess.run([*launcher, "set", "com.canonical.Unity.Launcher", "favorites", repr(updated)], env=environment, check=True)
 
     def bus(method, *arguments):
         return subprocess.run([CONFIG["gdbus"], "call", "--session", "--dest", "org.freedesktop.DBus",
