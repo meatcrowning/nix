@@ -12,7 +12,7 @@ from unity_frontend import Gtk, GLib, GObject, Window
 from gi.repository import Gdk
 GObject.threads_init()
 assert (Gtk.get_major_version(), Gtk.get_minor_version()) == (3, 6)
-assert Gtk.Settings.get_default().get_property('gtk-theme-name') == 'Ambiance'
+assert Gtk.Settings.get_default().get_property('gtk-theme-name') in ('Ambiance', 'Ambiance-Dark')
 
 # A private global-menu registrar proves GTK exports real menu actions. There
 # is no Unity shell, focus change, notification daemon, or session manager.

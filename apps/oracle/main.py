@@ -4136,10 +4136,10 @@ class Titlebar(QObject):
     compactChanged = Signal()
     barWidthChanged = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, enabled=True):
         super().__init__(parent)
-        self._client = VtbClient(on_click=self.clicked.emit,
-                                  on_click_at=self.clickedAt.emit)
+        self._client = (VtbClient(on_click=self.clicked.emit,
+                                  on_click_at=self.clickedAt.emit) if enabled else None)
         self._edge = "right"
         self._compact = False
         self._bar_width = 40
@@ -4228,11 +4228,13 @@ class Titlebar(QObject):
             else:
                 out.append((str(b["id"]), str(b["label"]), int(b.get("state", 0)),
                             str(b.get("tip", ""))))
-        self._client.set_buttons(out)
+        if self._client is not None:
+            self._client.set_buttons(out)
 
     @Slot(str)
     def setFooter(self, text):
-        self._client.set_footer(text)
+        if self._client is not None:
+            self._client.set_footer(text)
 
 
 class Jobs(QObject):
@@ -13012,6 +13014,13 @@ def main():
     # OLD face and the NEW one can be put side by side on one screen [his,
     # 2026-08-25] — `chatter (legacy)` in the runner is this same binary with
     # `--face=plasma`, so there is no second copy of chatter to keep in step.
+    # Only the original Quantal session gets the historical GTK face.
+    # Explicit faces and isolated QML harnesses retain their existing route.
+    from unity_engine import selected
+    if selected(os.environ, sys.argv):
+        from unity_engine import run
+        sys.exit(run(sys.modules[__name__]))
+
     face = ""
     for arg in list(sys.argv[1:]):
         if arg.startswith("--face="):

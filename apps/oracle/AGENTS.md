@@ -67,6 +67,28 @@ Ollama. Status left shows activity/results or idle when the server is up;
 right shows jobs and server state. `stopReply` clears stale activity text.
 With the server down, leave the left resting status empty.
 
+## Unity 12.10 frontend
+
+`unity_engine.py` selects the GTK face only with the Unity desktop token,
+`UNITY_QUANTAL_SESSION_DIR`, and the installed Quantal runtime. Explicit
+`--face` choices and `--selftest` retain their original routing. Book keeps
+its existing faces; Quantal is top-only.
+
+`unity_frontend.py` runs under Quantal's Python 2.7 / GTK 3.6, using the session
+Ambiance theme, server decorations and original appmenu exporter. The modern
+engine hosts `Root.qml` invisibly on offscreen Qt so turn handling, continuation,
+choices, attachments and session saves retain one owner. `unitySnapshot` and
+`unitySend` are the JSON/action seam; no second conversation store or tool loop.
+The engine owns the backend lease and drains session saves before exit.
+The private per-window socket transport is shared with Painter in
+`pylib/unityipc.py` and `pylib/unitygtk.py`.
+
+Run `tools/unity-test.sh UNITY_PACKAGE` under this app. It uses private
+PID/mount/network namespaces, Xvfb, D-Bus and scratch stores; its inner Python
+scripts must never run directly on the host. It verifies the desktop gate,
+GTK controls/global-menu export, streaming, attachment submission, cancellation
+and session persistence. No live model or desktop interaction is needed.
+
 ## Transport, tools, and context
 
 `Ollama` uses asynchronous Qt network/process work. Stream NDJSON incrementally,
