@@ -63,13 +63,28 @@ params = dict(model=engine.model, positive='restored prompt', negative='restored
               seed=42, width=640, height=768, steps=17, cfg=3.5)
 Path('/home/test/out/fixture.png').write_bytes(P.pngmeta.upsert_text(
     Path('/home/test/out/fixture.png').read_bytes(), {'painter': json.dumps(params)}))
+# An edit source and a short silent clip exercise both other viewer paths.
+Path('/home/test/out/.before').mkdir(exist_ok=True)
+before = QImage(80, 60, QImage.Format_RGB32)
+before.fill(QColor('blue'))
+before.save('/home/test/out/.before/edit.png')
+Path('/home/test/out/edit.png').write_bytes(P.pngmeta.upsert_text(
+    Path('/home/test/out/fixture.png').read_bytes(), {'painter': json.dumps(dict(params, edit=True))}))
+Path('/home/test/out/video').mkdir(exist_ok=True)
+subprocess.run([os.environ['FFMPEG'], '-hide_banner', '-loglevel', 'error',
+                '-f', 'lavfi', '-i', 'testsrc2=size=96x64:rate=12', '-t', '1',
+                '-c:v', 'mpeg4', '-an', '/home/test/out/video/clip.mp4'], check=True)
 ctl.gallery.load_existing()
 
 # Exercise command validation and persistence without a real generation.
 engine.dispatch(dict(op='settings', model=engine.model,
-                     settings=dict(positive='saved prompt', steps=23, width=768, height=1024)))
+                     settings=dict(positive='saved prompt', steps=23, aspectW=3, aspectH=4, megapixels=.7)))
 assert E.userprefs.saved_for(engine.model)['steps'] == 23
 assert E.userprefs.saved_for(engine.model)['aspectW'] == 3
+assert E.userprefs.saved_for(engine.model)['megapixels'] == .7
+assert engine.settings['width'] == ctl.dims('3:4', .7, engine.multiple)['width']
+engine.dispatch(dict(op='settings', heights={'positive': 210, 'negative': 95}))
+assert E.userprefs.load()['prompt.posH'] == 210
 try:
     engine.dispatch(dict(op='generate', model='wrong', settings={'positive': 'bad'}))
     raise AssertionError('stale model submitted')
@@ -97,6 +112,22 @@ for edit, video in [(False, False), (True, False), (False, True)]:
     else:
         assert wire['cfg'] == 3.5 and wire['width'] == 640
 
+# The existing controller's sampler path supplies transient frames over the
+# private socket, with no preview files and no repeated image payload.
+ctl.gallery.begin_live('fixture', grab=True)
+engine.set_view('live://generating')
+from PySide6.QtCore import QBuffer, QIODevice
+buf = QBuffer()
+buf.open(QIODevice.WriteOnly)
+image.save(buf, 'PNG')
+ctl._on_preview(None, bytes(buf.data()), 'png')
+media = engine.snapshot({})['media']
+assert media['data'] and media['path'] == 'live://generating'
+assert not engine.snapshot({'frameTick': media['tick']})['media']['data']
+assert any(r['live'] for r in engine.snapshot({})['gallery'])
+ctl.gallery.end_live(replaced_by='/home/test/out/fixture.png')
+assert engine.view_path == '/home/test/out/fixture.png'
+
 submitted = []
 ctl.generate = lambda params, count: submitted.append((params, count))
 ctl.cancel = lambda: ctl._set_status('Cancelled fixture')
@@ -119,7 +150,16 @@ assert submitted, 'GTK Generate did not reach controller'
 assert submitted[0][0]['positive'] == 'a native GTK prompt'
 assert submitted[0][0]['seed'] == 1234
 assert submitted[0][1] == 2
+expected = ctl.dims('16:9', .8, engine.multiple)
+assert submitted[0][0]['width'] == expected['width']
+assert submitted[0][0]['height'] == expected['height']
+assert engine.player is not None
+assert engine.player.audioOutput() is None
+assert engine.player.source().isEmpty(), 'decoder retained after leaving clip'
 assert E.userprefs.saved_for(engine.model)['positive'] == 'last edit before closing'
+assert E.userprefs.load()['prompt.posH'] == 285
+assert E.userprefs.load()['prompt.negH'] == 40
+assert E.userprefs.load()['unity.systemH'] == 600
 ctl._scan_pool.waitForDone()
 ctl.gallery._thumb_pool.waitForDone()
 print('PASS: GTK socket, submission, restore, persistence, stale model and pipeline contracts')

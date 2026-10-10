@@ -66,6 +66,7 @@ INNER
   --setenv XDG_RUNTIME_DIR /run/user/1000 --setenv QT_QPA_PLATFORM offscreen \
   --setenv XDG_CURRENT_DESKTOP Unity --setenv LANG C.UTF-8 \
   --setenv PATH "$(dirname "${bins[1]}"):$(dirname "${bins[2]}"):${bins[5]}" \
+  --setenv FFMPEG "$(readlink -f "$(command -v ffmpeg)")" \
   --setenv PACKAGE "$package" --setenv PYTHON "${bins[2]}" \
   --setenv XVFB "${bins[3]}" --setenv DBUS "${bins[4]}" --setenv QTENV "$qtenv" \
   --chdir /source "${bins[1]}" /work/inside.sh
