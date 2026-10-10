@@ -5,10 +5,9 @@ below Ambiance's own dark chrome (its menubar, toolbar, and panel colour). Accen
 gradients, and image shapes stay as Ubuntu shipped them.
 """
 
-import colorsys
+import argparse
 import re
 import shutil
-import sys
 from pathlib import Path
 
 from PIL import Image
@@ -109,7 +108,23 @@ def artwork(path):
     picture.save(path)
 
 
-def main(source, destination, *artworks):
+def appearance_option(library):
+    """Offer the theme in the original Appearance panel.
+
+    Its theme list is compiled in. The High Contrast Inverse slot points at a
+    theme this runtime does not ship, so it becomes Ambiance Dark in place.
+    """
+    data = bytearray(library.read_bytes())
+    for old, new in [(b"HighContrastInverse\0", b"Ambiance-Dark"),
+                     (b"High Contrast Inverse\0", b"Ambiance Dark")]:
+        assert data.count(old) == 1, old
+        start = data.index(old)
+        data[start:start + len(old)] = new.ljust(len(old), b"\0")
+    library.chmod(0o755)
+    library.write_bytes(bytes(data))
+
+
+def main(source, destination, panel=None, artworks=()):
     source, destination = Path(source), Path(destination)
     shutil.copytree(source, destination, symlinks=False)
     destination.chmod(0o755)
@@ -123,10 +138,19 @@ def main(source, destination, *artworks):
             elif path.suffix == ".png":
                 image(path)
     index = destination / "index.theme"
-    index.write_text(index.read_text().replace("Name=Ambiance", "Name=Ambiance Dark"))
+    index.write_text(index.read_text().replace("Name=Ambiance", "Name=Ambiance Dark")
+                     .replace("GtkTheme=Ambiance", "GtkTheme=" + destination.name))
     for path in artworks:
         artwork(Path(path))
+    if panel:
+        appearance_option(Path(panel))
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("source")
+    parser.add_argument("destination")
+    parser.add_argument("--panel")
+    parser.add_argument("--artwork", action="append", default=[])
+    args = parser.parse_args()
+    main(args.source, args.destination, args.panel, args.artwork)

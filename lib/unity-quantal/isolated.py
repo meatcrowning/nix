@@ -223,19 +223,21 @@ def limits():
 
 
 def worker(app, files):
+    theme_file = Path("/transport/theme")
+    theme = theme_name(theme_file.read_text()) if theme_file.is_file() else CONFIG["gtkTheme"]
     environment = os.environ.copy()
     environment.update({
         "LD_LIBRARY_PATH": CONFIG["modernLibraries"] + ":/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib",
         "GSETTINGS_SCHEMA_DIR": "/usr/share/glib-2.0/schemas",
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
-        "GTK_THEME": CONFIG["gtkTheme"], "UBUNTU_MENUPROXY": "0", "GIO_USE_VFS": "local",
+        "GTK_THEME": theme, "UBUNTU_MENUPROXY": "0", "GIO_USE_VFS": "local",
         "GIO_EXTRA_MODULES": "", "GIO_MODULE_DIR": "/nonexistent", "GSETTINGS_BACKEND": "memory",
         "GTK_MODULES": "", "GTK_IM_MODULE": "gtk-im-context-simple",
         "PATH": CONFIG["archivePath"] + ":/usr/bin:/bin", "XDG_DATA_DIRS": "/usr/share",
     })
     settings = Path.home() / ".config/gtk-3.0/settings.ini"
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text("[Settings]\ngtk-theme-name=" + CONFIG["gtkTheme"] + "\ngtk-icon-theme-name=ubuntu-mono-dark\ngtk-font-name=Ubuntu 11\n")
+    settings.write_text("[Settings]\ngtk-theme-name=" + theme + "\ngtk-icon-theme-name=ubuntu-mono-dark\ngtk-font-name=Ubuntu 11\n")
     (Path.home() / ".config/user-dirs.dirs").write_text('XDG_DOCUMENTS_DIR="$HOME/Documents"\nXDG_DOWNLOAD_DIR="$HOME/Documents"\nXDG_PICTURES_DIR="$HOME/Documents"\n')
     os.chdir("/home/legacy/Documents")
     bus_config = Path.home() / "bus.conf"
@@ -257,10 +259,29 @@ def worker(app, files):
     raise SystemExit(result)
 
 
+def theme_name(value):
+    # Private displays have no XSETTINGS; pass the chosen theme by name only.
+    value = value.strip().strip("'")
+    if value and "/" not in value and not value.startswith(".") \
+            and (Path(CONFIG["runtime"]) / "usr/share/themes" / value / "gtk-3.0").is_dir():
+        return value
+    return CONFIG["gtkTheme"]
+
+
+def current_theme():
+    try:
+        result = subprocess.run([str(HERE.parent.parent / "bin/unity-quantal-runtime"), "/usr/bin/gsettings", "get",
+                                 "org.gnome.desktop.interface", "gtk-theme"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return CONFIG["gtkTheme"]
+    return theme_name(result.stdout)
+
+
 def run_session(run, app, files, *, attach=True):
     for name in ["input", "output", "transport"]:
         (run / name).mkdir(mode=0o700, exist_ok=True)
     (run / "transport/exit-status").unlink(missing_ok=True)
+    (run / "transport/theme").write_text(current_theme())
     (run / "passwd").write_text(f"legacy:x:{os.getuid()}:{os.getgid()}:Legacy application:/home/legacy:/bin/sh\n")
     (run / "group").write_text(f"legacy:x:{os.getgid()}:legacy\n")
     (run / "machine-id").write_text("a" * 32 + "\n")
