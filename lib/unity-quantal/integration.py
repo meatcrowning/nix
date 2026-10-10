@@ -2,6 +2,7 @@
 
 import configparser
 import copy
+import html
 import os
 from pathlib import Path
 import re
@@ -157,6 +158,24 @@ def desktop_files(directory, state):
     (directory / "user-dirs.dirs").write_text(text + f'\nXDG_DESKTOP_DIR="{target}"\n')
 
 
+def host_logo(name):
+    """The NixOS snowflake above the system name, laid out like UbuntuLogo.png.
+
+    Flat fills and plain paths, because Quantal's librsvg predates the
+    gradients and <use> references of nixos-icons' own SVG.
+    """
+    lambda_ = ("m 309.54892,-710.38827 122.19683,211.67512 -56.15706,0.5268 -32.6236,-56.8692 "
+               "-32.85645,56.5653 -27.90237,-0.011 -14.29086,-24.6896 46.81047,-80.4901 "
+               "-33.22946,-57.8257 z")
+    arms = "".join(f'<path d="{lambda_}" fill="{"#7ebae4" if turn % 2 == 0 else "#5277c3"}" '
+                   f'transform="rotate({turn * 60} 407.3 -715.8)"/>' for turn in range(6))
+    # The lettering colour Ambiance-Dark gives the original wordmark.
+    return ('<svg xmlns="http://www.w3.org/2000/svg" width="190" height="145">'
+            f'<g transform="translate(95 54) scale(0.2) translate(-407.3 715.8)">{arms}</g>'
+            '<text x="95" y="138" text-anchor="middle" font-family="Ubuntu" font-size="26" '
+            f'fill="#dfdbd2">{html.escape(name)}</text></svg>\n')
+
+
 def host_details(directory, root):
     """Retain the original Details layout with facts from the actual host."""
     tree = ET.parse(root / "usr/share/gnome-control-center/ui/info.ui")
@@ -175,11 +194,11 @@ def host_details(directory, root):
             graphics.append(match[1])
     disk = shutil.disk_usage(Path.home())
     values = {
-        "version_label": system.get("PRETTY_NAME", "Linux") + "\nUnity 6.8 · Ubuntu 12.10 compatibility runtime",
+        "version_label": system.get("PRETTY_NAME", "Linux"),
         "memory_label": f"{int(memory[1]) / 1048576:.1f} GiB" if memory else "Unavailable",
         "processor_label": f"{model[1] if model else 'CPU'} · {os.cpu_count()} logical CPUs",
         "graphics_label": ", ".join(graphics) or "Host graphics driver",
-        "os_type_label": "64-bit · " + system.get("PRETTY_NAME", "Linux") + "\nUbuntu 12.10 desktop compatibility runtime",
+        "os_type_label": "64-bit",
         "disk_label": f"{disk.total / 2**30:.1f} GiB · {disk.free / 2**30:.1f} GiB free (home filesystem)",
     }
     for parent in list(tree.iter()):
@@ -198,6 +217,11 @@ def host_details(directory, root):
             label = ET.Element("property", name="label")
             label.text = values[key]
             widget.insert(0, label)
+    # The host's logo in place of the Ubuntu one, at the original artwork's
+    # size. The session directory is inside the sandbox's XDG_RUNTIME_DIR.
+    logo = directory / "host-logo.svg"
+    logo.write_text(host_logo(system.get("NAME", "Linux")))
+    tree.find(".//object[@id='system_image']/property[@name='pixbuf']").text = str(logo)
     # NixOS updates are managed by rebuild-top, not the obsolete Ubuntu updater.
     button = tree.find(".//object[@id='updates_button']")
     button.find("property[@name='visible']").text = "False"
