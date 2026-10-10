@@ -18,16 +18,31 @@ let
     url = "https://old-releases.ubuntu.com/releases/12.10/ubuntu-12.10-desktop-amd64.iso";
     sha256 = "256a2cc652ec86ff366907fd7b878e577b631cc6c6533368c615913296069d80";
   };
+  # Quantal's own Nautilus extensions (Actions, Image Converter, Compare with
+  # Meld) and the dependencies the ISO lacks, from the release archive.
+  archivePackages = map fetchurl (lib.importJSON ./archive-packages.json);
   runtime = runCommand "unity-12.10-original-runtime" {
     nativeBuildInputs = [ (python3.withPackages (ps: [ ps.pillow ])) libarchive squashfsTools ];
   } ''
     bsdtar -xf ${iso} casper/filesystem.squashfs
     unsquashfs -no-progress -no-xattrs -excludes -d original casper/filesystem.squashfs dev
     mkdir -p "$out"
-    python ${./assemble.py} original "$out"
+    python ${./assemble.py} original "$out" ${lib.concatStringsSep " " archivePackages}
     python ${./dark-theme.py} "$out/usr/share/themes/Ambiance" "$out/usr/share/themes/Ambiance-Dark" \
       --artwork "$out/usr/share/gnome-control-center/ui/UbuntuLogo.png" \
       --panel "$out/usr/lib/control-center-1/panels/libbackground.so"
+  '';
+  # indicator-cpufreq's meter icons; its governor menu predates amd-pstate.
+  cpufreqIconsDeb = fetchurl {
+    url = "https://old-releases.ubuntu.com/ubuntu/pool/universe/i/indicator-cpufreq/indicator-cpufreq_0.1.4-0ubuntu2_all.deb";
+    sha256 = "74f975533646a3d8133d124a99cecf1c83372996666ef80ce204f2eaf28764d0";
+  };
+  cpufreqIcons = runCommand "unity-quantal-cpufreq-icons" {
+    nativeBuildInputs = [ libarchive ];
+  } ''
+    mkdir -p "$out"
+    bsdtar -xOf ${cpufreqIconsDeb} data.tar.gz | bsdtar -xf - -C "$out" --strip-components 7 \
+      ./usr/share/icons/ubuntu-mono-dark/status/22
   '';
   # The default for new profiles; Appearance settings choose it afterwards.
   gtkTheme = "Ambiance-Dark";
@@ -102,7 +117,8 @@ stdenvNoCC.mkDerivation {
   dontBuild = true;
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
-    cp session.py bridge.py screensaver.py integration.py isolated.py display.py "$out/libexec/unity-quantal/"
+    cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
+      "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
@@ -200,6 +216,15 @@ stdenvNoCC.mkDerivation {
     exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/display.py" "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-display"
+    cat > "$out/bin/unity-quantal-cpufreq" <<EOF
+    #!${bash}/bin/bash
+    exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/cpufreq.py" ${cpufreqIcons}
+    EOF
+    cat > "$out/bin/unity-quantal-weather" <<EOF
+    #!${bash}/bin/bash
+    exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/weather.py" indicator
+    EOF
+    chmod +x "$out/bin/unity-quantal-cpufreq" "$out/bin/unity-quantal-weather"
     cat > "$out/bin/unity-quantal-isolated" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"

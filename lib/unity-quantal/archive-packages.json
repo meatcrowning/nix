@@ -1,0 +1,62 @@
+[
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/n/nautilus/gir1.2-nautilus-3.0_3.5.90.really.3.4.2-0ubuntu4_amd64.deb",
+    "sha256": "036ab724888b330dc15608b411379ad52651fea0accbdd316c1651b077b0527b"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/i/imagemagick/imagemagick_6.7.7.10-2ubuntu4_amd64.deb",
+    "sha256": "a8dac7b78ab72151982d523f4cc25acf6531dec1992ed7ec32e043241e562a84"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/i/imagemagick/imagemagick-common_6.7.7.10-2ubuntu4_all.deb",
+    "sha256": "30467e08c078eb9184ecf87cb3f269e15225617a56a1d8ce664f0e3fc8e8cfc9"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/f/fftw3/libfftw3-3_3.3.2-3.1ubuntu1_amd64.deb",
+    "sha256": "976270a7e717d5bf095d7d42056633179031a6d4d9e0e619b177178841a3a572"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/libg/libglade2/libglade2-0_2.6.4-1ubuntu2_amd64.deb",
+    "sha256": "cc181670618a4a06db8cf57f78cccd00bdf1bffef843f6374513f3b223cbb1e3"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/libl/liblqr/liblqr-1-0_0.4.1-2_amd64.deb",
+    "sha256": "38c539bd5b83a752d50f128736dc8d1bab34ae14af2bf2686ba5eef4c065c109"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/i/imagemagick/libmagickcore5_6.7.7.10-2ubuntu4_amd64.deb",
+    "sha256": "7929041253a89cd681c9eb6baf78c11f815eb9c70b5ab7cf5375294cd520d471"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/i/imagemagick/libmagickwand5_6.7.7.10-2ubuntu4_amd64.deb",
+    "sha256": "4bc96e65eae46c396d89a8787395f8287be4c39d3b2849196f9b71317ad1575c"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/libu/libunique3/libunique-3.0-0_3.0.2-1build1_amd64.deb",
+    "sha256": "4affba8a4e61d609d00f6ca08337bb7522e38cfe3cd9e4055e3cfacdfaa3ad8c"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/m/meld/meld_1.6.0-1_all.deb",
+    "sha256": "f144f199f0417e0653e20184c6cf7535f444d99bc7959bcfcb7cf80b6bb17776"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/n/nautilus-actions/nautilus-actions_3.2.2-1_amd64.deb",
+    "sha256": "c64be0e3c79ce6a368179db30689fd72019220e2ba8df7371010a768efac7b52"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/n/nautilus-compare/nautilus-compare_0.0.4-1_all.deb",
+    "sha256": "7f4b1ffcc57ee47bc711f1c03d760fb10a0b112f165d6b38228ca7fef873b254"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/n/nautilus-image-converter/nautilus-image-converter_0.3.1~git20110416-1_amd64.deb",
+    "sha256": "e0cab8693595c2fd72dc891518960eb84f13585b388d6bbc8a0f00f2e3024852"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/p/pygtk/python-glade2_2.24.0-3build1_amd64.deb",
+    "sha256": "0e76db55d1bead611ec8d94608de3d324495bdf6f23231405d5795ff4b60a69d"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/n/nautilus-python/python-nautilus_1.1-3_amd64.deb",
+    "sha256": "f9bca95c45b3f210078b9507deb44a1d6a721e33289b5ef06e136ba4a7766933"
+  }
+]
