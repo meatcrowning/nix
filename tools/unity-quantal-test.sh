@@ -208,13 +208,16 @@ application=${application#*\'}
 application=${application%%\'*}
 gdbus call --session --dest org.ayatana.bamf --object-path "$application" --method org.ayatana.bamf.application.DesktopFile | grep unity-original-gcalctool.desktop
 # Meta drags windows: left moves, right resizes; Alt drags reach the client.
-window_id() { xwininfo -root -tree | sed -n "s/^ *\\(0x[0-9a-f]*\\) $1.*/\\1/p" | head -n1; }
+# The window tree can change mid-listing while windows open; retry on the next poll.
+window_id() { { xwininfo -root -tree 2>/dev/null || true; } | sed -n "s/^ *\\(0x[0-9a-f]*\\) $1.*/\\1/p" | head -n1; }
 probe=$(window_id '"unity-host-probe"')
 terminal=$(window_id '"Terminal".*736x457')
 test -n "$probe" && test -n "$terminal"
 geometry() { xwininfo -id "$target" | sed -n 's/.*\(Absolute upper-left [XY]\|Width\|Height\): *//p' | tr '\n' ' '; echo; }
 drag() {
   local key=$1 button=$2 x y width height
+  # Another window may overlap the grab point; drag the target from the top.
+  xdotool windowraise "$target" sleep 0.3
   read -r x y width height < <(geometry)
   # Grab the lower-right quarter: Compiz resizes the edges nearest the pointer.
   xdotool mousemove $((x + width * 3 / 4)) $((y + height * 3 / 4)) sleep 0.2 keydown "$key" sleep 0.2 \
@@ -249,16 +252,24 @@ read -r ax ay _ _ < <(geometry)
 theme() { "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gsettings get org.gnome.desktop.interface gtk-theme; }
 background() { import -silent -window root -crop 1x1+$((ax + 100))+$((ay + 270)) -format '%[fx:int(255*luminance)]' info:; }
 pick() {
-  xdotool mousemove $((ax + 685)) $((ay + 467)) click 1 sleep 0.5 key "$@" sleep 0.3 key Return sleep 2
+  xdotool mousemove $((ax + 685)) $((ay + 467)) click 1 sleep 0.5 key "$@" sleep 0.3 key Return sleep 1
+}
+# Restyling every running GTK window takes a moment; poll rather than guess.
+restyled() {
+  for _ in {1..30}; do
+    [ "$(background)" "$1" "$2" ] && return 0
+    sleep 0.2
+  done
+  return 1
 }
 test "$(theme)" = "'Ambiance-Dark'"
-test "$(background)" -lt 80
+restyled -lt 80
 pick Up Up
 test "$(theme)" = "'Ambiance'"
-test "$(background)" -gt 200
+restyled -gt 200
 pick Down Down
 test "$(theme)" = "'Ambiance-Dark'"
-test "$(background)" -lt 80
+restyled -lt 80
 echo 'PASS: Appearance switches between Ambiance and Ambiance Dark live'
 # Brightness keys and night light share one gamma ramp; the panel opens from
 # original Settings and the indicator sits in the original panel.
@@ -294,9 +305,9 @@ xdotool key XF86MonBrightnessUp sleep 0.5
 grep '"brightness": 95' "$display_state"
 grep '"night": true' "$display_state"
 echo 'PASS: brightness keys, night light state, indicator, and Settings panel'
-# The session terminal is kitty dressed as the 12.10 GNOME Terminal.
+# The session terminal is GNOME Terminal 3.6's window over the current VTE.
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/x-terminal-emulator -e "$UNITY_TEST_TOOLS/bin/bash" \
-  -c 'printf "\e[40m  \e[0m\n"; sleep 30' >/work/terminal-kitty.log 2>&1 &
+  -c 'printf "\e[40m  \e[0m\n"; sleep 30' >/work/terminal-session.log 2>&1 &
 for _ in {1..80}; do
   target=$(window_id '"[^"]*": ("unity-terminal"')
   [ -n "$target" ] && break
@@ -304,11 +315,14 @@ for _ in {1..80}; do
 done
 test -n "$target"
 sleep 2
-read -r tx ty _ _ < <(geometry)
-pixel() { import -silent -window root -crop 1x1+$((tx + $1))+$((ty + $2)) -depth 8 -format '%[hex:p{0,0}]' info:; }
+import -silent -window "$target" /work/terminal-session.png
+pixel() { magick /work/terminal-session.png -crop 1x1+$1+$2 -depth 8 -format '%[hex:p{0,0}]' info:; }
+test "$(pixel 300 8)" = 3C3B37
+top=0
+while [ "$(pixel 400 $top)" != 300A24 ]; do top=$((top + 1)); [ $top -lt 60 ]; done
 test "$(pixel 400 300)" = 300A24
-test "$(pixel 5 8)" = 000000
-echo 'PASS: Unity terminal opens kitty with the 12.10 look'
+test "$(pixel 5 $((top + 8)))" = 000000
+echo 'PASS: Unity terminal opens with the 12.10 menubar and screen'
 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames > /work/bus-names.txt
 grep 'com.canonical.Unity.Panel.Service' /work/bus-names.txt
 grep 'Starting plugin: unityshell' /home/unity-test/.local/state/unity-quantal/session.log
