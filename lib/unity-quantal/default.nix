@@ -108,6 +108,7 @@ stdenvNoCC.mkDerivation {
       rsvg = "${librsvg}/bin/rsvg-convert";
       gdbus = "${glib.bin}/bin/gdbus";
       xprop = "${xprop}/bin/xprop";
+      libX11 = "${libX11}/lib/libX11.so.6";
       session = "${cinnamon-session}/bin/cinnamon-session";
       sessionData = "${cinnamon}/share/gsettings-schemas/${cinnamon.name}";
       sessionQuit = "${cinnamon-session}/bin/cinnamon-session-quit";
