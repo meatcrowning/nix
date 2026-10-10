@@ -19,7 +19,9 @@ import subprocess
 import sys
 import threading
 
-from gi.repository import Gio, GLib
+import gi
+gi.require_version("GLibUnix", "2.0")
+from gi.repository import Gio, GLib, GLibUnix  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CONFIG = json.loads((HERE / "config.json").read_text())
@@ -128,7 +130,7 @@ def main():
         pair = Pair(tool, reader, to_reader, to_tool)
         for side in (tool, reader):
             threading.Thread(target=follow, args=(pair, side, loop), daemon=True).start()
-    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, loop.quit)
+    GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, loop.quit)
     loop.run()
     # Every exit is unexpected or a refresh; either way the session restarts it.
     return 1
