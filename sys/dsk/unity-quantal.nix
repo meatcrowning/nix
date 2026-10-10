@@ -21,6 +21,7 @@ in
   services.xserver.enable = true;
   services.displayManager.sessionPackages = [ unity ];
   environment.systemPackages = [ unity rhythmbox ];
+  fonts.packages = [ unity.fonts ];
   system.build.unityQuantal = unity;
   security.pam.services.cinnamon-screensaver = { };
   programs.dconf.enable = true;

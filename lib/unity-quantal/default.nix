@@ -32,6 +32,25 @@ let
       --artwork "$out/usr/share/gnome-control-center/ui/UbuntuLogo.png" \
       --panel "$out/usr/lib/control-center-1/panels/libbackground.so"
   '';
+  # Ambiance Dark for current GTK 3 applications, whose CSS the 12.10 theme
+  # predates: Ubuntu 18.04's port of Ambiance, under the same palette and name.
+  nativeThemeDeb = fetchurl {
+    url = "https://archive.ubuntu.com/ubuntu/pool/main/u/ubuntu-themes/light-themes_16.10+18.04.20181005-0ubuntu1_all.deb";
+    hash = "sha256-P6IobhCcSkNJL7ephwQ7NBdSp/pI92hDRKXZmIuOPUM=";
+  };
+  nativeTheme = runCommand "unity-quantal-native-theme" {
+    nativeBuildInputs = [ (python3.withPackages (ps: [ ps.pillow ])) libarchive ];
+  } ''
+    bsdtar -xOf ${nativeThemeDeb} data.tar.xz | bsdtar -xf - ./usr/share/themes/Ambiance
+    rm -r usr/share/themes/Ambiance/{gtk-2.0,metacity-1,unity}
+    mkdir -p "$out/share/themes"
+    python ${./dark-theme.py} usr/share/themes/Ambiance "$out/share/themes/Ambiance-Dark" --native
+  '';
+  # The runtime's Ubuntu fonts, for the session font that XSETTINGS names.
+  fonts = runCommand "unity-quantal-fonts" { } ''
+    mkdir -p "$out/share/fonts/truetype"
+    ln -s ${runtime}/usr/share/fonts/truetype/ubuntu-font-family "$out/share/fonts/truetype/"
+  '';
   # indicator-cpufreq's meter icons; its governor menu predates amd-pstate.
   cpufreqIconsDeb = fetchurl {
     url = "https://old-releases.ubuntu.com/ubuntu/pool/universe/i/indicator-cpufreq/indicator-cpufreq_0.1.4-0ubuntu2_all.deb";
@@ -123,6 +142,7 @@ stdenvNoCC.mkDerivation {
     # Quantal's cursors, for native applications that follow Xcursor.theme.
     mkdir -p "$out/share/icons"
     ln -s ${runtime}/usr/share/icons/DMZ-White ${runtime}/usr/share/icons/DMZ-Black "$out/share/icons/"
+    ln -s ${nativeTheme}/share/themes "$out/share/themes"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers;
@@ -258,7 +278,7 @@ stdenvNoCC.mkDerivation {
     EOF
   '';
   passthru = {
-    inherit runtime;
+    inherit runtime fonts;
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop

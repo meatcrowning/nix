@@ -140,14 +140,14 @@ def appearance_option(library):
     library.write_bytes(bytes(data))
 
 
-def main(source, destination, panel=None, artworks=()):
+def main(source, destination, panel=None, artworks=(), native=False):
     source, destination = Path(source), Path(destination)
     shutil.copytree(source, destination, symlinks=False)
     destination.chmod(0o755)
     for path in destination.rglob("*"):
         if not path.is_symlink():
             path.chmod(0o755 if path.is_dir() else 0o644)
-    for part in ["gtk-2.0", "gtk-3.0"]:
+    for part in ["gtk-2.0", "gtk-3.0", "gtk-3.20"]:
         for path in (destination / part).rglob("*"):
             if path.name in SHIPPED:
                 continue
@@ -155,7 +155,9 @@ def main(source, destination, panel=None, artworks=()):
                 stylesheet(path)
             elif path.suffix == ".png":
                 image(path)
-    desktop_labels(source, destination)
+    # Current applications never draw the 12.10 desktop.
+    if not native:
+        desktop_labels(source, destination)
     index = destination / "index.theme"
     index.write_text(index.read_text().replace("Name=Ambiance", "Name=Ambiance Dark")
                      .replace("GtkTheme=Ambiance", "GtkTheme=" + destination.name))
@@ -171,5 +173,6 @@ if __name__ == "__main__":
     parser.add_argument("destination")
     parser.add_argument("--panel")
     parser.add_argument("--artwork", action="append", default=[])
+    parser.add_argument("--native", action="store_true")
     args = parser.parse_args()
-    main(args.source, args.destination, args.panel, args.artwork)
+    main(args.source, args.destination, args.panel, args.artwork, args.native)
