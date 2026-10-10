@@ -26,6 +26,10 @@ ROOT = Path(CONFIG["runtime"])
 RUNTIME = str(PACKAGE / "bin/unity-quantal-runtime")
 BRIDGES = ["unity-host-launch", "xdg-open", "gnome-session-quit",
            "gnome-screensaver-command", "x-terminal-emulator", "gnome-terminal"]
+# Stable across rebuilds, so a live refresh or auto-restart runs current code.
+DISPLAY_COMMAND = next(command for command in [
+    "/run/current-system/sw/bin/unity-quantal-display", str(PACKAGE / "bin/unity-quantal-display")]
+    if Path(command).exists())
 ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller"]
 
 
@@ -156,8 +160,8 @@ def prepare(directory, environment):
         "[Desktop Entry]\nType=Application\nName=Brightness & Night Light\nIcon=preferences-desktop-display\n"
         "Categories=Settings;HardwareSettings;X-GNOME-Settings-Panel;\n"
         "X-GNOME-Settings-Panel=unity-host-display\nX-Unity-Original=true\n"
-        "OnlyShowIn=Unity;\nExec=/usr/local/bin/unity-host-launch --desktop unity-display.desktop -- " + RUNTIME
-        + " /usr/bin/python2.7 " + str(HERE / "display.py") + " settings\n"
+        "OnlyShowIn=Unity;\nExec=/usr/local/bin/unity-host-launch --desktop unity-display.desktop -- "
+        + DISPLAY_COMMAND + " settings\n"
     )
 
     integration.host_icons(directory, state, CONFIG)
@@ -212,7 +216,7 @@ def prepare(directory, environment):
         "unity-quantal-network": (CONFIG["network"] + " --indicator", "Application"),
         "unity-quantal-media-keys": (CONFIG["mediaKeys"], "Application"),
         "unity-quantal-power": (CONFIG["power"], "Application"),
-        "unity-quantal-display": (RUNTIME + " /usr/bin/python2.7 " + str(HERE / "display.py") + " indicator", "Application"),
+        "unity-quantal-display": (DISPLAY_COMMAND + " indicator", "Application"),
     }
     for name, (command, phase) in components.items():
         text = (f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\n"
@@ -590,16 +594,36 @@ def refresh():
         activated = bus("StartServiceByName", name, "0")
         if activated.returncode:
             print(activated.stderr, file=sys.stderr)
-    # The existing supervisor owns this helper, so logout still reaps it.
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(10)
-        connection.connect(str(directory / "launch.sock"))
-        request = {"command": "unity-host-launch", "argv": ["--", CONFIG["python"], str(HERE / "session.py"), "window-icons"]}
-        connection.sendall((json.dumps(request) + "\n").encode())
-        response = json.loads(connection.makefile().readline())
-        if "error" in response:
-            raise RuntimeError(response["error"])
-    print("Updated Unity application catalog, icons, host details, and pointer settings")
+    def launch(*argv):
+        # The existing supervisor owns these helpers, so logout still reaps them.
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(10)
+            connection.connect(str(directory / "launch.sock"))
+            request = {"command": "unity-host-launch", "argv": ["--", *argv]}
+            connection.sendall((json.dumps(request) + "\n").encode())
+            response = json.loads(connection.makefile().readline())
+            if "error" in response:
+                raise RuntimeError(response["error"])
+
+    launch(CONFIG["python"], str(HERE / "session.py"), "window-icons")
+    # Replace the display service. In a session that autostarted it, the
+    # session manager restarts it through the stable command; a session that
+    # predates it, or gave up restarting, gets it from the supervisor.
+    owner = bus("GetConnectionUnixProcessID", "org.unity_quantal.Display")
+    match = re.search(r"uint32 (\d+)", owner.stdout)
+    if match and Path(f"/proc/{match[1]}").stat().st_uid == os.getuid():
+        os.kill(int(match[1]), signal.SIGTERM)
+        for _ in range(40):
+            if bus("GetConnectionUnixProcessID", "org.unity_quantal.Display").stdout != owner.stdout:
+                break
+            time.sleep(0.05)
+    for _ in range(40):
+        if "uint32" in bus("GetConnectionUnixProcessID", "org.unity_quantal.Display").stdout:
+            break
+        time.sleep(0.05)
+    else:
+        launch(DISPLAY_COMMAND, "indicator")
+    print("Updated Unity application catalog, icons, host details, pointer settings, and display service")
 
 
 def register_application(desktop, pid, environment=None):

@@ -172,6 +172,13 @@ stdenvNoCC.mkDerivation {
     PATH=$out/libexec/unity-quantal/terminal-shim:\$PATH exec ${cinnamon-settings-daemon}/libexec/csd-media-keys "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-media-keys"
+    # Session components launch this through /run/current-system, so an
+    # auto-restart or unity-quantal-refresh runs the rebuilt code.
+    cat > "$out/bin/unity-quantal-display" <<EOF
+    #!${bash}/bin/bash
+    exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/display.py" "\$@"
+    EOF
+    chmod +x "$out/bin/unity-quantal-display"
     cat > "$out/bin/unity-quantal-isolated" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"
