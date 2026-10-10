@@ -499,6 +499,15 @@ def apply_preferences(environment, log=None):
             subprocess.run([RUNTIME, "/usr/bin/gsettings", "set",
                             "org.compiz.workarounds:/org/compiz/profiles/unity/plugins/workarounds/",
                             key, "true"], env=environment, check=True, stdout=log, stderr=log)
+    # Meta drags windows: left button moves, right button resizes. The GNOME
+    # modifier keys mirror it for the original apps and settings panels.
+    for schema, key, value in [
+            ("org.compiz.move:/org/compiz/profiles/unity/plugins/move/", "initiate-button", "'<Super>Button1'"),
+            ("org.compiz.resize:/org/compiz/profiles/unity/plugins/resize/", "initiate-button", "'<Super>Button3'"),
+            ("org.gnome.desktop.wm.preferences", "mouse-button-modifier", "'<Super>'"),
+            ("org.gnome.desktop.wm.preferences", "resize-with-right-button", "true")]:
+        subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", schema, key, value],
+                       env=environment, check=True, stdout=log, stderr=log)
     integration.plasma_pointer(CONFIG, environment.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
 
 
