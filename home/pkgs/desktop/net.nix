@@ -11,7 +11,6 @@ let
 in
 {
   home.packages = with pkgs; [
-	# lynx is a pure-CLI text browser — let nix own it on both hosts.
 	lynx
   ] ++ lib.optionals isx86 [
         vivaldi-ffmpeg-codecs
