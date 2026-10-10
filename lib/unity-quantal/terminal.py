@@ -1,7 +1,7 @@
 """Unity 12.10's terminal for the Unity session.
 
 GNOME Terminal 3.6's window as Ubuntu shipped it (menubar, tabs, scrollbar,
-aubergine screen, Tango palette, Ubuntu Mono 13), drawn by GTK 3 over the
+aubergine screen, Tango palette, the system fixed-width font), drawn by GTK 3 over the
 current VTE so modern programs get true colour and current escape handling.
 Chrome colours are Ambiance's, as measured from the original in this session.
 """
@@ -19,6 +19,7 @@ gi.require_version("Vte", "2.91")
 from gi.repository import Gdk, Gio, GLib, Gtk, Pango, Vte  # noqa: E402
 
 NAME = "unity-terminal"
+# Ubuntu 12.10's monospace-font-name, for when the session's setting is unreadable.
 FONT = "Ubuntu Mono 13"
 FOREGROUND = "#ffffff"
 BACKGROUND = "#300a24"
@@ -27,7 +28,7 @@ PALETTE = ["#000000", "#cc0000", "#4e9a06", "#c4a000", "#3465a4", "#75507b", "#0
            "#555753", "#ef2929", "#8ae234", "#fce94f", "#729fcf", "#ad7fa8", "#34e2e2", "#eeeeec"]
 # GNOME Terminal 3.6's zoom steps.
 ZOOMS = [0.5787, 0.6944, 0.8333, 1.0, 1.2, 1.44, 1.728]
-# New screens and Normal Size open one step out (FONT at about 10.8 points).
+# New screens and Normal Size open one step out, at 83% of the font's size.
 DEFAULT_ZOOM = ZOOMS.index(0.8333)
 PCRE2_CASELESS = 0x00000008
 PCRE2_MULTILINE = 0x00000400
@@ -182,7 +183,7 @@ class Screen(Gtk.Box):
         self.title_override = None
         self.terminal = Vte.Terminal()
         terminal = self.terminal
-        terminal.set_font(Pango.FontDescription.from_string(FONT))
+        self.set_font(window.get_application().font)
         self.set_zoom(DEFAULT_ZOOM)
         terminal.set_colors(rgba(FOREGROUND), rgba(BACKGROUND), [rgba(c) for c in PALETTE])
         terminal.set_color_cursor(rgba(FOREGROUND))
@@ -210,7 +211,8 @@ class Screen(Gtk.Box):
         self.pack_start(terminal, True, True, 0)
         self.pack_start(scrollbar, False, False, 0)
         environment = [f"{k}={v}" for k, v in os.environ.items()
-                       if k not in ("COLUMNS", "LINES", "TERM", "COLORTERM", "GTK_THEME", "FONTCONFIG_FILE")]
+                       if k not in ("COLUMNS", "LINES", "TERM", "COLORTERM", "GTK_THEME", "FONTCONFIG_FILE",
+                                    "DCONF_PROFILE", "UNITY_QUANTAL_SCHEMAS")]
         environment += ["TERM=xterm-256color", "COLORTERM=truecolor"]
         command = argv or [user_shell()]
         terminal.spawn_async(Vte.PtyFlags.DEFAULT, cwd or os.path.expanduser("~"), command, environment,
@@ -230,6 +232,9 @@ class Screen(Gtk.Box):
     def cwd(self):
         uri = self.terminal.get_current_directory_uri()
         return Gio.File.new_for_uri(uri).get_path() if uri else None
+
+    def set_font(self, name):
+        self.terminal.set_font(Pango.FontDescription.from_string(name))
 
     def set_zoom(self, index):
         self.zoom = max(0, min(len(ZOOMS) - 1, index))
@@ -537,10 +542,39 @@ class TerminalWindow(Gtk.ApplicationWindow):
         dialog.destroy()
 
 
+def font_settings():
+    """The session's org.gnome.desktop.interface, read with Ubuntu 12.10's schema.
+
+    Like GNOME Terminal's "Use the system fixed width font", which Tweak Tool's
+    Monospace Font sets. The launcher points DCONF_PROFILE at Unity's profile.
+    """
+    directory = os.environ.get("UNITY_QUANTAL_SCHEMAS")
+    if not directory:
+        return None
+    try:
+        source = Gio.SettingsSchemaSource.new_from_directory(directory, None, False)
+    except GLib.Error:
+        return None
+    schema = source.lookup("org.gnome.desktop.interface", False)
+    return Gio.Settings.new_full(schema, None, None) if schema else None
+
+
 class Application(Gtk.Application):
     def __init__(self, argv):
         super().__init__(application_id=None, flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.argv = argv
+        self.settings = font_settings()
+        self.font = FONT
+        if self.settings:
+            self.font = self.settings.get_string("monospace-font-name") or FONT
+            self.settings.connect("changed::monospace-font-name", self.font_changed)
+
+    def font_changed(self, settings, key):
+        self.font = settings.get_string(key) or FONT
+        for window in self.get_windows():
+            if isinstance(window, TerminalWindow):
+                for screen in window.notebook.get_children():
+                    screen.set_font(self.font)
 
     def do_activate(self):
         settings = Gtk.Settings.get_default()

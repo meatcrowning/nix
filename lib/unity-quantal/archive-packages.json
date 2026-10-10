@@ -1,7 +1,23 @@
 [
   {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/g/gconf/gir1.2-gconf-2.0_3.2.5-0ubuntu4_amd64.deb",
+    "sha256": "4b81fb76fbc98183dcc12aa0c3a1d27fce80b1c92a7ae8a4232f27a90ece36f3"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/g/gnome-desktop3/gir1.2-gnomedesktop-3.0_3.6.0.1-0ubuntu2_amd64.deb",
+    "sha256": "21040017135d148d42e8071c2df6018cddb552c780d1b13ad5ad7944cffa5ca7"
+  },
+  {
     "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/n/nautilus/gir1.2-nautilus-3.0_3.5.90.really.3.4.2-0ubuntu4_amd64.deb",
     "sha256": "036ab724888b330dc15608b411379ad52651fea0accbdd316c1651b077b0527b"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/g/gnome-shell/gnome-shell-common_3.6.1-0ubuntu1_all.deb",
+    "sha256": "5cb7a20a8aaf5fc796f13ec6260e0ffef48b23ee18ed666ec673b84058788495"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/g/gnome-tweak-tool/gnome-tweak-tool_3.6.0-0ubuntu2_all.deb",
+    "sha256": "6e183fd59634c96c8d73846b3663794ef817209fc67811048501e56299360adb"
   },
   {
     "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/i/imagemagick/imagemagick_6.7.7.10-2ubuntu4_amd64.deb",

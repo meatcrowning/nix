@@ -29,8 +29,11 @@ for deb in map(Path, sys.argv[3:]):
     package = re.search(r"^Package: (\S+)", fields, re.M)[1]
     data = next(v for k, v in members.items() if k.startswith("data.tar"))
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
-        archive.extractall(source, filter="tar")
-        paths = ["/" + m.name.removeprefix("./").rstrip("/") for m in archive.getmembers()]
+        # GNOME Shell's shortcuts would appear in Unity's Keyboard settings.
+        payload = [m for m in archive.getmembers()
+                   if not m.name.startswith("./usr/share/gnome-control-center/keybindings/50-gnome-shell")]
+        archive.extractall(source, members=payload, filter="tar")
+        paths = ["/" + m.name.removeprefix("./").rstrip("/") for m in payload]
     # ImageMagick's maintainer script links its commands through alternatives.
     for path in [p for p in paths if p.endswith(".im6")]:
         if not (source / path[1:-4]).exists():
