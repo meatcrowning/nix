@@ -215,7 +215,9 @@ def prepare(directory, environment):
         entry = parser["D-BUS Service"]
         name = entry.get("Name", "")
         # The native services handle modern apps and the host's user database.
-        if name == "ca.desrt.dconf" or name.startswith(("org.gtk.vfs.", "org.gtk.Private.", "org.a11y.", "org.freedesktop.secrets")):
+        # Isolated apps start only through their sandbox, never by activation.
+        if name == "ca.desrt.dconf" or name.startswith(("org.gtk.vfs.", "org.gtk.Private.", "org.a11y.", "org.freedesktop.secrets")) \
+                or Path(entry.get("Exec", "").split(" ")[0]).name in isolated.APPS:
             stale = directory / "native-data/dbus-1/services" / file.name
             if stale.exists():
                 stale.unlink()
