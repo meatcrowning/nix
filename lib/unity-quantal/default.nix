@@ -24,8 +24,10 @@ let
     mkdir -p "$out"
     python ${./assemble.py} original "$out"
     python ${./dark-theme.py} "$out/usr/share/themes/Ambiance" "$out/usr/share/themes/Ambiance-Dark" \
-      "$out/usr/share/gnome-control-center/ui/UbuntuLogo.png"
+      --artwork "$out/usr/share/gnome-control-center/ui/UbuntuLogo.png" \
+      --panel "$out/usr/lib/control-center-1/panels/libbackground.so"
   '';
+  # The default for new profiles; Appearance settings choose it afterwards.
   gtkTheme = "Ambiance-Dark";
   modernLibraries = lib.makeLibraryPath [
     glibc stdenv.cc.cc.lib libglvnd libX11 libxcb libdrm zlib expat

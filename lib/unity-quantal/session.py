@@ -300,7 +300,6 @@ def runtime(arguments):
         "DCONF_PROFILE": str(HERE / "dconf-profile"),
         "GSETTINGS_SCHEMA_DIR": "/usr/share/glib-2.0/schemas",
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
-        "GTK_THEME": CONFIG["gtkTheme"],
     })
     if arguments[0] == "/usr/bin/gnome-terminal":
         # New tabs/windows do not inherit the initial --command override.
@@ -450,6 +449,10 @@ def session():
             subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "com.canonical.Unity.Launcher",
                             "favorites", repr(favorites)], env=environment,
                            stdout=log, stderr=subprocess.STDOUT, check=True, timeout=10)
+            # Themes follow Appearance settings through XSETTINGS from here on.
+            subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.desktop.interface",
+                            "gtk-theme", repr(CONFIG["gtkTheme"])], env=environment,
+                           stdout=log, stderr=subprocess.STDOUT, check=True, timeout=10)
         # Hardware policy and media keys come from the native session. The old
         # daemon still supplies Unity's X settings, backgrounds, and keyboard.
         for plugin in ["power", "media-keys", "sound", "housekeeping", "mouse"]:
@@ -509,8 +512,7 @@ def apply_preferences(environment, log=None):
             ("org.gnome.desktop.wm.preferences", "mouse-button-modifier", "'<Super>'"),
             ("org.gnome.desktop.wm.preferences", "resize-with-right-button", "true"),
             # Holding Meta opens the dash on release only, never the hints overlay.
-            ("org.compiz.unityshell:/org/compiz/profiles/unity/plugins/unityshell/", "shortcut-overlay", "false"),
-            ("org.gnome.desktop.interface", "gtk-theme", repr(CONFIG["gtkTheme"]))]:
+            ("org.compiz.unityshell:/org/compiz/profiles/unity/plugins/unityshell/", "shortcut-overlay", "false")]:
         subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", schema, key, value],
                        env=environment, check=True, stdout=log, stderr=log)
     integration.plasma_pointer(CONFIG, environment.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))

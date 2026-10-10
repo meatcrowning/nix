@@ -234,6 +234,32 @@ target=$terminal
 drag Super_L 3
 test "$dw" -gt 0 || test "$dh" -gt 0
 echo 'PASS: Meta+left moves, Meta+right resizes, Alt+left leaves windows in place'
+# Appearance offers Ambiance Dark (the uninstalled High Contrast entries stay
+# hidden); choosing a theme restyles running apps.
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-control-center background >/work/appearance.log 2>&1 &
+for _ in {1..60}; do
+  appearance=$(window_id '"Appearance"')
+  [ -n "$appearance" ] && break
+  sleep 0.1
+done
+test -n "$appearance"
+sleep 2
+target=$appearance
+read -r ax ay _ _ < <(geometry)
+theme() { "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gsettings get org.gnome.desktop.interface gtk-theme; }
+background() { import -silent -window root -crop 1x1+$((ax + 100))+$((ay + 270)) -format '%[fx:int(255*luminance)]' info:; }
+pick() {
+  xdotool mousemove $((ax + 685)) $((ay + 467)) click 1 sleep 0.5 key "$@" sleep 0.3 key Return sleep 2
+}
+test "$(theme)" = "'Ambiance-Dark'"
+test "$(background)" -lt 80
+pick Up Up
+test "$(theme)" = "'Ambiance'"
+test "$(background)" -gt 200
+pick Down Down
+test "$(theme)" = "'Ambiance-Dark'"
+test "$(background)" -lt 80
+echo 'PASS: Appearance switches between Ambiance and Ambiance Dark live'
 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames > /work/bus-names.txt
 grep 'com.canonical.Unity.Panel.Service' /work/bus-names.txt
 grep 'Starting plugin: unityshell' /home/unity-test/.local/state/unity-quantal/session.log
