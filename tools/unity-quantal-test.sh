@@ -474,6 +474,42 @@ while [ "$(pixel 400 $top)" != 300A24 ]; do top=$((top + 1)); [ $top -lt 60 ]; d
 test "$(pixel 400 300)" = 300A24
 test "$(pixel 5 $((top + 8)))" = 000000
 echo 'PASS: Unity terminal opens with the 12.10 menubar and screen'
+# New windows open centered in the work area; an application's next window
+# takes the size its last one was resized to, still centered.
+extents() { xprop -id "$1" _NET_FRAME_EXTENTS | sed 's/.*= //'; }
+# Compiz centers the client area; the titlebar sits above that centre.
+client_center() { local x y width height; read -r x y width height < <(geometry); echo $((x + width / 2)) $((y + height / 2)); }
+area_center() { xprop -root _NET_WORKAREA | sed 's/.*= //' | { IFS=', ' read -r x y w h _; echo $((x + w / 2)) $((y + h / 2)); }; }
+near() { test "$(( $1 > $2 ? $1 - $2 : $2 - $1 ))" -le 2; }
+memory_probe() {
+  "$UNITY_TEST_TOOLS/bin/xmessage" -name memory-probe -geometry +40+40 memory >/dev/null 2>&1 &
+  target=
+  for _ in {1..50}; do target=$(window_id '"memory-probe"'); [ -n "$target" ] && break; sleep 0.1; done
+  test -n "$target"
+  for _ in {1..50}; do extents "$target" | grep -q '^[0-9]' && break; sleep 0.1; done
+  sleep 1.5
+}
+read -r ax ay < <(area_center)
+memory_probe
+read -r fx fy < <(client_center)
+echo "first window: centre $fx $fy, work area $ax $ay"
+near "$fx" "$ax"
+near "$fy" "$ay"
+xdotool windowsize "$target" 517 263 sleep 2.5
+read -r _ _ width height < <(geometry)
+test "$width $height" = "517 263"
+grep -A3 '"memory-probe.Xmessage"' /home/unity-test/.local/state/unity-quantal/window-sizes.json | tr -d ' \n' | grep -q '\[517,263\]'
+xdotool windowclose "$target" 2>/dev/null || xdotool windowkill "$target"
+sleep 1
+memory_probe
+read -r _ _ width height < <(geometry)
+read -r fx fy < <(client_center)
+echo "next window: ${width}x$height, centre $fx $fy"
+test "$width $height" = "517 263"
+near "$fx" "$ax"
+near "$fy" "$ay"
+xdotool windowkill "$target"
+echo 'PASS: new windows open centered at their application'"'"'s remembered size'
 # GNOME Tweak Tool: every key it shows is mapped to a reader in tweaks.json,
 # and each automatic check reaches that reader.
 test -f "$session_dir/applications/unity-original-gnome-tweak-tool.desktop"
@@ -483,7 +519,6 @@ tweak_map="$UNITY_PACKAGE/libexec/unity-quantal/tweaks.json"
 "$TEST_PYTHON" /work/tweaks-check.py "$UNITY_PACKAGE" "$tweak_map" /work/tweaks-inventory.json | tee /work/tweaks-check.txt
 tweak() { "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gsettings "$@"; }
 active() { xprop -root _NET_ACTIVE_WINDOW | grep -o '0x[0-9a-f]*'; }
-extents() { xprop -id "$1" _NET_FRAME_EXTENTS | sed 's/.*= //'; }
 "$UNITY_TEST_TOOLS/bin/xmessage" -name tweak-probe-a -geometry 300x120+200+200 a >/dev/null 2>&1 &
 "$UNITY_TEST_TOOLS/bin/xmessage" -name tweak-probe-b -geometry 300x120+900+500 b >/dev/null 2>&1 &
 for _ in {1..50}; do
@@ -492,6 +527,8 @@ for _ in {1..50}; do
   sleep 0.1
 done
 test -n "$probe_a" && test -n "$probe_b"
+# Compiz centers new windows; put the probes where the checks expect them.
+xdotool windowmove "$probe_a" 200 200 windowmove "$probe_b" 900 500
 sleep 1
 # Titlebar font: the decoration grows with it.
 for _ in {1..50}; do extents "$probe_a" | grep -q '^[0-9]' && break; sleep 0.1; done

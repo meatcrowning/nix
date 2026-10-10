@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 import re
+import select
 from pathlib import Path
 import shlex
 import signal
@@ -237,6 +238,7 @@ def prepare(directory, environment):
         "unity-quantal-locker": (CONFIG["screensaver"], "Application"),
         "unity-quantal-lock-api": (CONFIG["bridgePython"] + " " + str(HERE / "screensaver.py"), "Application"),
         "unity-quantal-window-icons": (CONFIG["python"] + " " + str(HERE / "session.py") + " window-icons", "Application"),
+        "unity-quantal-window-memory": (CONFIG["python"] + " " + str(HERE / "session.py") + " window-memory", "Application"),
         "unity-quantal-polkit": (CONFIG["polkit"], "Application"),
         "unity-quantal-network": (CONFIG["network"] + " --indicator", "Application"),
         "unity-quantal-media-keys": (CONFIG["mediaKeys"], "Application"),
@@ -569,6 +571,12 @@ def apply_preferences(environment, log=None):
     for schema, key, value in [
             ("org.compiz.move:/org/compiz/profiles/unity/plugins/move/", "initiate-button", "'<Super>Button1'"),
             ("org.compiz.resize:/org/compiz/profiles/unity/plugins/resize/", "initiate-button", "'<Super>Button3'"),
+            # New windows open centered, even where the application asks for a
+            # position; window-memory then restores the application's size.
+            # 'type=Normal' misses clients without a window type; docks and the
+            # desktop still place themselves, and dialogs open over their parent.
+            ("org.compiz.place:/org/compiz/profiles/unity/plugins/place/", "mode", "1"),
+            ("org.compiz.place:/org/compiz/profiles/unity/plugins/place/", "force-placement-match", "'any'"),
             ("org.gnome.desktop.wm.preferences", "mouse-button-modifier", "'<Super>'"),
             ("org.gnome.desktop.wm.preferences", "resize-with-right-button", "true"),
             # The Quantal 10 MiB cap hides previews of modern images/videos.
@@ -643,6 +651,7 @@ def refresh():
                 raise RuntimeError(response["error"])
 
     launch(CONFIG["python"], str(HERE / "session.py"), "window-icons")
+    launch(CONFIG["python"], str(HERE / "session.py"), "window-memory")
     # Replace the session services. In a session that autostarted them, the
     # session manager restarts each through its stable command; a session that
     # predates one, or gave up restarting it, gets it from the supervisor.
@@ -717,17 +726,10 @@ class WindowAttributes(ctypes.Structure):
                 ("override_redirect", ctypes.c_int), ("screen", ctypes.c_void_p)]
 
 
-def reframe_stranded_windows():
-    # Compiz can leave a window minimized yet mapped outside any frame. It then
-    # ignores activation, so the launcher cannot raise it and the window looks
-    # lost off-screen. A minimized window Compiz still manages keeps its frame;
-    # a fresh map makes Compiz manage the stranded one again.
+def xlib():
     x = ctypes.CDLL(CONFIG["libX11"])
     x.XOpenDisplay.restype = ctypes.c_void_p
     x.XOpenDisplay.argtypes = [ctypes.c_char_p]
-    display = x.XOpenDisplay(None)
-    if not display:
-        return
     x.XDefaultRootWindow.restype = ctypes.c_ulong
     x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
     x.XInternAtom.restype = ctypes.c_ulong
@@ -739,24 +741,51 @@ def reframe_stranded_windows():
                                      ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong),
                                      ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong),
                                      ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p)]
+    x.XTranslateCoordinates.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+                                        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+                                        ctypes.POINTER(ctypes.c_ulong)]
+    x.XSelectInput.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_long]
+    x.XSendEvent.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_long, ctypes.c_void_p]
+    x.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    x.XPending.argtypes = [ctypes.c_void_p]
+    x.XConnectionNumber.argtypes = [ctypes.c_void_p]
     x.XFree.argtypes = [ctypes.c_void_p]
     for name in ["XUnmapWindow", "XMapWindow"]:
         getattr(x, name).argtypes = [ctypes.c_void_p, ctypes.c_ulong]
     x.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    x.XFlush.argtypes = [ctypes.c_void_p]
     # Windows vanish between listing and inspection; never exit on BadWindow.
-    ignore = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)(lambda *_: 0)
-    x.XSetErrorHandler(ignore)
+    x.ignore = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)(lambda *_: 0)
+    x.XSetErrorHandler(x.ignore)
+    return x
+
+
+def x_property(x, display, window, atom, size=32):
+    kind, format_, count, after, data = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_void_p()
+    if x.XGetWindowProperty(display, window, atom, 0, 4096, 0, 0, kind, format_, count, after, data) != 0 or not data:
+        return [] if size == 32 else b""
+    if format_.value != size:
+        values = [] if size == 32 else b""
+    elif size == 32:
+        values = list(ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))[:count.value])
+    else:
+        values = ctypes.string_at(data, count.value)
+    x.XFree(data)
+    return values
+
+
+def reframe_stranded_windows():
+    # Compiz can leave a window minimized yet mapped outside any frame. It then
+    # ignores activation, so the launcher cannot raise it and the window looks
+    # lost off-screen. A minimized window Compiz still manages keeps its frame;
+    # a fresh map makes Compiz manage the stranded one again.
+    x = xlib()
+    display = x.XOpenDisplay(None)
+    if not display:
+        return
     root = x.XDefaultRootWindow(display)
     wm_state = x.XInternAtom(display, b"WM_STATE", 0)
     client_list = x.XInternAtom(display, b"_NET_CLIENT_LIST", 0)
-
-    def longs(window, atom):
-        kind, size, count, after, data = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_void_p()
-        if x.XGetWindowProperty(display, window, atom, 0, 4096, 0, 0, kind, size, count, after, data) != 0 or not data:
-            return []
-        values = list(ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))[:count.value]) if size.value == 32 else []
-        x.XFree(data)
-        return values
 
     def stranded():
         found = set()
@@ -767,9 +796,9 @@ def reframe_stranded_windows():
         if children:
             x.XFree(children)
         attributes = WindowAttributes()
-        for window in tops & set(longs(root, client_list)):
+        for window in tops & set(x_property(x, display, root, client_list)):
             if (x.XGetWindowAttributes(display, window, attributes) and attributes.map_state == 2
-                    and not attributes.override_redirect and longs(window, wm_state)[:1] == [3]):
+                    and not attributes.override_redirect and x_property(x, display, window, wm_state)[:1] == [3]):
                 found.add(window)
         return found
 
@@ -786,6 +815,155 @@ def reframe_stranded_windows():
         x.XSync(display, 0)
         seen = current - repeated
         time.sleep(2)
+
+
+class XAnyEvent(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int),
+                ("display", ctypes.c_void_p), ("window", ctypes.c_ulong)]
+
+
+class XConfigureEvent(ctypes.Structure):
+    _fields_ = XAnyEvent._fields_ + [("subject", ctypes.c_ulong), ("x", ctypes.c_int), ("y", ctypes.c_int),
+                                     ("width", ctypes.c_int), ("height", ctypes.c_int),
+                                     ("border_width", ctypes.c_int), ("above", ctypes.c_ulong),
+                                     ("override_redirect", ctypes.c_int)]
+
+
+class XPropertyEvent(ctypes.Structure):
+    _fields_ = XAnyEvent._fields_ + [("atom", ctypes.c_ulong), ("time", ctypes.c_ulong), ("state", ctypes.c_int)]
+
+
+class XClientMessageEvent(ctypes.Structure):
+    _fields_ = XAnyEvent._fields_ + [("message_type", ctypes.c_ulong), ("format", ctypes.c_int),
+                                     ("data", ctypes.c_long * 5)]
+
+
+class XEvent(ctypes.Union):
+    _fields_ = [("any", XAnyEvent), ("configure", XConfigureEvent), ("property", XPropertyEvent),
+                ("client", XClientMessageEvent), ("pad", ctypes.c_long * 24)]
+
+
+def remember_window_sizes():
+    # Compiz centers new normal windows (apply_preferences). This gives each
+    # application's new windows the size its last one was resized to, keeping
+    # the centre Compiz chose. Sizes are client sizes keyed by WM_CLASS.
+    directory = Path(os.environ["UNITY_QUANTAL_SESSION_DIR"])
+    lock = (directory / "window-memory.lock").open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return
+    store = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "unity-quantal/window-sizes.json"
+    try:
+        sizes = json.loads(store.read_text())
+    except (OSError, ValueError):
+        sizes = {}
+    x = xlib()
+    display = x.XOpenDisplay(None)
+    if not display:
+        return
+    root = x.XDefaultRootWindow(display)
+    atom = {name: x.XInternAtom(display, name.encode(), 0) for name in [
+        "_NET_CLIENT_LIST", "_NET_WORKAREA", "_NET_FRAME_EXTENTS", "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE",
+        "_NET_WM_WINDOW_TYPE_NORMAL", "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ",
+        "_NET_WM_STATE_FULLSCREEN", "_NET_MOVERESIZE_WINDOW", "WM_CLASS", "WM_TRANSIENT_FOR", "WM_NORMAL_HINTS"]}
+    configure_notify, property_notify = 22, 28
+    structure_notify, property_change = 1 << 17, 1 << 22
+    # Sizes from the first moments are the application's or ours, not the user's.
+    settle = 1.0
+
+    def key(window):
+        parts = x_property(x, display, window, atom["WM_CLASS"], 8).split(b"\0")
+        return ".".join(part.decode(errors="replace") for part in parts[:2]) if parts[0] else None
+
+    def resizable_normal(window):
+        types = x_property(x, display, window, atom["_NET_WM_WINDOW_TYPE"])
+        if types and types[0] != atom["_NET_WM_WINDOW_TYPE_NORMAL"]:
+            return False
+        if x_property(x, display, window, atom["WM_TRANSIENT_FOR"]):
+            return False
+        hints = x_property(x, display, window, atom["WM_NORMAL_HINTS"])
+        # PMinSize | PMaxSize with equal bounds: a fixed-size window.
+        return not (len(hints) >= 9 and hints[0] & 48 == 48 and hints[5:7] == hints[7:9])
+
+    def free(window):
+        state = set(x_property(x, display, window, atom["_NET_WM_STATE"]))
+        return not state & {atom["_NET_WM_STATE_MAXIMIZED_VERT"], atom["_NET_WM_STATE_MAXIMIZED_HORZ"],
+                            atom["_NET_WM_STATE_FULLSCREEN"]}
+
+    def place(window, width, height):
+        attributes = WindowAttributes()
+        if not x.XGetWindowAttributes(display, window, attributes):
+            return
+        left, right, top, bottom = (x_property(x, display, window, atom["_NET_FRAME_EXTENTS"]) + [0] * 4)[:4]
+        area = x_property(x, display, root, atom["_NET_WORKAREA"])[:4] or [0, 0, attributes.width, attributes.height]
+        width = max(1, min(width, area[2] - left - right))
+        height = max(1, min(height, area[3] - top - bottom))
+        cx, cy, child = ctypes.c_int(), ctypes.c_int(), ctypes.c_ulong()
+        x.XTranslateCoordinates(display, window, root, 0, 0, cx, cy, child)
+        # Keep the client's centre: the frame's, offset by its fixed extents.
+        px = cx.value + (attributes.width - width) // 2
+        py = cy.value + (attributes.height - height) // 2
+        px = max(area[0] + left, min(px, area[0] + area[2] - right - width))
+        py = max(area[1] + top, min(py, area[1] + area[3] - bottom - height))
+        event = XEvent()
+        message = event.client
+        message.type, message.send_event, message.window = 33, 1, window
+        message.message_type, message.format = atom["_NET_MOVERESIZE_WINDOW"], 32
+        # StaticGravity (client coordinates), x/y/width/height, from a pager.
+        message.data[:] = [10 | 0xF00 | 2 << 12, px, py, width, height]
+        x.XSendEvent(display, root, 0, (1 << 19) | (1 << 20), ctypes.byref(event))
+        x.XFlush(display)
+
+    windows = {}  # window -> [key, adopted time, wanted size or None]
+
+    def adopt(window, fresh):
+        name = key(window)
+        if not name or not resizable_normal(window):
+            return
+        x.XSelectInput(display, window, structure_notify)
+        wanted = tuple(sizes[name]) if fresh and name in sizes and free(window) else None
+        windows[window] = [name, time.monotonic() if fresh else 0, wanted]
+        if wanted:
+            place(window, *wanted)
+
+    def save():
+        store.parent.mkdir(parents=True, exist_ok=True)
+        temporary = store.with_suffix(".tmp")
+        temporary.write_text(json.dumps(sizes, indent=1, sort_keys=True))
+        temporary.replace(store)
+
+    # Watch window membership and client geometry only.
+    x.XSelectInput(display, root, property_change)
+    for window in x_property(x, display, root, atom["_NET_CLIENT_LIST"]):
+        adopt(window, False)
+    event, dirty = XEvent(), 0.0
+    descriptor = x.XConnectionNumber(display)
+    while True:
+        if not x.XPending(display):
+            if dirty and time.monotonic() - dirty > 1:
+                save()
+                dirty = 0.0
+            select.select([descriptor], [], [], 1)
+            continue
+        x.XNextEvent(display, ctypes.byref(event))
+        if event.any.type == property_notify and event.property.atom == atom["_NET_CLIENT_LIST"]:
+            current = set(x_property(x, display, root, atom["_NET_CLIENT_LIST"]))
+            for window in set(windows) - current:
+                del windows[window]
+            for window in current - set(windows):
+                adopt(window, True)
+        elif event.any.type == configure_notify and event.configure.subject in windows:
+            window, size = event.configure.subject, (event.configure.width, event.configure.height)
+            name, adopted, wanted = windows[window]
+            if time.monotonic() - adopted < settle:
+                # An application that sizes itself after mapping gets ours again, once.
+                if wanted and size != wanted:
+                    windows[window][2] = None
+                    place(window, *wanted)
+            elif not event.configure.send_event and free(window) and sizes.get(name) != list(size):
+                sizes[name] = list(size)
+                dirty = dirty or time.monotonic()
 
 
 def watch_windows():
@@ -811,6 +989,8 @@ if __name__ == "__main__":
         refresh()
     elif sys.argv[1:] == ["window-icons"]:
         watch_windows()
+    elif sys.argv[1:] == ["window-memory"]:
+        remember_window_sizes()
     elif sys.argv[1:2] == ["settings"] and len(sys.argv) == 3 and sys.argv[2] in CONFIG["settingsCommands"]:
         environment = os.environ.copy()
         environment["XDG_DATA_DIRS"] = CONFIG["settingsData"] + ":" + environment.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share")
