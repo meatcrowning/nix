@@ -3,6 +3,8 @@ let
   symbola = pkgs.callPackage ../../../lib/quantal-emoji.nix { };
 in
 {
+  home.packages = [ symbola ];
+  fonts.fontconfig.defaultFonts.emoji = [ "Symbola" "Noto Color Emoji" ];
   # ~/.fonts is visible to both the historical FHS runtime and native apps on
   # top/book. Quantal redirects XDG_DATA_HOME, so modern font installation
   # locations alone are insufficient for its GTK processes.
