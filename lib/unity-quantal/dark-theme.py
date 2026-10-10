@@ -108,6 +108,20 @@ def artwork(path):
     picture.save(path)
 
 
+def desktop_labels(source, destination):
+    """Keep desktop icon labels as shipped: light text over the wallpaper.
+
+    Ambiance colours them with the window palette, which is dark here.
+    """
+    original = dict(re.findall(r"@define-color\s+(\w+)\s+(#[0-9a-fA-F]{3,6})\s*;",
+                               (source / "gtk-3.0/gtk-main.css").read_text()))
+    path = destination / "gtk-3.0/apps/nautilus.css"
+    desktop, marker, rest = path.read_text().partition("/* browser window */")
+    for name in ("selected_bg_color", "selected_fg_color", "bg_color", "fg_color"):
+        desktop = re.sub(r"@" + name + r"\b", original[name], desktop)
+    path.write_text(desktop + marker + rest)
+
+
 def appearance_option(library):
     """Offer the theme in the original Appearance panel.
 
@@ -137,6 +151,7 @@ def main(source, destination, panel=None, artworks=()):
                 stylesheet(path)
             elif path.suffix == ".png":
                 image(path)
+    desktop_labels(source, destination)
     index = destination / "index.theme"
     index.write_text(index.read_text().replace("Name=Ambiance", "Name=Ambiance Dark")
                      .replace("GtkTheme=Ambiance", "GtkTheme=" + destination.name))
