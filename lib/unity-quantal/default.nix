@@ -8,7 +8,8 @@
 , xmessage, weston, xwayland, mesa-demos, xinput, xrandr, librsvg, imagemagick
 , pavucontrol, system-config-printer
 , cinnamon-desktop
-, xpra, zenity, closureInfo, writeText, kitty
+, xpra, zenity, closureInfo, writeText
+, wrapGAppsHook3, gobject-introspection, gtk3, vte
 , libseccomp, gnutar, gzip, bzip2, xz, unzip, zip
 }:
 let
@@ -49,6 +50,18 @@ let
     bsdtar -xOf ${isolatedArchiveDeb} data.tar.gz | bsdtar -xf - -C "$out"
   '';
   archivePath = lib.makeBinPath [ gnutar gzip bzip2 xz unzip zip ];
+  # The session's terminal: GNOME Terminal 3.6's window over the current VTE.
+  terminalApp = stdenvNoCC.mkDerivation {
+    name = "unity-quantal-terminal-app";
+    dontUnpack = true;
+    nativeBuildInputs = [ wrapGAppsHook3 gobject-introspection ];
+    buildInputs = [ gtk3 vte ];
+    installPhase = ''
+      mkdir -p "$out/bin"
+      { echo "#!${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3"; cat ${./terminal.py}; } > "$out/bin/unity-terminal"
+      chmod +x "$out/bin/unity-terminal"
+    '';
+  };
   restrict = runCommand "unity-isolated-restrict" {
     nativeBuildInputs = [ stdenv.cc ];
     buildInputs = [ libseccomp ];
@@ -128,18 +141,16 @@ stdenvNoCC.mkDerivation {
     EOF
       chmod +x "$out/bin/unity-quantal-$command"
     done
-    # The session's terminal: kitty styled as Unity 12.10's GNOME Terminal,
-    # with the runtime's original Ubuntu Mono files.
-    cp kitty.conf "$out/libexec/unity-quantal/kitty.conf"
+    # The session's terminal, with the runtime's original Ubuntu font files.
     cat > "$out/libexec/unity-quantal/terminal-fonts.conf" <<EOF
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
     <fontconfig>
       <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
       <dir>${runtime}/usr/share/fonts/truetype/ubuntu-font-family</dir>
-      <!-- Ubuntu 12.10 rendered with slight hinting. -->
+      <!-- Ubuntu 12.10 rendered its fonts with slight hinting. -->
       <match target="font">
-        <test name="family"><string>Ubuntu Mono</string></test>
+        <test name="family" compare="contains"><string>Ubuntu</string></test>
         <edit name="antialias" mode="assign"><bool>true</bool></edit>
         <edit name="hinting" mode="assign"><bool>true</bool></edit>
         <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
@@ -148,11 +159,8 @@ stdenvNoCC.mkDerivation {
     EOF
     cat > "$out/bin/unity-quantal-terminal" <<EOF
     #!${bash}/bin/bash
-    # Accept x-terminal-emulator and gnome-terminal style command options.
-    case "\''${1:-}" in -e|-x|--) shift ;; esac
     export FONTCONFIG_FILE=$out/libexec/unity-quantal/terminal-fonts.conf
-    exec ${kitty}/bin/kitty --config $out/libexec/unity-quantal/kitty.conf \\
-      --class unity-terminal --name unity-terminal "\$@"
+    exec ${terminalApp}/bin/unity-terminal "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-terminal"
     # Ctrl+Alt+T runs the media-keys daemon's gnome-terminal. Only that daemon
