@@ -205,6 +205,9 @@ stdenvNoCC.mkDerivation {
     # The session's fixed-width font setting, from Unity's own profile.
     export DCONF_PROFILE=$out/libexec/unity-quantal/dconf-profile
     export UNITY_QUANTAL_SCHEMAS=${runtime}/usr/share/glib-2.0/schemas
+    # Ctrl+Alt+T starts it from the original runtime, whose environment has no
+    # cursor search path; without one it cannot find the session's cursors.
+    export XCURSOR_PATH=\''${XCURSOR_PATH:-\$HOME/.local/share/icons:\$HOME/.icons:/etc/profiles/per-user/\$USER/share/icons:/run/current-system/sw/share/icons}
     exec ${terminalApp}/bin/unity-terminal "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-terminal"
