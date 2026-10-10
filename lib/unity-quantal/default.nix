@@ -4,7 +4,7 @@
 , libXinerama, libXcursor, libXi, libxshmfence
 , dbus, dconf, gvfs, cinnamon, cinnamon-session, cinnamon-screensaver, cinnamon-settings-daemon, polkit_gnome
 , networkmanagerapplet, xdg-terminal-exec, xdg-utils, coreutils, bash, glib
-, symlinkJoin, findutils, gnugrep, gnused, xorg-server, xprop, xwininfo, xdpyinfo
+, symlinkJoin, findutils, gnugrep, gnused, xorg-server, xprop, xwininfo, xdpyinfo, xdotool
 , xmessage, weston, xwayland, mesa-demos, xinput, xrandr, librsvg, imagemagick
 , pavucontrol, system-config-printer
 , cinnamon-desktop
@@ -142,7 +142,7 @@ stdenvNoCC.mkDerivation {
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
-        xwininfo xdpyinfo xmessage glib dbus weston xwayland mesa-demos imagemagick ];
+        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick ];
     };
     providedSessions = [ "unity-quantal" ];
   };

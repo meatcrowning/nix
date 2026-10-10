@@ -207,6 +207,33 @@ application=$(gdbus call --session --dest org.ayatana.bamf --object-path /org/ay
 application=${application#*\'}
 application=${application%%\'*}
 gdbus call --session --dest org.ayatana.bamf --object-path "$application" --method org.ayatana.bamf.application.DesktopFile | grep unity-original-gcalctool.desktop
+# Meta drags windows: left moves, right resizes; Alt drags reach the client.
+window_id() { xwininfo -root -tree | sed -n "s/^ *\\(0x[0-9a-f]*\\) $1.*/\\1/p" | head -n1; }
+probe=$(window_id '"unity-host-probe"')
+terminal=$(window_id '"Terminal".*736x457')
+test -n "$probe" && test -n "$terminal"
+geometry() { xwininfo -id "$target" | sed -n 's/.*\(Absolute upper-left [XY]\|Width\|Height\): *//p' | tr '\n' ' '; echo; }
+drag() {
+  local key=$1 button=$2 x y width height
+  read -r x y width height < <(geometry)
+  # Grab the lower-right quarter: Compiz resizes the edges nearest the pointer.
+  xdotool mousemove $((x + width * 3 / 4)) $((y + height * 3 / 4)) sleep 0.2 keydown "$key" sleep 0.2 \
+    mousedown "$button" sleep 0.2 mousemove_relative -- 60 50 sleep 0.2 mousemove_relative -- 60 50 \
+    sleep 0.2 mouseup "$button" sleep 0.2 keyup "$key" sleep 0.5
+  read -r X Y W H < <(geometry)
+  echo "$key+$button: $x $y $width $height -> $X $Y $W $H" | tee -a /work/drag.txt
+  dx=$((X - x)) dy=$((Y - y)) dw=$((W - width)) dh=$((H - height))
+}
+target=$probe
+drag Alt_L 1
+test "$dx $dy" = "0 0"
+drag Super_L 1
+test "$dx" -ge 100 && test "$dy" -ge 80 && test "$dw $dh" = "0 0"
+# xmessage is fixed-size; resize a terminal instead.
+target=$terminal
+drag Super_L 3
+test "$dw" -gt 0 || test "$dh" -gt 0
+echo 'PASS: Meta+left moves, Meta+right resizes, Alt+left leaves windows in place'
 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames > /work/bus-names.txt
 grep 'com.canonical.Unity.Panel.Service' /work/bus-names.txt
 grep 'Starting plugin: unityshell' /home/unity-test/.local/state/unity-quantal/session.log
