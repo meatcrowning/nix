@@ -60,6 +60,29 @@ Shared TextButton, ToolTipArea, WheelNotch, Kinetic views, spelling, context
 menus, and scrollbar contracts apply. Native Plasma controls follow the native
 style; custom Hyprland controls do not impose that style on Plasma.
 
+## Unity frontend
+
+On top's native Unity session, `main.py` selects `unity_engine.py`: an offscreen
+Qt controller with one private, per-window Unix socket. `unity_frontend.py`
+runs with Python 2.7 / GTK 3.6 through `unity-quantal-runtime`; keep it compatible
+with that runtime. No modern Qt/Python libraries enter the historical process.
+Book retains its existing desktop faces; the original Unity runtime is x86-only.
+
+The controller still owns generation, model discovery, gallery caches, metadata,
+and backend leases. The GTK adapter translates image/edit/video controls to the
+same contracts as `Root.qml.submit`; keep them in sync. Both faces use Painter's
+per-model preferences. GTK must merge unrelated preference keys, retain seed
+policy, and finish its final save before closing. Desktop opens use the saved
+launch environment, never the engine's offscreen environment.
+
+Use real GTK widgets, Ambiance, server decorations and the original appmenu
+exporter. `lib/unity-quantal/assemble.py` owns that runtime dependency. Verify with
+`tools/unity-test.sh UNITY_PACKAGE` (under this app): a private PID/mount/network
+namespace, Xvfb and D-Bus, scratch home and synthetic controller data. It checks
+GTK controls, socket submission, output restore, persistence and global-menu
+registration without a live backend. `PAINTER_UNITY_SHOT=/tmp/file.png` retains
+an isolated fixture image. Never run its inner Python scripts on the host.
+
 ## Gallery, output, and layout
 
 `gallery.py` owns discovery, deduplication, filtering, and bounded workers;
