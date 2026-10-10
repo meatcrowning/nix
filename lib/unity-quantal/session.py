@@ -1,6 +1,7 @@
 """Native session supervisor and FHS compatibility runtime for Unity 6.8."""
 
 import configparser
+import ctypes
 import fcntl
 import json
 import os
@@ -668,6 +669,88 @@ def window_icons(directory):
                 break
 
 
+class WindowAttributes(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_int), ("y", ctypes.c_int), ("width", ctypes.c_int), ("height", ctypes.c_int),
+                ("border_width", ctypes.c_int), ("depth", ctypes.c_int), ("visual", ctypes.c_void_p),
+                ("root", ctypes.c_ulong), ("class_", ctypes.c_int), ("bit_gravity", ctypes.c_int),
+                ("win_gravity", ctypes.c_int), ("backing_store", ctypes.c_int), ("backing_planes", ctypes.c_ulong),
+                ("backing_pixel", ctypes.c_ulong), ("save_under", ctypes.c_int), ("colormap", ctypes.c_ulong),
+                ("map_installed", ctypes.c_int), ("map_state", ctypes.c_int), ("all_event_masks", ctypes.c_long),
+                ("your_event_mask", ctypes.c_long), ("do_not_propagate_mask", ctypes.c_long),
+                ("override_redirect", ctypes.c_int), ("screen", ctypes.c_void_p)]
+
+
+def reframe_stranded_windows():
+    # Compiz can leave a window minimized yet mapped outside any frame. It then
+    # ignores activation, so the launcher cannot raise it and the window looks
+    # lost off-screen. A minimized window Compiz still manages keeps its frame;
+    # a fresh map makes Compiz manage the stranded one again.
+    x = ctypes.CDLL(CONFIG["libX11"])
+    x.XOpenDisplay.restype = ctypes.c_void_p
+    x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    display = x.XOpenDisplay(None)
+    if not display:
+        return
+    x.XDefaultRootWindow.restype = ctypes.c_ulong
+    x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    x.XInternAtom.restype = ctypes.c_ulong
+    x.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    x.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong] + [ctypes.POINTER(ctypes.c_ulong)] * 2 + [
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)), ctypes.POINTER(ctypes.c_uint)]
+    x.XGetWindowAttributes.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(WindowAttributes)]
+    x.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long,
+                                     ctypes.c_int, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong),
+                                     ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong),
+                                     ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p)]
+    x.XFree.argtypes = [ctypes.c_void_p]
+    for name in ["XUnmapWindow", "XMapWindow"]:
+        getattr(x, name).argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    x.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    # Windows vanish between listing and inspection; never exit on BadWindow.
+    ignore = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)(lambda *_: 0)
+    x.XSetErrorHandler(ignore)
+    root = x.XDefaultRootWindow(display)
+    wm_state = x.XInternAtom(display, b"WM_STATE", 0)
+    client_list = x.XInternAtom(display, b"_NET_CLIENT_LIST", 0)
+
+    def longs(window, atom):
+        kind, size, count, after, data = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_void_p()
+        if x.XGetWindowProperty(display, window, atom, 0, 4096, 0, 0, kind, size, count, after, data) != 0 or not data:
+            return []
+        values = list(ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))[:count.value]) if size.value == 32 else []
+        x.XFree(data)
+        return values
+
+    def stranded():
+        found = set()
+        parent, children, count = ctypes.c_ulong(), ctypes.POINTER(ctypes.c_ulong)(), ctypes.c_uint()
+        if not x.XQueryTree(display, root, ctypes.byref(ctypes.c_ulong()), parent, children, count):
+            return found
+        tops = set(children[:count.value])
+        if children:
+            x.XFree(children)
+        attributes = WindowAttributes()
+        for window in tops & set(longs(root, client_list)):
+            if (x.XGetWindowAttributes(display, window, attributes) and attributes.map_state == 2
+                    and not attributes.override_redirect and longs(window, wm_state)[:1] == [3]):
+                found.add(window)
+        return found
+
+    seen = set()
+    while True:
+        current = stranded()
+        # A second sighting rules out a window caught mid-transition.
+        repeated = current & seen
+        for window in repeated:
+            print("window-icons: re-framing stranded window " + hex(window), file=sys.stderr, flush=True)
+            x.XUnmapWindow(display, window)
+            x.XSync(display, 0)
+            x.XMapWindow(display, window)
+        x.XSync(display, 0)
+        seen = current - repeated
+        time.sleep(2)
+
+
 def watch_windows():
     directory = Path(os.environ["UNITY_QUANTAL_SESSION_DIR"])
     lock = (directory / "window-icons.lock").open("w")
@@ -675,6 +758,7 @@ def watch_windows():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return
+    threading.Thread(target=reframe_stranded_windows, daemon=True).start()
     # Watch window membership only, never input, focus, or selection events.
     with subprocess.Popen([CONFIG["xprop"], "-spy", "-root", "_NET_CLIENT_LIST"], stdout=subprocess.PIPE, text=True) as watcher:
         for _ in watcher.stdout:
