@@ -11,6 +11,7 @@
 , xpra, zenity, closureInfo, writeText
 , wrapGAppsHook3, gobject-introspection, gtk3, vte
 , libseccomp, gnutar, gzip, bzip2, xz, unzip, zip
+, gdk-pixbuf, ffmpegthumbnailer, ffmpeg-headless, writeShellScript
 }:
 let
   iso = fetchurl {
@@ -50,6 +51,25 @@ let
     bsdtar -xOf ${isolatedArchiveDeb} data.tar.gz | bsdtar -xf - -C "$out"
   '';
   archivePath = lib.makeBinPath [ gnutar gzip bzip2 xz unzip zip ];
+  # Nautilus does not depend on thumbnail providers. Use current decoders,
+  # without letting the Quantal process's library/loader overrides leak in.
+  imageThumbnailer = writeShellScript "unity-image-thumbnailer" ''
+    unset LD_LIBRARY_PATH GDK_PIXBUF_MODULE_FILE GDK_PIXBUF_MODULEDIR
+    exec ${gdk-pixbuf}/bin/gdk-pixbuf-thumbnailer "$@"
+  '';
+  videoThumbnailer = writeShellScript "unity-video-thumbnailer" ''
+    unset LD_LIBRARY_PATH GDK_PIXBUF_MODULE_FILE GDK_PIXBUF_MODULEDIR
+    exec ${ffmpegthumbnailer}/bin/ffmpegthumbnailer "$@"
+  '';
+  thumbnailers = runCommand "unity-quantal-thumbnailers" { } ''
+    mkdir -p "$out"
+    cp ${gdk-pixbuf}/share/thumbnailers/gdk-pixbuf-thumbnailer.thumbnailer "$out/"
+    cp ${ffmpegthumbnailer}/share/thumbnailers/ffmpegthumbnailer.thumbnailer "$out/"
+    sed -i -E 's|^(TryExec=).*|\1${imageThumbnailer}|; s|^(Exec=)[^ ]+|\1${imageThumbnailer}|' \
+      "$out/gdk-pixbuf-thumbnailer.thumbnailer"
+    sed -i -E 's|^(TryExec=).*|\1${videoThumbnailer}|; s|^(Exec=)[^ ]+|\1${videoThumbnailer}|' \
+      "$out/ffmpegthumbnailer.thumbnailer"
+  '';
   # The session's terminal: GNOME Terminal 3.6's window over the current VTE.
   terminalApp = stdenvNoCC.mkDerivation {
     name = "unity-quantal-terminal-app";
@@ -86,7 +106,7 @@ stdenvNoCC.mkDerivation {
     cp -r display-icons "$out/libexec/unity-quantal/"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
-      inherit runtime modernLibraries archivePath gtkTheme;
+      inherit runtime modernLibraries archivePath gtkTheme thumbnailers;
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
       isolatedClosure = "${isolatedClosure}/store-paths";
       xpra = "${xpra}/bin/xpra";
@@ -202,7 +222,8 @@ stdenvNoCC.mkDerivation {
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
-        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr ];
+        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr
+        ffmpeg-headless ];
     };
     providedSessions = [ "unity-quantal" ];
   };
