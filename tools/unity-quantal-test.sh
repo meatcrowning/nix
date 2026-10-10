@@ -305,6 +305,21 @@ xdotool key XF86MonBrightnessUp sleep 0.5
 grep '"brightness": 95' "$display_state"
 grep '"night": true' "$display_state"
 echo 'PASS: brightness keys, night light state, indicator, and Settings panel'
+# Scrolling the panel icon steps brightness both ways (Unity sends +120 per
+# notch up, -120 down).
+printf '{"brightness": 50, "night": true, "temperature": 3500}' > "$display_state.tmp"
+mv "$display_state.tmp" "$display_state"
+sleep 1
+display_entry=$(gdbus call --session --dest com.canonical.Unity.Panel.Service --object-path /com/canonical/Unity/Panel/Service \
+  --method com.canonical.Unity.Panel.Service.Sync | grep -o "'libapplication.so', '0x[0-9a-f]*', 'unity-quantal-display'" | sed "s/.*'\(0x[0-9a-f]*\)'.*/\1/")
+test -n "$display_entry"
+scroll_entry() { gdbus call --session --dest com.canonical.Unity.Panel.Service --object-path /com/canonical/Unity/Panel/Service \
+  --method com.canonical.Unity.Panel.Service.ScrollEntry -- "$display_entry" "$1" >/dev/null; sleep 0.5; }
+scroll_entry 120
+grep '"brightness": 55' "$display_state"
+scroll_entry -120
+grep '"brightness": 50' "$display_state"
+echo 'PASS: scrolling the panel indicator steps brightness up and down'
 # A live refresh replaces the display service and keeps it registered.
 display_owner() { gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
   --method org.freedesktop.DBus.GetConnectionUnixProcessID org.unity_quantal.Display 2>/dev/null || true; }
