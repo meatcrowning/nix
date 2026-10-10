@@ -260,6 +260,40 @@ pick Down Down
 test "$(theme)" = "'Ambiance-Dark'"
 test "$(background)" -lt 80
 echo 'PASS: Appearance switches between Ambiance and Ambiance Dark live'
+# Brightness keys and night light share one gamma ramp; the panel opens from
+# original Settings and the indicator sits in the original panel.
+display_state=/home/unity-test/.config/unity-quantal/display.json
+gdbus call --session --dest com.canonical.indicator.application \
+  --object-path /com/canonical/indicator/application/service \
+  --method com.canonical.indicator.application.service.GetApplications > /work/indicators.txt
+grep unity-quantal-display /work/indicators.txt
+xdotool key XF86MonBrightnessDown sleep 0.3 key XF86MonBrightnessDown sleep 0.5
+grep '"brightness": 90' "$display_state"
+xrandr --verbose > /work/xrandr-dim.txt
+if grep -q 'Gamma:' /work/xrandr-dim.txt; then grep 'Brightness: 0.9' /work/xrandr-dim.txt; fi
+printf '{"brightness": 90, "night": true, "temperature": 3500}' > "$display_state.tmp"
+mv "$display_state.tmp" "$display_state"
+sleep 1
+xrandr --verbose > /work/xrandr-night.txt
+if grep -q 'Gamma:' /work/xrandr-night.txt; then ! grep 'Gamma: *1.0:1.0:1.0' /work/xrandr-night.txt; fi
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-control-center unity-host-display >/work/display-panel.log 2>&1 &
+for _ in {1..150}; do
+  display_panel=$(window_id '"Brightness & Night Light"')
+  [ -n "$display_panel" ] && break
+  sleep 0.1
+done
+test -n "$display_panel"
+for _ in {1..50}; do
+  xprop -id "$display_panel" _NET_WM_DESKTOP_FILE | grep -q unity-display.desktop && break
+  sleep 0.1
+done
+xprop -id "$display_panel" _NET_WM_DESKTOP_FILE | grep unity-display.desktop
+sleep 1
+import -silent -window root /work/display-panel.png
+xdotool key XF86MonBrightnessUp sleep 0.5
+grep '"brightness": 95' "$display_state"
+grep '"night": true' "$display_state"
+echo 'PASS: brightness keys, night light state, indicator, and Settings panel'
 # The session terminal is kitty dressed as the 12.10 GNOME Terminal.
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/x-terminal-emulator -e "$UNITY_TEST_TOOLS/bin/bash" \
   -c 'printf "\e[40m  \e[0m\n"; sleep 30' >/work/terminal-kitty.log 2>&1 &
