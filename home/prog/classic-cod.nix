@@ -45,8 +45,21 @@ let
         touch "$WINEPREFIX/.controller-v1"
       fi
       cp -f ${pkgs.dxvk.bin}/x32/d3d9.dll "$WINEPREFIX/drive_c/windows/syswow64/d3d9.dll"
+      gameMounts=()
+      ${lib.optionalString (name == "modern-warfare-3") ''
+        if [[ "$mode" == campaign ]]; then
+          # The SP binary stalls in its legacy Steam bootstrap when it can
+          # create a .STEAMSTART file. Keep installed assets read-only inside
+          # Wine while retaining writable saves, settings, mods, and logs.
+          mkdir -p "$game/players2" "$game/userraw"
+          gameMounts=(--ro-bind "$game" "$game"
+            --bind "$game/players2" "$game/players2"
+            --bind "$game/userraw" "$game/userraw")
+        fi
+      ''}
       cd "$game"
       bwrap --unshare-net --bind / / --dev-bind /dev /dev --proc /proc \
+        "''${gameMounts[@]}" \
         wine "$executable" "''${args[@]}" +set net_ip 127.0.0.1 +set gpad_enabled 1 "$@"
     '';
   };
