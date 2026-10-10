@@ -8,7 +8,7 @@
 , xmessage, weston, xwayland, mesa-demos, xinput, xrandr, librsvg, imagemagick
 , pavucontrol, system-config-printer
 , cinnamon-desktop
-, xpra, zenity, closureInfo, writeText
+, xpra, zenity, closureInfo, writeText, kitty
 , libseccomp, gnutar, gzip, bzip2, xz, unzip, zip
 }:
 let
@@ -112,9 +112,9 @@ stdenvNoCC.mkDerivation {
         screen = [ "${cinnamon}/bin/cinnamon-settings" "screensaver" ];
         datetime = [ "${cinnamon}/bin/cinnamon-settings" "calendar" ];
       };
-      mediaKeys = "${cinnamon-settings-daemon}/libexec/csd-media-keys";
+      mediaKeys = "$out/bin/unity-quantal-media-keys";
       power = "${cinnamon-settings-daemon}/libexec/csd-power";
-      terminal = "${xdg-terminal-exec}/bin/xdg-terminal-exec";
+      terminal = "$out/bin/unity-quantal-terminal";
       open = "${xdg-utils}/bin/xdg-open";
       hostPath = lib.makeBinPath [ coreutils bash xdg-utils xdg-terminal-exec cinnamon-screensaver cinnamon-session ];
     }}
@@ -127,6 +127,42 @@ stdenvNoCC.mkDerivation {
     EOF
       chmod +x "$out/bin/unity-quantal-$command"
     done
+    # The session's terminal: kitty styled as Unity 12.10's GNOME Terminal,
+    # with the runtime's original Ubuntu Mono files.
+    cp kitty.conf "$out/libexec/unity-quantal/kitty.conf"
+    cat > "$out/libexec/unity-quantal/terminal-fonts.conf" <<EOF
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+    <fontconfig>
+      <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+      <dir>${runtime}/usr/share/fonts/truetype/ubuntu-font-family</dir>
+      <!-- Ubuntu 12.10 rendered with slight hinting. -->
+      <match target="font">
+        <test name="family"><string>Ubuntu Mono</string></test>
+        <edit name="antialias" mode="assign"><bool>true</bool></edit>
+        <edit name="hinting" mode="assign"><bool>true</bool></edit>
+        <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
+      </match>
+    </fontconfig>
+    EOF
+    cat > "$out/bin/unity-quantal-terminal" <<EOF
+    #!${bash}/bin/bash
+    # Accept x-terminal-emulator and gnome-terminal style command options.
+    case "\''${1:-}" in -e|-x|--) shift ;; esac
+    export FONTCONFIG_FILE=$out/libexec/unity-quantal/terminal-fonts.conf
+    exec ${kitty}/bin/kitty --config $out/libexec/unity-quantal/kitty.conf \\
+      --class unity-terminal --name unity-terminal "\$@"
+    EOF
+    chmod +x "$out/bin/unity-quantal-terminal"
+    # Ctrl+Alt+T runs the media-keys daemon's gnome-terminal. Only that daemon
+    # sees this shim, so other desktops keep their own terminals.
+    mkdir -p "$out/libexec/unity-quantal/terminal-shim"
+    ln -s "$out/bin/unity-quantal-terminal" "$out/libexec/unity-quantal/terminal-shim/gnome-terminal"
+    cat > "$out/bin/unity-quantal-media-keys" <<EOF
+    #!${bash}/bin/bash
+    PATH=$out/libexec/unity-quantal/terminal-shim:\$PATH exec ${cinnamon-settings-daemon}/libexec/csd-media-keys "\$@"
+    EOF
+    chmod +x "$out/bin/unity-quantal-media-keys"
     cat > "$out/bin/unity-quantal-isolated" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"

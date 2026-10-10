@@ -260,6 +260,21 @@ pick Down Down
 test "$(theme)" = "'Ambiance-Dark'"
 test "$(background)" -lt 80
 echo 'PASS: Appearance switches between Ambiance and Ambiance Dark live'
+# The session terminal is kitty dressed as the 12.10 GNOME Terminal.
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/x-terminal-emulator -e "$UNITY_TEST_TOOLS/bin/bash" \
+  -c 'printf "\e[40m  \e[0m\n"; sleep 30' >/work/terminal-kitty.log 2>&1 &
+for _ in {1..80}; do
+  target=$(window_id '"[^"]*": ("unity-terminal"')
+  [ -n "$target" ] && break
+  sleep 0.1
+done
+test -n "$target"
+sleep 2
+read -r tx ty _ _ < <(geometry)
+pixel() { import -silent -window root -crop 1x1+$((tx + $1))+$((ty + $2)) -depth 8 -format '%[hex:p{0,0}]' info:; }
+test "$(pixel 400 300)" = 300A24
+test "$(pixel 5 8)" = 000000
+echo 'PASS: Unity terminal opens kitty with the 12.10 look'
 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames > /work/bus-names.txt
 grep 'com.canonical.Unity.Panel.Service' /work/bus-names.txt
 grep 'Starting plugin: unityshell' /home/unity-test/.local/state/unity-quantal/session.log
@@ -285,7 +300,7 @@ wait "$supervisor"
 echo 'PASS: original shell, host application, separate settings, native lock, session logout'
 EOF
 echo "Unity session test logs: $run"
-"$test_tools/bin/timeout" --kill-after=5s 120s "$test_tools/bin/bwrap" --die-with-parent --new-session --unshare-all \
+"$test_tools/bin/timeout" --kill-after=5s 180s "$test_tools/bin/bwrap" --die-with-parent --new-session --unshare-all \
   --ro-bind /nix /nix --proc /proc --dev /dev --ro-bind /sys /sys \
   --symlink "$test_tools/bin" /bin \
   --tmpfs /tmp --tmpfs /run --dir /run/user/1000 \

@@ -20,6 +20,8 @@ PALETTE = {
 # Colours already meant for Ambiance's dark surfaces (menubars, toolbars,
 # tooltips, overlays) are kept as shipped.
 KEEP = re.compile(r"dark|tooltip|osd")
+# Stylesheets drawn dark by design (the terminal's aubergine screen) stay as shipped.
+SHIPPED = {"gnome-terminal.css", "gnome-terminal.rc"}
 # Ambiance's dark grey is slightly warm; mapped greys keep that tint.
 WARM = (1.0, 0.983, 0.917)
 
@@ -147,6 +149,8 @@ def main(source, destination, panel=None, artworks=()):
             path.chmod(0o755 if path.is_dir() else 0o644)
     for part in ["gtk-2.0", "gtk-3.0"]:
         for path in (destination / part).rglob("*"):
+            if path.name in SHIPPED:
+                continue
             if path.suffix in (".css", ".rc", ".ini") or path.name == "gtkrc":
                 stylesheet(path)
             elif path.suffix == ".png":
