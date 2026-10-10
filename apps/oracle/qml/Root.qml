@@ -1115,6 +1115,21 @@ Item {
     // announcement of it rather than an answer (see `onRoundStarted`).
     readonly property int preambleMax: 140
 
+    // The GTK face uses the same turn/persistence state machine offscreen.
+    // This narrow JSON seam keeps QML objects out of the historical runtime.
+    function unitySend(text) { promptBox.text = text; send(); }
+    function unitySnapshot() {
+        var rows = [];
+        for (var i = 0; i < chatLog.count; i++)
+            rows.push(JSON.parse(JSON.stringify(chatLog.get(i))));
+        var atts = [];
+        for (var j = 0; j < attachments.count; j++)
+            atts.push(JSON.parse(JSON.stringify(attachments.get(j))));
+        return JSON.stringify({rows: rows, attachments: atts,
+                               session: sessionId, title: sessionTitle,
+                               model: model, status: status || serverNote});
+    }
+
     function rowsJson() {
         var a = [];
         for (var i = 0; i < chatLog.count; i++) {
@@ -4054,7 +4069,7 @@ Item {
 
                     Image {
                         anchors { fill: parent; margins: 1 }
-                        source: "file://" + model.path
+                        source: model.image ? "file://" + model.path : ""
                         sourceSize.width: width
                         sourceSize.height: height
                         fillMode: Image.PreserveAspectFit
