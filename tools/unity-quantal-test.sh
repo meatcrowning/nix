@@ -378,6 +378,81 @@ for _ in {1..50}; do
 done
 test -n "$after" && test "$after" != "$before"
 echo 'PASS: unity-quantal-refresh replaces the live display service'
+# CPU frequency and weather indicators. The test has no network: the fetcher,
+# run on the host side through the launch socket, reports the service down;
+# a fixture report then fills the panel entry.
+indicators() { gdbus call --session --dest com.canonical.indicator.application \
+  --object-path /com/canonical/indicator/application/service \
+  --method com.canonical.indicator.application.service.GetApplications; }
+for _ in {1..50}; do
+  indicators > /work/indicators.txt
+  grep -q "indicator-cpufreq-[0-9]*'" /work/indicators.txt && grep -q unity-quantal-weather /work/indicators.txt && break
+  sleep 0.1
+done
+grep -o "'indicator-cpufreq-[0-9]*'" /work/indicators.txt
+weather_settings=/home/unity-test/.config/unity-quantal/weather.json
+weather_report=/home/unity-test/.cache/unity-quantal/weather.json
+printf '{"location": "Testville", "units": "metric"}' > "$weather_settings.tmp"
+mv "$weather_settings.tmp" "$weather_settings"
+for _ in {1..100}; do
+  grep -q 'Weather service unavailable' "$weather_report" 2>/dev/null && break
+  sleep 0.1
+done
+grep '"query": "Testville"' "$weather_report"
+grep 'Weather service unavailable' "$weather_report"
+printf '{"query": "Testville", "fetched": %s, "place": {"name": "Testville", "latitude": 0, "longitude": 0},
+  "forecast": {"current": {"temperature_2m": 23.4, "apparent_temperature": 22, "relative_humidity_2m": 40,
+  "weather_code": 61, "wind_speed_10m": 9, "wind_direction_10m": 200, "is_day": 1},
+  "daily": {"time": ["2026-10-10", "2026-10-11"], "weather_code": [61, 0], "temperature_2m_max": [24, 20],
+  "temperature_2m_min": [15, 12], "sunrise": ["2026-10-10T07:40", "2026-10-11T07:41"],
+  "sunset": ["2026-10-10T19:05", "2026-10-11T19:03"]}}}' "$(date +%s)" > "$weather_report.tmp"
+mv "$weather_report.tmp" "$weather_report"
+for _ in {1..50}; do
+  indicators > /work/indicators.txt
+  grep -q "'weather-showers-scattered'.*'23°'" /work/indicators.txt && break
+  sleep 0.1
+done
+grep -o "'weather-showers-scattered'.*'23°'" /work/indicators.txt
+echo 'PASS: CPU frequency meter and weather indicator, fetch through the host launcher'
+# Quantal's Nautilus extensions load into the original Files.
+gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+  --method org.freedesktop.DBus.StartServiceByName org.gnome.Nautilus 0
+files=$(gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+  --method org.freedesktop.DBus.GetConnectionUnixProcessID org.gnome.Nautilus | grep -o '[0-9]*' | tail -n1)
+for _ in {1..50}; do
+  grep -q libnautilus-python /proc/"$files"/maps && break
+  sleep 0.1
+done
+for extension in actions-menu image-converter python; do
+  grep -q "libnautilus-$extension.so" /proc/"$files"/maps
+done
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/python2.7 -c '
+from gi.repository import Nautilus
+scope = {"__name__": "nautilus_compare"}
+execfile("/usr/share/nautilus-python/extensions/nautilus-compare.py", scope)
+assert any(isinstance(v, type) and issubclass(v, Nautilus.MenuProvider) for v in scope.values())
+'
+# Meld is PyGTK 2; keep it out of the GTK 3 process above.
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/python2.7 -c 'import gtk.glade'
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/convert -version | grep 'ImageMagick 6.7.7'
+test -f "$session_dir/applications/unity-original-nact.desktop"
+echo 'PASS: Nautilus Actions, Image Converter and Compare load in original Files'
+indicator_owner() { gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+  --method org.freedesktop.DBus.GetConnectionUnixProcessID "$1" 2>/dev/null || true; }
+cpufreq_before=$(indicator_owner org.unity_quantal.CpuFreq)
+weather_before=$(indicator_owner org.unity_quantal.Weather)
+test -n "$cpufreq_before" && test -n "$weather_before"
+"$UNITY_PACKAGE/bin/unity-quantal-refresh" >/work/indicator-refresh.log 2>&1
+for _ in {1..50}; do
+  cpufreq_after=$(indicator_owner org.unity_quantal.CpuFreq)
+  weather_after=$(indicator_owner org.unity_quantal.Weather)
+  [ -n "$cpufreq_after" ] && [ "$cpufreq_after" != "$cpufreq_before" ] &&
+    [ -n "$weather_after" ] && [ "$weather_after" != "$weather_before" ] && break
+  sleep 0.1
+done
+test -n "$cpufreq_after" && test "$cpufreq_after" != "$cpufreq_before"
+test -n "$weather_after" && test "$weather_after" != "$weather_before"
+echo 'PASS: unity-quantal-refresh replaces the CPU frequency and weather indicators'
 # The session terminal is GNOME Terminal 3.6's window over the current VTE.
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/x-terminal-emulator -e "$UNITY_TEST_TOOLS/bin/bash" \
   -c 'printf "\e[40m  \e[0m\n"; sleep 30' >/work/terminal-session.log 2>&1 &

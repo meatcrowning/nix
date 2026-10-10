@@ -1,14 +1,47 @@
 """Extract the original Unity shell and its runtime from the Quantal ISO."""
 
 import hashlib
+import io
 import os
 from pathlib import Path
 import re
 import shutil
 import sys
+import tarfile
 
 
-source, target = map(Path, sys.argv[1:])
+source, target = map(Path, sys.argv[1:3])
+# Further arguments are Quantal archive packages the ISO lacks. Install them
+# into the extracted tree as dpkg would, so the closure check below covers them.
+extras = []
+for deb in map(Path, sys.argv[3:]):
+    members = {}
+    with deb.open("rb") as stream:
+        if stream.read(8) != b"!<arch>\n":
+            raise RuntimeError(f"Not a Debian package: {deb}")
+        while header := stream.read(60):
+            name, size = header[:16].decode().strip().rstrip("/"), int(header[48:58])
+            members[name] = stream.read(size)
+            stream.read(size % 2)
+    control = next(v for k, v in members.items() if k.startswith("control.tar"))
+    with tarfile.open(fileobj=io.BytesIO(control)) as archive:
+        fields = archive.extractfile("./control").read().decode()
+    package = re.search(r"^Package: (\S+)", fields, re.M)[1]
+    data = next(v for k, v in members.items() if k.startswith("data.tar"))
+    with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+        archive.extractall(source, filter="tar")
+        paths = ["/" + m.name.removeprefix("./").rstrip("/") for m in archive.getmembers()]
+    # ImageMagick's maintainer script links its commands through alternatives.
+    for path in [p for p in paths if p.endswith(".im6")]:
+        if not (source / path[1:-4]).exists():
+            (source / path[1:-4]).symlink_to(Path(path).name)
+            paths.append(path[:-4])
+    (source / "var/lib/dpkg/info" / (package + ".list")).write_text("\n".join(paths) + "\n")
+    fields = re.sub(r"^(Package: .*)$", r"\1\nStatus: install ok installed", fields.strip(), count=1, flags=re.M)
+    with (source / "var/lib/dpkg/status").open("a") as status:
+        status.write("\n\n" + fields + "\n")
+    extras.append(package)
+
 records = {}
 providers = {}
 for paragraph in (source / "var/lib/dpkg/status").read_text().split("\n\n"):
@@ -36,7 +69,7 @@ evolution-data-server zeitgeist-core zeitgeist-datahub
 gedit gnome-terminal gcalctool eog file-roller python-gi appmenu-gtk3 gir1.2-appindicator3-0.1
 light-themes gtk3-engines-unico humanity-icon-theme ubuntu-mono ubuntu-wallpapers ubuntu-sounds
 ttf-ubuntu-font-family python dbus-x11 dconf-tools bash dash coreutils
-""".split()
+""".split() + extras
 selected = set()
 pending = list(roots)
 while pending:

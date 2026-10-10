@@ -27,11 +27,22 @@ ROOT = Path(CONFIG["runtime"])
 RUNTIME = str(PACKAGE / "bin/unity-quantal-runtime")
 BRIDGES = ["unity-host-launch", "xdg-open", "gnome-session-quit",
            "gnome-screensaver-command", "x-terminal-emulator", "gnome-terminal"]
+
+
 # Stable across rebuilds, so a live refresh or auto-restart runs current code.
-DISPLAY_COMMAND = next(command for command in [
-    "/run/current-system/sw/bin/unity-quantal-display", str(PACKAGE / "bin/unity-quantal-display")]
-    if Path(command).exists())
-ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller"]
+def stable_command(name):
+    return next(command for command in ["/run/current-system/sw/bin/" + name, str(PACKAGE / "bin" / name)]
+                if Path(command).exists())
+
+
+DISPLAY_COMMAND = stable_command("unity-quantal-display")
+# Panel indicators of this session: bus name -> command.
+INDICATORS = {
+    "org.unity_quantal.Display": [DISPLAY_COMMAND, "indicator"],
+    "org.unity_quantal.CpuFreq": [stable_command("unity-quantal-cpufreq")],
+    "org.unity_quantal.Weather": [stable_command("unity-quantal-weather")],
+}
+ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller", "nact"]
 
 
 def desktop_parser(path):
@@ -154,7 +165,8 @@ def prepare(directory, environment):
         if icons:
             icons.sort(key=lambda p: (0 if "48x48" in p.parts or "48" in p.parts else 1, str(p)))
             entry["Icon"] = str(icons[0])
-        entry["StartupWMClass"] = {"gnome-terminal": "Gnome-terminal", "nautilus": "Nautilus"}.get(name, name)
+        entry["StartupWMClass"] = {"gnome-terminal": "Gnome-terminal", "nautilus": "Nautilus",
+                                   "nact": "Nautilus-actions-config-tool"}.get(name, name)
         write_desktop(directory / "applications" / ("unity-original-" + name + ".desktop"), parser)
 
     for profile, label in [("unity", "Unity default"), ("plasma", "Plasma feel")]:
@@ -227,6 +239,8 @@ def prepare(directory, environment):
         "unity-quantal-media-keys": (CONFIG["mediaKeys"], "Application"),
         "unity-quantal-power": (CONFIG["power"], "Application"),
         "unity-quantal-display": (DISPLAY_COMMAND + " indicator", "Application"),
+        "unity-quantal-cpufreq": (INDICATORS["org.unity_quantal.CpuFreq"][0], "Application"),
+        "unity-quantal-weather": (INDICATORS["org.unity_quantal.Weather"][0], "Application"),
     }
     for name, (command, phase) in components.items():
         text = (f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\n"
@@ -618,24 +632,25 @@ def refresh():
                 raise RuntimeError(response["error"])
 
     launch(CONFIG["python"], str(HERE / "session.py"), "window-icons")
-    # Replace the display service. In a session that autostarted it, the
-    # session manager restarts it through the stable command; a session that
-    # predates it, or gave up restarting, gets it from the supervisor.
-    owner = bus("GetConnectionUnixProcessID", "org.unity_quantal.Display")
-    match = re.search(r"uint32 (\d+)", owner.stdout)
-    if match and Path(f"/proc/{match[1]}").stat().st_uid == os.getuid():
-        os.kill(int(match[1]), signal.SIGTERM)
+    # Replace the indicator services. In a session that autostarted them, the
+    # session manager restarts each through its stable command; a session that
+    # predates one, or gave up restarting it, gets it from the supervisor.
+    for name, command in INDICATORS.items():
+        owner = bus("GetConnectionUnixProcessID", name)
+        match = re.search(r"uint32 (\d+)", owner.stdout)
+        if match and Path(f"/proc/{match[1]}").stat().st_uid == os.getuid():
+            os.kill(int(match[1]), signal.SIGTERM)
+            for _ in range(40):
+                if bus("GetConnectionUnixProcessID", name).stdout != owner.stdout:
+                    break
+                time.sleep(0.05)
         for _ in range(40):
-            if bus("GetConnectionUnixProcessID", "org.unity_quantal.Display").stdout != owner.stdout:
+            if "uint32" in bus("GetConnectionUnixProcessID", name).stdout:
                 break
             time.sleep(0.05)
-    for _ in range(40):
-        if "uint32" in bus("GetConnectionUnixProcessID", "org.unity_quantal.Display").stdout:
-            break
-        time.sleep(0.05)
-    else:
-        launch(DISPLAY_COMMAND, "indicator")
-    print("Updated Unity application catalog, icons, host details, pointer settings, and display service")
+        else:
+            launch(*command)
+    print("Updated Unity application catalog, icons, host details, pointer settings, and indicators")
 
 
 def register_application(desktop, pid, environment=None):
