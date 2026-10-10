@@ -27,6 +27,8 @@ PALETTE = ["#000000", "#cc0000", "#4e9a06", "#c4a000", "#3465a4", "#75507b", "#0
            "#555753", "#ef2929", "#8ae234", "#fce94f", "#729fcf", "#ad7fa8", "#34e2e2", "#eeeeec"]
 # GNOME Terminal 3.6's zoom steps.
 ZOOMS = [0.5787, 0.6944, 0.8333, 1.0, 1.2, 1.44, 1.728]
+# New screens and Normal Size open one step out (FONT at about 10.8 points).
+DEFAULT_ZOOM = ZOOMS.index(0.8333)
 PCRE2_CASELESS = 0x00000008
 PCRE2_MULTILINE = 0x00000400
 
@@ -178,10 +180,10 @@ class Screen(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.window = window
         self.title_override = None
-        self.zoom = ZOOMS.index(1.0)
         self.terminal = Vte.Terminal()
         terminal = self.terminal
         terminal.set_font(Pango.FontDescription.from_string(FONT))
+        self.set_zoom(DEFAULT_ZOOM)
         terminal.set_colors(rgba(FOREGROUND), rgba(BACKGROUND), [rgba(c) for c in PALETTE])
         terminal.set_color_cursor(rgba(FOREGROUND))
         terminal.set_color_cursor_foreground(rgba(BACKGROUND))
@@ -465,7 +467,7 @@ class TerminalWindow(Gtk.ApplicationWindow):
 
     def zoom(self, step):
         screen = self.current()
-        screen.set_zoom(ZOOMS.index(1.0) if step == 0 else screen.zoom + step)
+        screen.set_zoom(DEFAULT_ZOOM if step == 0 else screen.zoom + step)
 
     def set_title_dialog(self):
         screen = self.current()
