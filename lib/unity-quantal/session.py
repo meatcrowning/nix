@@ -501,6 +501,8 @@ def apply_preferences(environment, log=None):
                             key, "true"], env=environment, check=True, stdout=log, stderr=log)
     # Meta drags windows: left button moves, right button resizes. The GNOME
     # modifier keys mirror it for the original apps and settings panels.
+    # With GNOME integration on, Compiz reads these only at startup; a running
+    # shell needs a restart (SIGTERM; cinnamon-session respawns it).
     for schema, key, value in [
             ("org.compiz.move:/org/compiz/profiles/unity/plugins/move/", "initiate-button", "'<Super>Button1'"),
             ("org.compiz.resize:/org/compiz/profiles/unity/plugins/resize/", "initiate-button", "'<Super>Button3'"),
