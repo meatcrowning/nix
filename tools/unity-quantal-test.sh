@@ -55,6 +55,9 @@ Icon=unity-quantal-probe
 Exec=$test_tools/bin/xmessage -name unity-host-probe -buttons ok:0 host-application
 Terminal=false
 EOF
+# Tweak Tool's inventory runs in the original runtime, which sees only the home.
+cp "$repo/tools/unity-tweaks-inventory.py" "$run/home/tweaks-inventory.py"
+cp "$repo/tools/unity-tweaks-check.py" "$run/tweaks-check.py"
 cat > "$run/inside.sh" <<'EOF'
 set -euo pipefail
 source /guard.sh
@@ -471,6 +474,95 @@ while [ "$(pixel 400 $top)" != 300A24 ]; do top=$((top + 1)); [ $top -lt 60 ]; d
 test "$(pixel 400 300)" = 300A24
 test "$(pixel 5 $((top + 8)))" = 000000
 echo 'PASS: Unity terminal opens with the 12.10 menubar and screen'
+# GNOME Tweak Tool: every key it shows is mapped to a reader in tweaks.json,
+# and each automatic check reaches that reader.
+test -f "$session_dir/applications/unity-original-gnome-tweak-tool.desktop"
+tweak_map="$UNITY_PACKAGE/libexec/unity-quantal/tweaks.json"
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/python2.7 /home/unity-test/tweaks-inventory.py \
+  > /work/tweaks-inventory.json 2>/work/tweaks-inventory.log
+"$TEST_PYTHON" /work/tweaks-check.py "$UNITY_PACKAGE" "$tweak_map" /work/tweaks-inventory.json | tee /work/tweaks-check.txt
+tweak() { "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gsettings "$@"; }
+active() { xprop -root _NET_ACTIVE_WINDOW | grep -o '0x[0-9a-f]*'; }
+extents() { xprop -id "$1" _NET_FRAME_EXTENTS | sed 's/.*= //'; }
+"$UNITY_TEST_TOOLS/bin/xmessage" -name tweak-probe-a -geometry 300x120+200+200 a >/dev/null 2>&1 &
+"$UNITY_TEST_TOOLS/bin/xmessage" -name tweak-probe-b -geometry 300x120+900+500 b >/dev/null 2>&1 &
+for _ in {1..50}; do
+  probe_a=$(window_id '"tweak-probe-a"'); probe_b=$(window_id '"tweak-probe-b"')
+  [ -n "$probe_a" ] && [ -n "$probe_b" ] && break
+  sleep 0.1
+done
+test -n "$probe_a" && test -n "$probe_b"
+sleep 1
+# Titlebar font: the decoration grows with it.
+for _ in {1..50}; do extents "$probe_a" | grep -q '^[0-9]' && break; sleep 0.1; done
+before=$(extents "$probe_a")
+tweak set org.gnome.desktop.wm.preferences titlebar-font "'Ubuntu Bold 28'"
+for _ in {1..40}; do [ "$(extents "$probe_a")" != "$before" ] && break; sleep 0.1; done
+after=$(extents "$probe_a")
+tweak reset org.gnome.desktop.wm.preferences titlebar-font
+echo "titlebar-font: $before -> $after"
+test "$(echo "$after" | cut -d, -f3)" -gt "$(echo "$before" | cut -d, -f3)"
+echo 'PASS: titlebar-font reaches the window decorations'
+# Focus mode: with sloppy focus, pointing at a window focuses it.
+xdotool windowactivate --sync "$probe_a" sleep 0.5
+tweak set org.gnome.desktop.wm.preferences focus-mode "'sloppy'"
+sleep 1
+xdotool mousemove 1050 560 sleep 1
+sloppy=$(active)
+tweak reset org.gnome.desktop.wm.preferences focus-mode
+sleep 1
+xdotool mousemove 350 260 sleep 1
+clicked=$(active)
+echo "focus-mode: probes $probe_a $probe_b; sloppy -> $sloppy; click -> $clicked"
+test "$((sloppy))" = "$((probe_b))" && test "$((clicked))" = "$((probe_b))"
+echo 'PASS: focus-mode reaches Compiz'
+# Titlebar double-click action: minimize instead of maximize.
+tweak set org.gnome.desktop.wm.preferences action-double-click-titlebar "'minimize'"
+sleep 1
+xdotool windowactivate --sync "$probe_a" sleep 0.5
+target=$probe_a
+read -r x y width _ < <(geometry)
+top=$(extents "$probe_a" | cut -d, -f3)
+xdotool mousemove $((x + width / 2)) $((y - top / 2)) sleep 0.3 click --repeat 2 --delay 80 1 sleep 1
+xprop -id "$probe_a" _NET_WM_STATE | tee /work/titlebar-state.txt
+tweak reset org.gnome.desktop.wm.preferences action-double-click-titlebar
+grep -q _NET_WM_STATE_HIDDEN /work/titlebar-state.txt
+xdotool windowactivate --sync "$probe_a" 2>/dev/null || true
+echo 'PASS: action-double-click-titlebar reaches the window decorations'
+# Desktop icons: Files' desktop window follows show-desktop-icons.
+desktop_windows() { for w in $(xprop -root _NET_CLIENT_LIST | grep -o '0x[0-9a-f]*'); do
+  xprop -id "$w" _NET_WM_WINDOW_TYPE | grep -q DESKTOP && echo "$w"; done; true; }
+desktop_windows > /work/desktop-before.txt
+tweak set org.gnome.desktop.background show-desktop-icons false
+for _ in {1..50}; do [ -z "$(desktop_windows)" ] && break; sleep 0.1; done
+desktop_windows > /work/desktop-hidden.txt
+tweak reset org.gnome.desktop.background show-desktop-icons
+echo "desktop windows: $(wc -l < /work/desktop-before.txt) -> $(wc -l < /work/desktop-hidden.txt)"
+test -s /work/desktop-before.txt && test ! -s /work/desktop-hidden.txt
+echo 'PASS: show-desktop-icons reaches the Files desktop'
+# Workspaces: Unity's are Compiz's viewport grid; num-workspaces stays inert,
+# as tweaks.json records. A change here means the map needs a real reader.
+xprop -root _NET_NUMBER_OF_DESKTOPS _NET_DESKTOP_GEOMETRY > /work/workspaces-before.txt
+tweak set org.gnome.desktop.wm.preferences num-workspaces 3
+sleep 2
+xprop -root _NET_NUMBER_OF_DESKTOPS _NET_DESKTOP_GEOMETRY > /work/workspaces-after.txt
+tweak reset org.gnome.desktop.wm.preferences num-workspaces
+test "$(cat /work/workspaces-before.txt)" = "$(cat /work/workspaces-after.txt)"
+echo 'PASS: num-workspaces stays inert in Unity, as tweaks.json records'
+# Monospace font: the session terminal follows it, live.
+tweak set org.gnome.desktop.interface monospace-font-name "'Ubuntu Mono 13'"
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/x-terminal-emulator -e "$UNITY_TEST_TOOLS/bin/bash" \
+  -c 'while :; do stty size > "$HOME/terminal-size.tmp"; mv "$HOME/terminal-size.tmp" "$HOME/terminal-size"; sleep 0.2; done' \
+  >/work/terminal-font.log 2>&1 &
+for _ in {1..80}; do [ -s "$HOME/terminal-size" ] && break; sleep 0.1; done
+small=$(cat "$HOME/terminal-size")
+tweak set org.gnome.desktop.interface monospace-font-name "'Ubuntu Mono 26'"
+for _ in {1..50}; do [ "$(cat "$HOME/terminal-size")" != "$small" ] && break; sleep 0.1; done
+large=$(cat "$HOME/terminal-size")
+tweak reset org.gnome.desktop.interface monospace-font-name
+echo "terminal rows/columns: $small -> $large"
+test "${large#* }" -lt "${small#* }"
+echo 'PASS: monospace-font-name reaches the session terminal live'
 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.ListNames > /work/bus-names.txt
 grep 'com.canonical.Unity.Panel.Service' /work/bus-names.txt
 grep 'Starting plugin: unityshell' /home/unity-test/.local/state/unity-quantal/session.log

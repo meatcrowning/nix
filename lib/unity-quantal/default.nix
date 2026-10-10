@@ -5,7 +5,7 @@
 , dbus, dconf, gvfs, cinnamon, cinnamon-session, cinnamon-screensaver, cinnamon-settings-daemon, polkit_gnome
 , networkmanagerapplet, xdg-terminal-exec, xdg-utils, coreutils, bash, glib
 , symlinkJoin, findutils, gnugrep, gnused, xorg-server, xprop, xwininfo, xdpyinfo, xdotool
-, xmessage, weston, xwayland, mesa-demos, xinput, xrandr, librsvg, imagemagick
+, xmessage, weston, xwayland, mesa-demos, xinput, xrandr, setxkbmap, librsvg, imagemagick
 , pavucontrol, system-config-printer
 , cinnamon-desktop
 , xpra, zenity, closureInfo, writeText
@@ -118,7 +118,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      "$out/libexec/unity-quantal/"
+      mirror.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
@@ -143,6 +143,7 @@ stdenvNoCC.mkDerivation {
       xrandr = "${xrandr}/bin/xrandr";
       rsvg = "${librsvg}/bin/rsvg-convert";
       gdbus = "${glib.bin}/bin/gdbus";
+      gsettings = "${glib.bin}/bin/gsettings";
       xprop = "${xprop}/bin/xprop";
       libX11 = "${libX11}/lib/libX11.so.6";
       session = "${cinnamon-session}/bin/cinnamon-session";
@@ -197,6 +198,9 @@ stdenvNoCC.mkDerivation {
     cat > "$out/bin/unity-quantal-terminal" <<EOF
     #!${bash}/bin/bash
     export FONTCONFIG_FILE=$out/libexec/unity-quantal/terminal-fonts.conf
+    # The session's fixed-width font setting, from Unity's own profile.
+    export DCONF_PROFILE=$out/libexec/unity-quantal/dconf-profile
+    export UNITY_QUANTAL_SCHEMAS=${runtime}/usr/share/glib-2.0/schemas
     exec ${terminalApp}/bin/unity-terminal "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-terminal"
@@ -224,7 +228,11 @@ stdenvNoCC.mkDerivation {
     #!${bash}/bin/bash
     exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/weather.py" indicator
     EOF
-    chmod +x "$out/bin/unity-quantal-cpufreq" "$out/bin/unity-quantal-weather"
+    cat > "$out/bin/unity-quantal-settings-mirror" <<EOF
+    #!${bash}/bin/bash
+    exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/mirror.py"
+    EOF
+    chmod +x "$out/bin/unity-quantal-cpufreq" "$out/bin/unity-quantal-weather" "$out/bin/unity-quantal-settings-mirror"
     cat > "$out/bin/unity-quantal-isolated" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"
@@ -247,7 +255,7 @@ stdenvNoCC.mkDerivation {
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
-        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr
+        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr setxkbmap
         ffmpeg-headless ];
     };
     providedSessions = [ "unity-quantal" ];

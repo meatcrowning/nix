@@ -36,13 +36,15 @@ def stable_command(name):
 
 
 DISPLAY_COMMAND = stable_command("unity-quantal-display")
-# Panel indicators of this session: bus name -> command.
-INDICATORS = {
+# Session services a refresh replaces: bus name -> command.
+SERVICES = {
     "org.unity_quantal.Display": [DISPLAY_COMMAND, "indicator"],
     "org.unity_quantal.CpuFreq": [stable_command("unity-quantal-cpufreq")],
     "org.unity_quantal.Weather": [stable_command("unity-quantal-weather")],
+    "org.unity_quantal.SettingsMirror": [stable_command("unity-quantal-settings-mirror")],
 }
-ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller", "nact"]
+ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller", "nact",
+                 "gnome-tweak-tool"]
 
 
 def desktop_parser(path):
@@ -166,7 +168,8 @@ def prepare(directory, environment):
             icons.sort(key=lambda p: (0 if "48x48" in p.parts or "48" in p.parts else 1, str(p)))
             entry["Icon"] = str(icons[0])
         entry["StartupWMClass"] = {"gnome-terminal": "Gnome-terminal", "nautilus": "Nautilus",
-                                   "nact": "Nautilus-actions-config-tool"}.get(name, name)
+                                   "nact": "Nautilus-actions-config-tool",
+                                   "gnome-tweak-tool": "Gnome-tweak-tool"}.get(name, name)
         write_desktop(directory / "applications" / ("unity-original-" + name + ".desktop"), parser)
 
     for profile, label in [("unity", "Unity default"), ("plasma", "Plasma feel")]:
@@ -239,8 +242,9 @@ def prepare(directory, environment):
         "unity-quantal-media-keys": (CONFIG["mediaKeys"], "Application"),
         "unity-quantal-power": (CONFIG["power"], "Application"),
         "unity-quantal-display": (DISPLAY_COMMAND + " indicator", "Application"),
-        "unity-quantal-cpufreq": (INDICATORS["org.unity_quantal.CpuFreq"][0], "Application"),
-        "unity-quantal-weather": (INDICATORS["org.unity_quantal.Weather"][0], "Application"),
+        "unity-quantal-cpufreq": (SERVICES["org.unity_quantal.CpuFreq"][0], "Application"),
+        "unity-quantal-weather": (SERVICES["org.unity_quantal.Weather"][0], "Application"),
+        "unity-quantal-settings-mirror": (SERVICES["org.unity_quantal.SettingsMirror"][0], "Application"),
     }
     for name, (command, phase) in components.items():
         text = (f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\n"
@@ -632,10 +636,10 @@ def refresh():
                 raise RuntimeError(response["error"])
 
     launch(CONFIG["python"], str(HERE / "session.py"), "window-icons")
-    # Replace the indicator services. In a session that autostarted them, the
+    # Replace the session services. In a session that autostarted them, the
     # session manager restarts each through its stable command; a session that
     # predates one, or gave up restarting it, gets it from the supervisor.
-    for name, command in INDICATORS.items():
+    for name, command in SERVICES.items():
         owner = bus("GetConnectionUnixProcessID", name)
         match = re.search(r"uint32 (\d+)", owner.stdout)
         if match and Path(f"/proc/{match[1]}").stat().st_uid == os.getuid():
@@ -650,7 +654,7 @@ def refresh():
             time.sleep(0.05)
         else:
             launch(*command)
-    print("Updated Unity application catalog, icons, host details, pointer settings, and indicators")
+    print("Updated Unity application catalog, icons, host details, pointer settings, and session services")
 
 
 def register_application(desktop, pid, environment=None):

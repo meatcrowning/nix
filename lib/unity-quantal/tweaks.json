@@ -1,0 +1,93 @@
+{
+  "keys": {
+    "org.gnome.desktop.background show-desktop-icons": {
+      "reader": "original Files (desktop window)", "check": {"harness": "desktop-icons"}},
+    "org.gnome.desktop.input-sources xkb-options": {
+      "reader": "settings mirror -> org.gnome.libgnomekbd.keyboard options -> original settings daemon, keyboard plugin",
+      "check": {"set": "['caps:none']", "xkb": "caps:none"}},
+    "org.gnome.desktop.interface buttons-have-icons": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "true", "xsettings": "gtk-button-images", "expect": "True"}},
+    "org.gnome.desktop.interface clock-show-date": {
+      "reader": "settings mirror -> com.canonical.indicator.datetime show-date",
+      "check": {"set": "true", "mirror": ["unity", "com.canonical.indicator.datetime", "show-date"]}},
+    "org.gnome.desktop.interface clock-show-seconds": {
+      "reader": "settings mirror -> com.canonical.indicator.datetime show-seconds",
+      "check": {"set": "true", "mirror": ["unity", "com.canonical.indicator.datetime", "show-seconds"]}},
+    "org.gnome.desktop.interface cursor-theme": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "'Humanity'", "xsettings": "gtk-cursor-theme-name", "expect": "Humanity"}},
+    "org.gnome.desktop.interface document-font-name": {
+      "reader": "original applications read it themselves",
+      "check": {"manual": "no session component relays it; open a document app"}},
+    "org.gnome.desktop.interface font-name": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "'Ubuntu 14'", "xsettings": "gtk-font-name", "expect": "Ubuntu 14"}},
+    "org.gnome.desktop.interface gtk-key-theme": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "'Emacs'", "xsettings": "gtk-key-theme-name", "expect": "Emacs"}},
+    "org.gnome.desktop.interface gtk-theme": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "'Radiance'", "xsettings": "gtk-theme-name", "expect": "Radiance"}},
+    "org.gnome.desktop.interface icon-theme": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "'Humanity'", "xsettings": "gtk-icon-theme-name", "expect": "Humanity"}},
+    "org.gnome.desktop.interface menus-have-icons": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "true", "xsettings": "gtk-menu-images", "expect": "True"}},
+    "org.gnome.desktop.interface monospace-font-name": {
+      "reader": "session terminal; original applications", "check": {"harness": "monospace-font"}},
+    "org.gnome.desktop.interface text-scaling-factor": {
+      "reader": "original settings daemon, XSETTINGS (Xft/DPI)",
+      "check": {"set": "1.5", "xsettings": "gtk-xft-dpi", "expect": "147456"}},
+    "org.gnome.desktop.wm.preferences action-double-click-titlebar": {
+      "reader": "Unity window decorations", "check": {"harness": "titlebar-double-click"}},
+    "org.gnome.desktop.wm.preferences action-middle-click-titlebar": {
+      "reader": "Unity window decorations",
+      "check": {"manual": "same reader as the double-click action, which the harness drives"}},
+    "org.gnome.desktop.wm.preferences action-right-click-titlebar": {
+      "reader": "Unity window decorations",
+      "check": {"manual": "same reader as the double-click action, which the harness drives"}},
+    "org.gnome.desktop.wm.preferences focus-mode": {
+      "reader": "Compiz, GNOME integration", "check": {"harness": "focus-mode"}},
+    "org.gnome.desktop.wm.preferences num-workspaces": {
+      "reader": "nothing: Unity's workspaces are Compiz's hsize x vsize grid (Appearance, Enable workspaces), as on 12.10",
+      "check": {"inert": "the harness asserts the desktop grid ignores it"}},
+    "org.gnome.desktop.wm.preferences theme": {
+      "reader": "Unity window decorations",
+      "check": {"manual": "a theme's look is only visible on screen"}},
+    "org.gnome.desktop.wm.preferences titlebar-font": {
+      "reader": "Unity window decorations", "check": {"harness": "titlebar-font"}},
+    "org.gnome.nautilus.desktop computer-icon-visible": {
+      "reader": "original Files", "check": {"manual": "icons on the desktop window are not X windows"}},
+    "org.gnome.nautilus.desktop home-icon-visible": {
+      "reader": "original Files", "check": {"manual": "icons on the desktop window are not X windows"}},
+    "org.gnome.nautilus.desktop network-icon-visible": {
+      "reader": "original Files", "check": {"manual": "icons on the desktop window are not X windows"}},
+    "org.gnome.nautilus.desktop trash-icon-visible": {
+      "reader": "original Files", "check": {"manual": "icons on the desktop window are not X windows"}},
+    "org.gnome.nautilus.desktop volumes-visible": {
+      "reader": "original Files", "check": {"manual": "icons on the desktop window are not X windows"}},
+    "org.gnome.nautilus.preferences always-use-location-entry": {
+      "reader": "original Files", "check": {"manual": "changes the Files toolbar"}},
+    "org.gnome.settings-daemon.plugins.power button-power": {
+      "reader": "settings mirror -> Cinnamon power daemon",
+      "check": {"set": "'nothing'", "mirror": ["native", "org.cinnamon.settings-daemon.plugins.power", "button-power"]}},
+    "org.gnome.settings-daemon.plugins.power lid-close-ac-action": {
+      "reader": "settings mirror -> Cinnamon power daemon",
+      "check": {"set": "'nothing'", "mirror": ["native", "org.cinnamon.settings-daemon.plugins.power", "lid-close-ac-action"]}},
+    "org.gnome.settings-daemon.plugins.power lid-close-battery-action": {
+      "reader": "settings mirror -> Cinnamon power daemon",
+      "check": {"set": "'nothing'", "mirror": ["native", "org.cinnamon.settings-daemon.plugins.power", "lid-close-battery-action"]}},
+    "org.gnome.settings-daemon.plugins.xsettings antialiasing": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "'none'", "xsettings": "gtk-xft-antialias", "expect": "0"}},
+    "org.gnome.settings-daemon.plugins.xsettings hinting": {
+      "reader": "original settings daemon, XSETTINGS",
+      "check": {"set": "'none'", "xsettings": "gtk-xft-hintstyle", "expect": "hintnone"}}
+  },
+  "hidden": {
+    "org.gnome.shell.calendar": "GNOME Shell only; Tweak Tool hides it, as on Ubuntu 12.10 Unity",
+    "org.gnome.shell.overrides": "GNOME Shell only; Tweak Tool hides it, as on Ubuntu 12.10 Unity"
+  }
+}
