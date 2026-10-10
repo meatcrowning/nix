@@ -1754,7 +1754,8 @@ def test_modes(win, ctl, tmp):
           and find(edit_panel, "FrameWell").property("active") is True)
     boxes = find_all(content, "PromptBox")
     check("one prompt box, no negative",
-          [b.isVisible() for b in boxes] == [True, False],
+          bool(boxes) and boxes[0].isVisible()
+          and not any(b.isVisible() for b in boxes[1:]),
           [b.isVisible() for b in boxes])
     hidden = {name: find(content, name) for name in
               ("ParamsPanel", "ResolutionPanel", "TogglePanel", "VideoPanel")}

@@ -2854,6 +2854,13 @@ def main():
         os.environ.pop("WAYLAND_DISPLAY", None)
         os.environ.pop("DISPLAY", None)
 
+    desktop = os.environ.get("DESK_SESSION", os.environ.get("XDG_CURRENT_DESKTOP", ""))
+    if not selftest and not resource_fixture and "unity" in desktop.lower().split(":"):
+        if not os.environ.get("UNITY_QUANTAL_SESSION_DIR") or not shutil.which("unity-quantal-runtime"):
+            raise SystemExit("Painter's Unity face requires the Unity Quantal runtime session.")
+        from unity_engine import run
+        return run(sys.modules[__name__])
+
     # The Controls style, and with it the whole face: `Basic` in the Hyprland
     # session (the system default resolves to Breeze, whose ToolTip pulls in
     # kirigami and fails to load where there is none), `org.kde.desktop` under
