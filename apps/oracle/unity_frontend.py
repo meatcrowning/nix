@@ -44,9 +44,14 @@ def text_view(editable=False):
     return widget
 
 
+def utf8(value):
+    # Quantal PyGObject returns UTF-8 bytes, unlike modern Python 3 bindings.
+    return value.decode('utf-8') if isinstance(value, bytes) else value
+
+
 def buffer_text(widget):
     buf = widget.get_buffer()
-    return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+    return utf8(buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True))
 
 
 def update_text(widget, text):
@@ -80,8 +85,9 @@ class Turn(Gtk.Box):
         self.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 4)
         self.extra_key = None
 
-    def update(self, row):
-        who = 'You' if row.get('isUser') else row.get('who') or 'Chatter'
+    def update(self, row, state):
+        who = ('You' if row.get('isUser') else
+               (row.get('who') if state.get('showModelName') else state.get('assistantName')) or 'Chatter')
         stamp = datetime.datetime.fromtimestamp(row.get('ts') or 0).strftime('%H:%M') if row.get('ts') else ''
         self.head.set_text(who + ('  ·  ' + stamp if stamp else ''))
         update_text(self.body, row.get('body', ''))
@@ -170,9 +176,11 @@ class Window(Gtk.Window):
             ('_Edit', [('copy', '_Copy', '<Control>c', lambda: self.edit('copy-clipboard')),
                        ('paste', '_Paste', '<Control>v', lambda: self.edit('paste-clipboard')),
                        ('select', 'Select _All', '<Control>a', self.select_all),
-                       ('prompt', '_Base Prompt…', '', self.prompt)]),
+                       ('prompt', '_Base Prompt…', '', self.prompt),
+                       ('name', '_Assistant Name…', '', self.assistant_name)]),
             ('_View', [('history', 'Conversation _History', 'F9', self.toggle_history),
-                       ('jobs', '_Background Jobs…', '', self.show_jobs)]),
+                       ('jobs', '_Background Jobs…', '', self.show_jobs),
+                       ('show-model-name', 'Show _Model Name', '', self.toggle_model_name)]),
             ('_Tools', [('refresh', '_Refresh', 'F5', lambda: self.send('refresh')),
                         ('continue', '_Continue Reply', '', lambda: self.send('continue')),
                         ('start-server', '_Start Server', '', lambda: self.send('start-server')),
@@ -184,7 +192,8 @@ class Window(Gtk.Window):
             item.set_submenu(menu)
             menus.append(item)
             for key, title, shortcut, callback in entries:
-                action = Gtk.MenuItem.new_with_mnemonic(title)
+                action = (Gtk.CheckMenuItem.new_with_mnemonic(title) if key == 'show-model-name'
+                          else Gtk.MenuItem.new_with_mnemonic(title))
                 action.connect('activate', lambda _w, fn=callback: fn())
                 if shortcut:
                     val, mods = Gtk.accelerator_parse(shortcut)
@@ -290,6 +299,7 @@ class Window(Gtk.Window):
         names = state['models']
         self.models.set_active(names.index(state['model']) if state['model'] in names else -1)
         self.models.set_sensitive(not state['busy'])
+        self.actions['show-model-name'].set_active(state.get('showModelName', False))
         if state.get('sessions') != self.state.get('sessions'):
             self.history_store.clear()
             for row in state['sessions']:
@@ -312,7 +322,7 @@ class Window(Gtk.Window):
                 self.turns.append(widget)
                 self.log.pack_start(widget, False, False, 0)
                 widget.show_all()
-            self.turns[i].update(row)
+            self.turns[i].update(row, state)
         atts = state['attachments']
         if atts != self.attachment_key:
             for child in self.attachments.get_children():
@@ -345,7 +355,7 @@ class Window(Gtk.Window):
 
     def model_changed(self, widget):
         if not self.syncing and widget.get_active_text():
-            self.send('model', value=widget.get_active_text())
+            self.send('model', value=utf8(widget.get_active_text()))
 
     def session_changed(self, selection):
         model, it = selection.get_selected()
@@ -379,7 +389,7 @@ class Window(Gtk.Window):
                 path, host = GLib.filename_from_uri(uri)
                 if host not in (None, '', 'localhost'):
                     continue
-                self.send('attach', path=path)
+                self.send('attach', path=utf8(path))
                 accepted = True
             except GLib.GError:
                 continue
@@ -392,7 +402,7 @@ class Window(Gtk.Window):
         def done(widget, response):
             if response == Gtk.ResponseType.OK:
                 for path in widget.get_filenames():
-                    self.send('attach', path=path)
+                    self.send('attach', path=utf8(path))
             widget.destroy()
         dialog.connect('response', done)
         dialog.show()
@@ -410,6 +420,24 @@ class Window(Gtk.Window):
             widget.destroy()
         dialog.connect('response', done)
         dialog.show()
+
+    def toggle_model_name(self):
+        if not self.syncing:
+            self.send('show-model-name', value=self.actions['show-model-name'].get_active())
+
+    def assistant_name(self):
+        dialog = Gtk.Dialog('Assistant Name', self, Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK))
+        entry = Gtk.Entry()
+        entry.set_max_length(24)
+        entry.set_text(self.state.get('assistantName', ''))
+        dialog.get_content_area().pack_start(entry, False, False, 8)
+        def done(widget, response):
+            if response == Gtk.ResponseType.OK:
+                self.send('assistant-name', value=utf8(entry.get_text()))
+            widget.destroy()
+        dialog.connect('response', done)
+        dialog.show_all()
 
     def prompt(self):
         dialog = Gtk.Dialog('Base Prompt', self, Gtk.DialogFlags.DESTROY_WITH_PARENT,
