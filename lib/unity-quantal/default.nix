@@ -12,6 +12,8 @@
 , wrapGAppsHook3, gobject-introspection, gtk3, vte
 , libseccomp, gnutar, gzip, bzip2, xz, unzip, zip
 , gdk-pixbuf, ffmpegthumbnailer, ffmpeg-headless, writeShellScript
+# The music library the original Rhythmbox reads, read-only, in its sandbox.
+, musicLibrary
 }:
 let
   iso = fetchurl {
@@ -50,6 +52,15 @@ let
   fonts = runCommand "unity-quantal-fonts" { } ''
     mkdir -p "$out/share/fonts/truetype"
     ln -s ${runtime}/usr/share/fonts/truetype/ubuntu-font-family "$out/share/fonts/truetype/"
+  '';
+  # Archive packages skip dpkg's schema trigger. The media sandbox compiles its
+  # own copy; the session keeps the ISO's compiled schemas.
+  mediaSchemas = runCommand "unity-quantal-media-schemas" {
+    nativeBuildInputs = [ glib.dev ];
+  } ''
+    mkdir -p "$out"
+    cp ${runtime}/usr/share/glib-2.0/schemas/*.xml ${runtime}/usr/share/glib-2.0/schemas/*.override "$out/"
+    glib-compile-schemas "$out"
   '';
   # indicator-cpufreq's meter icons; its governor menu predates amd-pstate.
   cpufreqIconsDeb = fetchurl {
@@ -124,7 +135,7 @@ let
     $CC -Wall -Wextra -Werror -O2 ${./restrict.c} -lseccomp -o "$out/bin/unity-isolated-restrict"
   '';
   isolatedClosure = closureInfo {
-    rootPaths = [ runtime isolatedArchive xpra xorg-server glibc bash dbus python3
+    rootPaths = [ runtime isolatedArchive mediaSchemas xpra xorg-server glibc bash dbus python3
       restrict (writeText "unity-isolated-libraries" (modernLibraries + ":" + archivePath)) ];
   };
 in
@@ -145,8 +156,9 @@ stdenvNoCC.mkDerivation {
     ln -s ${nativeTheme}/share/themes "$out/share/themes"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
-      inherit runtime modernLibraries archivePath gtkTheme thumbnailers;
+      inherit runtime modernLibraries archivePath gtkTheme thumbnailers musicLibrary;
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
+      mediaSchemas = "${mediaSchemas}";
       isolatedClosure = "${isolatedClosure}/store-paths";
       xpra = "${xpra}/bin/xpra";
       xvfb = "${xorg-server}/bin/Xvfb";

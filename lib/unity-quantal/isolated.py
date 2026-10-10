@@ -2,6 +2,7 @@
 
 import argparse
 import configparser
+import fcntl
 import hashlib
 import json
 import os
@@ -18,7 +19,11 @@ from urllib.parse import unquote, urlsplit
 
 HERE = Path(__file__).resolve().parent
 CONFIG = json.loads((HERE / "config.json").read_text())
-APPS = {"gedit": "Text Editor", "eog": "Image Viewer", "file-roller": "Archive Manager", "gcalctool": "Calculator"}
+APPS = {"gedit": "Text Editor", "eog": "Image Viewer", "file-roller": "Archive Manager", "gcalctool": "Calculator",
+        "rhythmbox": "Rhythmbox"}
+# Rhythmbox keeps a private profile, reads the music library, and plays
+# through the host's PulseAudio socket; it imports and exports no files.
+MEDIA = {"rhythmbox"}
 MIMES = {
     "gedit": ["text/plain", "text/x-python", "text/x-nix", "text/x-lua", "text/x-c",
               "text/x-c++src", "text/x-c++hdr", "text/x-chdr", "text/x-csrc", "text/x-shellscript",
@@ -28,6 +33,7 @@ MIMES = {
     "file-roller": ["application/zip", "application/x-tar", "application/x-compressed-tar",
                     "application/x-bzip-compressed-tar", "application/x-xz-compressed-tar"],
     "gcalctool": [],
+    "rhythmbox": [],
 }
 LIMIT = 512 * 1024 * 1024
 FEATURES = [
@@ -56,9 +62,10 @@ def install_desktops(package):
         entry.optionxform = str
         entry["Desktop Entry"] = {
             "Type": "Application", "Name": label + " (Ubuntu 12.10)", "Icon": icon,
-            "Exec": str(package / "bin/unity-quantal-isolated") + " " + app + " -- %F",
+            "Exec": str(package / "bin/unity-quantal-isolated") + " " + app + ("" if app in MEDIA else " -- %F"),
             "OnlyShowIn": "Unity;", "Terminal": "false", "StartupNotify": "false",
-            "StartupWMClass": app, "Categories": "Utility;", "MimeType": ";".join(MIMES[app]) + ";",
+            "StartupWMClass": app, "Categories": "AudioVideo;Audio;Player;" if app in MEDIA else "Utility;",
+            "MimeType": ";".join(MIMES[app]) + ";",
         }
         with (destination / ("unity-original-" + app + ".desktop")).open("w") as stream:
             entry.write(stream, space_around_delimiters=False)
@@ -160,7 +167,14 @@ def copy_regular(source, destination):
         os.close(fd)
 
 
-def base_namespace(run, client=False):
+def media_paths():
+    """Host paths a media application may use: its profile, library, and sound server."""
+    base = Path.home() / ".local/state/unity-quantal/isolated"
+    pulse = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())) / "pulse/native"
+    return base / "rhythmbox-profile", Path(CONFIG["musicLibrary"]), pulse
+
+
+def base_namespace(run, client=False, app=None):
     command = [CONFIG["bwrap"], "--die-with-parent", "--new-session", "--unshare-all", "--unshare-user",
                "--disable-userns", "--cap-drop", "ALL", "--tmpfs", "/",
                "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run", "--perms", "1777", "--dir", "/tmp/.X11-unix"]
@@ -205,9 +219,17 @@ def base_namespace(run, client=False):
         # Xpra 6.5.3 imports MmapPointerError even with mmap disabled. Its
         # import blocker breaks window forwarding; protocol features stay off.
         environment["XPRA_ENFORCE_FEATURES"] = "0"
-        command += ["--ro-bind", str(run / "input"), "/home/legacy/Input",
-                    "--bind", str(run / "output"), "/home/legacy/Documents",
-                    "--ro-bind", str(HERE / "isolated.py"), "/runner/isolated.py",
+        if app in MEDIA:
+            profile, library, pulse = media_paths()
+            # The library is read-only: 2.97 keeps ratings and play counts in its own database.
+            command += ["--bind", str(profile), "/home/legacy", "--dir", "/home/legacy/Music",
+                        "--ro-bind-try", str(library), "/home/legacy/Music"]
+            if pulse.is_socket():
+                command += ["--ro-bind", str(pulse), "/run/user/1000/pulse/native"]
+        else:
+            command += ["--ro-bind", str(run / "input"), "/home/legacy/Input",
+                        "--bind", str(run / "output"), "/home/legacy/Documents"]
+        command += ["--ro-bind", str(HERE / "isolated.py"), "/runner/isolated.py",
                     "--ro-bind", str(HERE / "config.json"), "/runner/config.json"]
     command += ["--clearenv"]
     for key, value in environment.items():
@@ -225,6 +247,8 @@ def limits():
 def worker(app, files):
     theme_file = Path("/transport/theme")
     theme = theme_name(theme_file.read_text()) if theme_file.is_file() else CONFIG["gtkTheme"]
+    # Xpra's wrapper exports current typelibs, which break the 2012 PyGObject.
+    os.environ.pop("GI_TYPELIB_PATH", None)
     environment = os.environ.copy()
     environment.update({
         "LD_LIBRARY_PATH": CONFIG["modernLibraries"] + ":/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib",
@@ -238,10 +262,23 @@ def worker(app, files):
     settings = Path.home() / ".config/gtk-3.0/settings.ini"
     settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text("[Settings]\ngtk-theme-name=" + theme + "\ngtk-icon-theme-name=ubuntu-mono-dark\ngtk-font-name=Ubuntu 11\n")
-    (Path.home() / ".config/user-dirs.dirs").write_text('XDG_DOCUMENTS_DIR="$HOME/Documents"\nXDG_DOWNLOAD_DIR="$HOME/Documents"\nXDG_PICTURES_DIR="$HOME/Documents"\n')
-    os.chdir("/home/legacy/Documents")
+    if app in MEDIA:
+        environment.update({"GSETTINGS_BACKEND": "dconf", "GSETTINGS_SCHEMA_DIR": CONFIG["mediaSchemas"],
+                            "PULSE_SERVER": "unix:/run/user/1000/pulse/native"})
+        (Path.home() / ".config/user-dirs.dirs").write_text('XDG_MUSIC_DIR="$HOME/Music"\n')
+    else:
+        (Path.home() / ".config/user-dirs.dirs").write_text('XDG_DOCUMENTS_DIR="$HOME/Documents"\nXDG_DOWNLOAD_DIR="$HOME/Documents"\nXDG_PICTURES_DIR="$HOME/Documents"\n')
+        os.chdir("/home/legacy/Documents")
     bus_config = Path.home() / "bus.conf"
-    bus_config.write_text('<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen><auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/><allow receive_sender="*"/><allow own="*"/></policy></busconfig>')
+    services = ""
+    if app in MEDIA:
+        # Only the settings service activates; its database stays in the profile.
+        Path("/tmp/services").mkdir()
+        Path("/tmp/services/ca.desrt.dconf.service").write_text(
+            "[D-BUS Service]\nName=ca.desrt.dconf\nExec=/usr/bin/env LD_LIBRARY_PATH="
+            + environment["LD_LIBRARY_PATH"] + " /usr/lib/dconf/dconf-service\n")
+        services = "<servicedir>/tmp/services</servicedir>"
+    bus_config.write_text('<busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen><auth>EXTERNAL</auth>' + services + '<policy context="default"><allow send_destination="*"/><allow receive_sender="*"/><allow own="*"/></policy></busconfig>')
     argv = [CONFIG["isolatedArchive"] if app == "file-roller" else "/usr/bin/" + app]
     if app == "gedit":
         argv += ["--standalone"]
@@ -280,6 +317,8 @@ def current_theme():
 def run_session(run, app, files, *, attach=True):
     for name in ["input", "output", "transport"]:
         (run / name).mkdir(mode=0o700, exist_ok=True)
+    if app in MEDIA:
+        media_paths()[0].mkdir(parents=True, mode=0o700, exist_ok=True)
     (run / "transport/exit-status").unlink(missing_ok=True)
     (run / "transport/theme").write_text(current_theme())
     (run / "passwd").write_text(f"legacy:x:{os.getuid()}:{os.getgid()}:Legacy application:/home/legacy:/bin/sh\n")
@@ -289,7 +328,7 @@ def run_session(run, app, files, *, attach=True):
     child = shlex.join([CONFIG["python"], "/runner/isolated.py", "worker", app, *files])
     xvfb = shlex.join([CONFIG["xvfb"], "+extension", "Composite", "-screen", "0", "1920x1200x24",
                       "-nolisten", "tcp", "-noreset", "-ac"])
-    server_argv = base_namespace(run) + [CONFIG["xpra"], "start", ":100", *FEATURES,
+    server_argv = base_namespace(run, app=app) + [CONFIG["xpra"], "start", ":100", *FEATURES,
         "--daemon=no", "--attach=no", "--use-display=no", "--systemd-run=no", "--start-via-proxy=no",
         "--mdns=no", "--html=off", "--http-scripts=off", "--pulseaudio=no", "--start-new-commands=no",
         "--socket-dir=/transport", "--socket-dirs=/transport", "--bind=/transport/app.sock",
@@ -340,9 +379,25 @@ def run_session(run, app, files, *, attach=True):
         os.close(fd)
 
 
+def media(app):
+    base = Path.home() / ".local/state/unity-quantal/isolated"
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # One instance per profile; a second launch leaves the running one alone.
+    with (base / (app + ".lock")).open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        run = Path(tempfile.mkdtemp(prefix=app + "-", dir=base))
+        run_session(run, app, [])
+        shutil.rmtree(run)
+
+
 def main(app, values):
     if os.environ.get("XDG_CURRENT_DESKTOP") != "Unity":
         raise RuntimeError("These application defaults are for the Unity session")
+    if app in MEDIA:
+        return media(app)
     files = [local_file(value) for value in values]
     if app in ("eog", "file-roller") and not files:
         chosen = dialog("--file-selection", "--title=Open in " + APPS[app])

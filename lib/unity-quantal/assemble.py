@@ -70,6 +70,7 @@ indicator-appmenu indicator-application indicator-session indicator-sound
 indicator-datetime indicator-messages notify-osd notify-osd-icons
 evolution-data-server zeitgeist-core zeitgeist-datahub
 gedit gnome-terminal gcalctool eog file-roller python-gi appmenu-gtk3 gir1.2-appindicator3-0.1
+rhythmbox rhythmbox-plugins rhythmbox-plugin-magnatune rhythmbox-ubuntuone gstreamer0.10-pulseaudio
 light-themes gtk3-engines-unico dmz-cursor-theme humanity-icon-theme ubuntu-mono ubuntu-wallpapers ubuntu-sounds
 ttf-ubuntu-font-family python dbus-x11 dconf-tools bash dash coreutils
 """.split() + extras

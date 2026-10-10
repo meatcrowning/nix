@@ -74,5 +74,229 @@
   {
     "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/n/nautilus-python/python-nautilus_1.1-3_amd64.deb",
     "sha256": "f9bca95c45b3f210078b9507deb44a1d6a721e33289b5ef06e136ba4a7766933"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/g/gstreamer0.10-ffmpeg/gstreamer0.10-ffmpeg_0.10.13-5_amd64.deb",
+    "sha256": "bd42b8bc8c8282cca16923447cd8b07be30a44eeb08e00a540f3835e83dbe712"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/liba/libav/libswscale2_0.8.10-0ubuntu0.12.10.1_amd64.deb",
+    "sha256": "aeb8b8c911d427c8c0d95d848885362f824b69f56cb9ba9edddaf50d16cf1cd4"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/liba/libav/libavutil51_0.8.10-0ubuntu0.12.10.1_amd64.deb",
+    "sha256": "299604c34127993b40e28d77aa3ac91171e015957a5daf8811e6b26a2cd44d22"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/liba/libav/libpostproc52_0.8.10-0ubuntu0.12.10.1_amd64.deb",
+    "sha256": "1c842cf78c322855393eb548aa75f819a27dc890f1c442a01afd241f390b1c23"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/liba/libav/libavformat53_0.8.10-0ubuntu0.12.10.1_amd64.deb",
+    "sha256": "e1ea5c3d8b03fe480b3ca76588d4eeb652285562dee32b21d3c39436eabc1d7c"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/liba/libav/libavcodec53_0.8.10-0ubuntu0.12.10.1_amd64.deb",
+    "sha256": "57d59a38c8989661298244bcb8433d48fc736e44b0caba4014c5699a3224cba5"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/libv/libvpx/libvpx1_1.1.0-1_amd64.deb",
+    "sha256": "5c5f80e70134ddbadfef48ec5b1fbcc3a770589d7c6b660c7d975ffb60a88740"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/libv/libva/libva1_1.0.15-4build1_amd64.deb",
+    "sha256": "b5b82921750bf8e0ead0687175add0a497aa5453050d340b3ba4130af3299398"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/s/schroedinger/libschroedinger-1.0-0_1.0.11-2_amd64.deb",
+    "sha256": "dfeff0b24dd457efc3f59ad11a7241d02d22ba6840c85c5c00b69a7e486d5301"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/libg/libgsm/libgsm1_1.0.13-4_amd64.deb",
+    "sha256": "a62f15803040ac11462fe98c36d67fc5c21bc44ab15b3d23cd70fa3071ba5d13"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/g/gst-plugins-ugly0.10/gstreamer0.10-plugins-ugly_0.10.19-2_amd64.deb",
+    "sha256": "df34b58b3126d40fc3503c469972cf8a94d1a90e70de530b91d3f2218a91679e"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/x/x264/libx264-123_0.123.2189+git35cf912-1_amd64.deb",
+    "sha256": "8a6743dfee50f21886cdc595cae6aeb7d1c739757378817615e824731d8bd14d"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/t/twolame/libtwolame0_0.3.13-1build1_amd64.deb",
+    "sha256": "d7b00f0d9736acfe166f72cf42ca68314a42574617973b4222bd1891ca2fc366"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libs/libsidplay/libsidplay1_1.36.59-5_amd64.deb",
+    "sha256": "5818d8d5b98650285d07008815e430ce9f12a03c388135ab2e8462562f94287e"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/o/opencore-amr/libopencore-amrwb0_0.1.3-2_amd64.deb",
+    "sha256": "b7acf5c9adc2bfd93c720965203c886ff4326ec23023e519d854bfda865810cf"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/o/opencore-amr/libopencore-amrnb0_0.1.3-2_amd64.deb",
+    "sha256": "374089ac35ac1fd5953e76fe8e25138ae688a976fa077308dc06521615705ed2"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/m/mpeg2dec/libmpeg2-4_0.5.1-5_amd64.deb",
+    "sha256": "d9a90108afc92e9911aed0eb09364c9e32a48ca21c943d039bc780bcca26934b"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/l/lame/libmp3lame0_3.99.5+repack1-3_amd64.deb",
+    "sha256": "5c75bacf7278b27d64009c42f36a29429f8382c18a031f1c3a4de55847c91c71"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libm/libmad/libmad0_0.15.1b-7ubuntu1_amd64.deb",
+    "sha256": "c6f0f8fdfdf57ec1c7c2cad183ed869b2e17b17e0734377b0fd603d569c2eb04"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libd/libdvdread/libdvdread4_4.2.0+20120521-2ubuntu1.1_amd64.deb",
+    "sha256": "dfd269fb57a7add787b924dff1f3cb2171f71d6326d307862767ce47838e50a3"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/a/a52dec/liba52-0.7.4_0.7.4-16build1_amd64.deb",
+    "sha256": "cdbfbc3db9460ab2ddd2eb44955191658260ba76e5be8a14db18f2441f9a435d"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/g/gst-plugins-bad0.10/gstreamer0.10-plugins-bad_0.10.23-7ubuntu1.1_amd64.deb",
+    "sha256": "9f66a13fb8d2ff27b2fdafea490dd324706a9f8d3ee93a10d497b3c6d6825ed1"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/z/zvbi/libzvbi0_0.2.33-6_amd64.deb",
+    "sha256": "af9d4e2ae94bc4fd899d2e4e6b748163f9c79edb587b60899b7eaf3692a6709c"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/z/zvbi/libzvbi-common_0.2.33-6_all.deb",
+    "sha256": "70b3e41dbfd558619fd8052fb90445e90fbf2bfee24fad689e6302c3d686c74e"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/z/zbar/libzbar0_0.10+doc-7build3_amd64.deb",
+    "sha256": "12ed2ec25e531c30c4f2a54591343dbd1d6ea2b08d06d9ef68d912fadaaa92b4"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/x/xvidcore/libxvidcore4_1.3.2-9_amd64.deb",
+    "sha256": "12909b31b48e469adf63eb0eebc1367e582ccc09a34e235754a3102f1a327fdc"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/w/wildmidi/libwildmidi1_0.2.3.4-2.1quantal1_amd64.deb",
+    "sha256": "3b0480dc0d877fcb066b181e60aef08f6d4f8007725d240ca4af7783cd68aebd"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/w/wildmidi/libwildmidi-config_0.2.3.4-2.1quantal1_all.deb",
+    "sha256": "27401397864f48fe83552ef21bbaa45ee641514a07ba97aa4c32d72369b2205c"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/v/vo-amrwbenc/libvo-amrwbenc0_0.1.2-1_amd64.deb",
+    "sha256": "bd411d3dc2d6ea830864f1f7420fc49b320c4fcb2acbbaed64cf348dc4f96e62"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/v/vo-aacenc/libvo-aacenc0_0.1.2-1_amd64.deb",
+    "sha256": "bcf6f5a3fdb12c8d953e8ef0843f7d45776690158a33373124b873badda27ff3"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/s/spandsp/libspandsp2_0.0.6~pre20-3ubuntu1_amd64.deb",
+    "sha256": "00313b9bc5d2f5ff15bc6f1231e8e256fb83f9eef3223e9c5e5c307326f6df06"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/s/soundtouch/libsoundtouch0_1.6.0-3_amd64.deb",
+    "sha256": "5ddcd97061314b8a1f3bbda477f4671fdef5dc731dae4ced7d6868a78aa3de71"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/s/slv2/libslv2-9_0.6.6+dfsg1-2_amd64.deb",
+    "sha256": "ff58e70de5429d7369d8c249b2a0d2539ff7ba8b9672cef8a9dbd0d957710615"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/o/opus/libopus0_1.0.1-0ubuntu1_amd64.deb",
+    "sha256": "389260455700027802df3768dd6e15b424c224f1449679562f8229358916e86c"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/o/openal-soft/libopenal1_1.14-4ubuntu1_amd64.deb",
+    "sha256": "f5dee47865d2f1945d033288d2f9c3f1c7053ba7da3fc1f3db584f7424b7768c"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/o/openal-soft/libopenal-data_1.14-4ubuntu1_all.deb",
+    "sha256": "9d01389beb1a6f171a9a986d913acda08276be2bb2bec46a7a1594125a43b226"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libo/libofa/libofa0_0.9.3-5_amd64.deb",
+    "sha256": "890f47556ba2689b6aa87ca988440f3b449eb93cc2638822bcc3566095b12040"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libm/libmpc/libmpcdec6_0.1~r459-1ubuntu1_amd64.deb",
+    "sha256": "53d1eab434ea780b8fe34d7c3c0ff713785dba0bf29628b84bbd487faeb0d9da"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libm/libmodplug/libmodplug1_0.8.8.4-3_amd64.deb",
+    "sha256": "3f920c8d8d761df0e56a5467e315a8dc1585193724b4bfbec379589e09561c27"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libm/libmms/libmms0_0.6.2-3_amd64.deb",
+    "sha256": "f24a0a05b681dc77b992f6fb827ace4788efd325451633ce7cc08a8faa8ea10a"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libm/libmimic/libmimic0_1.0.4-2.1build1_amd64.deb",
+    "sha256": "b7977dac7a60eab3d05d7b45e1b7079141e401667165896a721d60c273e55b98"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libk/libkate/libkate1_0.4.1-1_amd64.deb",
+    "sha256": "755babf4355e14934ab6e9a9601b413df307115be6df942578d31a7326ebb437"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/g/gst-plugins-bad0.10/libgstreamer-plugins-bad0.10-0_0.10.23-7ubuntu1.1_amd64.deb",
+    "sha256": "4de4dff268b268e9f46326e22f0524d947c86bf581f13ac8e09e7f9d67107d75"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/g/game-music-emu/libgme0_0.5.5-2_amd64.deb",
+    "sha256": "bca2bc064a98d3d3f7411f1a0ff90c2e6ac6da5e9b08d9bb19070168556fb199"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/f/flite/libflite1_1.4-release-6_amd64.deb",
+    "sha256": "c09948db74b7e46d673339a0310faf6c1521b458ecc7eac67653bc467e9e0864"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/f/faad2/libfaad2_2.7-8_amd64.deb",
+    "sha256": "75e4a15d1b6ed579c88a78bbbb741d3b29c00f414970b677519dd0b0f30ee742"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libd/libdvdnav/libdvdnav4_4.2.0+20120524-2ubuntu0.1_amd64.deb",
+    "sha256": "5d27e7ae4fa8698afed52886d9d68ab17d2d6de4542746ea2dbcfd2ab6a2f9b3"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/d/directfb/libdirectfb-1.2-9_1.2.10.0-5_amd64.deb",
+    "sha256": "c278f4bb5bd85592c967ce4a291806a616f0c38a480fb0666f957150793dcad4"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/t/tslib/libts-0.0-0_1.0-11_amd64.deb",
+    "sha256": "2704c4fb1e67b31dd2ba66db4ebf626fd857968ea5c3e95c2bdacbc7a9619f6a"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/t/tslib/tsconf_1.0-11_all.deb",
+    "sha256": "bc7883709475e2c1a3d3270de20c8cad83cdbc079b1f9fff61a763ce8a3f4a87"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/d/dirac/libdirac-encoder0_1.0.2-6_amd64.deb",
+    "sha256": "156d7ca3f588ed2f8d1600827b067ac880dc88f4a24261ec594989026fe7e16b"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libd/libdca/libdca0_0.0.5-5_amd64.deb",
+    "sha256": "b0f7dc6e12eb0fed7d7cbd3a17f6bfe0e7bb69f8cc4db93714acc167b86290bf"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/libd/libdc1394-22/libdc1394-22_2.2.0-2build1_amd64.deb",
+    "sha256": "6a913548fa24a25fe7e14af506b2ac9b6c70d649c2bfaf97768f6e77cba12a1e"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/libc/libcdaudio/libcdaudio1_0.99.12p2-12_amd64.deb",
+    "sha256": "edc861b84778269ca20aad38709ad2a8bb9fc9094be98c657cd8c000de7e6c67"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/universe/liba/libass/libass4_0.10.0-3_amd64.deb",
+    "sha256": "2c97ffa8561ef3f2595b4108e570ecbdaef35edd3954442ce5bf2473fb3792b9"
+  },
+  {
+    "url": "https://old-releases.ubuntu.com/ubuntu/pool/main/e/enca/libenca0_1.13-4build1_amd64.deb",
+    "sha256": "9279e390b5b1aa3c93433b05057696252718a06100a90190e69f875fd5cfe9e6"
   }
 ]

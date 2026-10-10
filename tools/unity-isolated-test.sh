@@ -57,6 +57,9 @@ else: raise AssertionError('outer abstract X socket reachable')
 print('PASS: filesystem, processes, devices, network, X11 and bus isolation')
 '''
 subprocess.run(m.base_namespace(probe)+[m.CONFIG['python'],'-c',script],check=True)
+# The media profile adds only its own home, the library and the sound socket.
+m.media_paths()[0].mkdir(parents=True,exist_ok=True)
+subprocess.run(m.base_namespace(probe,app='rhythmbox')+[m.CONFIG['python'],'-c',script],check=True)
 # Export must never follow malicious links, FIFOs, or copy executable modes.
 (probe/'output/link').symlink_to('/home/test/private.txt')
 try: m.regular_files(probe/'output')
@@ -135,7 +138,7 @@ for app in m.APPS:
         found=False
         while time.monotonic()<deadline and process.is_alive():
             tree=subprocess.run(['xwininfo','-root','-tree'],capture_output=True,text=True).stdout
-            if any(name in tree for name in {'gedit':['gedit','Gedit'], 'eog':['eog','Eog'], 'file-roller':['file-roller','File-roller'], 'gcalctool':['gcalctool','Gcalctool']}[app]):
+            if any(name in tree for name in {'gedit':['gedit','Gedit'], 'eog':['eog','Eog'], 'file-roller':['file-roller','File-roller'], 'gcalctool':['gcalctool','Gcalctool'], 'rhythmbox':['rhythmbox','Rhythmbox']}[app]):
                 found=True
                 break
             time.sleep(.2)

@@ -45,7 +45,7 @@ SERVICES = {
     "org.unity_quantal.SettingsMirror": [stable_command("unity-quantal-settings-mirror")],
 }
 ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller", "nact",
-                 "gnome-tweak-tool"]
+                 "gnome-tweak-tool", "rhythmbox"]
 
 
 def desktop_parser(path):
