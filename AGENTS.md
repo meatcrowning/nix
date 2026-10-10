@@ -131,6 +131,10 @@ also verifies the public noreply Git identity (home/git-privacy.nix).
 - When the Hyprland panel is active, Quickshell needs a forced hot reload
   after symlink changes; use its nested guide. Never run bare qs, which starts
   another panel. Leave an inactive panel stopped.
+- When the verified session is top's Unity 12.10, apply a rebuilt session to
+  the running desktop with /run/current-system/sw/bin/unity-quantal-refresh
+  (catalog, settings entries, services, display service). Do not ask the user
+  to relog for that; only Unity shell or runtime changes need a new login.
 - Apps run live Python/QML source and need no rebuild unless packaging or
   dependencies change. Do not relaunch the user's apps for verification.
 - nix-pull [check|apply] is the only pull/apply path; it uses --ff-only.

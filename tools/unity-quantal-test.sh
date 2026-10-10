@@ -305,6 +305,19 @@ xdotool key XF86MonBrightnessUp sleep 0.5
 grep '"brightness": 95' "$display_state"
 grep '"night": true' "$display_state"
 echo 'PASS: brightness keys, night light state, indicator, and Settings panel'
+# A live refresh replaces the display service and keeps it registered.
+display_owner() { gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+  --method org.freedesktop.DBus.GetConnectionUnixProcessID org.unity_quantal.Display 2>/dev/null || true; }
+before=$(display_owner)
+test -n "$before"
+"$UNITY_PACKAGE/bin/unity-quantal-refresh" >/work/display-refresh.log 2>&1
+for _ in {1..50}; do
+  after=$(display_owner)
+  [ -n "$after" ] && [ "$after" != "$before" ] && break
+  sleep 0.1
+done
+test -n "$after" && test "$after" != "$before"
+echo 'PASS: unity-quantal-refresh replaces the live display service'
 # The session terminal is GNOME Terminal 3.6's window over the current VTE.
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/x-terminal-emulator -e "$UNITY_TEST_TOOLS/bin/bash" \
   -c 'printf "\e[40m  \e[0m\n"; sleep 30' >/work/terminal-session.log 2>&1 &
