@@ -234,7 +234,7 @@ stdenvNoCC.mkDerivation {
     EOF
     cat > "$out/bin/unity-quantal-settings-mirror" <<EOF
     #!${bash}/bin/bash
-    exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/mirror.py"
+    exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/mirror.py" "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-cpufreq" "$out/bin/unity-quantal-weather" "$out/bin/unity-quantal-settings-mirror"
     cat > "$out/bin/unity-quantal-isolated" <<EOF

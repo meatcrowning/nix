@@ -151,16 +151,20 @@ def follow(pair, side, loop):
 
 
 def main():
+    if sys.argv[1:] == ["cursor"]:
+        # The session publishes the cursor before any application starts.
+        CursorResources()
+        return 0
     loop = GLib.MainLoop()
     Gio.bus_own_name(Gio.BusType.SESSION, NAME, Gio.BusNameOwnerFlags.NONE,
                      None, None, lambda *_: loop.quit())
+    cursor = CursorResources()
+    for side in cursor.sides:
+        threading.Thread(target=follow, args=(cursor, side, loop), daemon=True).start()
     for tool, reader, to_reader, to_tool in PAIRS:
         pair = Pair(tool, reader, to_reader, to_tool)
         for side in (tool, reader):
             threading.Thread(target=follow, args=(pair, side, loop), daemon=True).start()
-    cursor = CursorResources()
-    for side in cursor.sides:
-        threading.Thread(target=follow, args=(cursor, side, loop), daemon=True).start()
     GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, loop.quit)
     loop.run()
     # Every exit is unexpected or a refresh; either way the session restarts it.

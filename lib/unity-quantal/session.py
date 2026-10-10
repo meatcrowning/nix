@@ -516,6 +516,9 @@ def session():
             subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.settings-daemon.plugins." + plugin,
                             "active", "false"], env=environment, stdout=log, stderr=subprocess.STDOUT, check=False, timeout=10)
         apply_preferences(environment, log)
+        # Native applications read Xcursor.theme once, when they start.
+        subprocess.run([str(PACKAGE / "bin/unity-quantal-settings-mirror"), "cursor"], env=environment,
+                       stdout=log, stderr=subprocess.STDOUT, check=False, timeout=30)
         manager = subprocess.Popen([CONFIG["session"], "--session=unity-quantal", "--autostart=" + str(directory / "autostart")],
                                    env=environment, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         def stop(_signum, _frame):
