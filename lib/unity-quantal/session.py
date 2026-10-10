@@ -159,7 +159,7 @@ def prepare(directory, environment):
     integration.host_details(directory, ROOT)
     (directory / "gtk3").mkdir(exist_ok=True)
     (directory / "gtk3/settings.ini").write_text(
-        "[Settings]\ngtk-theme-name=Ambiance\ngtk-icon-theme-name=ubuntu-mono-dark\n"
+        "[Settings]\ngtk-theme-name=" + CONFIG["gtkTheme"] + "\ngtk-icon-theme-name=ubuntu-mono-dark\n"
         "gtk-font-name=Ubuntu 11\ngtk-application-prefer-dark-theme=false\n"
     )
     shell = directory / "bridge-bin/unity-native-shell"
@@ -300,7 +300,7 @@ def runtime(arguments):
         "DCONF_PROFILE": str(HERE / "dconf-profile"),
         "GSETTINGS_SCHEMA_DIR": "/usr/share/glib-2.0/schemas",
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
-        "GTK_THEME": "Ambiance",
+        "GTK_THEME": CONFIG["gtkTheme"],
     })
     if arguments[0] == "/usr/bin/gnome-terminal":
         # New tabs/windows do not inherit the initial --command override.
@@ -507,7 +507,10 @@ def apply_preferences(environment, log=None):
             ("org.compiz.move:/org/compiz/profiles/unity/plugins/move/", "initiate-button", "'<Super>Button1'"),
             ("org.compiz.resize:/org/compiz/profiles/unity/plugins/resize/", "initiate-button", "'<Super>Button3'"),
             ("org.gnome.desktop.wm.preferences", "mouse-button-modifier", "'<Super>'"),
-            ("org.gnome.desktop.wm.preferences", "resize-with-right-button", "true")]:
+            ("org.gnome.desktop.wm.preferences", "resize-with-right-button", "true"),
+            # Holding Meta opens the dash on release only, never the hints overlay.
+            ("org.compiz.unityshell:/org/compiz/profiles/unity/plugins/unityshell/", "shortcut-overlay", "false"),
+            ("org.gnome.desktop.interface", "gtk-theme", repr(CONFIG["gtkTheme"]))]:
         subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", schema, key, value],
                        env=environment, check=True, stdout=log, stderr=log)
     integration.plasma_pointer(CONFIG, environment.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))

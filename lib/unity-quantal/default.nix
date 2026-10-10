@@ -17,13 +17,16 @@ let
     sha256 = "256a2cc652ec86ff366907fd7b878e577b631cc6c6533368c615913296069d80";
   };
   runtime = runCommand "unity-12.10-original-runtime" {
-    nativeBuildInputs = [ python3 libarchive squashfsTools ];
+    nativeBuildInputs = [ (python3.withPackages (ps: [ ps.pillow ])) libarchive squashfsTools ];
   } ''
     bsdtar -xf ${iso} casper/filesystem.squashfs
     unsquashfs -no-progress -no-xattrs -excludes -d original casper/filesystem.squashfs dev
     mkdir -p "$out"
     python ${./assemble.py} original "$out"
+    python ${./dark-theme.py} "$out/usr/share/themes/Ambiance" "$out/usr/share/themes/Ambiance-Dark" \
+      "$out/usr/share/gnome-control-center/ui/UbuntuLogo.png"
   '';
+  gtkTheme = "Ambiance-Dark";
   modernLibraries = lib.makeLibraryPath [
     glibc stdenv.cc.cc.lib libglvnd libX11 libxcb libdrm zlib expat
     # Unity 6.8 needs Ubuntu's XFixesSelectBarrierInput ABI. Retain its original
@@ -67,7 +70,7 @@ stdenvNoCC.mkDerivation {
     cp session.py bridge.py screensaver.py integration.py isolated.py "$out/libexec/unity-quantal/"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
-      inherit runtime modernLibraries archivePath;
+      inherit runtime modernLibraries archivePath gtkTheme;
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
       isolatedClosure = "${isolatedClosure}/store-paths";
       xpra = "${xpra}/bin/xpra";
