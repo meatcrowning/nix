@@ -571,7 +571,11 @@ def apply_preferences(environment, log=None):
             # The Quantal 10 MiB cap hides previews of modern images/videos.
             ("org.gnome.nautilus.preferences", "thumbnail-limit", "1073741824"),
             # Holding Meta opens the dash on release only, never the hints overlay.
-            ("org.compiz.unityshell:/org/compiz/profiles/unity/plugins/unityshell/", "shortcut-overlay", "false")]:
+            ("org.compiz.unityshell:/org/compiz/profiles/unity/plugins/unityshell/", "shortcut-overlay", "false"),
+            # Glide 2 keeps drawing a closed window after gtk-window-decorator
+            # frees its frame pixmap; on NVIDIA the shadow flashes solid black.
+            ("org.compiz.animation:/org/compiz/profiles/unity/plugins/animation/", "close-effects",
+             "['animation:None', 'animation:Fade', 'animation:Fade']")]:
         subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", schema, key, value],
                        env=environment, check=True, stdout=log, stderr=log)
     integration.plasma_pointer(CONFIG, environment.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
