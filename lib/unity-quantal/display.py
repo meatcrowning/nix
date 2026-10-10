@@ -251,7 +251,9 @@ class Indicator(Gtk.Application):
             "unity-quantal-display", "unity-display-day",
             AppIndicator3.IndicatorCategory.HARDWARE, os.path.join(HERE, "display-icons"))
         self.indicator.set_title("Display")
-        self.indicator.connect("scroll-event", self.scroll)
+        # 12.10's AppIndicator reports every scroll as "up", so read the sign
+        # from the panel's Scroll call (negative is up) before it gets there.
+        Gio.bus_get_sync(Gio.BusType.SESSION, None).add_filter(self.filter, None)
         menu = Gtk.Menu()
         self.heading = Gtk.MenuItem("")
         self.heading.set_sensitive(False)
@@ -303,10 +305,16 @@ class Indicator(Gtk.Application):
     def step(self, delta):
         self.change(brightness=self.state["brightness"] + delta)
         osd(self.state["brightness"])
+        return False
 
-    def scroll(self, _indicator, _steps, direction):
-        if direction in (Gdk.ScrollDirection.UP, Gdk.ScrollDirection.DOWN):
-            self.step(STEP if direction == Gdk.ScrollDirection.UP else -STEP)
+    def filter(self, _connection, message, incoming, _data):
+        if (incoming and message.get_member() == "Scroll"
+                and message.get_interface() == "org.kde.StatusNotifierItem"):
+            delta, orientation = message.get_body().unpack()
+            if orientation == "vertical" and delta:
+                # Runs on GDBus's worker thread; step on the main loop.
+                GLib.idle_add(self.step, -STEP if delta > 0 else STEP)
+        return message
 
     def choose(self, item, level):
         if not self.menu_updating and item.get_active():
@@ -408,6 +416,8 @@ class Settings(Gtk.Application):
 if __name__ == "__main__":
     # The window class matches unity-display.desktop, so the launcher shows its icon.
     GLib.set_prgname("unity-display")
+    # The D-Bus scroll filter calls back from another thread.
+    GObject.threads_init()
     # Children (the settings panel) are reaped by the kernel.
     signal.signal(signal.SIGCHLD, signal.SIG_IGN)
     application = {"indicator": Indicator, "settings": Settings}.get(sys.argv[1] if len(sys.argv) > 1 else "")
