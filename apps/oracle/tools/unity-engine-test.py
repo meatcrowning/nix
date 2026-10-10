@@ -41,6 +41,7 @@ app.setQuitOnLastWindowClosed(False)
 assert app.platformName() == 'offscreen'
 engine = E.Engine(M, app)
 o = engine.ollama
+engine.dispatch({'op': 'assistant-name', 'value': 'Mira ✨'})
 o._models = ['fixture:latest']
 o.modelsChanged.emit()
 assert engine.snapshot()['model'] == 'fixture:latest'
@@ -49,12 +50,13 @@ def send(model, prompt, history, attachments, sid):
     submissions.append((model, prompt, json.loads(history), json.loads(attachments), sid))
     o._busy = True
     o.busyChanged.emit()
-    QTimer.singleShot(30, lambda: o.replyThinking.emit('A little reasoning'))
-    QTimer.singleShot(60, lambda: o.replyChunk.emit('Hello from the shared engine.'))
+    QTimer.singleShot(30, lambda: o.replyThinking.emit('Réflexion ✨'))
+    QTimer.singleShot(60, lambda: o.replyChunk.emit('Hello café 😃'))
     def finish():
         o._busy = False
         o.busyChanged.emit()
         o.replyDone.emit()
+    QTimer.singleShot(90, lambda: o.replyChunk.emit(' — encore 🌙'))
     QTimer.singleShot(150, finish)
 o.send = send
 path = Path('/run/user/1000/chatter-test.sock')
@@ -72,7 +74,12 @@ if child.poll() is None:
     raise AssertionError('GTK fixture timed out')
 assert child.returncode == 0, child.returncode
 engine.close()
-assert len(submissions) == 1, submissions
+assert len(submissions) == 3, submissions
+assert [len(s[2]) for s in submissions] == [0, 2, 4]
+assert submissions[1][1] == 'Encore 😃'
+assert submissions[2][1] == 'Troisième café 🌙'
+assert o.assistantName == 'Mira ✨'
+assert not o.showModelName
 assert submissions[0][1] == 'A test message'
 assert submissions[0][3][0]['name'] == 'attachment.txt'
 unexpected = [w for w in engine.warnings if 'DeskMotion.qml: No such file' not in w]
@@ -94,4 +101,4 @@ except ValueError:
 engine.close()
 saved = list(Path('/home/test/sessions').glob('*.json'))
 assert saved, 'conversation was not persisted'
-print('PASS: Quantal-only gate, GTK socket actions, streaming, attachments, save/load, menu export')
+print('PASS: Quantal gate, three Unicode turns, custom/model captions, streaming, attachments, save/load, menu export')

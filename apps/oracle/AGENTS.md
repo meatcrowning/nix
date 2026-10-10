@@ -80,14 +80,19 @@ engine hosts `Root.qml` invisibly on offscreen Qt so turn handling, continuation
 choices, attachments and session saves retain one owner. `unitySnapshot` and
 `unitySend` are the JSON/action seam; no second conversation store or tool loop.
 The engine owns the backend lease and drains session saves before exit.
+Normalize GTK-returned UTF-8 bytes at the frontend boundary before comparing or
+serializing text. Captions use the shared assistant-name/model-name preferences;
+do not treat the stored model identity in a transcript as its display name.
 The private per-window socket transport is shared with Painter in
 `pylib/unityipc.py` and `pylib/unitygtk.py`.
 
-Run `tools/unity-test.sh UNITY_PACKAGE` under this app. It uses private
+Run `tools/unity-test.sh UNITY_PACKAGE [SYMBOLA_TTF]` under this app. It uses private
 PID/mount/network namespaces, Xvfb, D-Bus and scratch stores; its inner Python
 scripts must never run directly on the host. It verifies the desktop gate,
 GTK controls/global-menu export, streaming, attachment submission, cancellation
-and session persistence. No live model or desktop interaction is needed.
+and session persistence, including repeated Unicode/emoji turns. The optional
+font path also verifies Symbola fallback in the original Pango renderer.
+No live model or desktop interaction is needed.
 
 ## Transport, tools, and context
 

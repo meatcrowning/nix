@@ -62,6 +62,7 @@ class Engine:
         state = json.loads(self.call('unitySnapshot'))
         o = self.ollama
         state.update(models=o.models, busy=o.busy, awaitingChoice=o.awaitingChoice,
+                     assistantName=o.assistantName, showModelName=o.showModelName,
                      sessions=self.sessions.sessions, serverUp=self.backend.serverUp,
                      jobs=self.jobs.rows, prompts=o.promptPresets,
                      promptChoice=o.promptChoice, customPrompt=o.customPrompt,
@@ -108,6 +109,12 @@ class Engine:
             self.ollama.answerChoice(request['id'], int(request['index']))
         elif op == 'stop-job':
             self.jobs.stop(request['id'])
+        elif op == 'assistant-name':
+            result = self.ollama._set_assistant_name(request['value'])
+            if 'error' in result:
+                raise ValueError(result['error'])
+        elif op == 'show-model-name':
+            self.ollama.setShowModelName(bool(request['value']))
         elif op == 'prompt':
             if request['value'] == 'custom':
                 self.ollama.setCustomPrompt(request['text'])

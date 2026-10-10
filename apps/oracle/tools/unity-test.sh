@@ -8,6 +8,7 @@ source "$repo/tools/lib/session-guard.sh"
 sg_require_offscreen
 package=${1:?usage: unity-test.sh UNITY_PACKAGE}
 config="$package/libexec/unity-quantal/config.json"
+emoji_font=${2:-}
 mapfile -t bins < <(python3 - "$config" <<'PY'
 import json,sys
 c=json.load(open(sys.argv[1]))
@@ -20,6 +21,11 @@ run=$(mktemp -d /tmp/oracle-unity-test.XXXXXX)
 trap 'rc=$?; if [ "$rc" != 0 ]; then cat "$run"/*.log 2>/dev/null || true; fi; rm -rf "$run"' EXIT
 mkdir -p "$run/home" "$run/runtime"
 chmod 700 "$run/runtime"
+if [ -n "$emoji_font" ]; then
+  mkdir -p "$run/home/.fonts" "$run/home/.config/fontconfig/conf.d"
+  cp "$emoji_font" "$run/home/.fonts/Symbola-Quantal.ttf"
+  cp "$repo/home/pkgs/desktop/font-files/52-period-emoji.conf" "$run/home/.config/fontconfig/conf.d/"
+fi
 cat > "$run/inside.sh" <<'INNER'
 set -euo pipefail
 source /source/tools/lib/session-guard.sh
@@ -53,7 +59,7 @@ sys.path.insert(0, os.environ['PACKAGE']+'/libexec/unity-quantal')
 import session
 session.prepare(Path(os.environ['UNITY_QUANTAL_SESSION_DIR']), os.environ)
 Path('/etc/fonts').mkdir()
-Path('/etc/fonts/fonts.conf').write_text('<fontconfig><dir>' + str(session.ROOT / 'usr/share/fonts') + '</dir><cachedir>/home/test/.cache/fontconfig</cachedir></fontconfig>')
+Path('/etc/fonts/fonts.conf').write_text('<fontconfig><dir>' + str(session.ROOT / 'usr/share/fonts') + '</dir><dir>/home/test/.fonts</dir><include ignore_missing="yes">/home/test/.config/fontconfig/conf.d</include><cachedir>/home/test/.cache/fontconfig</cachedir></fontconfig>')
 PY
 "$QTENV" python3 /source/apps/oracle/tools/unity-engine-test.py
 
