@@ -5,7 +5,7 @@
 , dbus, dconf, gvfs, cinnamon, cinnamon-session, cinnamon-screensaver, cinnamon-settings-daemon, polkit_gnome
 , networkmanagerapplet, xdg-terminal-exec, xdg-utils, coreutils, bash, glib
 , symlinkJoin, findutils, gnugrep, gnused, xorg-server, xprop, xwininfo, xdpyinfo, xdotool
-, xmessage, weston, xwayland, mesa-demos, xinput, xrandr, setxkbmap, librsvg, imagemagick
+, xmessage, xrdb, weston, xwayland, mesa-demos, xinput, xrandr, setxkbmap, librsvg, imagemagick
 , pavucontrol, system-config-printer
 , cinnamon-desktop
 , xpra, zenity, closureInfo, writeText
@@ -120,6 +120,9 @@ stdenvNoCC.mkDerivation {
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
       mirror.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
+    # Quantal's cursors, for native applications that follow Xcursor.theme.
+    mkdir -p "$out/share/icons"
+    ln -s ${runtime}/usr/share/icons/DMZ-White ${runtime}/usr/share/icons/DMZ-Black "$out/share/icons/"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers;
@@ -144,6 +147,7 @@ stdenvNoCC.mkDerivation {
       rsvg = "${librsvg}/bin/rsvg-convert";
       gdbus = "${glib.bin}/bin/gdbus";
       gsettings = "${glib.bin}/bin/gsettings";
+      xrdb = "${xrdb}/bin/xrdb";
       xprop = "${xprop}/bin/xprop";
       libX11 = "${libX11}/lib/libX11.so.6";
       session = "${cinnamon-session}/bin/cinnamon-session";
@@ -255,7 +259,7 @@ stdenvNoCC.mkDerivation {
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
-        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr setxkbmap
+        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr setxkbmap xrdb
         ffmpeg-headless ];
     };
     providedSessions = [ "unity-quantal" ];

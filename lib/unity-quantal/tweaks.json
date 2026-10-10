@@ -15,8 +15,9 @@
       "reader": "settings mirror -> com.canonical.indicator.datetime show-seconds",
       "check": {"set": "true", "mirror": ["unity", "com.canonical.indicator.datetime", "show-seconds"]}},
     "org.gnome.desktop.interface cursor-theme": {
-      "reader": "original settings daemon, XSETTINGS",
-      "check": {"set": "'Humanity'", "xsettings": "gtk-cursor-theme-name", "expect": "Humanity"}},
+      "reader": "original settings daemon, XSETTINGS; settings mirror -> Xcursor.theme for native applications",
+      "check": {"set": "'DMZ-Black'", "xsettings": "gtk-cursor-theme-name", "expect": "DMZ-Black",
+                "resource": "Xcursor.theme"}},
     "org.gnome.desktop.interface document-font-name": {
       "reader": "original applications read it themselves",
       "check": {"manual": "no session component relays it; open a document app"}},

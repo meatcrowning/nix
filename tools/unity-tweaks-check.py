@@ -5,7 +5,8 @@ Run by tools/unity-quantal-test.sh inside its headless session:
 The inventory (tools/unity-tweaks-inventory.py) must list exactly the keys and
 hidden schemas in the map (lib/unity-quantal/tweaks.json). Each key with an
 automatic check is set to a probe value and must reach its reader: the
-XSETTINGS the settings daemon publishes, the keyboard map, or the mirrored key.
+XSETTINGS the settings daemon publishes, the keyboard map, the mirrored key,
+or an X resource.
 Keys checked by name in the harness or by hand are listed, not run.
 """
 
@@ -48,6 +49,11 @@ def xsetting(name):
 def xkb_options():
     query = subprocess.run(["setxkbmap", "-query"], capture_output=True, text=True).stdout
     return next((line.split(":", 1)[1].strip() for line in query.splitlines() if line.startswith("options:")), "")
+
+
+def x_resource(name):
+    query = subprocess.run(["xrdb", "-query"], capture_output=True, text=True).stdout
+    return next((line.split(":", 1)[1].strip() for line in query.splitlines() if line.startswith(name + ":")), "")
 
 
 def until(read, expected, seconds=8):
@@ -93,6 +99,9 @@ for name, entry in sorted(tweaks["keys"].items()):
                 default = gsettings(profile, "get", reader_schema, reader_key)
                 ok, value = until(lambda: gsettings("unity", "get", schema, key), lambda v: v == default)
                 seen += "; reset reader -> tool " + value
+        if ok and "resource" in check:
+            ok, value = until(lambda: x_resource(check["resource"]), lambda v: v == check["expect"])
+            seen += "; " + check["resource"] + "=" + value
         gsettings("unity", "reset", schema, key)
     except RuntimeError as error:
         ok, seen = False, str(error)

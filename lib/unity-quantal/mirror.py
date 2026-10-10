@@ -7,6 +7,9 @@ keyboard plugin reads libgnomekbd's options, not input-sources (so the tool's
 Typing tab did nothing on 12.10 itself). Each pair is mirrored both ways; at
 start the reader's current value wins. The pairs and the rest of the tool's
 keys are listed in tweaks.json.
+
+The cursor theme and size are also published as Xcursor.* X resources, which
+native applications such as Vivaldi read instead of XSETTINGS.
 """
 
 import ast
@@ -109,6 +112,31 @@ class Pair:
             write(other, self.values[other])
 
 
+class CursorResources:
+    """Publishes the cursor settings as the X resources libXcursor reads."""
+
+    KEYS = ("cursor-theme", "cursor-size")
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.sides = [("unity", "org.gnome.desktop.interface", key) for key in self.KEYS]
+        self.values = {side: read(side) for side in self.sides}
+        self.publish()
+
+    def publish(self):
+        theme = ast.literal_eval(self.values[self.sides[0]])
+        size = int(self.values[self.sides[1]].split()[-1])  # "24" or "int32 24"
+        subprocess.run([CONFIG["xrdb"], "-merge"], input=f"Xcursor.theme: {theme}\nXcursor.size: {size}\n",
+                       text=True, check=True)
+
+    def changed(self, side, value):
+        with self.lock:
+            if value != self.values[side]:
+                self.values[side] = value
+                print(f"mirror: {side[2]} = {value} -> Xcursor resources", file=sys.stderr)
+                self.publish()
+
+
 def follow(pair, side, loop):
     command, environment = gsettings(side, "monitor", side[1], side[2])
     process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, text=True,
@@ -130,6 +158,9 @@ def main():
         pair = Pair(tool, reader, to_reader, to_tool)
         for side in (tool, reader):
             threading.Thread(target=follow, args=(pair, side, loop), daemon=True).start()
+    cursor = CursorResources()
+    for side in cursor.sides:
+        threading.Thread(target=follow, args=(cursor, side, loop), daemon=True).start()
     GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, loop.quit)
     loop.run()
     # Every exit is unexpected or a refresh; either way the session restarts it.
