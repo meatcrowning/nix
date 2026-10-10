@@ -63,6 +63,15 @@ def prepare(directory, environment):
     }
     (directory / "state.json.tmp").write_text(json.dumps(state))
     (directory / "state.json.tmp").replace(directory / "state.json")
+    # This data home is already visible to running legacy processes. Refresh
+    # can install providers without replacing their read-only Ubuntu root.
+    thumbnails = Path(data_home) / "unity-quantal-session/thumbnailers"
+    thumbnails.mkdir(parents=True, exist_ok=True)
+    for provider in Path(CONFIG["thumbnailers"]).glob("*.thumbnailer"):
+        target = thumbnails / provider.name
+        temporary = target.with_suffix(".tmp")
+        temporary.write_bytes(provider.read_bytes())
+        temporary.replace(target)
     for subdir in ["applications", "bridge-bin", "autostart", "native-data/dbus-1/services",
                    "native-data/cinnamon-session/sessions", "native-data/applications"]:
         (directory / subdir).mkdir(parents=True, exist_ok=True)
@@ -541,6 +550,8 @@ def apply_preferences(environment, log=None):
             ("org.compiz.resize:/org/compiz/profiles/unity/plugins/resize/", "initiate-button", "'<Super>Button3'"),
             ("org.gnome.desktop.wm.preferences", "mouse-button-modifier", "'<Super>'"),
             ("org.gnome.desktop.wm.preferences", "resize-with-right-button", "true"),
+            # The Quantal 10 MiB cap hides previews of modern images/videos.
+            ("org.gnome.nautilus.preferences", "thumbnail-limit", "1073741824"),
             # Holding Meta opens the dash on release only, never the hints overlay.
             ("org.compiz.unityshell:/org/compiz/profiles/unity/plugins/unityshell/", "shortcut-overlay", "false")]:
         subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", schema, key, value],

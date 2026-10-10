@@ -116,6 +116,51 @@ sleep 3
 export XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11
 "$UNITY_PACKAGE/bin/unity-quantal-refresh"
 test -f /home/unity-test/.local/share/unity-quantal-session/icons/hicolor/96x96/apps/unity-quantal-probe.png
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gsettings get \
+  org.gnome.nautilus.preferences thumbnail-limit | grep -qx 'uint64 1073741824'
+# Exercise Files' original thumbnail factory with refreshed providers, including
+# their subprocesses under the legacy library and pixbuf environment.
+mkdir -p "$HOME/thumbnail-probes"
+magick -size 320x180 xc:steelblue "$HOME/thumbnail-probes/image.png"
+magick "$HOME/thumbnail-probes/image.png" "$HOME/thumbnail-probes/image.jpg"
+ffmpeg -nostdin -v error -f lavfi -i color=c=blue:s=320x180:d=1 \
+  -an -c:v libx264 -pix_fmt yuv420p "$HOME/thumbnail-probes/video.mp4"
+"$UNITY_BASE_PACKAGE/bin/unity-quantal-runtime" "$TEST_PYTHON" -c '
+import ctypes, pathlib
+desktop = ctypes.CDLL("libgnome-desktop-3.so.4")
+glib = ctypes.CDLL("libgobject-2.0.so.0")
+pixbuf = ctypes.CDLL("libgdk_pixbuf-2.0.so.0")
+glib.g_type_init()
+desktop.gnome_desktop_thumbnail_factory_new.argtypes = [ctypes.c_int]
+desktop.gnome_desktop_thumbnail_factory_new.restype = ctypes.c_void_p
+desktop.gnome_desktop_thumbnail_factory_can_thumbnail.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_long]
+desktop.gnome_desktop_thumbnail_factory_generate_thumbnail.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
+desktop.gnome_desktop_thumbnail_factory_generate_thumbnail.restype = ctypes.c_void_p
+desktop.gnome_desktop_thumbnail_factory_save_thumbnail.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long]
+desktop.gnome_desktop_thumbnail_factory_lookup.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long]
+desktop.gnome_desktop_thumbnail_factory_lookup.restype = ctypes.c_char_p
+pixbuf.gdk_pixbuf_get_width.argtypes = [ctypes.c_void_p]
+pixbuf.gdk_pixbuf_get_height.argtypes = [ctypes.c_void_p]
+glib.g_object_unref.argtypes = [ctypes.c_void_p]
+factory = desktop.gnome_desktop_thumbnail_factory_new(0)
+for name, mime in [("image.png", "image/png"), ("image.jpg", "image/jpeg"), ("video.mp4", "video/mp4")]:
+    file = pathlib.Path.home() / "thumbnail-probes" / name
+    uri, mime = file.as_uri().encode(), mime.encode()
+    mtime = int(file.stat().st_mtime)
+    assert desktop.gnome_desktop_thumbnail_factory_can_thumbnail(factory, uri, mime, mtime), name
+    thumb = desktop.gnome_desktop_thumbnail_factory_generate_thumbnail(factory, uri, mime)
+    assert thumb, name
+    assert 0 < pixbuf.gdk_pixbuf_get_width(thumb) <= 128, name
+    assert 0 < pixbuf.gdk_pixbuf_get_height(thumb) <= 128, name
+    desktop.gnome_desktop_thumbnail_factory_save_thumbnail(factory, thumb, uri, mtime)
+    assert desktop.gnome_desktop_thumbnail_factory_lookup(factory, uri, mtime), name
+    glib.g_object_unref(thumb)
+glib.g_object_unref(factory)
+print("PASS: original Files factory generates and caches PNG, JPEG and H.264 video previews")
+'
+if [ "${UNITY_TEST_PREVIEWS_ONLY:-0}" = 1 ]; then
+  exit 0
+fi
 "$UNITY_PACKAGE/bin/unity-quantal-mouse" unity
 grep -qx unity /home/unity-test/.config/unity-quantal/mouse-profile
 "$UNITY_PACKAGE/bin/unity-quantal-mouse" plasma
@@ -396,4 +441,5 @@ echo "Unity session test logs: $run"
   --setenv QT_QPA_PLATFORM offscreen "${graphics[@]}" \
   --setenv UNITY_PACKAGE "$package" --setenv TEST_PYTHON "$python" --setenv UNITY_TEST_TOOLS "$test_tools" \
   --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
+  --setenv UNITY_TEST_PREVIEWS_ONLY "${UNITY_TEST_PREVIEWS_ONLY:-0}" \
   --chdir /work "$test_tools/bin/bash" /work/inside.sh
