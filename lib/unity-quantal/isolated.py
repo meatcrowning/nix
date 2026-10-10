@@ -228,14 +228,14 @@ def worker(app, files):
         "LD_LIBRARY_PATH": CONFIG["modernLibraries"] + ":/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib",
         "GSETTINGS_SCHEMA_DIR": "/usr/share/glib-2.0/schemas",
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
-        "GTK_THEME": "Ambiance", "UBUNTU_MENUPROXY": "0", "GIO_USE_VFS": "local",
+        "GTK_THEME": CONFIG["gtkTheme"], "UBUNTU_MENUPROXY": "0", "GIO_USE_VFS": "local",
         "GIO_EXTRA_MODULES": "", "GIO_MODULE_DIR": "/nonexistent", "GSETTINGS_BACKEND": "memory",
         "GTK_MODULES": "", "GTK_IM_MODULE": "gtk-im-context-simple",
         "PATH": CONFIG["archivePath"] + ":/usr/bin:/bin", "XDG_DATA_DIRS": "/usr/share",
     })
     settings = Path.home() / ".config/gtk-3.0/settings.ini"
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text("[Settings]\ngtk-theme-name=Ambiance\ngtk-icon-theme-name=ubuntu-mono-dark\ngtk-font-name=Ubuntu 11\n")
+    settings.write_text("[Settings]\ngtk-theme-name=" + CONFIG["gtkTheme"] + "\ngtk-icon-theme-name=ubuntu-mono-dark\ngtk-font-name=Ubuntu 11\n")
     (Path.home() / ".config/user-dirs.dirs").write_text('XDG_DOCUMENTS_DIR="$HOME/Documents"\nXDG_DOWNLOAD_DIR="$HOME/Documents"\nXDG_PICTURES_DIR="$HOME/Documents"\n')
     os.chdir("/home/legacy/Documents")
     bus_config = Path.home() / "bus.conf"
