@@ -133,11 +133,13 @@ stdenvNoCC.mkDerivation {
     EOF
     chmod +x "$out/bin/unity-quantal-isolated"
     python "$out/libexec/unity-quantal/isolated.py" install "$out"
+    # ly reads its sessions directory only at startup; a stable Exec keeps a
+    # long-running greeter from starting the package of an older generation.
     cat > "$out/share/xsessions/unity-quantal.desktop" <<EOF
     [Desktop Entry]
     Name=Unity 12.10
     Comment=Original Ubuntu 12.10 Unity on modern X11
-    Exec=$out/bin/unity-quantal-session
+    Exec=/run/current-system/sw/bin/unity-quantal-session
     Type=Application
     DesktopNames=Unity;
     EOF
