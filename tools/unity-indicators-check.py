@@ -140,6 +140,18 @@ panel = call('com.canonical.Unity.Panel.Service', '/com/canonical/Unity/Panel/Se
 for name in ['unity-quantal-load', 'unity-quantal-temperature', 'unity-quantal-notifications']:
     assert any(row[2] == name and row[8] and row[9] for row in panel), (name, panel)
 
+applications = call('com.canonical.indicator.application', '/com/canonical/indicator/application/service',
+                    'com.canonical.indicator.application.service.GetApplications')[0]
+meters = [row for row in applications if row[-1] in ['System Load', 'Temperatures']]
+assert len(meters) == 2, applications
+def menu_ids(row):
+    layout = call(row[2], row[3], 'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]')
+    return [item[0] for item in layout[1][2]]
+before = [menu_ids(row) for row in meters]
+deadline = time.monotonic() + 3
+wait_for(lambda: time.monotonic() >= deadline, 'meter update')
+assert [menu_ids(row) for row in meters] == before, 'meter refresh replaced open menu items'
+
 history = Path(os.environ['UNITY_QUANTAL_SESSION_DIR']) / 'notification-history.json'
 notification_id = call('org.freedesktop.Notifications', '/org/freedesktop/Notifications',
     'org.freedesktop.Notifications.Notify', 'Indicator probe', '0', '', 'History probe', 'Test body',
@@ -152,4 +164,4 @@ call('org.freedesktop.Notifications', '/org/freedesktop/Notifications', 'org.fre
 assert not any(e['summary'] == 'Transient probe' for e in json.loads(history.read_text()))
 call('org.freedesktop.Notifications', '/org/unity_quantal/NotificationHistory', 'org.unity_quantal.NotificationHistory.Clear')
 assert json.loads(history.read_text()) == []
-print('PASS: all three panel entries; private session history, transient exclusion and clear', flush=True)
+print('PASS: all three panel entries, stable meter menus; private session history, transient exclusion and clear', flush=True)

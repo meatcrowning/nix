@@ -103,6 +103,19 @@ class Indicator:
             self.menu.remove(child)
             child.destroy()
 
+    def rows(self, labels):
+        # Preserve menu item IDs while readings change, including when the
+        # user has the menu open. Rebuild only if sensor topology changes.
+        children = self.menu.get_children()
+        if len(children) != len(labels):
+            self.replace()
+            for label in labels:
+                item(self.menu, label)
+        else:
+            for child, label in zip(children, labels):
+                if child.get_label() != label:
+                    child.set_label(label)
+
     def update(self):
         if self.kind == 'load':
             total, idle = cpu_sample()
@@ -117,23 +130,17 @@ class Indicator:
             self.previous_io, self.previous_time = io, now
             self.indicator.set_label('%.0f%%' % cpu, '100%')
             self.graph(cpu, 100 * used / memory['MemTotal'])
-            self.replace()
-            item(self.menu, 'CPU: %.0f%%' % cpu)
-            item(self.menu, 'Memory: %.1f / %.1f GiB' % (used / 1048576, memory['MemTotal'] / 1048576))
-            item(self.menu, 'Network receive: ' + rate(speed[0]))
-            item(self.menu, 'Network send: ' + rate(speed[1]))
-            item(self.menu, 'Disk read: ' + rate(speed[2]))
-            item(self.menu, 'Disk write: ' + rate(speed[3]))
-            item(self.menu, 'Load average: ' + ' / '.join(read('/proc/loadavg').split()[:3]))
-            item(self.menu, 'Graph: CPU solid, memory dotted (last 80 seconds)')
+            self.rows(['CPU: %.0f%%' % cpu,
+                'Memory: %.1f / %.1f GiB' % (used / 1048576, memory['MemTotal'] / 1048576),
+                'Network receive: ' + rate(speed[0]), 'Network send: ' + rate(speed[1]),
+                'Disk read: ' + rate(speed[2]), 'Disk write: ' + rate(speed[3]),
+                'Load average: ' + ' / '.join(read('/proc/loadavg').split()[:3]),
+                'Graph: CPU solid, memory dotted (last 80 seconds)'])
         elif self.kind == 'temperature':
             values = temperatures()
             self.indicator.set_label((u'%.0f\u00b0C' % max(v for _, v in values)) if values else '--', '100 C')
-            self.replace()
-            for label, value in values:
-                item(self.menu, u'%s: %.1f\u00b0C' % (label, value))
-            if not values:
-                item(self.menu, 'No temperature sensors available')
+            self.rows([u'%s: %.1f\u00b0C' % (label, value) for label, value in values]
+                      or ['No temperature sensors available'])
         else:
             # Entries are session-local, bounded and cleared by the owning
             # notification service; no second daemon intercepts notifications.
