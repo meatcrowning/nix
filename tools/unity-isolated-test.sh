@@ -10,6 +10,7 @@ test_tools=${2:?test tools required}
 python=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["python"])' "$package/libexec/unity-quantal/config.json")
 run=$(mktemp -d /tmp/unity-isolated-test.XXXXXX)
 mkdir -p "$run/home"
+cp "$repo/tools/unity-isolated-text-check.py" "$run/text-check.py"
 printf 'private host data\n' > "$run/home/private.txt"
 cat > "$run/check.py" <<'PY'
 import ctypes
@@ -26,6 +27,9 @@ import time
 spec = importlib.util.spec_from_file_location('isolated', sys.argv[1] + '/libexec/unity-quantal/isolated.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+exec(Path('/work/text-check.py').read_text())
+if os.environ.get('UNITY_TEXT_ONLY') == '1':
+    sys.exit(0)
 
 probe = Path('/work/probe')
 probe.mkdir()
@@ -233,4 +237,5 @@ echo "Isolated application logs: $run"
   --setenv PATH "$test_tools/bin" --setenv QT_QPA_PLATFORM offscreen \
   --setenv XDG_RUNTIME_DIR /run/user/1000 --setenv XDG_CURRENT_DESKTOP Unity \
   --setenv UNITY_PACKAGE "$package" --setenv TEST_PYTHON "$python" \
+  --setenv UNITY_TEXT_ONLY "${UNITY_TEXT_ONLY:-0}" \
   --chdir /work "$test_tools/bin/bash" /work/inside.sh

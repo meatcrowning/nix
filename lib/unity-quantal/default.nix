@@ -145,6 +145,7 @@ let
     sed -i -E 's|^(TryExec=).*|\1${videoThumbnailer}|; s|^(Exec=)[^ ]+|\1${videoThumbnailer}|' \
       "$out/ffmpegthumbnailer.thumbnailer"
   '';
+  terminalText = callPackage ./terminal-text.nix { inherit runtime; };
   # The session's terminal: GNOME Terminal 3.6's window over the current VTE.
   terminalApp = stdenvNoCC.mkDerivation {
     name = "unity-quantal-terminal-app";
@@ -172,7 +173,7 @@ let
     $CC -Wall -Wextra -Werror -O2 ${./restrict.c} -lseccomp -o "$out/bin/unity-isolated-restrict"
   '';
   isolatedClosure = closureInfo {
-    rootPaths = [ runtime isolatedArchive mediaSchemas xpra xorg-server glibc bash dbus python3 legacyGtkModule
+    rootPaths = [ runtime isolatedArchive mediaSchemas xpra xorg-server xrdb glibc bash dbus python3 legacyGtkModule
       restrict (writeText "unity-isolated-libraries" (modernLibraries + ":" + archivePath)) ];
   };
 in
@@ -263,24 +264,11 @@ stdenvNoCC.mkDerivation {
     EOF
       chmod +x "$out/bin/unity-quantal-$command"
     done
-    # The session's terminal, with the runtime's original Ubuntu font files.
-    cat > "$out/libexec/unity-quantal/terminal-fonts.conf" <<EOF
-    <?xml version="1.0"?>
-    <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
-    <fontconfig>
-      <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
-      <dir>${runtime}/usr/share/fonts/truetype/ubuntu-font-family</dir>
-      <!-- Ubuntu 12.10 rendered its fonts with slight hinting. -->
-      <match target="font">
-        <test name="family" compare="contains"><string>Ubuntu</string></test>
-        <edit name="antialias" mode="assign"><bool>true</bool></edit>
-        <edit name="hinting" mode="assign"><bool>true</bool></edit>
-        <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
-      </match>
-    </fontconfig>
-    EOF
+    ln -s ${terminalText}/etc/fonts/fonts.conf "$out/libexec/unity-quantal/terminal-fonts.conf"
     cat > "$out/bin/unity-quantal-terminal" <<EOF
     #!${bash}/bin/bash
+    export _UNITY_TERMINAL_PRELOAD=\''${LD_PRELOAD-}
+    export LD_PRELOAD=${terminalText}/lib/libfreetype.so.6\''${LD_PRELOAD:+:\$LD_PRELOAD}
     export FONTCONFIG_FILE=$out/libexec/unity-quantal/terminal-fonts.conf
     # The session's fixed-width font setting, from Unity's own profile.
     export DCONF_PROFILE=$out/libexec/unity-quantal/dconf-profile

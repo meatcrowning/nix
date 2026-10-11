@@ -299,8 +299,20 @@ def worker(app, files):
     sound_file = Path("/transport/sounds")
     sounds = json.loads(sound_file.read_text()) if sound_file.exists() else {
         "theme-name": "ubuntu", "event-sounds": True, "input-feedback-sounds": True}
+    text_file = Path("/transport/text-settings")
+    text = font_settings(json.loads(text_file.read_text()) if text_file.exists() else {})
+    # GDK 3.6's X resource defaults take precedence over settings.ini for some
+    # Xft properties. Set both on this worker's private X server.
+    resources = "".join("Xft." + key.removeprefix("gtk-xft-") + ": "
+                        + str(value / 1024 if key == "gtk-xft-dpi" else value) + "\n"
+                        for key, value in text.items())
+    resources += "Xft.autohint: 0\nXft.lcdfilter: lcddefault\n"
+    xenv = {key: os.environ[key] for key in ("DISPLAY", "XAUTHORITY") if key in os.environ}
+    if xenv.get("DISPLAY"):
+        subprocess.run([CONFIG["xrdb"], "-nocpp", "-merge"], input=resources, text=True, env=xenv, check=True)
     settings.write_text("[Settings]\ngtk-theme-name=" + theme + "\ngtk-icon-theme-name=ubuntu-mono-dark\ngtk-font-name=Ubuntu 11\n"
-                        "gtk-sound-theme-name=" + sounds["theme-name"] + "\n"
+                        + "".join(key + "=" + str(value) + "\n" for key, value in text.items())
+                        + "gtk-sound-theme-name=" + sounds["theme-name"] + "\n"
                         "gtk-enable-event-sounds=" + str(int(sounds["event-sounds"])) + "\n"
                         "gtk-enable-input-feedback-sounds=" + str(int(sounds["input-feedback-sounds"])) + "\n")
     if app in MEDIA:
@@ -355,6 +367,40 @@ def current_theme():
     return theme_name(result.stdout)
 
 
+def font_settings(preferences):
+    # Xpra does not forward XSETTINGS. Without explicit values GTK falls back
+    # to different hinting and grayscale AA despite using the original libs.
+    antialias = preferences.get("antialiasing", "rgba")
+    hint = preferences.get("hinting", "slight")
+    order = preferences.get("rgba-order", "rgb")
+    return {
+        "gtk-xft-antialias": int(antialias != "none"),
+        "gtk-xft-hinting": int(hint != "none"),
+        "gtk-xft-hintstyle": "hint" + (hint if hint in {"none", "slight", "medium", "full"} else "slight"),
+        "gtk-xft-rgba": order if antialias == "rgba" and order in {"rgb", "bgr", "vrgb", "vbgr"} else "none",
+        "gtk-xft-dpi": 96 * 1024,
+    }
+
+
+def current_font_preferences():
+    environment = os.environ.copy()
+    for key in ("LD_LIBRARY_PATH", "LD_PRELOAD", "GSETTINGS_BACKEND"):
+        environment.pop(key, None)
+    environment.update(GSETTINGS_SCHEMA_DIR=CONFIG["runtime"] + "/usr/share/glib-2.0/schemas",
+                       DCONF_PROFILE=str(HERE / "dconf-profile"))
+    try:
+        result = subprocess.run([CONFIG["gsettings"], "list-recursively",
+                                 "org.gnome.settings-daemon.plugins.xsettings"],
+                                env=environment, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            return {parts[1]: parts[2].strip("'") for line in result.stdout.splitlines()
+                    if len(parts := line.split(maxsplit=2)) == 3
+                    and parts[1] in {"antialiasing", "hinting", "rgba-order"}}
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return {}
+
+
 def run_session(run, app, files, *, attach=True):
     for name in ["input", "output", "transport"]:
         (run / name).mkdir(mode=0o700, exist_ok=True)
@@ -362,6 +408,7 @@ def run_session(run, app, files, *, attach=True):
         media_paths()[0].mkdir(parents=True, mode=0o700, exist_ok=True)
     (run / "transport/exit-status").unlink(missing_ok=True)
     (run / "transport/theme").write_text(current_theme())
+    (run / "transport/text-settings").write_text(json.dumps(current_font_preferences()))
     sound_preferences = {}
     for key in ["theme-name", "event-sounds", "input-feedback-sounds"]:
         result = subprocess.run([str(HERE.parent.parent / "bin/unity-quantal-runtime"), "/usr/bin/gsettings", "get",
