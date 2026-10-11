@@ -1,0 +1,133 @@
+--- a/src/eog-metadata-reader-jpg.c
++++ b/src/eog-metadata-reader-jpg.c
+@@ -73,0 +74,4 @@
++	/* Buffer APP1 before identifying it: identifiers may span input blocks. */
++	guchar *app1_chunk;
++	guint app1_len;
++
+@@ -128,0 +133 @@
++	g_clear_pointer (&emr->priv->app1_chunk, g_free);
+@@ -212,2 +216,0 @@
+-	EogMetadataReaderState next_state = EMR_READ;
+-	guchar *chunk = NULL;
+@@ -257,2 +260,5 @@
+-			if (priv->size > 2)  /* ignore the two size-bytes */
+-				priv->size -= 2;
++			if (priv->size < 2) {
++				priv->state = EMR_FINISHED;
++				break;
++			}
++			priv->size -= 2;
+@@ -299,16 +305,8 @@
+-			eog_debug_message (DEBUG_IMAGE_DATA, "Read APP1 data, Length: %i", priv->size);
+-
+-			app1_type = eog_metadata_identify_app1 ((gchar*) &buf[i], priv->size);
+-
+-			switch (app1_type) {
+-			case EJA_EXIF:
+-				if (priv->exif_chunk == NULL) {
+-					priv->exif_chunk = g_new0 (guchar, priv->size);
+-					priv->exif_len = priv->size;
+-					priv->bytes_read = 0;
+-					chunk = priv->exif_chunk;
+-					next_state = EMR_READ_EXIF;
+-				} else {
+-					chunk = NULL;
+-					priv->state = EMR_SKIP_BYTES;
+-				}
++			if (priv->app1_chunk == NULL) {
++				priv->app1_len = priv->size;
++				priv->app1_chunk = g_new0 (guchar, priv->app1_len);
++				priv->bytes_read = 0;
++			}
++			eog_metadata_reader_get_next_block (priv, priv->app1_chunk,
++			                                    &i, buf, len, EMR_READ_APP1);
++			if (priv->state != EMR_READ)
+@@ -316,28 +314,11 @@
+-			case EJA_XMP:
+-				if (priv->xmp_chunk == NULL) {
+-					priv->xmp_chunk = g_new0 (guchar, priv->size);
+-					priv->xmp_len = priv->size;
+-					priv->bytes_read = 0;
+-					chunk = priv->xmp_chunk;
+-					next_state = EMR_READ_XMP;
+-				} else {
+-					chunk = NULL;
+-					priv->state = EMR_SKIP_BYTES;
+-				}
+-				break;
+-			case EJA_OTHER:
+-			default:
+-				/* skip unknown data */
+-				chunk = NULL;
+-				priv->state = EMR_SKIP_BYTES;
+-				break;
+-			}
+-
+-			if (chunk) {
+-				eog_metadata_reader_get_next_block (priv, chunk,
+-								    &i, buf,
+-								    len,
+-								    next_state);
+-			}
+-
+-			if (IS_FINISHED(priv))
++			app1_type = eog_metadata_identify_app1 ((gchar*)priv->app1_chunk,
++			                                      priv->app1_len);
++			if (app1_type == EJA_EXIF && priv->exif_chunk == NULL) {
++				priv->exif_chunk = g_steal_pointer (&priv->app1_chunk);
++				priv->exif_len = priv->app1_len;
++			} else if (app1_type == EJA_XMP && priv->xmp_chunk == NULL) {
++				priv->xmp_chunk = g_steal_pointer (&priv->app1_chunk);
++				priv->xmp_len = priv->app1_len;
++			}
++			g_clear_pointer (&priv->app1_chunk, g_free);
++			if (IS_FINISHED (priv))
+@@ -390 +371 @@
+-				valid &= strncmp (icc_chunk,
++				valid = priv->icc_len >= 14 && strncmp (icc_chunk,
+@@ -395 +376 @@
+-				valid &=  *(guint16*)(icc_chunk+12) == 0x101;
++				valid = valid && icc_chunk[12] == 1 && icc_chunk[13] == 1;
+@@ -515 +496 @@
+-	if (priv->icc_chunk) {
++	if (priv->icc_chunk && priv->icc_len >= 14) {
+@@ -540 +521 @@
+-		if (entry == NULL) {
++		if (entry == NULL || entry->size < 2) {
+--- a/src/eog-metadata-reader-png.c
++++ b/src/eog-metadata-reader-png.c
+@@ -210 +210 @@
+-			priv->size |= (buf[i] & 0xFF) << 24;
++			priv->size |= (guint32)buf[i] << 24;
+@@ -263 +263 @@
+-			    priv->size > (22 + 54) && priv->xmp_chunk == NULL) {
++			    priv->size > (22 + 54) && priv->size <= 16 * 1024 * 1024 && priv->xmp_chunk == NULL) {
+@@ -266 +266 @@
+-				   priv->icc_chunk == NULL) {
++				   priv->icc_chunk == NULL && priv->size >= 3 && priv->size <= 16 * 1024 * 1024) {
+@@ -310 +310 @@
+-			priv->target_crc |= buf[i] << ((3 - priv->sub_step) * 8);
++			priv->target_crc |= (guint32)buf[i] << ((3 - priv->sub_step) * 8);
+@@ -423 +423 @@
+-							    EMR_READ_ICCP);
++							    EMR_READ_CHRM);
+@@ -443 +443 @@
+-							    EMR_READ_ICCP);
++							    EMR_READ_GAMA);
+@@ -534,5 +534,3 @@
+-		/* Skip the name of the ICC profile */
+-		while (*((guchar*)priv->icc_chunk+offset) != '\0')
+-			offset++;
+-		/* Ensure the compression method (deflate) */
+-		if (*((guchar*)priv->icc_chunk+(++offset)) != '\0')
++		/* Neither the name nor the compression byte may escape the chunk. */
++		const guchar *name_end = memchr (priv->icc_chunk, 0, priv->icc_len);
++		if (name_end == NULL)
+@@ -540 +538,5 @@
+-		++offset; //offset now points to the start of the deflated data
++		offset = name_end - (const guchar*)priv->icc_chunk + 1;
++		if (offset >= priv->icc_len ||
++		    ((const guchar*)priv->icc_chunk)[offset] != 0)
++			return NULL;
++		++offset;
