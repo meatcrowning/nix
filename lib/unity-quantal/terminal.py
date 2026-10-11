@@ -3,6 +3,7 @@
 GNOME Terminal 3.6's window as Ubuntu shipped it (menubar, tabs, scrollbar,
 aubergine screen, Tango palette, the system fixed-width font), drawn by GTK 3 over the
 current VTE so modern programs get true colour and current escape handling.
+Quantal's FreeType renders the glyphs; Pango keeps the API required by VTE.
 Chrome colours are Ambiance's, as measured from the original in this session.
 """
 
@@ -11,6 +12,14 @@ import pwd
 import re
 import shlex
 import sys
+
+# The rasterizer is already loaded; host programs must not inherit it.
+if "_UNITY_TERMINAL_PRELOAD" in os.environ:
+    preload = os.environ.pop("_UNITY_TERMINAL_PRELOAD")
+    if preload:
+        os.environ["LD_PRELOAD"] = preload
+    else:
+        os.environ.pop("LD_PRELOAD", None)
 
 import gi
 
@@ -222,7 +231,8 @@ class Screen(Gtk.Box):
         environment += ["TERM=xterm-256color", "COLORTERM=truecolor"]
         command = argv or [user_shell()]
         terminal.spawn_async(Vte.PtyFlags.DEFAULT, cwd or os.path.expanduser("~"), command, environment,
-                             GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self.on_spawned)
+                             GLib.SpawnFlags.SEARCH_PATH | Vte.SPAWN_NO_PARENT_ENVV,
+                             None, None, -1, None, self.on_spawned)
         self.show_all()
 
     def paste(self):
