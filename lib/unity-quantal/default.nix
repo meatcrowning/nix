@@ -1,4 +1,4 @@
-{ lib, stdenvNoCC, fetchurl, runCommand, python3, libarchive, squashfsTools
+{ lib, stdenvNoCC, fetchurl, runCommand, python3, libarchive, squashfsTools, callPackage
 , bubblewrap, glibc, stdenv, libglvnd, libX11, libxcb, libdrm, zlib, expat
 , libXext, libXdamage, libXrandr, libXrender, libXcomposite
 , libXinerama, libXcursor, libXi, libxshmfence
@@ -35,6 +35,7 @@ let
       --artwork "$out/usr/share/gnome-control-center/ui/UbuntuLogo.png" \
       --panel "$out/usr/lib/control-center-1/panels/libbackground.so"
   '';
+  viewer = callPackage ./viewer.nix { inherit runtime; };
   # Ambiance Dark for current GTK 3 applications, whose CSS the 12.10 theme
   # predates: Ubuntu 18.04's port of Ambiance, under the same palette and name.
   nativeThemeDeb = fetchurl {
@@ -333,6 +334,7 @@ stdenvNoCC.mkDerivation {
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"
     EOF
+    ln -s ${viewer}/bin/unity-image-viewer "$out/bin/unity-quantal-viewer"
     chmod +x "$out/bin/unity-quantal-isolated"
     python "$out/libexec/unity-quantal/isolated.py" install "$out"
     # ly reads its sessions directory only at startup; a stable Exec keeps a
@@ -347,7 +349,7 @@ stdenvNoCC.mkDerivation {
     EOF
   '';
   passthru = {
-    inherit runtime fonts;
+    inherit runtime fonts viewer;
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
