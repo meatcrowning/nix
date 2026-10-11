@@ -127,6 +127,13 @@ let
       chmod +x "$out/bin/unity-terminal"
     '';
   };
+  scrollGrab = runCommand "unity-quantal-scroll-grab" {
+    nativeBuildInputs = [ stdenv.cc ];
+    buildInputs = [ libX11 ];
+  } ''
+    mkdir -p "$out/lib"
+    $CC -Wall -Wextra -Werror -shared -fPIC -O2 ${./scroll-grab.c} -lX11 -ldl -o "$out/lib/scroll-grab.so"
+  '';
   restrict = runCommand "unity-isolated-restrict" {
     nativeBuildInputs = [ stdenv.cc ];
     buildInputs = [ libseccomp ];
@@ -148,7 +155,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      mirror.py tweaks.json "$out/libexec/unity-quantal/"
+      mirror.py notifications.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     # Quantal's cursors, for native applications that follow Xcursor.theme.
     mkdir -p "$out/share/icons"
@@ -157,6 +164,7 @@ stdenvNoCC.mkDerivation {
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers musicLibrary;
+      scrollGrab = "${scrollGrab}/lib/scroll-grab.so";
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
       mediaSchemas = "${mediaSchemas}";
       isolatedClosure = "${isolatedClosure}/store-paths";

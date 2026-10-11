@@ -35,6 +35,7 @@ MIMES = {
     "gcalctool": [],
     "rhythmbox": [],
 }
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".ico", ".svg"}
 LIMIT = 512 * 1024 * 1024
 FEATURES = [
     "--clipboard=no", "--notifications=no", "--system-tray=no", "--bell=no",
@@ -121,6 +122,21 @@ def local_file(value):
     if not path.is_file() or path.stat().st_size > LIMIT:
         raise ValueError("Choose a regular file smaller than 512 MiB")
     return path
+
+
+def image_inputs(files):
+    """Let EOG enumerate neighboring images, without granting directory access."""
+    if len(files) != 1:
+        return files
+    selected = files[0]
+    siblings = []
+    with os.scandir(selected.parent) as entries:
+        for entry in entries:
+            if Path(entry.name).suffix.lower() not in IMAGE_SUFFIXES:
+                continue
+            if entry.is_file(follow_symlinks=False) and entry.stat(follow_symlinks=False).st_size <= LIMIT:
+                siblings.append(Path(entry.path))
+    return [selected] + sorted((p for p in siblings if p != selected), key=lambda p: p.name)
 
 
 def digest(path):
@@ -229,6 +245,11 @@ def base_namespace(run, client=False, app=None):
         else:
             command += ["--ro-bind", str(run / "input"), "/home/legacy/Input",
                         "--bind", str(run / "output"), "/home/legacy/Documents"]
+        if app == "eog" and (run / "images.json").is_file():
+            # Read-only file mounts avoid copying and hashing full-size images
+            # before the first window appears. Unrelated files stay hidden.
+            for source, name in json.loads((run / "images.json").read_text()):
+                command += ["--ro-bind", source, "/home/legacy/Input/" + name]
         command += ["--ro-bind", str(HERE / "isolated.py"), "/runner/isolated.py",
                     "--ro-bind", str(HERE / "config.json"), "/runner/config.json"]
     command += ["--clearenv"]
@@ -411,7 +432,17 @@ def main(app, values):
         (run / name).mkdir(mode=0o700)
     original = {}
     argv = []
-    for index, source in enumerate(files):
+    if app == "eog":
+        images = image_inputs(files)
+        mounts = []
+        for index, source in enumerate(images):
+            name = str(index + 1) + "-" + source.name if len(files) > 1 else source.name
+            (run / "input" / name).touch(mode=0o600)
+            mounts.append((str(source), name))
+            if source in files:
+                argv.append("/home/legacy/Input/" + name)
+        (run / "images.json").write_text(json.dumps(mounts))
+    for index, source in enumerate([] if app == "eog" else files):
         name = str(index + 1) + "-" + source.name if len(files) > 1 else source.name
         target = run / ("output" if app == "gedit" else "input") / name
         copy_regular(source, target)

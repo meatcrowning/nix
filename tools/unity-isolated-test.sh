@@ -124,8 +124,31 @@ for app in m.APPS:
         (run/'output/example.txt').write_text('Private document example')
         files=['/home/legacy/Documents/example.txt']
     elif app == 'eog':
-        subprocess.run(['magick','-size','16x16','xc:red',str(run/'input/example.png')],check=True)
-        files=['/home/legacy/Input/example.png']
+        library = run/'library'
+        library.mkdir()
+        for name, colour in [('a.png','red'), ('b.png','blue')]:
+            subprocess.run(['magick','-size','16x16','xc:'+colour,str(library/name)],check=True)
+        (library/'private.txt').write_text('not an image')
+        (library/'linked.png').symlink_to(library/'a.png')
+        images = m.image_inputs([library/'b.png'])
+        assert images == [library/'b.png', library/'a.png'], images
+        assert m.image_inputs([library/'a.png', library/'b.png']) == [library/'a.png', library/'b.png']
+        for image in images:
+            (run/'input'/image.name).touch()
+        (run/'images.json').write_text(json.dumps([(str(p),p.name) for p in images]))
+        files=['/home/legacy/Input/b.png']
+        # Namespace sees siblings, but neither private files nor symlink targets.
+        # Prepare the same per-run identity inputs as run_session.
+        for name in ('passwd','group','machine-id'):
+            (run/name).write_bytes((probe/name).read_bytes())
+        (run/'transport').mkdir()
+        subprocess.run(m.base_namespace(run,app='eog')+[m.CONFIG['python'],'-c',
+            "from pathlib import Path; p=Path('/home/legacy/Input'); "
+            "assert sorted(x.name for x in p.iterdir()) == ['a.png','b.png']; "
+            "assert (p/'b.png').read_bytes().startswith(b'\\x89PNG'); "
+            "assert not Path('/work/eog/library/private.txt').exists()"],check=True)
+        assert all(p.stat().st_size == 0 for p in (run/'input').iterdir()), 'input images were copied'
+        print('PASS: image siblings mounted read-only without copies or unrelated documents',flush=True)
     elif app == 'file-roller':
         import zipfile
         with zipfile.ZipFile(run/'input/example.zip','w') as archive:
@@ -149,7 +172,22 @@ for app in m.APPS:
             raise AssertionError('No isolated window for '+app)
         candidates=[line for line in tree.splitlines() if app.lower() in line.lower() and re.search(r' [1-9][0-9]{1,}x[1-9][0-9]{1,}[+-]',line)]
         assert candidates,tree
-        close_window(int(re.search(r'0x[0-9a-f]+',candidates[0]).group(),16))
+        window = int(re.search(r'0x[0-9a-f]+',candidates[0]).group(),16)
+        if app == 'eog':
+            assert 'b.png' in candidates[0], candidates
+            subprocess.run(['xdotool','windowfocus','--sync',str(window)],check=True)
+            time.sleep(.3)
+            for key, expected in [('Left','a.png'),('Right','b.png')]:
+                subprocess.run(['xdotool','key',key],check=True)
+                for _ in range(50):
+                    tree=subprocess.check_output(['xwininfo','-root','-tree'],text=True)
+                    if expected in tree:
+                        break
+                    time.sleep(.1)
+                else:
+                    raise AssertionError('Image Viewer navigation did not reach '+expected)
+            print('PASS: Image Viewer opens selected image and navigates both directions',flush=True)
+        close_window(window)
         process.join(20)
         assert not process.is_alive() and process.exitcode==0
         print('PASS: private display and sandboxed client for '+app,flush=True)

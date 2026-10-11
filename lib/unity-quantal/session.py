@@ -223,7 +223,8 @@ def prepare(directory, environment):
                 stale.unlink()
             continue
         if "Exec" in entry:
-            entry["Exec"] = RUNTIME + " " + entry["Exec"]
+            entry["Exec"] = (CONFIG["bridgePython"] + " " + str(HERE / "notifications.py")
+                             if name == "org.freedesktop.Notifications" else RUNTIME + " " + entry["Exec"])
             entry.pop("SystemdService", None)
             write_desktop(directory / "native-data/dbus-1/services" / file.name, parser)
 
@@ -347,6 +348,8 @@ def runtime(arguments):
         "GSETTINGS_SCHEMA_DIR": "/usr/share/glib-2.0/schemas",
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
     })
+    if arguments[0] == "/usr/bin/compiz":
+        environment["LD_PRELOAD"] = CONFIG["scrollGrab"]
     if arguments[0] == "/usr/bin/gnome-terminal":
         # New tabs/windows do not inherit the initial --command override.
         # GNOME Terminal consults SHELL before falling back to /etc/passwd.

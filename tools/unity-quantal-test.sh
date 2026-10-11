@@ -58,6 +58,7 @@ EOF
 # Tweak Tool's inventory runs in the original runtime, which sees only the home.
 cp "$repo/tools/unity-tweaks-inventory.py" "$run/home/tweaks-inventory.py"
 cp "$repo/tools/unity-tweaks-check.py" "$run/tweaks-check.py"
+cp "$repo/tools/unity-input-check.py" "$run/input-check.py"
 cat > "$run/inside.sh" <<'EOF'
 set -euo pipefail
 source /guard.sh
@@ -118,6 +119,11 @@ gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/Se
 sleep 3
 export XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11
 "$UNITY_PACKAGE/bin/unity-quantal-refresh"
+if [ "$UNITY_TEST_INPUT_ONLY" = 1 ]; then
+  bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
+  "$bridge_python" /work/input-check.py
+  exit 0
+fi
 test -f /home/unity-test/.local/share/unity-quantal-session/icons/hicolor/96x96/apps/unity-quantal-probe.png
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gsettings get \
   org.gnome.nautilus.preferences thumbnail-limit | grep -qx 'uint64 1073741824'
@@ -645,5 +651,7 @@ echo "Unity session test logs: $run"
   --setenv QT_QPA_PLATFORM offscreen "${graphics[@]}" \
   --setenv UNITY_PACKAGE "$package" --setenv TEST_PYTHON "$python" --setenv UNITY_TEST_TOOLS "$test_tools" \
   --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
+  --setenv UNITY_TEST_VIVALDI "$(readlink -f "$(command -v vivaldi || true)")" \
+  --setenv UNITY_TEST_INPUT_ONLY "${UNITY_TEST_INPUT_ONLY:-0}" \
   --setenv UNITY_TEST_PREVIEWS_ONLY "${UNITY_TEST_PREVIEWS_ONLY:-0}" \
   --chdir /work "$test_tools/bin/bash" /work/inside.sh
