@@ -195,8 +195,9 @@ stdenv.mkDerivation {
     cp ${runtime}/usr/lib/eog/girepository-1.0/Eog-3.0.typelib "$out/lib/eog/girepository-1.0/"
     mkdir -p "$out/libexec/schemas"
     cp "$out/share/gsettings-schemas/unity-quantal-viewer-3.6.0-modern/glib-2.0/schemas/"*.xml "$out/libexec/schemas/"
-    cp ${runtime}/usr/share/glib-2.0/schemas/org.gnome.desktop.{background,interface,lockdown}*.xml "$out/libexec/schemas/"
+    cp ${runtime}/usr/share/glib-2.0/schemas/org.gnome.desktop.{background,interface,lockdown,thumbnailers,thumbnail-cache}*.xml "$out/libexec/schemas/"
     cp ${runtime}/usr/share/glib-2.0/schemas/org.gnome.desktop.enums.xml "$out/libexec/schemas/"
+    cp ${runtime}/usr/share/glib-2.0/schemas/org.gtk.Settings.*.xml "$out/libexec/schemas/"
     # Ubuntu changed the upstream sidebar default; preserve its EOG overrides.
     python - "$out/libexec/schemas/10_ubuntu-settings.gschema.override" <<'PY'
     import configparser, sys

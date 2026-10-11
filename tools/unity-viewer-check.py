@@ -57,7 +57,9 @@ Path("/work/fonts.conf").write_text(
     '<fontconfig><dir>' + str(runtime / "usr/share/fonts") + '</dir>'
     '<cachedir>/work/font-cache</cachedir></fontconfig>')
 os.environ["FONTCONFIG_FILE"] = "/work/fonts.conf"
-os.environ["XDG_DATA_DIRS"] = str(runtime / "usr/share")
+# Native launches must supply their own resources and schemas. The original
+# runtime here masked missing native schemas that crashed desktop launches.
+os.environ["XDG_DATA_DIRS"] = "/nonexistent"
 library = Path("/work/images")
 library.mkdir()
 subprocess.run(["magick", "-size", "320x240", "xc:#da3020", str(library / "a.png")], check=True)
@@ -97,7 +99,8 @@ def launch(mode, image, arguments=None, cwd=None):
         env.update(LD_LIBRARY_PATH=config["modernLibraries"] + ":/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib",
                    GSETTINGS_SCHEMA_DIR="/usr/share/glib-2.0/schemas", GSETTINGS_BACKEND="memory",
                    GDK_PIXBUF_MODULE_FILE="/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
-                   GTK_MODULES="", GIO_USE_VFS="local", GIO_EXTRA_MODULES="", GIO_MODULE_DIR="/nonexistent", UBUNTU_MENUPROXY="0")
+                   GTK_MODULES="", GIO_USE_VFS="local", GIO_EXTRA_MODULES="", GIO_MODULE_DIR="/nonexistent", UBUNTU_MENUPROXY="0",
+                   XDG_DATA_DIRS="/usr/share")
         env.pop("FONTCONFIG_FILE", None)
         env.pop("FONTCONFIG_PATH", None)
         argv = [config["bwrap"], "--bind", "/", "/"]
