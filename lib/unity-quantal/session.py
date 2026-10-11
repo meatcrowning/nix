@@ -701,7 +701,10 @@ def refresh():
         if '"Nautilus"' in props and "_NET_WM_WINDOW_TYPE_DESKTOP" not in props:
             nautilus_windows = True
 
-    services = ["com.canonical.indicator.datetime", "org.freedesktop.Notifications", "org.ayatana.bamf", "com.canonical.Unity.Panel.Service"]
+    # Keep bamfdaemon: Unity's launcher cannot rebind to a replacement, so
+    # icons of apps open across the restart stay "running" and ignore clicks.
+    # It already watches the application directories prepare() rewrites.
+    services = ["com.canonical.indicator.datetime", "org.freedesktop.Notifications", "com.canonical.Unity.Panel.Service"]
     if not nautilus_windows:
         services.append("org.gnome.Nautilus")
     else:

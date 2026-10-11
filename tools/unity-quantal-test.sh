@@ -156,8 +156,20 @@ if [ "$UNITY_TEST_INDICATORS_ONLY" = 1 ]; then
 fi
 "$UNITY_BASE_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-quantal-probe.desktop -- "$UNITY_TEST_TOOLS/bin/xmessage" -name unity-host-probe -buttons ok:0 host-application
 sleep 3
+bamf_owner() { gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus --method org.freedesktop.DBus.GetConnectionUnixProcessID org.ayatana.bamf; }
+bamf_before=$(bamf_owner)
+# Unity's launcher keeps these objects; a restart strands its running icons.
+probe_application() {
+  local probe
+  probe=$(xwininfo -root -tree | sed -n 's/^ *\(0x[0-9a-f]*\) "unity-host-probe".*/\1/p' | head -n1)
+  gdbus call --session --dest org.ayatana.bamf --object-path /org/ayatana/bamf/matcher --method org.ayatana.bamf.matcher.ApplicationForXid "$((probe))"
+}
+probe_before=$(probe_application)
 export XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11
 "$UNITY_PACKAGE/bin/unity-quantal-refresh"
+test "$(bamf_owner)" = "$bamf_before"
+test "$(probe_application)" = "$probe_before"
+echo 'PASS: unity-quantal-refresh keeps the launcher application matcher'
 if [ "$UNITY_TEST_INPUT_ONLY" = 1 ]; then
   bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
   "$bridge_python" /work/input-check.py
