@@ -132,18 +132,28 @@ def offline():
     return False
 wait_for(offline, 'closed player marked offline in old sound menu')
 
-for name in ['org.unity_quantal.Load', 'org.unity_quantal.Temperature', 'org.unity_quantal.NotificationIndicator']:
+for name in ['org.unity_quantal.Gpu', 'org.unity_quantal.Load', 'org.unity_quantal.Temperature', 'org.unity_quantal.NotificationIndicator']:
     wait_for(lambda name=name: call('org.freedesktop.DBus', '/org/freedesktop/DBus',
         'org.freedesktop.DBus.NameHasOwner', name)[0], name)
 panel = call('com.canonical.Unity.Panel.Service', '/com/canonical/Unity/Panel/Service',
     'com.canonical.Unity.Panel.Service.Sync')[0]
-for name in ['unity-quantal-load', 'unity-quantal-temperature', 'unity-quantal-notifications']:
+for name in ['unity-quantal-gpu', 'unity-quantal-load', 'unity-quantal-temperature', 'unity-quantal-notifications']:
     assert any(row[2] == name and row[8] and row[9] for row in panel), (name, panel)
 
 applications = call('com.canonical.indicator.application', '/com/canonical/indicator/application/service',
                     'com.canonical.indicator.application.service.GetApplications')[0]
-meters = [row for row in applications if row[-1] in ['System Load', 'Temperatures']]
-assert len(meters) == 2, applications
+meters = [row for row in applications if row[-1] in ['System Load', 'GPU Load', 'Temperatures']]
+assert len(meters) == 3, applications
+gpu = next(row for row in applications if row[-1] == 'GPU Load')
+cpu = next(row for row in applications if row[-1] == 'System Load')
+assert gpu[1] == cpu[1] + 1, ('GPU must immediately follow CPU', applications)
+def gpu_menu():
+    return str(call(gpu[2], gpu[3], 'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]'))
+wait_for(lambda: 'GPU: 63%' in gpu_menu() and 'VRAM: 2.0 / 8.0 GiB' in gpu_menu(), 'GPU telemetry')
+Path.home().joinpath('gpu-reading').write_text('Test GPU, 81, 4096, 8192, 52\n')
+wait_for(lambda: 'GPU: 81%' in gpu_menu() and 'VRAM: 4.0 / 8.0 GiB' in gpu_menu(), 'GPU telemetry update')
+icons = list(Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))).rglob('gpu-*.svg'))
+assert icons and 'stroke-dasharray="1 2"' in icons[-1].read_text(), icons
 def menu_ids(row):
     layout = call(row[2], row[3], 'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]')
     return [item[0] for item in layout[1][2]]
@@ -151,6 +161,8 @@ before = [menu_ids(row) for row in meters]
 deadline = time.monotonic() + 3
 wait_for(lambda: time.monotonic() >= deadline, 'meter update')
 assert [menu_ids(row) for row in meters] == before, 'meter refresh replaced open menu items'
+Path.home().joinpath('gpu-reading').unlink()
+wait_for(lambda: 'GPU readings unavailable' in gpu_menu(), 'failed GPU read shown as unavailable')
 
 history = Path(os.environ['UNITY_QUANTAL_SESSION_DIR']) / 'notification-history.json'
 notification_id = call('org.freedesktop.Notifications', '/org/freedesktop/Notifications',
@@ -164,4 +176,4 @@ call('org.freedesktop.Notifications', '/org/freedesktop/Notifications', 'org.fre
 assert not any(e['summary'] == 'Transient probe' for e in json.loads(history.read_text()))
 call('org.freedesktop.Notifications', '/org/unity_quantal/NotificationHistory', 'org.unity_quantal.NotificationHistory.Clear')
 assert json.loads(history.read_text()) == []
-print('PASS: all three panel entries, stable meter menus; private session history, transient exclusion and clear', flush=True)
+print('PASS: CPU/GPU order, GPU readings and graph, all panel entries, stable meter menus; private session history, transient exclusion and clear', flush=True)

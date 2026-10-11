@@ -318,7 +318,7 @@ stdenvNoCC.mkDerivation {
     exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/media.py" "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-media"
-    for kind in load temperature notifications; do
+    for kind in load gpu temperature notifications; do
       cat > "$out/bin/unity-quantal-$kind" <<EOF
     #!${bash}/bin/bash
     exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/indicators.py" $kind

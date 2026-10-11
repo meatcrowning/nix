@@ -62,6 +62,12 @@ cp "$repo/tools/unity-input-check.py" "$run/input-check.py"
 cp "$repo/tools/unity-sounds-check.py" "$run/sounds-check.py"
 cp "$repo/tools/unity-indicators-check.py" "$run/indicators-check.py"
 if [ "${UNITY_TEST_INDICATORS_ONLY:-0}" = 1 ]; then
+  cat > "$run/profile/bin/nvidia-smi" <<EOF
+#!$test_tools/bin/bash
+cat /home/unity-test/gpu-reading
+EOF
+  chmod +x "$run/profile/bin/nvidia-smi"
+  echo 'Test GPU, 63, 2048, 8192, 47' > "$run/home/gpu-reading"
   printf '[Desktop Entry]\nType=Application\nName=Vivaldi\nExec=/bin/true\nIcon=web-browser\n' > "$run/home/.local/share/applications/vivaldi-stable.desktop"
 fi
 cat > "$run/inside.sh" <<'EOF'
@@ -664,8 +670,13 @@ wait "$supervisor"
 echo 'PASS: original shell, host application, separate settings, native lock, session logout'
 EOF
 echo "Unity session test logs: $run"
+indicator_devices=()
+if [ "${UNITY_TEST_INDICATORS_ONLY:-0}" = 1 ]; then
+  # Telemetry comes solely from the fixture, including the unavailable case.
+  indicator_devices=(--tmpfs /sys/class/drm)
+fi
 "$test_tools/bin/timeout" --kill-after=5s 240s "$test_tools/bin/bwrap" --die-with-parent --new-session --unshare-all \
-  --ro-bind /nix /nix --proc /proc --dev /dev --ro-bind /sys /sys \
+  --ro-bind /nix /nix --proc /proc --dev /dev --ro-bind /sys /sys "${indicator_devices[@]}" \
   --symlink "$test_tools/bin" /bin \
   --tmpfs /tmp --tmpfs /run --dir /run/user/1000 \
   --bind "$run" /work --bind "$run/home" /home/unity-test \

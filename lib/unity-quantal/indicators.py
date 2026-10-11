@@ -1,14 +1,15 @@
 #!/usr/bin/python2.7
 """Load, temperature and recent-notification menus in Quantal's panel runtime."""
 from __future__ import division, print_function
+import csv
 import glob
 import json
 import os
 import re
+import subprocess
 import sys
 import textwrap
 import time
-from gi.repository import AppIndicator3, Gio, GLib, Gtk
 
 
 def read(path):
@@ -17,6 +18,34 @@ def read(path):
             return stream.read().strip()
     except IOError:
         return ''
+
+
+def gpu_fetch(path):
+    # Run through the host launcher: NVIDIA's current libraries cannot be
+    # loaded inside the original GTK runtime. Bound each read to one second.
+    report = {'time': time.time()}
+    try:
+        output = subprocess.check_output(['nvidia-smi',
+            '--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu',
+            '--format=csv,noheader,nounits'], timeout=1, stderr=subprocess.DEVNULL).decode()
+        values = next(csv.reader(output.splitlines(), skipinitialspace=True))
+        report.update(name=values[0], usage=float(values[1]), used=float(values[2]),
+                      total=float(values[3]), temperature=float(values[4]))
+    except (OSError, subprocess.SubprocessError, ValueError, StopIteration, IndexError):
+        # DRM drivers with a utilization counter need no external utility.
+        for device in sorted(glob.glob('/sys/class/drm/card[0-9]*/device')):
+            try:
+                usage = float(read(device + '/gpu_busy_percent'))
+                used = float(read(device + '/mem_info_vram_used')) / 1048576
+                total = float(read(device + '/mem_info_vram_total')) / 1048576
+            except ValueError:
+                continue
+            report.update(name='GPU', usage=usage, used=used, total=total)
+            break
+    temporary = path + '.tmp'
+    with open(temporary, 'w') as stream:
+        json.dump(report, stream)
+    os.replace(temporary, path)
 
 
 def cpu_sample():
@@ -77,17 +106,21 @@ class Indicator:
     def __init__(self, kind):
         self.kind = kind
         icon, title = {'load': ('utilities-system-monitor', 'System Load'),
+                       'gpu': ('utilities-system-monitor', 'GPU Load'),
                        'temperature': (os.path.join(os.path.dirname(__file__), 'display-icons/unity-temperature.svg'), 'Temperatures'),
                        'notifications': ('indicator-messages', 'Recent Notifications')}[kind]
         self.indicator = AppIndicator3.Indicator.new('unity-quantal-' + kind, icon,
                                                    AppIndicator3.IndicatorCategory.SYSTEM_SERVICES)
         self.indicator.set_title(title)
+        if kind in ('load', 'gpu'):
+            # Quantal sorts descending after integer division by two.
+            self.indicator.set_ordering_index(100002 if kind == 'load' else 100000)
         self.menu = Gtk.Menu()
         self.indicator.set_menu(self.menu)
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         Gio.bus_own_name_on_connection(self.bus, 'org.unity_quantal.' +
-            {'load': 'Load', 'temperature': 'Temperature', 'notifications': 'NotificationIndicator'}[kind],
+            {'load': 'Load', 'gpu': 'Gpu', 'temperature': 'Temperature', 'notifications': 'NotificationIndicator'}[kind],
             Gio.BusNameOwnerFlags.NONE, None, None)
         self.previous_cpu = cpu_sample() if kind == 'load' else None
         self.previous_io = counters() if kind == 'load' else None
@@ -136,6 +169,27 @@ class Indicator:
                 'Disk read: ' + rate(speed[2]), 'Disk write: ' + rate(speed[3]),
                 'Load average: ' + ' / '.join(read('/proc/loadavg').split()[:3]),
                 'Graph: CPU solid, memory dotted (last 80 seconds)'])
+        elif self.kind == 'gpu':
+            path = os.path.join(os.environ['UNITY_QUANTAL_SESSION_DIR'], 'gpu.json')
+            try:
+                report = json.loads(read(path) or '{}')
+            except ValueError:
+                report = {}
+            if 'usage' in report and time.time() - report.get('time', 0) < 10:
+                usage, used, total = report['usage'], report['used'], report['total']
+                self.indicator.set_label('%.0f%%' % usage, '100%')
+                self.graph(usage, 100 * used / total if total else 0)
+                self.rows([report['name'], 'GPU: %.0f%%' % usage,
+                    'VRAM: %.1f / %.1f GiB' % (used / 1024, total / 1024),
+                    ('Temperature: %.0f C' % report['temperature']) if 'temperature' in report else 'Temperature: unavailable',
+                    'Graph: GPU solid, VRAM dotted (last 80 seconds)'])
+            else:
+                self.indicator.set_label('--', '100%')
+                self.samples = []
+                self.rows(['GPU readings unavailable'])
+            config = json.loads(read(os.path.join(os.path.dirname(__file__), 'config.json')))
+            subprocess.Popen(['/usr/local/bin/unity-host-launch', '--', config['python'],
+                              os.path.abspath(__file__), 'gpu-fetch', path])
         elif self.kind == 'temperature':
             values = temperatures()
             self.indicator.set_label((u'%.0f\u00b0C' % max(v for _, v in values)) if values else '--', '100 C')
@@ -176,11 +230,11 @@ class Indicator:
 
     def graph(self, cpu, memory):
         self.samples = (self.samples + [(cpu, memory)])[-40:]
-        directory = os.path.join(os.environ.get('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'load-meter')
+        directory = os.path.join(os.environ.get('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), self.kind + '-meter')
         if not os.path.isdir(directory):
             os.makedirs(directory)
         self.serial += 1
-        path = os.path.join(directory, 'load-%d.svg' % self.serial)
+        path = os.path.join(directory, (self.kind + '-%d.svg') % self.serial)
         lines = []
         for series, style in [(0, ''), (1, ' stroke-dasharray="1 2"')]:
             points = ' '.join('%.1f,%.1f' % (i + 40 - len(self.samples), 20 - max(0, min(100, v[series])) * .18)
@@ -190,7 +244,7 @@ class Indicator:
             stream.write('<svg xmlns="http://www.w3.org/2000/svg" width="42" height="22">' + ''.join(lines) + '</svg>')
         self.indicator.set_icon(path)
         # Keep the current image and two predecessors while the panel reads it.
-        old = os.path.join(directory, 'load-%d.svg' % (self.serial - 3))
+        old = os.path.join(directory, (self.kind + '-%d.svg') % (self.serial - 3))
         if os.path.isfile(old):
             os.unlink(old)
 
@@ -200,5 +254,9 @@ class Indicator:
 
 
 if __name__ == '__main__':
-    indicator = Indicator(sys.argv[1])
-    Gtk.main()
+    if sys.argv[1] == 'gpu-fetch':
+        gpu_fetch(sys.argv[2])
+    else:
+        from gi.repository import AppIndicator3, Gio, GLib, Gtk
+        indicator = Indicator(sys.argv[1])
+        Gtk.main()
