@@ -1,6 +1,5 @@
 """Real event producers and PCM capture inside unity-quantal-test.sh only."""
 import array
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -59,8 +58,9 @@ def set_sound(key, value):
     time.sleep(.3)
 
 
-wait_for(lambda: 'sound desktop-login: complete' in log.read_text(), 'login sound completion')
-assert log.read_text().count('sound desktop-login: complete') == 1
+wait_for(lambda: 'sound system-ready: complete' in log.read_text(), 'login sound completion')
+assert log.read_text().count('sound system-ready: complete') == 1
+assert 'sound desktop-login:' not in log.read_text()
 assert get('theme-name') == "'ubuntu'" and get('event-sounds') == 'true'
 assert get('input-feedback-sounds') == 'true'
 run(runtime, '/usr/bin/python2.7', '-c', 'import ctypes; ctypes.CDLL("/usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libcanberra-gtk3-module.so")')
@@ -128,7 +128,7 @@ set_sound('input-feedback-sounds', 'false')
 run(package / 'bin/unity-quantal-refresh')
 time.sleep(1)
 assert get('input-feedback-sounds') == 'false'
-assert log.read_text().count('sound desktop-login: complete') == 1
+assert log.read_text().count('sound system-ready: complete') == 1
 print('PASS: refresh preserves preferences and does not replay login', flush=True)
 
 trash = Path.home() / '.local/share/Trash/files'
@@ -148,36 +148,6 @@ def notify(hints, event=None):
 
 capture('notification-hint', lambda: notify("{'sound-name': <'message-new-instant'>}", 'message-new-instant'))
 capture('notification-suppressed', lambda: notify("{'sound-name': <'message'>, 'suppress-sound': <true>}"), audible=False)
-
-# Use ALSA's file PCM for the greeter output in the same device-free namespace.
-# The same aplay command decodes the build-time WAV; no mixer or hardware opens.
-alsa = Path('/work/alsa.conf')
-alsa.write_text('pcm.capture { type file slave.pcm { type null } file "/work/greeter.pcm" format "raw" }\n')
-spec = importlib.util.spec_from_file_location('greeter', package / 'libexec/unity-quantal/greeter-sound.py')
-greeter = importlib.util.module_from_spec(spec); spec.loader.exec_module(greeter)
-proc = Path('/work/asound'); (proc / 'card2').mkdir(parents=True)
-(proc / 'pcm').write_text('00-03: HDMI : HDMI : playback 1\n02-00: ALC897 Analog : ALC897 Analog : playback 1\n')
-(proc / 'card2/id').write_text('Generic_1\n')
-assert greeter.analog_device(proc) == 'plughw:CARD=Generic_1,DEV=0'
-select_device = greeter.analog_device
-greeter.analog_device = lambda: select_device(proc)
-greeter.greeter_active = lambda: True
-player = Path('/work/greeter-aplay')
-player.write_text('#!' + config['bash'] + '\nfor arg in "$@"; do file="$arg"; done\n'
-                  'ALSA_CONFIG_PATH=/work/alsa.conf exec ' + config['aplay'] + ' -q -D capture "$file"\n')
-player.chmod(0o700)
-greeter.CONFIG['aplay'] = str(player)
-import sys
-saved_argv = sys.argv; sys.argv = ['greeter-sound.py', '--worker']
-greeter.main()
-sys.argv = saved_argv
-pcm = array.array('h'); pcm.frombytes(Path('/work/greeter.pcm').read_bytes())
-assert max(map(abs, pcm)) > 10
-greeter.greeter_active = lambda: False
-before = Path('/work/greeter.pcm').stat().st_mtime_ns
-sys.argv = ['greeter-sound.py', '--worker']; greeter.main(); sys.argv = saved_argv
-assert Path('/work/greeter.pcm').stat().st_mtime_ns == before
-print('PASS: actual greeter worker selects analog PCM, decodes through ALSA, and skips an active user', flush=True)
 
 def logout():
     run(tools / 'bin/gdbus', 'call', '--session', '--dest', 'org.gnome.SessionManager',

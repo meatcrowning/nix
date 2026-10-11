@@ -238,7 +238,7 @@ class SessionSounds:
             self.marker.touch(exist_ok=False)
         except FileExistsError:
             return
-        self.player.play("desktop-login")
+        self.player.play("system-ready")
 
     def response(self):
         try:

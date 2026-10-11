@@ -14,7 +14,7 @@
 , gdk-pixbuf, ffmpegthumbnailer, ffmpeg-headless, writeShellScript
 # The music library the original Rhythmbox reads, read-only, in its sandbox.
 , musicLibrary
-, libcanberra, libcanberra-gtk3, pulseaudio, alsa-utils, systemd, patchelf
+, libcanberra, libcanberra-gtk3, pulseaudio, patchelf
 }:
 let
   iso = fetchurl {
@@ -185,7 +185,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      mirror.py notifications.py sounds.py greeter-sound.py tweaks.json "$out/libexec/unity-quantal/"
+      mirror.py notifications.py sounds.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     mkdir -p "$out/lib/gtk-3.0/modules"
     ln -s ${libcanberra-gtk3}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so \
@@ -228,9 +228,7 @@ stdenvNoCC.mkDerivation {
       nativeGtkModules = "$out/lib/gtk-3.0/modules";
       # Use the patched GTK module with Quantal's libraries and ISO samples.
       legacyGtkModule = "${legacyGtkModule}/lib/libcanberra-gtk3-module.so";
-      aplay = "${alsa-utils}/bin/aplay";
       pactl = "${pulseaudio}/bin/pactl";
-      loginctl = "${systemd}/bin/loginctl";
       session = "${cinnamon-session}/bin/cinnamon-session";
       sessionData = "${cinnamon}/share/gsettings-schemas/${cinnamon.name}";
       sessionQuit = "${cinnamon-session}/bin/cinnamon-session-quit";
@@ -321,15 +319,11 @@ stdenvNoCC.mkDerivation {
     exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/mirror.py" "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-cpufreq" "$out/bin/unity-quantal-weather" "$out/bin/unity-quantal-settings-mirror"
-    for command in sounds greeter-sound; do
-      cat > "$out/bin/unity-quantal-$command" <<EOF
+    cat > "$out/bin/unity-quantal-sounds" <<EOF
     #!${bash}/bin/bash
-    exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/$command.py" "\$@"
+    exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/sounds.py" "\$@"
     EOF
-      chmod +x "$out/bin/unity-quantal-$command"
-    done
-    ${ffmpeg-headless}/bin/ffmpeg -nostdin -v error -i ${runtime}/usr/share/sounds/ubuntu/stereo/system-ready.ogg \
-      -ar 48000 -ac 2 "$out/libexec/unity-quantal/system-ready.wav"
+    chmod +x "$out/bin/unity-quantal-sounds"
     cat > "$out/bin/unity-quantal-isolated" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"
@@ -354,7 +348,7 @@ stdenvNoCC.mkDerivation {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
         xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr setxkbmap xrdb
-        ffmpeg-headless pulseaudio alsa-utils ];
+        ffmpeg-headless pulseaudio ];
     };
     providedSessions = [ "unity-quantal" ];
   };
