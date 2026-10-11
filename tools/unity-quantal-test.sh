@@ -311,7 +311,8 @@ xprop -id "$calculator" _NET_WM_DESKTOP_FILE | grep unity-original-gcalctool.des
 application=$(gdbus call --session --dest org.ayatana.bamf --object-path /org/ayatana/bamf/matcher --method org.ayatana.bamf.matcher.ApplicationForXid "$((calculator))")
 application=${application#*\'}
 application=${application%%\'*}
-gdbus call --session --dest org.ayatana.bamf --object-path "$application" --method org.ayatana.bamf.application.DesktopFile | grep unity-original-gcalctool.desktop
+# Exactly the catalog path a launcher favorite resolves to; a host copy is a second icon.
+gdbus call --session --dest org.ayatana.bamf --object-path "$application" --method org.ayatana.bamf.application.DesktopFile | grep "'/usr/share/applications/unity-original-gcalctool.desktop'"
 # Meta drags windows: left moves, right resizes; Alt drags reach the client.
 # The window tree can change mid-listing while windows open; retry on the next poll.
 window_id() { { xwininfo -root -tree 2>/dev/null || true; } | sed -n "s/^ *\\(0x[0-9a-f]*\\) $1.*/\\1/p" | head -n1; }
