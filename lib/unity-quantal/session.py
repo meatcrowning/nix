@@ -147,7 +147,9 @@ def prepare(directory, environment):
             file = "unity-original-" + name + ".desktop"
             parser = desktop_parser(PACKAGE / "share/applications" / file)
             entry = parser["Desktop Entry"]
-            entry["Exec"] = "/usr/local/bin/unity-host-launch --desktop " + file + " -- " + entry["Exec"]
+            for section in parser.sections():
+                if "Exec" in parser[section]:
+                    parser[section]["Exec"] = "/usr/local/bin/unity-host-launch --desktop " + file + " -- " + parser[section]["Exec"]
             entry["X-Unity-Original"] = "true"
             write_desktop(directory / "applications" / file, parser)
             continue

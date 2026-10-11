@@ -50,7 +50,7 @@ try:
     captured = []
     def render(command, **kwargs):
         command = [s for s in command if not s.startswith('GTK_MODULES=')]
-        command[-1:] = ['/usr/bin/python', '/transport/probe.py', 'fixed']
+        command[-4:] = ['/usr/bin/python', '/transport/probe.py', 'fixed']
         captured.append((command, kwargs))
         return original(command, **kwargs)
     subprocess.call = render

@@ -10,6 +10,7 @@ from pathlib import Path
 import resource
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -76,6 +77,10 @@ def install_desktops(package):
             "StartupWMClass": app, "Categories": "AudioVideo;Audio;Player;" if app in MEDIA else "Utility;",
             "MimeType": ";".join(MIMES[app]) + ";",
         }
+        if app in MEDIA:
+            entry["Desktop Entry"]["Actions"] = "Quit;"
+            entry["Desktop Action Quit"] = {
+                "Name": "Quit", "Exec": str(package / "bin/unity-quantal-isolated") + " " + app + " --quit"}
         with (destination / ("unity-original-" + app + ".desktop")).open("w") as stream:
             entry.write(stream, space_around_delimiters=False)
 
@@ -338,6 +343,8 @@ def worker(app, files):
     elif app == "file-roller":
         argv += ["--default-dir=/home/legacy/Documents"]
     argv += files
+    if app in MEDIA:
+        argv = [CONFIG["python"], "/runner/isolated.py", "media-worker", app]
     # Private D-Bus, with no host bus or host activation service directories.
     command = [str(Path(CONFIG["dbus"]).with_name("dbus-run-session")), "--dbus-daemon=" + CONFIG["dbus"], "--config-file=" + str(bus_config), "--", "/usr/bin/env"]
     command += [key + "=" + value for key, value in environment.items()]
@@ -474,25 +481,103 @@ def run_session(run, app, files, *, attach=True):
         os.close(fd)
 
 
-def media(app):
+def media_worker(app):
+    """Only present/quit cross the boundary; the private bus stays private."""
+    endpoint = Path("/transport/control.sock")
+    endpoint.unlink(missing_ok=True)
+    with socket.socket(socket.AF_UNIX) as server:
+        server.bind(str(endpoint))
+        server.listen(4)
+        server.settimeout(.2)
+        process = subprocess.Popen(["/usr/bin/" + app])
+        try:
+            while process.poll() is None:
+                try:
+                    connection, _ = server.accept()
+                except socket.timeout:
+                    continue
+                with connection:
+                    connection.settimeout(2)
+                    try:
+                        command = connection.recv(32)
+                        methods = {
+                            b"present": ["org.gtk.Application.Activate", "{}"],
+                            b"quit": ["org.gtk.Actions.Activate", "Quit", "[]", "{}"],
+                        }
+                        if command not in methods:
+                            connection.sendall(b"invalid")
+                            continue
+                        result = subprocess.run([
+                            "/usr/bin/gdbus", "call", "--session", "--dest", "org.gnome.Rhythmbox3",
+                            "--object-path", "/org/gnome/Rhythmbox3", "--method", *methods[command]],
+                            stdout=subprocess.DEVNULL, timeout=5)
+                        if result.returncode == 0 and command == b"quit":
+                            process.wait(timeout=10)
+                        connection.sendall(b"ok" if result.returncode == 0 else b"retry")
+                    except (OSError, subprocess.TimeoutExpired):
+                        # A closing launcher must not take the player down.
+                        continue
+            return process.returncode
+        finally:
+            endpoint.unlink(missing_ok=True)
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+
+
+def control_media(lock, base, app, command):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        lock.seek(0)
+        name = lock.read().strip()
+        if name.startswith(app + "-") and Path(name).name == name:
+            try:
+                with socket.socket(socket.AF_UNIX) as connection:
+                    connection.settimeout(12)
+                    connection.connect(str(base / name / "transport/control.sock"))
+                    connection.sendall(command.encode())
+                    if connection.recv(32) == b"ok":
+                        return
+            except OSError:
+                pass
+        time.sleep(.1)
+    raise RuntimeError("The running music player did not respond to " + command)
+
+
+def media(app, *, quit=False):
     base = Path.home() / ".local/state/unity-quantal/isolated"
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # One instance per profile; a second launch leaves the running one alone.
-    with (base / (app + ".lock")).open("w") as lock:
+    # Keep one profile owner, but make repeat launches restore its window.
+    # Do not truncate this file before acquiring the lock: it holds the route.
+    with (base / (app + ".lock")).open("a+") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
+            return control_media(lock, base, app, "quit" if quit else "present")
+        if quit:
             return
         run = Path(tempfile.mkdtemp(prefix=app + "-", dir=base))
-        run_session(run, app, [])
-        shutil.rmtree(run)
+        lock.seek(0)
+        lock.truncate()
+        lock.write(run.name)
+        lock.flush()
+        try:
+            run_session(run, app, [])
+            shutil.rmtree(run)
+        finally:
+            lock.seek(0)
+            lock.truncate()
 
 
-def main(app, values, *, viewer_flags=()):
+def main(app, values, *, viewer_flags=(), media_quit=False):
     if os.environ.get("XDG_CURRENT_DESKTOP") != "Unity":
         raise RuntimeError("These application defaults are for the Unity session")
     if app in MEDIA:
-        return media(app)
+        return media(app, quit=media_quit)
     files = [local_file(value) for value in values]
     if app in ("eog", "file-roller") and not files:
         chosen = dialog("--file-selection", "--title=Open in " + APPS[app])
@@ -575,12 +660,17 @@ if __name__ == "__main__":
         raise SystemExit(0)
     if sys.argv[1:2] == ["worker"] and sys.argv[2:3] and sys.argv[2] in APPS:
         worker(sys.argv[2], sys.argv[3:])
+    if sys.argv[1:2] == ["media-worker"] and sys.argv[2:3] and sys.argv[2] in MEDIA:
+        raise SystemExit(media_worker(sys.argv[2]))
     parser = argparse.ArgumentParser()
+    parser.add_argument("--quit", action="store_true")
     parser.add_argument("app", choices=APPS)
     parser.add_argument("files", nargs="*")
     args = parser.parse_args()
+    if args.quit and args.app not in MEDIA:
+        parser.error("--quit is only available for music players")
     try:
-        main(args.app, args.files)
+        main(args.app, args.files, media_quit=args.quit)
     except Exception as error:
         print(str(error), file=sys.stderr)
         dialog("--error", "--no-markup", "--title=Application could not finish", "--text=" + str(error))
