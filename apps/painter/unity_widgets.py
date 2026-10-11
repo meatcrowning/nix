@@ -199,7 +199,7 @@ class ImageView(Gtk.Box):
         self.rendering = True
         w, h = self.original.get_width(), self.original.get_height()
         vw, vh = max(1, self.scroll.get_allocated_width() - 4), max(1, self.scroll.get_allocated_height() - 4)
-        self.scale = self.zoom or min(float(vw) / w, float(vh) / h, 1.0)
+        self.scale = self.zoom or min(float(vw) / w, float(vh) / h)
         width, height = max(1, int(w * self.scale)), max(1, int(h * self.scale))
         # The layout has the full virtual image size. Only the visible region
         # gets a bitmap, so zooming a large output never allocates zoom^2 pixels.

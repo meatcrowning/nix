@@ -9,6 +9,7 @@ Chrome colours are Ambiance's, as measured from the original in this session.
 import os
 import pwd
 import re
+import shlex
 import sys
 
 import gi
@@ -206,6 +207,11 @@ class Screen(Gtk.Box):
         terminal.connect("window-title-changed", lambda *_: window.update_titles())
         terminal.connect("child-exited", self.on_exit)
         terminal.connect("button-press-event", self.on_button)
+        terminal.connect("key-press-event", self.on_key)
+        terminal.drag_dest_set(Gtk.DestDefaults.ALL, [], Gdk.DragAction.COPY)
+        terminal.drag_dest_add_uri_targets()
+        terminal.drag_dest_add_text_targets()
+        terminal.connect("drag-data-received", self.on_drop)
         terminal.connect("char-size-changed", lambda *_: window.update_geometry())
         scrollbar = Gtk.Scrollbar(orientation=Gtk.Orientation.VERTICAL, adjustment=terminal.get_vadjustment())
         self.pack_start(terminal, True, True, 0)
@@ -218,6 +224,39 @@ class Screen(Gtk.Box):
         terminal.spawn_async(Vte.PtyFlags.DEFAULT, cwd or os.path.expanduser("~"), command, environment,
                              GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self.on_spawned)
         self.show_all()
+
+    def paste(self):
+        # Request text asynchronously: Chromium may own several rich formats,
+        # and the selection owner must be allowed to answer on the event loop.
+        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).request_text(
+            lambda _clipboard, text, _data: self.terminal.paste_text(text) if text else None, None)
+
+    def on_key(self, terminal, event):
+        mods = event.state & Gtk.accelerator_get_default_mod_mask()
+        if mods == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
+            if event.keyval in (Gdk.KEY_v, Gdk.KEY_V):
+                self.paste()
+                return True
+            if event.keyval in (Gdk.KEY_c, Gdk.KEY_C):
+                terminal.copy_clipboard_format(Vte.Format.TEXT)
+                return True
+        if mods == Gdk.ModifierType.SHIFT_MASK and event.keyval == Gdk.KEY_Insert:
+            self.paste()
+            return True
+        return False
+
+    def on_drop(self, terminal, context, x, y, selection, info, timestamp):
+        uris = selection.get_uris()
+        if uris:
+            # Quote each filename separately, preserving spaces and shell
+            # metacharacters. Non-local locations remain usable URI arguments.
+            text = " ".join(shlex.quote(Gio.File.new_for_uri(uri).get_path() or uri)
+                            for uri in uris) + " "
+        else:
+            text = selection.get_text()
+        if text:
+            terminal.paste_text(text)
+        Gtk.drag_finish(context, bool(text), False, timestamp)
 
     def on_spawned(self, terminal, pid, error):
         if error is not None:
@@ -304,7 +343,7 @@ class TerminalWindow(Gtk.ApplicationWindow):
         _, menu = self.submenu("_Edit")
         self.copy_item = self.item(menu, "_Copy", lambda: self.current().terminal.copy_clipboard_format(Vte.Format.TEXT),
                                    "<Shift><Control>c")
-        self.paste_item = self.item(menu, "_Paste", lambda: self.current().terminal.paste_clipboard(), "<Shift><Control>v")
+        self.paste_item = self.item(menu, "_Paste", lambda: self.current().paste(), "<Shift><Control>v")
         menu.append(Gtk.SeparatorMenuItem())
         self.item(menu, "Select _All", lambda: self.current().terminal.select_all())
         menu.append(Gtk.SeparatorMenuItem())
@@ -380,7 +419,7 @@ class TerminalWindow(Gtk.ApplicationWindow):
             menu.append(Gtk.SeparatorMenuItem())
         copy = self.item(menu, "_Copy", lambda: screen.terminal.copy_clipboard_format(Vte.Format.TEXT))
         copy.set_sensitive(screen.terminal.get_has_selection())
-        self.item(menu, "_Paste", lambda: screen.terminal.paste_clipboard())
+        self.item(menu, "_Paste", screen.paste)
         menu.append(Gtk.SeparatorMenuItem())
         show = Gtk.CheckMenuItem.new_with_mnemonic("Show _Menubar")
         show.set_active(self.menubar.get_visible())

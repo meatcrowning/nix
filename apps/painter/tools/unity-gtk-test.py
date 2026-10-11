@@ -34,7 +34,16 @@ class Registrar(dbus.service.Object):
     def GetMenus(self):
         return registrations
 registrar = Registrar(bus, '/com/canonical/AppMenu/Registrar')
+notifications = []
+notification_owner = dbus.service.BusName('org.freedesktop.Notifications', bus)
+class Notifications(dbus.service.Object):
+    @dbus.service.method('org.freedesktop.Notifications', in_signature='susssasa{sv}i', out_signature='u')
+    def Notify(self, app, replaces, icon, summary, body, actions, hints, timeout):
+        notifications.append(str(body))
+        return 1
+notification_server = Notifications(bus, '/org/freedesktop/Notifications')
 window = Window(sys.argv[1])
+window.message('Generation completed')
 step = [0]
 failed = [False]
 video_tick = ['']
@@ -51,6 +60,8 @@ def test():
         if not window.state.get('model'):
             return True
         if step[0] == 0:
+            assert notifications == ['Generation completed'], notifications
+            assert not window.info.get_visible()
             assert len(window.state['models']) == 2
             assert window.get_title() == 'Painter'
             assert window.actions['generate'][0].get_sensitive()
@@ -96,9 +107,10 @@ def test():
             assert window.values()['aspectH'] == 6
             assert registrations, 'GTK global menu did not register'
             assert window.picture.get_pixbuf() is not None
-            assert window.viewer.scale == 1.0, ('fit size', window.viewer.scale, window.viewer.scroll.get_allocated_width(), window.viewer.scroll.get_allocated_height())
+            assert window.viewer.scale > 1.0, ('fit size', window.viewer.scale, window.viewer.scroll.get_allocated_width(), window.viewer.scroll.get_allocated_height())
+            scale = window.viewer.scale
             window.zoom_by(1.25)
-            assert window.viewer.scale == 1.25
+            assert abs(window.viewer.scale - scale * 1.25) < .001
             window.fit_image()
             assert window.viewer.zoom == 0
             window.viewer.set_zoom(1)

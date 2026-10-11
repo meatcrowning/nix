@@ -23,7 +23,7 @@ if not os.path.exists('/usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules/im-ibus
     os.environ.setdefault('GTK_IM_MODULE', 'gtk-im-context-simple')
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, GObject
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, GObject, Gio
 from unity_widgets import ResizableText, ImageView
 
 
@@ -616,6 +616,29 @@ class Window(Gtk.Window):
         self.send('generate', save=True)
 
     def message(self, text, error=False):
+        if not error:
+            Gio.bus_get(Gio.BusType.SESSION, None, self.notification_bus, text)
+            return
+        self.show_message(text, error)
+
+    def notification_bus(self, source, result, text):
+        try:
+            bus = Gio.bus_get_finish(result)
+            bus.call('org.freedesktop.Notifications', '/org/freedesktop/Notifications',
+                     'org.freedesktop.Notifications', 'Notify',
+                     GLib.Variant('(susssasa{sv}i)',
+                                  ('Painter', 0, 'painter', 'Painter', text, [], {}, -1)),
+                     None, Gio.DBusCallFlags.NONE, 3000, None, self.notification_sent, text)
+        except GLib.GError:
+            self.show_message(text, False)
+
+    def notification_sent(self, bus, result, text):
+        try:
+            bus.call_finish(result)
+        except GLib.GError:
+            self.show_message(text, False)
+
+    def show_message(self, text, error=False):
         self.info_label.set_text(text)
         self.info.set_message_type(Gtk.MessageType.ERROR if error else Gtk.MessageType.INFO)
         self.info.get_content_area().show_all()
