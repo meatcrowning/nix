@@ -43,6 +43,32 @@ int main(int argc, char **argv)
         g_object_unref(image);
         g_free(path);
     }
+    gchar *animation_path = g_build_filename(argv[1], "animation.gif", NULL);
+    EogImage *animation = load(animation_path, 32, 16);
+    eog_image_data_ref(animation);
+    g_assert_true(eog_image_is_animation(animation));
+    g_assert_true(eog_image_start_animation(animation));
+    gboolean advanced = FALSE;
+    gint64 deadline = g_get_monotonic_time() + G_TIME_SPAN_SECOND;
+    while (g_get_monotonic_time() < deadline && !advanced) {
+        while (g_main_context_iteration(NULL, FALSE)) {}
+        GdkPixbuf *frame = eog_image_get_pixbuf(animation);
+        advanced = gdk_pixbuf_get_pixels(frame)[1] == 255;
+        g_object_unref(frame);
+        g_usleep(1000);
+    }
+    g_assert_true(advanced);
+    gpointer weak = animation;
+    g_object_add_weak_pointer(G_OBJECT(animation), &weak);
+    eog_image_data_unref(animation);
+    g_object_unref(animation);
+    deadline = g_get_monotonic_time() + G_TIME_SPAN_SECOND;
+    while (weak && g_get_monotonic_time() < deadline) {
+        while (g_main_context_iteration(NULL, FALSE)) {}
+        g_usleep(1000);
+    }
+    g_assert_null(weak);
+    g_free(animation_path);
     gchar *path = g_build_filename(argv[1], "corrupt.png", NULL);
     g_file_set_contents(path, "\211PNG\r\n\032\n", 8, NULL);
     GFile *file = g_file_new_for_path(path);
@@ -55,5 +81,5 @@ int main(int argc, char **argv)
     g_object_unref(file);
     g_free(path);
     xmp_terminate();
-    g_print("PASS: ten formats, native PNG/JPEG rotate/save/reopen, corrupt input\n");
+    g_print("PASS: ten formats, native PNG/JPEG rotate/save/reopen, animation and pending-timer teardown, corrupt input\n");
 }

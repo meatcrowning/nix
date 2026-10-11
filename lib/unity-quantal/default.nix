@@ -5,7 +5,7 @@
 , dbus, dconf, gvfs, cinnamon, cinnamon-session, cinnamon-screensaver, cinnamon-settings-daemon, polkit_gnome
 , networkmanagerapplet, xdg-terminal-exec, xdg-utils, coreutils, bash, glib
 , symlinkJoin, findutils, gnugrep, gnused, xorg-server, xprop, xwininfo, xdpyinfo, xdotool
-, xmessage, xrdb, weston, xwayland, mesa-demos, xinput, xrandr, setxkbmap, librsvg, imagemagick
+, xmessage, xrdb, tab-window-manager, weston, xwayland, mesa-demos, xinput, xrandr, setxkbmap, librsvg, imagemagick
 , pavucontrol, system-config-printer
 , cinnamon-desktop
 , xpra, zenity, closureInfo, writeText
@@ -35,7 +35,7 @@ let
       --artwork "$out/usr/share/gnome-control-center/ui/UbuntuLogo.png" \
       --panel "$out/usr/lib/control-center-1/panels/libbackground.so"
   '';
-  viewer = callPackage ./viewer.nix { inherit runtime; };
+  viewer = callPackage ./viewer.nix { inherit runtime legacyGtkModule; };
   # Ambiance Dark for current GTK 3 applications, whose CSS the 12.10 theme
   # predates: Ubuntu 18.04's port of Ambiance, under the same palette and name.
   nativeThemeDeb = fetchurl {
@@ -185,7 +185,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      mirror.py notifications.py sounds.py tweaks.json "$out/libexec/unity-quantal/"
+      mirror.py notifications.py sounds.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     mkdir -p "$out/lib/gtk-3.0/modules"
     ln -s ${libcanberra-gtk3}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so \
@@ -197,6 +197,7 @@ stdenvNoCC.mkDerivation {
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers musicLibrary;
+      viewer = "${viewer}/bin/unity-image-viewer";
       scrollGrab = "${scrollGrab}/lib/scroll-grab.so";
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
       mediaSchemas = "${mediaSchemas}";
@@ -328,7 +329,11 @@ stdenvNoCC.mkDerivation {
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"
     EOF
-    ln -s ${viewer}/bin/unity-image-viewer "$out/bin/unity-quantal-viewer"
+    cat > "$out/bin/unity-quantal-viewer" <<EOF
+    #!${bash}/bin/bash
+    exec ${python3}/bin/python3 "$out/libexec/unity-quantal/viewer-launch.py" "\$@"
+    EOF
+    chmod +x "$out/bin/unity-quantal-viewer"
     chmod +x "$out/bin/unity-quantal-isolated"
     python "$out/libexec/unity-quantal/isolated.py" install "$out"
     # ly reads its sessions directory only at startup; a stable Exec keeps a
@@ -347,7 +352,7 @@ stdenvNoCC.mkDerivation {
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
-        xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr setxkbmap xrdb
+        xwininfo xdpyinfo xdotool xmessage tab-window-manager glib dbus weston xwayland mesa-demos imagemagick xrandr setxkbmap xrdb
         ffmpeg-headless pulseaudio ];
     };
     providedSessions = [ "unity-quantal" ];

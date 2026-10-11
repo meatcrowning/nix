@@ -216,6 +216,10 @@ def prepare(directory, environment):
                      + "SHELL=" + shlex.quote(state["host_shell"]) + " "
                      + shlex.quote(state["host_shell"]) + " \"$@\"\n")
     shell.chmod(0o755)
+    viewer = directory / "bridge-bin/eog"
+    viewer.write_text("#!/bin/sh\nexec /usr/local/bin/unity-host-launch -- "
+                      + shlex.quote(str(PACKAGE / "bin/unity-quantal-viewer")) + ' "$@"\n')
+    viewer.chmod(0o755)
 
     for file in (ROOT / "usr/share/dbus-1/services").glob("*.service"):
         parser = desktop_parser(file)
@@ -288,6 +292,9 @@ def prepare(directory, environment):
 
 
 def runtime(arguments):
+    if arguments and arguments[0] in ("eog", "/usr/bin/eog"):
+        executable = str(PACKAGE / "bin/unity-quantal-viewer")
+        os.execv(executable, [executable, *arguments[1:]])
     directory = Path(os.environ["UNITY_QUANTAL_SESSION_DIR"])
     state = json.loads((directory / "state.json").read_text())
     user_home = str(Path.home())
@@ -311,6 +318,8 @@ def runtime(arguments):
                 "--ro-bind", "/tmp/.X11-unix", "/tmp/.X11-unix",
                 "--ro-bind", str(directory / "applications"), "/usr/share/applications",
                 "--ro-bind", str(directory / "bridge-bin"), "/usr/local/bin"]
+    if (directory / "bridge-bin/eog").is_file():
+        command += ["--ro-bind", str(directory / "bridge-bin/eog"), "/usr/bin/eog"]
     for source, target in [
         ("timezone", "/etc/timezone"),
         ("info.ui", "/usr/share/gnome-control-center/ui/info.ui"),

@@ -4,11 +4,13 @@
 , libXcursor, libXcomposite, libXdamage, libXinerama, libepoxy, libxkbfile, dbus
 , libexif, lcms2, exempi, libjpeg, librsvg, libxml2, zlib
 , gobject-introspection, shared-mime-info, gsettings-desktop-schemas
-, python3, runtime, makeWrapper, callPackage, dconf, libcanberra, cups
+, python3, runtime, legacyGtkModule, makeWrapper, callPackage, dconf, libcanberra, libvorbis, libtool, cups
 }:
 let
-  gdk = callPackage ./viewer-gdk.nix { };
-  supportLibraries = [ glib gdk-pixbuf atk at-spi2-atk pango cairo fontconfig libcanberra cups libX11 libXext
+  textStack = callPackage ./viewer-text.nix { inherit runtime; };
+  svgBridge = callPackage ./viewer-svg.nix { inherit runtime textStack; };
+  gdk = callPackage ./viewer-gdk.nix { pango = textStack; cairo = textStack; };
+  supportLibraries = [ glib gdk-pixbuf atk at-spi2-atk textStack libcanberra libvorbis libtool cups libX11 libXext
     libXi libXrandr libXrender libXfixes libXcursor libXcomposite libXdamage libXinerama
     libxkbfile dbus gobject-introspection stdenv.cc.cc.lib ];
   ubuntu = name: hash: fetchurl {
@@ -21,7 +23,7 @@ let
     (ubuntu "libp/libpeas/libpeas-dev_1.4.0-2ubuntu3_amd64.deb" "42c419a4c3a388038f37d506dabefab1a19e2c5481295a5e9c55217dc48e0330")
     (ubuntu "libg/libgrip/libgrip-dev_0.3.5-0ubuntu1_amd64.deb" "837b99605f2d791dbc38f657b943e83696cc0237cd858fcd782e146faabe5655")
   ];
-  # Only the historical widget/gesture ABI is retained. Decoder dependencies
+  # The original widgets and text stack are retained. Raster decoder dependencies
   # come from nixpkgs, never from the ISO's general library search directory.
   widgetAbi = runCommand "unity-viewer-widget-abi" {
     nativeBuildInputs = [ libarchive python3 ];
@@ -34,7 +36,7 @@ let
     cp -r deb/usr/include/* "$out/include/"
     cp deb/usr/lib/pkgconfig/*.pc deb/usr/lib/x86_64-linux-gnu/pkgconfig/*.pc "$out/lib/pkgconfig/"
     cp ${runtime}/usr/share/pkgconfig/gnome-icon-theme.pc "$out/lib/pkgconfig/"
-    for name in gtk-3 gnome-desktop-3 peas-1.0 peas-gtk-1.0 grip geis grail frame colord; do
+    for name in canberra-gtk3 gtk-3 gnome-desktop-3 peas-1.0 peas-gtk-1.0 grip geis grail frame colord; do
       original=$(find ${runtime}/usr/lib -name "lib$name.so.*" -type f | head -1)
       test -n "$original"
       cp "$original" "$out/lib/"
@@ -62,6 +64,10 @@ let
       chmod u+w "$target"
       patchelf --set-rpath "$out/lib:${lib.makeLibraryPath supportLibraries}" "$target"
     done
+    mkdir -p "$out/lib/gtk-3.0/modules"
+    cp ${legacyGtkModule}/lib/libcanberra-gtk3-module.so "$out/lib/gtk-3.0/modules/"
+    chmod u+w "$out/lib/gtk-3.0/modules/libcanberra-gtk3-module.so"
+    patchelf --set-rpath "$out/lib:${lib.makeLibraryPath supportLibraries}" "$out/lib/gtk-3.0/modules/libcanberra-gtk3-module.so"
     for name in Gtk Gdk GdkX11 Peas PeasGtk; do
       cp ${runtime}/usr/lib/girepository-1.0/$name-*.typelib "$out/lib/girepository-1.0/"
     done
@@ -73,11 +79,11 @@ let
   };
   resources = runCommand "unity-viewer-resources" {} ''
     mkdir -p "$out/share"
-    for name in icons themes fonts mime sounds; do
+    for name in icons themes fonts mime sounds help; do
       test ! -d ${runtime}/usr/share/$name || ln -s ${runtime}/usr/share/$name "$out/share/$name"
     done
   '';
-  imageLibraries = [ glib gdk-pixbuf libexif lcms2 exempi libjpeg librsvg libxml2 zlib ];
+  imageLibraries = [ glib gdk-pixbuf libexif lcms2 exempi libjpeg svgBridge libxml2 zlib ];
 in
 stdenv.mkDerivation {
   pname = "unity-quantal-viewer";
@@ -87,7 +93,7 @@ stdenv.mkDerivation {
     sha256 = "8f8e43a337a3fb7071c650078f2ef89567b4889527f300d053491e9185dbae6b";
   };
   nativeBuildInputs = [ pkg-config autoreconfHook gnome-common gtk-doc intltool yelp-tools itstool libxslt (python3.withPackages (ps: [ ps.pillow ])) makeWrapper ];
-  buildInputs = imageLibraries ++ [ widgetAbi atk at-spi2-atk pango cairo libX11 libXext
+  buildInputs = imageLibraries ++ [ widgetAbi atk at-spi2-atk textStack libX11 libXext
     libXi libXrandr libXrender libXfixes libXcursor libXcomposite libXdamage libXinerama
     libepoxy libxkbfile dbus gobject-introspection shared-mime-info gsettings-desktop-schemas ];
   postPatch = ''
@@ -112,6 +118,20 @@ stdenv.mkDerivation {
     s = p.read_text().replace('entry->format == EXIF_FORMAT_LONG)', 'entry->format == EXIF_FORMAT_LONG && entry->size >= 4)')
     s = s.replace('entry->format == EXIF_FORMAT_SHORT)', 'entry->format == EXIF_FORMAT_SHORT && entry->size >= 2)')
     s = s.replace('if (entry != NULL) {\n\t\t\tpriv->orientation', 'if (entry != NULL && entry->size >= 2) {\n\t\t\tpriv->orientation')
+    start = s.index('static gboolean\nprivate_timeout (')
+    end = s.index('\n}', start) + 2
+    s = s[:start] + Path('${./viewer-animation.c}').read_text() + s[end:]
+    s = s.replace('priv->anim_iter = gdk_pixbuf_animation_get_iter (priv->anim,NULL);', 'g_object_ref (priv->anim);\n\t\t\tpriv->anim_iter = gdk_pixbuf_animation_get_iter (priv->anim,NULL);')
+    s = s.replace('g_object_ref (priv->anim_iter);', '/* The image owns the iterator. */')
+    s = s.replace('g_timeout_add (gdk_pixbuf_animation_iter_get_delay_time (priv->anim_iter), private_timeout, img);',
+                  'g_timeout_add_full (G_PRIORITY_DEFAULT, MAX (10, gdk_pixbuf_animation_iter_get_delay_time (priv->anim_iter)), private_timeout, g_object_ref (img), g_object_unref);')
+    # The final data_unref may destroy the image; check the invariant first.
+    s = s.replace('g_object_unref (G_OBJECT (img));\n\n\tg_assert (img->priv->data_ref_count <= G_OBJECT (img)->ref_count);',
+                  'g_assert (img->priv->data_ref_count < G_OBJECT (img)->ref_count);\n\tg_object_unref (G_OBJECT (img));')
+    p.write_text(s)
+    p = Path('src/eog-print-preview.c')
+    s = p.read_text().replace('\tcreate_surface (preview);\n\n\treturn FALSE;',
+        '\tif (gtk_widget_get_realized (GTK_WIDGET (preview)))\n\t\tcreate_surface (preview);\n\n\treturn FALSE;')
     p.write_text(s)
     PY2
     cp ${libjpeg.src}/src/{transupp.c,transupp.h,jpegint.h,jpegapicomp.h,jinclude.h} jpegutils/
@@ -121,10 +141,13 @@ stdenv.mkDerivation {
       --replace-fail 'g_try_malloc (w * 3 * sizeof (guchar))' 'g_try_malloc_n (w, 3 * sizeof (guchar))' \
       --replace-fail 'i*rowstride + j*(rowstride/w)' '(gsize)i*rowstride + (gsize)j*gdk_pixbuf_get_n_channels (pixbuf)'
     substituteInPlace src/eog-transform.c \
+      --replace-fail '<cairo/cairo.h>' '<cairo.h>' \
       --replace-fail 'sy * src_rowstride' '(gsize) sy * src_rowstride' \
       --replace-fail 'y * dest_rowstride' '(gsize) y * dest_rowstride'
     substituteInPlace src/eog-print-preview.c \
-      --replace-fail 'g_malloc (height * cairo_stride)' 'g_malloc_n (height, cairo_stride)'
+      --replace-fail 'g_malloc (height * cairo_stride)' 'g_malloc_n (height, cairo_stride)' \
+      --replace-fail 'g_idle_add ((GSourceFunc) create_surface_when_idle, preview);' \
+        'g_idle_add_full (G_PRIORITY_DEFAULT_IDLE, (GSourceFunc) create_surface_when_idle, g_object_ref (preview), g_object_unref);'
   '';
   configureFlags = [ "--disable-introspection" "--disable-gtk-doc" "--disable-maintainer-mode" "--enable-compile-warnings=no" ];
   env.NIX_CFLAGS_COMPILE = "-Wno-error=implicit-function-declaration -Wno-error=incompatible-pointer-types";
@@ -154,6 +177,7 @@ stdenv.mkDerivation {
     for ext, fmt in [('png','PNG'), ('jpeg','JPEG'), ('bmp','BMP'), ('tiff','TIFF'),
                      ('ico','ICO'), ('gif','GIF'), ('pnm','PPM'), ('tga','TGA')]:
         image.save('fixtures/input.' + ext, format=fmt, sizes=[(32,16)], bitmap_format='bmp')
+    image.save('fixtures/animation.gif', save_all=True, append_images=[Image.new('RGB', (32,16), (0,255,0))], duration=120, loop=0)
     Path('fixtures/input.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="16"><rect width="32" height="16" fill="red"/></svg>')
     Path('fixtures/input.xpm').write_text('/* XPM */\nstatic char *x[] = {"32 16 1 1", "r c red",' + ','.join(['"' + 'r'*32 + '"']*16) + '};')
     FIXTURES
@@ -163,7 +187,7 @@ stdenv.mkDerivation {
     >$(LINK) -DHAVE_CONFIG_H -I. -I.. $(EOG_CFLAGS) ${./viewer-image-test.c} $(eog_LDADD) $(LIBS)
     MAKE
     make -C src viewer-image-test
-    GDK_PIXBUF_MODULE_FILE=${librsvg}/${gdk-pixbuf.binaryDir}/loaders.cache src/viewer-image-test "$PWD/fixtures"
+    GDK_PIXBUF_MODULE_FILE=${svgBridge}/lib/loaders.cache src/viewer-image-test "$PWD/fixtures"
     runHook postCheck
   '';
   postInstall = ''
@@ -191,14 +215,17 @@ stdenv.mkDerivation {
     echo 'user-db:unity_quantal' > "$out/libexec/dconf-profile"
     mv "$out/bin/eog" "$out/libexec/eog"
     makeWrapper "$out/libexec/eog" "$out/bin/unity-image-viewer" \
-      --run 'for key in LD_LIBRARY_PATH LD_PRELOAD GDK_PIXBUF_MODULEDIR GDK_PIXBUF_MODULE_FILE GTK_PATH GTK_DATA_PREFIX GTK_MODULES GTK_IM_MODULE GI_TYPELIB_PATH GSETTINGS_SCHEMA_DIR GIO_EXTRA_MODULES GIO_MODULE_DIR GIO_USE_VFS DCONF_PROFILE UBUNTU_MENUPROXY XDG_DATA_DIRS GSETTINGS_BACKEND GTK_THEME; do if [[ -v "$key" ]]; then export "_UNITY_VIEWER_HOST_$key=set:''${!key}"; else export "_UNITY_VIEWER_HOST_$key=unset"; fi; done' \
+      --run 'for key in LD_LIBRARY_PATH LD_PRELOAD GDK_PIXBUF_MODULEDIR GDK_PIXBUF_MODULE_FILE GTK_PATH GTK_DATA_PREFIX GTK_MODULES GTK_IM_MODULE GI_TYPELIB_PATH GSETTINGS_SCHEMA_DIR GIO_EXTRA_MODULES GIO_MODULE_DIR GIO_USE_VFS DCONF_PROFILE UBUNTU_MENUPROXY XDG_DATA_DIRS GSETTINGS_BACKEND GTK_THEME PANGO_RC_FILE FONTCONFIG_FILE FONTCONFIG_PATH; do if [[ -v "$key" ]]; then export "_UNITY_VIEWER_HOST_$key=set:''${!key}"; else export "_UNITY_VIEWER_HOST_$key=unset"; fi; done' \
       --unset LD_LIBRARY_PATH --unset GDK_PIXBUF_MODULEDIR \
       --unset LD_PRELOAD \
-      --set GDK_PIXBUF_MODULE_FILE "${librsvg}/${gdk-pixbuf.binaryDir}/loaders.cache" \
+      --set GDK_PIXBUF_MODULE_FILE "${svgBridge}/lib/loaders.cache" \
+      --set FONTCONFIG_PATH "${runtime}/etc/fonts" \
+      --set FONTCONFIG_FILE "${textStack}/etc/fonts.conf" \
+      --set PANGO_RC_FILE "${textStack}/etc/pango/pangorc" \
       --set GTK_PATH "${widgetAbi}/lib/gtk-3.0" \
       --set GTK_DATA_PREFIX "${runtime}/usr" \
-      --set GTK_MODULES "" --set GTK_IM_MODULE gtk-im-context-simple \
-      --set GI_TYPELIB_PATH "$out/lib/eog/girepository-1.0:${widgetAbi}/lib/girepository-1.0:${lib.makeSearchPath "lib/girepository-1.0" (map lib.getLib [ glib gdk-pixbuf pango harfbuzz atk gobject-introspection ])}" \
+      --set GTK_MODULES "${widgetAbi}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so" --set GTK_IM_MODULE gtk-im-context-simple \
+      --set GI_TYPELIB_PATH "$out/lib/eog/girepository-1.0:${widgetAbi}/lib/girepository-1.0:${lib.makeSearchPath "lib/girepository-1.0" (map lib.getLib [ glib gdk-pixbuf textStack atk gobject-introspection ])}" \
       --set GSETTINGS_SCHEMA_DIR "$out/libexec/schemas" \
       --set GIO_EXTRA_MODULES "${dconf.lib}/lib/gio/modules" \
       --set GIO_MODULE_DIR "${dconf.lib}/lib/gio/modules" \
@@ -209,7 +236,7 @@ stdenv.mkDerivation {
       --run 'export GTK_THEME="''${GTK_THEME:-Ambiance-Dark}"'
     ln -s unity-image-viewer "$out/bin/eog"
   '';
-  passthru = { inherit widgetAbi imageLibraries; };
+  passthru = { inherit widgetAbi imageLibraries textStack svgBridge; };
   meta = {
     description = "Ubuntu 12.10 Image Viewer with maintained image processing";
     platforms = [ "x86_64-linux" ];

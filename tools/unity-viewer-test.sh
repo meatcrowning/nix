@@ -40,6 +40,16 @@ for _ in {1..100}; do
   test -S /tmp/.X11-unix/X93 && break
   sleep .05
 done
+cat > /work/twmrc <<'WM'
+NoGrabServer
+RandomPlacement
+NoTitle
+BorderWidth 0
+WM
+twm -f /work/twmrc >/work/wm.log 2>&1 &
+wm_pid=$!
+sleep .2
+kill -0 "$wm_pid"
 cat > /work/bus.conf <<'BUS'
 <busconfig><type>session</type><listen>unix:tmpdir=/tmp</listen><auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/><allow receive_sender="*"/><allow own="*"/></policy></busconfig>
 BUS
@@ -65,7 +75,10 @@ echo "Viewer fixture: $run"
   --clearenv --setenv HOME /home/test --setenv USER test --setenv LOGNAME test \
   --setenv PATH "$test_tools/bin" --setenv QT_QPA_PLATFORM offscreen \
   --setenv XDG_RUNTIME_DIR /run/user/1000 --setenv XDG_CURRENT_DESKTOP Unity \
+  --setenv VIEWER_COMPARE_ISOLATED "${VIEWER_COMPARE_ISOLATED:-0}" \
+  --setenv VIEWER_GDB "${VIEWER_GDB:-}" \
   --setenv VIEWER_BENCHMARK "${VIEWER_BENCHMARK:-0}" \
   --setenv UNITY_PACKAGE "$package" --setenv VIEWER_PACKAGE "$viewer" \
+  --setenv CANBERRA_DRIVER null \
   --setenv TEST_PYTHON "$python" --setenv NO_AT_BRIDGE 1 --setenv LANG C.UTF-8 \
   --chdir /work "$test_tools/bin/bash" /work/inside.sh

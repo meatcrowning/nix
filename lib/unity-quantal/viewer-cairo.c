@@ -1,6 +1,6 @@
 /* The GTK 3.6 implementation multiplies signed dimensions before allocating
- * its surface (CVE-2013-7447). Let maintained Cairo allocate and validate the
- * surface instead. Keep the original premultiplication and channel ordering.
+ * its surface. Validate geometry before asking the historical Cairo allocator
+ * for a surface. Keep the original premultiplication and channel ordering.
  * Rebuilt into GDK so internal calls cannot bypass this implementation.
  */
 #include <cairo.h>
@@ -15,6 +15,13 @@ void gdk_cairo_set_source_pixbuf(cairo_t *cr, const GdkPixbuf *pixbuf,
     int height = gdk_pixbuf_get_height(pixbuf);
     int channels = gdk_pixbuf_get_n_channels(pixbuf);
     g_return_if_fail(channels == 3 || channels == 4);
+    if (width <= 0 || height <= 0 || width > 32767 || height > 32767 ||
+        (uint64_t)width * height > 64 * 1024 * 1024) {
+        cairo_surface_t *invalid = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, -1, -1);
+        cairo_set_source_surface(cr, invalid, 0, 0);
+        cairo_surface_destroy(invalid);
+        return;
+    }
     cairo_surface_t *surface = cairo_image_surface_create(
         channels == 4 ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24, width, height);
     if (cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS) {

@@ -29,13 +29,20 @@ MIMES = {
               "text/x-c++src", "text/x-c++hdr", "text/x-chdr", "text/x-csrc", "text/x-shellscript",
               "application/json", "application/x-shellscript", "text/x-qml", "text/x-diff",
               "text/x-patch", "text/csv", "application/xml", "text/xml"],
-    "eog": ["image/png", "image/jpeg", "image/gif", "image/bmp", "image/tiff", "image/x-icon"],
+    "eog": ["image/png", "image/jpeg", "image/gif", "image/bmp", "image/tiff", "image/x-icon",
+            "image/svg+xml", "image/svg+xml-compressed", "image/x-pcx", "image/x-wmf", "image/wmf",
+            "image/vnd.wap.wbmp", "image/x-sun-raster", "image/x-cmu-raster", "application/x-navi-animation",
+            "image/jp2", "image/jpeg2000", "image/jpx",
+            "image/x-portable-anymap", "image/x-portable-bitmap", "image/x-portable-graymap",
+            "image/x-portable-pixmap", "image/x-xbitmap", "image/x-xpixmap", "image/x-tga", "image/icns"],
     "file-roller": ["application/zip", "application/x-tar", "application/x-compressed-tar",
                     "application/x-bzip-compressed-tar", "application/x-xz-compressed-tar"],
     "gcalctool": [],
     "rhythmbox": [],
 }
-IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".ico", ".svg"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".ico", ".svg", ".svgz",
+                  ".pcx", ".wmf", ".apm", ".wbmp", ".ras", ".sun", ".ani", ".jp2", ".jpc", ".j2k", ".jpf", ".jpx",
+                  ".icns", ".pnm", ".pbm", ".pgm", ".ppm", ".qtif", ".xpm", ".tga", ".xbm"}
 LIMIT = 512 * 1024 * 1024
 FEATURES = [
     "--clipboard=no", "--notifications=no", "--system-tray=no", "--bell=no",
@@ -63,7 +70,8 @@ def install_desktops(package):
         entry.optionxform = str
         entry["Desktop Entry"] = {
             "Type": "Application", "Name": label + " (Ubuntu 12.10)", "Icon": icon,
-            "Exec": str(package / "bin/unity-quantal-isolated") + " " + app + ("" if app in MEDIA else " -- %F"),
+            "Exec": (str(package / "bin/unity-quantal-viewer") + " -- %F") if app == "eog" else
+                    str(package / "bin/unity-quantal-isolated") + " " + app + ("" if app in MEDIA else " -- %F"),
             "OnlyShowIn": "Unity;", "Terminal": "false", "StartupNotify": "false",
             "StartupWMClass": app, "Categories": "AudioVideo;Audio;Player;" if app in MEDIA else "Utility;",
             "MimeType": ";".join(MIMES[app]) + ";",
@@ -433,7 +441,7 @@ def media(app):
         shutil.rmtree(run)
 
 
-def main(app, values):
+def main(app, values, *, viewer_flags=()):
     if os.environ.get("XDG_CURRENT_DESKTOP") != "Unity":
         raise RuntimeError("These application defaults are for the Unity session")
     if app in MEDIA:
@@ -481,7 +489,7 @@ def main(app, values):
         if dialog("--info", "--title=" + APPS[app], "--text=" + messages[app]) is not None:
             notice.touch(mode=0o600)
     try:
-        run_session(run, app, argv)
+        run_session(run, app, [*viewer_flags, *argv])
     except Exception as error:
         raise RuntimeError(str(error) + "\nPrivate documents are retained in " + str(run / "output")) from error
     retained = False
