@@ -10,6 +10,8 @@
 		# command, got exit 127, and spent nine rounds inventing reasons.
 		flac
 		imagemagick
+		# gs — ImageMagick shells out to it for EPS/PS/.ai; without it they fail.
+		ghostscript
 		picard
 		rsgain
 		chromaprint
