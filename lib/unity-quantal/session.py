@@ -40,7 +40,6 @@ DISPLAY_COMMAND = stable_command("unity-quantal-display")
 # Session services a refresh replaces: bus name -> command.
 SERVICES = {
     "org.unity_quantal.Display": [DISPLAY_COMMAND, "indicator"],
-    "org.unity_quantal.CpuFreq": [stable_command("unity-quantal-cpufreq")],
     "org.unity_quantal.Weather": [stable_command("unity-quantal-weather")],
     "org.unity_quantal.SettingsMirror": [stable_command("unity-quantal-settings-mirror")],
     "org.unity_quantal.Sounds": [stable_command("unity-quantal-sounds")],
@@ -265,7 +264,6 @@ def prepare(directory, environment):
         "unity-quantal-media-keys": (CONFIG["mediaKeys"], "Application"),
         "unity-quantal-power": (CONFIG["power"], "Application"),
         "unity-quantal-display": (DISPLAY_COMMAND + " indicator", "Application"),
-        "unity-quantal-cpufreq": (SERVICES["org.unity_quantal.CpuFreq"][0], "Application"),
         "unity-quantal-weather": (SERVICES["org.unity_quantal.Weather"][0], "Application"),
         "unity-quantal-settings-mirror": (SERVICES["org.unity_quantal.SettingsMirror"][0], "Application"),
         "unity-quantal-sounds": (SERVICES["org.unity_quantal.Sounds"][0], "Application"),
@@ -275,6 +273,10 @@ def prepare(directory, environment):
         "unity-quantal-temperature": (SERVICES["org.unity_quantal.Temperature"][0], "Application"),
         "unity-quantal-notifications": (SERVICES["org.unity_quantal.NotificationIndicator"][0], "Application"),
     }
+    # Retire the separate frequency applet; its controls live in System Load.
+    for location in ('autostart', 'native-data/applications'):
+        retired = directory / location / 'unity-quantal-cpufreq.desktop'
+        retired.unlink(missing_ok=True)
     for name, (command, phase) in components.items():
         text = (f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\n"
                 f"X-GNOME-Autostart-Phase={phase}\nX-GNOME-AutoRestart=true\n"
@@ -704,6 +706,7 @@ def refresh():
         services.append("org.gnome.Nautilus")
     else:
         print("Files windows are open; their desktop view will refresh when Files is next reopened")
+    stop("org.unity_quantal.CpuFreq")
     for name in services:
         stop(name)
         activated = bus("StartServiceByName", name, "0")

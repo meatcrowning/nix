@@ -1,10 +1,8 @@
 #!/usr/bin/python2.7
-"""CPU frequency indicator for the Unity session.
+"""Frequency readings and power profiles for Unity's CPU load menu.
 
-indicator-cpufreq's panel meter, over current hardware: amd-pstate offers no
-fixed frequencies or userspace governor to pick, so the menu switches
-power-profiles-daemon's profiles instead (active local sessions need no
-password). Runs on the original runtime's Python 2.7, GTK 3.6 and AppIndicator.
+Current amd-pstate hardware offers no fixed frequencies to pick, so the menu
+switches power-profiles-daemon profiles. Runs on the original GTK runtime.
 """
 from __future__ import division, print_function
 
@@ -14,8 +12,6 @@ import sys
 
 from gi.repository import Gio, GLib, GObject, Gtk
 
-# The original indicator-cpufreq meter icons, passed by the session command.
-ICONS = sys.argv[1] if len(sys.argv) > 1 else ""
 PROFILES = [("performance", "Performance"), ("balanced", "Balanced"), ("power-saver", "Power Saver")]
 INTERVAL = 2
 
@@ -43,23 +39,10 @@ def ghz(khz):
     return "%.2f GHz" % (khz / 1e6)
 
 
-class Indicator(Gtk.Application):
-    def __init__(self):
-        Gtk.Application.__init__(self, application_id="org.unity_quantal.CpuFreq",
-                                 flags=Gio.ApplicationFlags.FLAGS_NONE)
-        self.started = False
-
-    def do_activate(self):
-        if self.started:
-            return
-        self.started = True
-        from gi.repository import AppIndicator3
-        self.hold()
-        self.indicator = AppIndicator3.Indicator.new_with_path(
-            "unity-quantal-cpufreq", "indicator-cpufreq",
-            AppIndicator3.IndicatorCategory.HARDWARE, ICONS)
-        self.indicator.set_title("CPU Frequency")
-        menu = Gtk.Menu()
+class PowerMenu:
+    """Frequency readings and power-profile controls shared with the CPU meter."""
+    def __init__(self, menu):
+        menu.append(Gtk.SeparatorMenuItem())
         self.average = Gtk.MenuItem("")
         self.peak = Gtk.MenuItem("")
         for item in (self.average, self.peak):
@@ -78,8 +61,6 @@ class Indicator(Gtk.Application):
         menu.append(self.degraded)
         menu.show_all()
         self.updating = False
-        self.indicator.set_menu(menu)
-        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
 
         self.daemon = None
         try:
@@ -99,11 +80,6 @@ class Indicator(Gtk.Application):
         average, peak, maximum = sample()
         self.average.set_label("Average: " + (ghz(average) if average else "unknown"))
         self.peak.set_label("Fastest core: " + (ghz(peak) if peak else "unknown"))
-        if average and maximum:
-            level = min(100, max(25, -(-average * 4 // maximum) * 25))
-            self.indicator.set_icon("indicator-cpufreq-%d" % level)
-        else:
-            self.indicator.set_icon("indicator-cpufreq")
         return True
 
     def property(self, name):
@@ -136,6 +112,22 @@ class Indicator(Gtk.Application):
                 print("cpufreq: cannot select " + name + ": " + str(error), file=sys.stderr)
         # The daemon's PropertiesChanged settles the radio; undo a refused pick.
         self.show_profile()
+
+
+class Indicator(Gtk.Application):
+    def __init__(self):
+        Gtk.Application.__init__(self, application_id="org.unity_quantal.CpuFreq",
+                                 flags=Gio.ApplicationFlags.FLAGS_NONE)
+        self.started = False
+
+    def do_activate(self):
+        if self.started:
+            return
+        self.started = True
+        # An existing session manager may restart its retired autostart
+        # command. Keep that compatibility process idle without a panel icon;
+        # new sessions do not launch it.
+        self.hold()
 
 
 if __name__ == "__main__":

@@ -426,7 +426,7 @@ for _ in {1..50}; do
 done
 test -n "$after" && test "$after" != "$before"
 echo 'PASS: unity-quantal-refresh replaces the live display service'
-# CPU frequency and weather indicators. The test has no network: the fetcher,
+# CPU load and weather indicators. The test has no network: the fetcher,
 # run on the host side through the launch socket, reports the service down;
 # a fixture report then fills the panel entry.
 indicators() { gdbus call --session --dest com.canonical.indicator.application \
@@ -434,10 +434,10 @@ indicators() { gdbus call --session --dest com.canonical.indicator.application \
   --method com.canonical.indicator.application.service.GetApplications; }
 for _ in {1..50}; do
   indicators > /work/indicators.txt
-  grep -q "indicator-cpufreq-[0-9]*'" /work/indicators.txt && grep -q unity-quantal-weather /work/indicators.txt && break
+  grep -q "unity-quantal-load'" /work/indicators.txt && grep -q unity-quantal-weather /work/indicators.txt && break
   sleep 0.1
 done
-grep -o "'indicator-cpufreq-[0-9]*'" /work/indicators.txt
+grep -o "'unity-quantal-load'" /work/indicators.txt
 weather_settings=/home/unity-test/.config/unity-quantal/weather.json
 weather_report=/home/unity-test/.cache/unity-quantal/weather.json
 printf '{"location": "Testville", "units": "metric"}' > "$weather_settings.tmp"
@@ -461,7 +461,7 @@ for _ in {1..50}; do
   sleep 0.1
 done
 grep -o "'weather-showers-scattered'.*'23°'" /work/indicators.txt
-echo 'PASS: CPU frequency meter and weather indicator, fetch through the host launcher'
+echo 'PASS: CPU load meter and weather indicator, fetch through the host launcher'
 # Quantal's Nautilus extensions load into the original Files.
 gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
   --method org.freedesktop.DBus.StartServiceByName org.gnome.Nautilus 0
@@ -487,20 +487,20 @@ test -f "$session_dir/applications/unity-original-nact.desktop"
 echo 'PASS: Nautilus Actions, Image Converter and Compare load in original Files'
 indicator_owner() { gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
   --method org.freedesktop.DBus.GetConnectionUnixProcessID "$1" 2>/dev/null || true; }
-cpufreq_before=$(indicator_owner org.unity_quantal.CpuFreq)
+load_before=$(indicator_owner org.unity_quantal.Load)
 weather_before=$(indicator_owner org.unity_quantal.Weather)
-test -n "$cpufreq_before" && test -n "$weather_before"
+test -n "$load_before" && test -n "$weather_before"
 "$UNITY_PACKAGE/bin/unity-quantal-refresh" >/work/indicator-refresh.log 2>&1
 for _ in {1..50}; do
-  cpufreq_after=$(indicator_owner org.unity_quantal.CpuFreq)
+  load_after=$(indicator_owner org.unity_quantal.Load)
   weather_after=$(indicator_owner org.unity_quantal.Weather)
-  [ -n "$cpufreq_after" ] && [ "$cpufreq_after" != "$cpufreq_before" ] &&
+  [ -n "$load_after" ] && [ "$load_after" != "$load_before" ] &&
     [ -n "$weather_after" ] && [ "$weather_after" != "$weather_before" ] && break
   sleep 0.1
 done
-test -n "$cpufreq_after" && test "$cpufreq_after" != "$cpufreq_before"
+test -n "$load_after" && test "$load_after" != "$load_before"
 test -n "$weather_after" && test "$weather_after" != "$weather_before"
-echo 'PASS: unity-quantal-refresh replaces the CPU frequency and weather indicators'
+echo 'PASS: unity-quantal-refresh replaces the CPU load and weather indicators'
 # The session terminal is GNOME Terminal 3.6's window over the current VTE.
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/x-terminal-emulator -e "$UNITY_TEST_TOOLS/bin/bash" \
   -c 'printf "\e[40m  \e[0m\n"; sleep 30' >/work/terminal-session.log 2>&1 &

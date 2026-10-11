@@ -117,7 +117,8 @@ class Indicator:
             self.indicator.set_ordering_index(100002 if kind == 'load' else 100000)
         self.menu = Gtk.Menu()
         self.indicator.set_menu(self.menu)
-        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        self.indicator.set_status(AppIndicator3.IndicatorStatus.PASSIVE if kind == 'notifications'
+                                  else AppIndicator3.IndicatorStatus.ACTIVE)
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         Gio.bus_own_name_on_connection(self.bus, 'org.unity_quantal.' +
             {'load': 'Load', 'gpu': 'Gpu', 'temperature': 'Temperature', 'notifications': 'NotificationIndicator'}[kind],
@@ -129,6 +130,9 @@ class Indicator:
         self.samples = []
         self.serial = 0
         self.update()
+        if kind == 'load':
+            from cpufreq import PowerMenu
+            self.power = PowerMenu(self.menu)
         GLib.timeout_add_seconds(2, self.update)
 
     def replace(self):
@@ -140,6 +144,8 @@ class Indicator:
         # Preserve menu item IDs while readings change, including when the
         # user has the menu open. Rebuild only if sensor topology changes.
         children = self.menu.get_children()
+        if self.kind == 'load' and hasattr(self, 'power'):
+            children = children[:8]
         if len(children) != len(labels):
             self.replace()
             for label in labels:
@@ -211,6 +217,8 @@ class Indicator:
                 entries = json.loads(text) if text else []
             except ValueError:
                 entries = []
+            self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE if entries
+                                      else AppIndicator3.IndicatorStatus.PASSIVE)
             self.indicator.set_label(str(len(entries)) if entries else '', '30')
             self.replace()
             if not entries:
@@ -230,6 +238,8 @@ class Indicator:
             clear.set_sensitive(bool(entries))
             self.menu.append(clear)
         self.menu.show_all()
+        if self.kind == 'load' and hasattr(self, 'power'):
+            self.power.show_profile()
         return True
 
     def graph(self, cpu, memory):

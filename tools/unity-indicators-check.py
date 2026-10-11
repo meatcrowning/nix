@@ -137,8 +137,15 @@ for name in ['org.unity_quantal.Gpu', 'org.unity_quantal.Load', 'org.unity_quant
         'org.freedesktop.DBus.NameHasOwner', name)[0], name)
 panel = call('com.canonical.Unity.Panel.Service', '/com/canonical/Unity/Panel/Service',
     'com.canonical.Unity.Panel.Service.Sync')[0]
-for name in ['unity-quantal-gpu', 'unity-quantal-load', 'unity-quantal-temperature', 'unity-quantal-notifications']:
+for name in ['unity-quantal-gpu', 'unity-quantal-load', 'unity-quantal-temperature']:
     assert any(row[2] == name and row[8] and row[9] for row in panel), (name, panel)
+
+def notification_visible():
+    rows = call('com.canonical.Unity.Panel.Service', '/com/canonical/Unity/Panel/Service',
+                'com.canonical.Unity.Panel.Service.Sync')[0]
+    return any(row[2] == 'unity-quantal-notifications' and row[8] and row[9] for row in rows)
+assert not notification_visible(), 'empty notification history must be hidden'
+assert not Path(os.environ['UNITY_QUANTAL_SESSION_DIR'], 'autostart/unity-quantal-cpufreq.desktop').exists()
 
 applications = call('com.canonical.indicator.application', '/com/canonical/indicator/application/service',
                     'com.canonical.indicator.application.service.GetApplications')[0]
@@ -154,6 +161,41 @@ Path.home().joinpath('gpu-reading').write_text('Test GPU, 81, 4096, 8192, 52\n')
 wait_for(lambda: 'GPU: 81%' in gpu_menu() and 'VRAM: 4.0 / 8.0 GiB' in gpu_menu(), 'GPU telemetry update')
 icons = list(Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))).rglob('gpu-*.svg'))
 assert icons and 'stroke-dasharray="1 2"' in icons[-1].read_text(), icons
+assert not any(row[8] == 'unity-quantal-cpufreq' for row in applications), applications
+# This is the harness's private system bus; profile changes cannot reach top.
+profile_bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+profile_values = {'ActiveProfile': GLib.Variant('s', 'balanced'),
+    'Profiles': GLib.Variant('aa{sv}', [{'Profile': GLib.Variant('s', name)}
+        for name in ('performance', 'balanced', 'power-saver')]),
+    'PerformanceDegraded': GLib.Variant('s', '')}
+profile_info = Gio.DBusNodeInfo.new_for_xml('<node><interface name="net.hadess.PowerProfiles">'
+    '<property name="ActiveProfile" type="s" access="readwrite"/>'
+    '<property name="Profiles" type="aa{sv}" access="read"/>'
+    '<property name="PerformanceDegraded" type="s" access="read"/>'
+    '</interface></node>').interfaces[0]
+def set_profile(c, sender, path, interface, name, value):
+    profile_values[name] = value
+    c.emit_signal(None, path, 'org.freedesktop.DBus.Properties', 'PropertiesChanged',
+        GLib.Variant('(sa{sv}as)', (interface, {name: value}, [])))
+    return True
+profile_registration = profile_bus.register_object('/net/hadess/PowerProfiles', profile_info, None,
+    lambda c, s, p, i, name: profile_values[name], set_profile)
+profile_owner = Gio.bus_own_name_on_connection(profile_bus, 'net.hadess.PowerProfiles',
+    Gio.BusNameOwnerFlags.NONE, None, None)
+def cpu_layout():
+    return call(cpu[2], cpu[3], 'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]')[1][2]
+def selected(label):
+    return any(props.get('label') == label and props.get('toggle-state') == 1
+               and props.get('enabled', True) for _, props, _ in cpu_layout())
+wait_for(lambda: selected('Balanced'), 'profile daemon discovered by combined CPU menu')
+performance = next(id for id, props, _ in cpu_layout() if props.get('label') == 'Performance')
+call(cpu[2], cpu[3], 'com.canonical.dbusmenu.Event', str(performance), 'clicked', '<int32 0>', '0')
+wait_for(lambda: profile_values['ActiveProfile'].unpack() == 'performance' and selected('Performance'),
+         'combined CPU menu changes the private daemon profile')
+cpu_menu = str(cpu_layout())
+for label in ['Average:', 'Fastest core:', 'Performance', 'Balanced', 'Power Saver']:
+    assert label in cpu_menu, (label, cpu_menu)
+
 def menu_ids(row):
     layout = call(row[2], row[3], 'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]')
     return [item[0] for item in layout[1][2]]
@@ -171,9 +213,11 @@ notification_id = call('org.freedesktop.Notifications', '/org/freedesktop/Notifi
 wait_for(lambda: history.exists() and any(e['id'] == notification_id for e in json.loads(history.read_text())), 'notification recording')
 assert history.stat().st_mode & 0o777 == 0o600
 assert json.loads(history.read_text())[-1]['body'] == 'Test body'
+wait_for(notification_visible, 'nonempty notification history appears')
 call('org.freedesktop.Notifications', '/org/freedesktop/Notifications', 'org.freedesktop.Notifications.Notify',
     'Indicator probe', '0', '', 'Transient probe', '', '[]', "{'transient': <true>, 'suppress-sound': <true>}", '1000')
 assert not any(e['summary'] == 'Transient probe' for e in json.loads(history.read_text()))
 call('org.freedesktop.Notifications', '/org/unity_quantal/NotificationHistory', 'org.unity_quantal.NotificationHistory.Clear')
 assert json.loads(history.read_text()) == []
+wait_for(lambda: not notification_visible(), 'clearing notification history hides icon')
 print('PASS: CPU/GPU order, GPU readings and graph, all panel entries, stable meter menus; private session history, transient exclusion and clear', flush=True)
