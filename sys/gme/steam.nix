@@ -3,6 +3,15 @@
 {
   programs.steam = {
     enable = true;
+    package = pkgs.steam.override {
+      buildFHSEnv = args: pkgs.buildFHSEnv (args // {
+        extraBuildCommands = (args.extraBuildCommands or "") + ''
+          # Closure dependencies can bring Unity's read-only Ubuntu config
+          # into /etc. The container initializer must generate its own file.
+          rm -f "$out/etc/ld.so.conf"
+        '';
+      });
+    };
     remotePlay.openFirewall = true;
     # dedicatedServer stays closed: hosting a Source dedicated server (27015)
     # isn't something this desktop does, and every steam openFirewall flag opens
