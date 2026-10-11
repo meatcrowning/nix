@@ -60,6 +60,10 @@ cp "$repo/tools/unity-tweaks-inventory.py" "$run/home/tweaks-inventory.py"
 cp "$repo/tools/unity-tweaks-check.py" "$run/tweaks-check.py"
 cp "$repo/tools/unity-input-check.py" "$run/input-check.py"
 cp "$repo/tools/unity-sounds-check.py" "$run/sounds-check.py"
+cp "$repo/tools/unity-indicators-check.py" "$run/indicators-check.py"
+if [ "${UNITY_TEST_INDICATORS_ONLY:-0}" = 1 ]; then
+  printf '[Desktop Entry]\nType=Application\nName=Vivaldi\nExec=/bin/true\nIcon=web-browser\n' > "$run/home/.local/share/applications/vivaldi-stable.desktop"
+fi
 cat > "$run/inside.sh" <<'EOF'
 set -euo pipefail
 source /guard.sh
@@ -135,6 +139,13 @@ gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/Se
 if [ "$UNITY_TEST_SOUNDS_ONLY" = 1 ]; then
   bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
   "$bridge_python" /work/sounds-check.py
+  exit 0
+fi
+if [ "$UNITY_TEST_INDICATORS_ONLY" = 1 ]; then
+  export XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11
+  "$UNITY_PACKAGE/bin/unity-quantal-refresh"
+  bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
+  "$bridge_python" /work/indicators-check.py
   exit 0
 fi
 "$UNITY_BASE_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-quantal-probe.desktop -- "$UNITY_TEST_TOOLS/bin/xmessage" -name unity-host-probe -buttons ok:0 host-application
@@ -675,6 +686,7 @@ echo "Unity session test logs: $run"
   --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
   --setenv UNITY_TEST_VIVALDI "$(readlink -f "$(command -v vivaldi || true)")" \
   --setenv UNITY_TEST_INPUT_ONLY "${UNITY_TEST_INPUT_ONLY:-0}" \
+  --setenv UNITY_TEST_INDICATORS_ONLY "${UNITY_TEST_INDICATORS_ONLY:-0}" \
   --setenv UNITY_TEST_PREVIEWS_ONLY "${UNITY_TEST_PREVIEWS_ONLY:-0}" \
   --setenv UNITY_TEST_SOUNDS_ONLY "${UNITY_TEST_SOUNDS_ONLY:-0}" \
   --setenv UNITY_TEST_SOUND_HOOKS_ONLY "${UNITY_TEST_SOUND_HOOKS_ONLY:-0}" \

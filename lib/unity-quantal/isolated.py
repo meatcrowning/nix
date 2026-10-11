@@ -482,7 +482,7 @@ def run_session(run, app, files, *, attach=True):
 
 
 def media_worker(app):
-    """Only present/quit cross the boundary; the private bus stays private."""
+    """Window lifecycle endpoint; the session media adapter exposes only MPRIS."""
     endpoint = Path("/transport/control.sock")
     endpoint.unlink(missing_ok=True)
     with socket.socket(socket.AF_UNIX) as server:

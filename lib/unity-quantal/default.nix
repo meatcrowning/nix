@@ -186,7 +186,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      mirror.py notifications.py sounds.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
+      mirror.py notifications.py sounds.py media.py indicators.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     mkdir -p "$out/lib/gtk-3.0/modules"
     ln -s ${libcanberra-gtk3}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so \
@@ -313,6 +313,18 @@ stdenvNoCC.mkDerivation {
     exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/sounds.py" "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-sounds"
+    cat > "$out/bin/unity-quantal-media" <<EOF
+    #!${bash}/bin/bash
+    exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/media.py" "\$@"
+    EOF
+    chmod +x "$out/bin/unity-quantal-media"
+    for kind in load temperature notifications; do
+      cat > "$out/bin/unity-quantal-$kind" <<EOF
+    #!${bash}/bin/bash
+    exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/indicators.py" $kind
+    EOF
+      chmod +x "$out/bin/unity-quantal-$kind"
+    done
     cat > "$out/bin/unity-quantal-isolated" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"

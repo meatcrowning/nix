@@ -44,6 +44,10 @@ SERVICES = {
     "org.unity_quantal.Weather": [stable_command("unity-quantal-weather")],
     "org.unity_quantal.SettingsMirror": [stable_command("unity-quantal-settings-mirror")],
     "org.unity_quantal.Sounds": [stable_command("unity-quantal-sounds")],
+    "org.unity_quantal.Media": [stable_command("unity-quantal-media")],
+    "org.unity_quantal.Load": [stable_command("unity-quantal-load")],
+    "org.unity_quantal.Temperature": [stable_command("unity-quantal-temperature")],
+    "org.unity_quantal.NotificationIndicator": [stable_command("unity-quantal-notifications")],
 }
 ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller", "nact",
                  "gnome-tweak-tool", "rhythmbox"]
@@ -264,6 +268,10 @@ def prepare(directory, environment):
         "unity-quantal-weather": (SERVICES["org.unity_quantal.Weather"][0], "Application"),
         "unity-quantal-settings-mirror": (SERVICES["org.unity_quantal.SettingsMirror"][0], "Application"),
         "unity-quantal-sounds": (SERVICES["org.unity_quantal.Sounds"][0], "Application"),
+        "unity-quantal-media": (SERVICES["org.unity_quantal.Media"][0], "Application"),
+        "unity-quantal-load": (SERVICES["org.unity_quantal.Load"][0], "Application"),
+        "unity-quantal-temperature": (SERVICES["org.unity_quantal.Temperature"][0], "Application"),
+        "unity-quantal-notifications": (SERVICES["org.unity_quantal.NotificationIndicator"][0], "Application"),
     }
     for name, (command, phase) in components.items():
         text = (f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\n"
@@ -353,7 +361,7 @@ def runtime(arguments):
     environment = {key: value for key, value in os.environ.items() if key in {
         "HOME", "USER", "LOGNAME", "DISPLAY", "XAUTHORITY", "ICEAUTHORITY", "DBUS_SESSION_BUS_ADDRESS",
         "XDG_RUNTIME_DIR", "SESSION_MANAGER", "DESKTOP_AUTOSTART_ID", "DESKTOP_STARTUP_ID",
-        "PULSE_SERVER", "PULSE_COOKIE", "LANG", "LC_ALL", "UNITY_QUANTAL_HOST_SOCKET",
+        "PULSE_SERVER", "PULSE_COOKIE", "LANG", "LC_ALL", "UNITY_QUANTAL_HOST_SOCKET", "UNITY_QUANTAL_SESSION_DIR",
         "LOCALE_ARCHIVE", "LOCALE_ARCHIVE_2_27",
         "BAMF_DESKTOP_FILE_HINT",
     }}

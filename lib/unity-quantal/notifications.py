@@ -10,6 +10,7 @@ from pathlib import Path
 import signal
 import subprocess
 import tempfile
+import time
 
 HERE = Path(__file__).resolve().parent
 CONFIG = json.loads((HERE / 'config.json').read_text())
@@ -34,6 +35,10 @@ class Adapter:
     def __init__(self, upstream, native):
         self.upstream, self.native = upstream, native
         self.player = Player()
+        self.history_path = Path(os.environ['UNITY_QUANTAL_SESSION_DIR']) / 'notification-history.json'
+        self.history_registration = upstream.register_object('/org/unity_quantal/NotificationHistory',
+            Gio.DBusNodeInfo.new_for_xml('<node><interface name="org.unity_quantal.NotificationHistory">'
+                '<method name="Clear"/></interface></node>').interfaces[0], self.clear_history, None, None)
         self.registration = upstream.register_object(
             OBJECT, Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0], self.call, None, None)
         # Preserve Notify OSD's lock-screen suppression on its private bus.
@@ -61,18 +66,52 @@ class Adapter:
 
     def call(self, connection, sender, path, interface, method, parameters, invocation):
         sound = None
+        history = None
         if method == 'Notify':
             # Retain variant-valued hints verbatim (not unpack/repack, which
             # loses their D-Bus types). OSD expects passive notifications.
             children = [parameters.get_child_value(i) for i in range(8)]
             hints = children[6].unpack()
+            if not hints.get('transient', False) and 'x-canonical-private-synchronous' not in hints:
+                history = (children[0].unpack(), children[3].unpack(), children[4].unpack())
             if not hints.get('suppress-sound', False):
                 sound = (hints.get('sound-name'), hints.get('sound-file'))
             children[5] = GLib.Variant('as', [])
             children[7] = GLib.Variant('i', -1)
             parameters = GLib.Variant.new_tuple(*children)
         self.native.call(NAME, OBJECT, NAME, method, parameters, None,
-                         Gio.DBusCallFlags.NONE, 5000, None, self.replied, (method, invocation, sound))
+                         Gio.DBusCallFlags.NONE, 5000, None, self.replied, (method, invocation, sound, history))
+
+    def write_history(self, entries):
+        temporary = self.history_path.with_suffix('.tmp')
+        # Contents belong to this session, never the synced configuration.
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(entries[-30:], stream)
+        temporary.replace(self.history_path)
+
+    def clear_history(self, connection, sender, path, interface, method, parameters, invocation):
+        self.write_history([])
+        invocation.return_value(GLib.Variant('()', ()))
+
+    def remember(self, notification_id, entry):
+        def unlocked(connection, result):
+            try:
+                if connection.call_finish(result).unpack()[0]:
+                    return
+                try:
+                    entries = json.loads(self.history_path.read_text())
+                except (OSError, ValueError):
+                    entries = []
+                entries = [old for old in entries if old['id'] != notification_id]
+                app, summary, body = entry
+                entries.append(dict(id=notification_id, time=time.time(), app=app[:120],
+                                    summary=summary[:250], body=body[:2000]))
+                self.write_history(entries)
+            except (GLib.Error, OSError):
+                pass
+        self.upstream.call('org.gnome.ScreenSaver', '/org/gnome/ScreenSaver', 'org.gnome.ScreenSaver',
+                           'GetActive', None, None, Gio.DBusCallFlags.NONE, 3000, None, unlocked)
 
     def notification_sound(self, sound):
         event, filename = sound
@@ -97,8 +136,11 @@ class Adapter:
                     capabilities.append('actions')
                 reply = GLib.Variant('(as)', (capabilities,))
             invocation.return_value(reply)
-            if method == 'Notify' and len(context) == 3 and context[2]:
-                self.notification_sound(context[2])
+            if method == 'Notify':
+                if len(context) > 2 and context[2]:
+                    self.notification_sound(context[2])
+                if len(context) > 3 and context[3]:
+                    self.remember(reply.unpack()[0], context[3])
         except GLib.Error as error:
             invocation.return_dbus_error(NAME + '.Error', str(error))
 
