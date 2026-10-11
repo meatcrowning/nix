@@ -612,6 +612,27 @@ def refresh():
                                *arguments], env=environment, text=True, capture_output=True, timeout=10)
 
     bus("ReloadConfig")
+
+    def stop(name):
+        owner = bus("GetConnectionUnixProcessID", name)
+        match = re.search(r"uint32 (\d+)", owner.stdout)
+        # Only terminate a service owned by our UID on this session's bus.
+        if not match or Path(f"/proc/{match[1]}").stat().st_uid != os.getuid():
+            return
+        # unity-panel-service clears its indicators from its SIGTERM handler,
+        # which deadlocks on GLib locks when it interrupts an indicator
+        # update; the hung process keeps the bus name, so no replacement
+        # starts. Kill a service that has not released its name.
+        for sig in [signal.SIGTERM, signal.SIGKILL]:
+            try:
+                os.kill(int(match[1]), sig)
+            except ProcessLookupError:
+                return
+            for _ in range(40):
+                if bus("GetConnectionUnixProcessID", name).stdout != owner.stdout:
+                    return
+                time.sleep(0.05)
+
     # Reapply app matching to windows already open, without moving them.
     window_icons(directory)
     clients = subprocess.check_output([CONFIG["xprop"], "-root", "_NET_CLIENT_LIST"], text=True)
@@ -627,17 +648,7 @@ def refresh():
     else:
         print("Files windows are open; their desktop view will refresh when Files is next reopened")
     for name in services:
-        owner = bus("GetConnectionUnixProcessID", name)
-        match = re.search(r"uint32 (\d+)", owner.stdout)
-        if match:
-            pid = int(match[1])
-            # Only terminate a service owned by our UID on this session's bus.
-            if Path(f"/proc/{pid}").stat().st_uid == os.getuid():
-                os.kill(pid, signal.SIGTERM)
-                for _ in range(40):
-                    if bus("GetConnectionUnixProcessID", name).stdout != owner.stdout:
-                        break
-                    time.sleep(0.05)
+        stop(name)
         activated = bus("StartServiceByName", name, "0")
         if activated.returncode:
             print(activated.stderr, file=sys.stderr)
@@ -658,14 +669,7 @@ def refresh():
     # session manager restarts each through its stable command; a session that
     # predates one, or gave up restarting it, gets it from the supervisor.
     for name, command in SERVICES.items():
-        owner = bus("GetConnectionUnixProcessID", name)
-        match = re.search(r"uint32 (\d+)", owner.stdout)
-        if match and Path(f"/proc/{match[1]}").stat().st_uid == os.getuid():
-            os.kill(int(match[1]), signal.SIGTERM)
-            for _ in range(40):
-                if bus("GetConnectionUnixProcessID", name).stdout != owner.stdout:
-                    break
-                time.sleep(0.05)
+        stop(name)
         for _ in range(40):
             if "uint32" in bus("GetConnectionUnixProcessID", name).stdout:
                 break
