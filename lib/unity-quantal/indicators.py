@@ -192,7 +192,11 @@ class Indicator:
                               os.path.abspath(__file__), 'gpu-fetch', path])
         elif self.kind == 'temperature':
             values = temperatures()
-            self.indicator.set_label((u'%.0f\u00b0C' % max(v for _, v in values)) if values else '--', '100 C')
+            # Panel shows the CPU die temperature; an unconnected board
+            # thermistor can read hot and would otherwise win a plain max().
+            cpu = [v for label, v in values if label in ('k10temp: Tctl', 'coretemp: Package id 0')]
+            shown = cpu or [v for _, v in values]
+            self.indicator.set_label((u'%.0f\u00b0C' % max(shown)) if shown else '--', '100 C')
             self.rows([u'%s: %.1f\u00b0C' % (label, value) for label, value in values]
                       or ['No temperature sensors available'])
         else:
