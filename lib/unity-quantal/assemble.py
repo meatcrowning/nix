@@ -72,6 +72,7 @@ evolution-data-server zeitgeist-core zeitgeist-datahub
 gedit gnome-terminal gcalctool eog file-roller python-gi appmenu-gtk3 gir1.2-appindicator3-0.1
 rhythmbox rhythmbox-plugins rhythmbox-plugin-magnatune rhythmbox-ubuntuone gstreamer0.10-pulseaudio
 light-themes gtk3-engines-unico dmz-cursor-theme humanity-icon-theme ubuntu-mono ubuntu-wallpapers ubuntu-sounds
+libcanberra-pulse libcanberra-gtk-module libcanberra-gtk3-module gnome-session-canberra
 ttf-ubuntu-font-family python dbus-x11 dconf-tools bash dash coreutils
 """.split() + extras
 selected = set()
@@ -133,7 +134,8 @@ for src in (source / "etc/alternatives").iterdir():
     copy_file(str(src.relative_to(source)))
 
 # Verify the fidelity-critical files against the ISO's package manifests.
-for name in ["unity", "compiz-core", "libnux-3.0-0", "unity-asset-pool", "unity-common"]:
+for name in ["unity", "compiz-core", "libnux-3.0-0", "unity-asset-pool", "unity-common",
+             "ubuntu-sounds", "libcanberra-pulse", "libcanberra-gtk-module", "libcanberra-gtk3-module"]:
     manifests = list((source / "var/lib/dpkg/info").glob(name + ".md5sums"))
     manifests += list((source / "var/lib/dpkg/info").glob(name + ":*.md5sums"))
     for manifest in manifests:

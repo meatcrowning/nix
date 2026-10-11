@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, pkgs, ... }:
 
 {
   # The Vista .wav files (Microsoft's — this repo is public) live in a SEPARATE
@@ -19,7 +19,9 @@
     Unit.Description = "Play the Vista recycle sound when the trash changes";
     Service = {
       Type = "oneshot";
-      ExecStart = ''/bin/sh -c 'exec pw-play "$HOME/.local/share/sounds/vista/Windows Recycle.wav"' '';
+      # Unity owns its original trash-empty event. Test its supervisor lock:
+      # the user manager's desktop environment may describe a previous login.
+      ExecStart = ''/bin/sh -c 'lock="$XDG_RUNTIME_DIR/unity-quantal-session/session.lock"; if [ -e "$lock" ] && ! ${pkgs.util-linux}/bin/flock -n "$lock" true; then exit 0; fi; exec pw-play "$HOME/.local/share/sounds/vista/Windows Recycle.wav"' '';
     };
   };
   systemd.user.paths.vista-trash-sound = {

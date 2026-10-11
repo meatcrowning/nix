@@ -17,6 +17,7 @@ os.environ['GI_TYPELIB_PATH'] = CONFIG['typelibs']
 import gi
 gi.require_version('Gio', '2.0')
 from gi.repository import Gio, GLib
+from sounds import Player
 NAME = 'org.freedesktop.Notifications'
 OBJECT = '/org/freedesktop/Notifications'
 XML = '''<node><interface name="org.freedesktop.Notifications">
@@ -32,6 +33,7 @@ XML = '''<node><interface name="org.freedesktop.Notifications">
 class Adapter:
     def __init__(self, upstream, native):
         self.upstream, self.native = upstream, native
+        self.player = Player()
         self.registration = upstream.register_object(
             OBJECT, Gio.DBusNodeInfo.new_for_xml(XML).interfaces[0], self.call, None, None)
         # Preserve Notify OSD's lock-screen suppression on its private bus.
@@ -58,18 +60,35 @@ class Adapter:
         self.upstream.emit_signal(None, OBJECT, NAME, name, parameters)
 
     def call(self, connection, sender, path, interface, method, parameters, invocation):
+        sound = None
         if method == 'Notify':
             # Retain variant-valued hints verbatim (not unpack/repack, which
             # loses their D-Bus types). OSD expects passive notifications.
             children = [parameters.get_child_value(i) for i in range(8)]
+            hints = children[6].unpack()
+            if not hints.get('suppress-sound', False):
+                sound = (hints.get('sound-name'), hints.get('sound-file'))
             children[5] = GLib.Variant('as', [])
             children[7] = GLib.Variant('i', -1)
             parameters = GLib.Variant.new_tuple(*children)
         self.native.call(NAME, OBJECT, NAME, method, parameters, None,
-                         Gio.DBusCallFlags.NONE, 5000, None, self.replied, (method, invocation))
+                         Gio.DBusCallFlags.NONE, 5000, None, self.replied, (method, invocation, sound))
+
+    def notification_sound(self, sound):
+        event, filename = sound
+        if not event and not filename:
+            return
+        def unlocked(connection, result):
+            try:
+                if not connection.call_finish(result).unpack()[0]:
+                    self.player.play(event or 'message', filename=filename)
+            except GLib.Error:
+                pass  # A missing lock service must not expose private alerts.
+        self.upstream.call('org.gnome.ScreenSaver', '/org/gnome/ScreenSaver', 'org.gnome.ScreenSaver',
+                           'GetActive', None, None, Gio.DBusCallFlags.NONE, 3000, None, unlocked)
 
     def replied(self, connection, result, context):
-        method, invocation = context
+        method, invocation = context[:2]
         try:
             reply = connection.call_finish(result)
             if method == 'GetCapabilities':
@@ -78,6 +97,8 @@ class Adapter:
                     capabilities.append('actions')
                 reply = GLib.Variant('(as)', (capabilities,))
             invocation.return_value(reply)
+            if method == 'Notify' and len(context) == 3 and context[2]:
+                self.notification_sound(context[2])
         except GLib.Error as error:
             invocation.return_dbus_error(NAME + '.Error', str(error))
 
@@ -132,6 +153,7 @@ def main():
             loop.run()
             Gio.bus_unown_name(owner)
             upstream.unregister_object(adapter.registration)
+            adapter.player.close()
             native.close_sync(None)
         finally:
             for process in reversed(processes):

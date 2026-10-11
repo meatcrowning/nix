@@ -59,6 +59,7 @@ EOF
 cp "$repo/tools/unity-tweaks-inventory.py" "$run/home/tweaks-inventory.py"
 cp "$repo/tools/unity-tweaks-check.py" "$run/tweaks-check.py"
 cp "$repo/tools/unity-input-check.py" "$run/input-check.py"
+cp "$repo/tools/unity-sounds-check.py" "$run/sounds-check.py"
 cat > "$run/inside.sh" <<'EOF'
 set -euo pipefail
 source /guard.sh
@@ -93,6 +94,22 @@ for _ in {1..100}; do
   sleep 0.05
 done
 xdpyinfo > /work/display.txt
+if [ "$UNITY_TEST_SOUNDS_ONLY" = 1 ]; then
+  export XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11
+  # No ALSA modules, host socket, bus, or /dev/snd is present in this namespace.
+  pulseaudio -n --daemonize=no --use-pid-file=no --exit-idle-time=-1 --disable-shm=yes \
+    --load="module-native-protocol-unix socket=$XDG_RUNTIME_DIR/pulse/native auth-anonymous=1" \
+    --load="module-stream-restore" --load="module-device-restore" --load="module-default-device-restore" \
+    --load="module-null-sink sink_name=unity-test rate=44100 channels=2" >/work/pulse.log 2>&1 &
+  pulse_pid=$!
+  export PULSE_SERVER="unix:$XDG_RUNTIME_DIR/pulse/native"
+  for _ in {1..100}; do
+    test -S "$XDG_RUNTIME_DIR/pulse/native" && break
+    kill -0 "$pulse_pid"
+    sleep .05
+  done
+  test -S "$XDG_RUNTIME_DIR/pulse/native"
+fi
 glxinfo -B > /work/graphics.txt
 if [ "${UNITY_TEST_ACCELERATED:-0}" = 1 ]; then
   grep 'Accelerated: yes' /work/graphics.txt
@@ -115,6 +132,11 @@ for _ in {1..60}; do
   sleep 0.1
 done
 gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsSessionRunning | grep true
+if [ "$UNITY_TEST_SOUNDS_ONLY" = 1 ]; then
+  bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
+  "$bridge_python" /work/sounds-check.py
+  exit 0
+fi
 "$UNITY_BASE_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-quantal-probe.desktop -- "$UNITY_TEST_TOOLS/bin/xmessage" -name unity-host-probe -buttons ok:0 host-application
 sleep 3
 export XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11
@@ -631,7 +653,7 @@ wait "$supervisor"
 echo 'PASS: original shell, host application, separate settings, native lock, session logout'
 EOF
 echo "Unity session test logs: $run"
-"$test_tools/bin/timeout" --kill-after=5s 180s "$test_tools/bin/bwrap" --die-with-parent --new-session --unshare-all \
+"$test_tools/bin/timeout" --kill-after=5s 240s "$test_tools/bin/bwrap" --die-with-parent --new-session --unshare-all \
   --ro-bind /nix /nix --proc /proc --dev /dev --ro-bind /sys /sys \
   --symlink "$test_tools/bin" /bin \
   --tmpfs /tmp --tmpfs /run --dir /run/user/1000 \
@@ -654,4 +676,6 @@ echo "Unity session test logs: $run"
   --setenv UNITY_TEST_VIVALDI "$(readlink -f "$(command -v vivaldi || true)")" \
   --setenv UNITY_TEST_INPUT_ONLY "${UNITY_TEST_INPUT_ONLY:-0}" \
   --setenv UNITY_TEST_PREVIEWS_ONLY "${UNITY_TEST_PREVIEWS_ONLY:-0}" \
+  --setenv UNITY_TEST_SOUNDS_ONLY "${UNITY_TEST_SOUNDS_ONLY:-0}" \
+  --setenv UNITY_TEST_SOUND_HOOKS_ONLY "${UNITY_TEST_SOUND_HOOKS_ONLY:-0}" \
   --chdir /work "$test_tools/bin/bash" /work/inside.sh

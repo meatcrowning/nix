@@ -161,7 +161,12 @@ for app in m.APPS:
         found=False
         while time.monotonic()<deadline and process.is_alive():
             tree=subprocess.run(['xwininfo','-root','-tree'],capture_output=True,text=True).stdout
-            if any(name in tree for name in {'gedit':['gedit','Gedit'], 'eog':['eog','Eog'], 'file-roller':['file-roller','File-roller'], 'gcalctool':['gcalctool','Gcalctool'], 'rhythmbox':['rhythmbox','Rhythmbox']}[app]):
+            candidates=[line for line in tree.splitlines() if app.lower() in line.lower() and re.search(r' [1-9][0-9]{1,}x[1-9][0-9]{1,}[+-]',line)]
+            if candidates:
+                # The mapped EOG window precedes its document/title update.
+                if app == 'eog' and 'b.png' not in candidates[0]:
+                    time.sleep(.2)
+                    continue
                 found=True
                 break
             time.sleep(.2)

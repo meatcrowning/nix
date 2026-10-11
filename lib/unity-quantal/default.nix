@@ -1,4 +1,4 @@
-{ lib, stdenvNoCC, fetchurl, runCommand, python3, libarchive, squashfsTools
+{ lib, stdenvNoCC, fetchurl, runCommand, python3, libarchive, squashfsTools, callPackage
 , bubblewrap, glibc, stdenv, libglvnd, libX11, libxcb, libdrm, zlib, expat
 , libXext, libXdamage, libXrandr, libXrender, libXcomposite
 , libXinerama, libXcursor, libXi, libxshmfence
@@ -14,6 +14,7 @@
 , gdk-pixbuf, ffmpegthumbnailer, ffmpeg-headless, writeShellScript
 # The music library the original Rhythmbox reads, read-only, in its sandbox.
 , musicLibrary
+, libcanberra, libcanberra-gtk3, pulseaudio, alsa-utils, systemd, patchelf
 }:
 let
   iso = fetchurl {
@@ -34,6 +35,7 @@ let
       --artwork "$out/usr/share/gnome-control-center/ui/UbuntuLogo.png" \
       --panel "$out/usr/lib/control-center-1/panels/libbackground.so"
   '';
+  viewer = callPackage ./viewer.nix { inherit runtime; };
   # Ambiance Dark for current GTK 3 applications, whose CSS the 12.10 theme
   # predates: Ubuntu 18.04's port of Ambiance, under the same palette and name.
   nativeThemeDeb = fetchurl {
@@ -61,6 +63,34 @@ let
     mkdir -p "$out"
     cp ${runtime}/usr/share/glib-2.0/schemas/*.xml ${runtime}/usr/share/glib-2.0/schemas/*.override "$out/"
     glib-compile-schemas "$out"
+  '';
+  legacyCanberra = libcanberra-gtk3.overrideAttrs (old: {
+    postPatch = (old.postPatch or "") + ''
+      # Keep X11 error traps on the window's own display. Ubuntu has no
+      # generic window open/close/state samples; querying those windows from
+      # an emission hook disrupts EOG's title updates through Xpra.
+      substituteInPlace src/canberra-gtk-module.c \
+        --replace-fail 'gdk_error_trap_push();' 'gdk_x11_display_error_trap_push(d);' \
+        --replace-fail 'gdk_error_trap_pop_ignored();' 'gdk_x11_display_error_trap_pop_ignored(d);'
+      substituteInPlace src/canberra-gtk-module.c \
+        --replace-fail 'object = g_value_get_object(&param_values[0]);' \
+          'object = g_value_get_object(&param_values[0]); if (GTK_IS_WINDOW(object) && !GTK_IS_DIALOG(object) && gtk_window_get_type_hint(GTK_WINDOW(object)) == GDK_WINDOW_TYPE_HINT_NORMAL) return TRUE;'
+    '';
+  });
+  legacyGtkModule = runCommand "unity-quantal-gtk-sound-module" {
+    nativeBuildInputs = [ patchelf ];
+  } ''
+    mkdir -p "$out/lib"
+    cp ${legacyCanberra}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so "$out/lib/"
+    chmod u+w "$out/lib/libcanberra-gtk3-module.so"
+    # A Nix RPATH would load current GTK/font libraries into a Quantal process.
+    # The module's GTK 3 ABI works with 3.6; resolve its dependencies in FHS.
+    patchelf --set-rpath /usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu:/usr/lib \
+      "$out/lib/libcanberra-gtk3-module.so"
+    # Current GTK's pkg-config adds HarfBuzz, but the module uses no hb_* API
+    # and Quantal's Pango predates that dependency.
+    patchelf --remove-needed libharfbuzz.so.0 "$out/lib/libcanberra-gtk3-module.so"
+    patchelf --add-needed libcanberra-gtk3.so.0 "$out/lib/libcanberra-gtk3-module.so"
   '';
   # indicator-cpufreq's meter icons; its governor menu predates amd-pstate.
   cpufreqIconsDeb = fetchurl {
@@ -142,7 +172,7 @@ let
     $CC -Wall -Wextra -Werror -O2 ${./restrict.c} -lseccomp -o "$out/bin/unity-isolated-restrict"
   '';
   isolatedClosure = closureInfo {
-    rootPaths = [ runtime isolatedArchive mediaSchemas xpra xorg-server glibc bash dbus python3
+    rootPaths = [ runtime isolatedArchive mediaSchemas xpra xorg-server glibc bash dbus python3 legacyGtkModule
       restrict (writeText "unity-isolated-libraries" (modernLibraries + ":" + archivePath)) ];
   };
 in
@@ -155,8 +185,11 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      mirror.py notifications.py tweaks.json "$out/libexec/unity-quantal/"
+      mirror.py notifications.py sounds.py greeter-sound.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
+    mkdir -p "$out/lib/gtk-3.0/modules"
+    ln -s ${libcanberra-gtk3}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so \
+      "$out/lib/gtk-3.0/modules/libcanberra-gtk-module.so"
     # Quantal's cursors, for native applications that follow Xcursor.theme.
     mkdir -p "$out/share/icons"
     ln -s ${runtime}/usr/share/icons/DMZ-White ${runtime}/usr/share/icons/DMZ-Black "$out/share/icons/"
@@ -180,6 +213,7 @@ stdenvNoCC.mkDerivation {
       bash = "${bash}/bin/bash";
       dbus = "${dbus}/bin/dbus-daemon";
       dconfServices = "${dconf}/share/dbus-1/services";
+      dconfModules = "${lib.getLib dconf}/lib/gio/modules";
       vfsServices = "${gvfs}/share/dbus-1/services";
       lockerServices = "${cinnamon-screensaver}/share/dbus-1/services";
       xinput = "${xinput}/bin/xinput";
@@ -190,6 +224,13 @@ stdenvNoCC.mkDerivation {
       xrdb = "${xrdb}/bin/xrdb";
       xprop = "${xprop}/bin/xprop";
       libX11 = "${libX11}/lib/libX11.so.6";
+      libcanberra = "${libcanberra}/lib/libcanberra.so.0";
+      nativeGtkModules = "$out/lib/gtk-3.0/modules";
+      # Use the patched GTK module with Quantal's libraries and ISO samples.
+      legacyGtkModule = "${legacyGtkModule}/lib/libcanberra-gtk3-module.so";
+      aplay = "${alsa-utils}/bin/aplay";
+      pactl = "${pulseaudio}/bin/pactl";
+      loginctl = "${systemd}/bin/loginctl";
       session = "${cinnamon-session}/bin/cinnamon-session";
       sessionData = "${cinnamon}/share/gsettings-schemas/${cinnamon.name}";
       sessionQuit = "${cinnamon-session}/bin/cinnamon-session-quit";
@@ -280,10 +321,20 @@ stdenvNoCC.mkDerivation {
     exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/mirror.py" "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-cpufreq" "$out/bin/unity-quantal-weather" "$out/bin/unity-quantal-settings-mirror"
+    for command in sounds greeter-sound; do
+      cat > "$out/bin/unity-quantal-$command" <<EOF
+    #!${bash}/bin/bash
+    exec ${python3.withPackages (ps: [ ps.pygobject3 ])}/bin/python3 "$out/libexec/unity-quantal/$command.py" "\$@"
+    EOF
+      chmod +x "$out/bin/unity-quantal-$command"
+    done
+    ${ffmpeg-headless}/bin/ffmpeg -nostdin -v error -i ${runtime}/usr/share/sounds/ubuntu/stereo/system-ready.ogg \
+      -ar 48000 -ac 2 "$out/libexec/unity-quantal/system-ready.wav"
     cat > "$out/bin/unity-quantal-isolated" <<EOF
     #!${bash}/bin/bash
     exec ${python3}/bin/python3 "$out/libexec/unity-quantal/isolated.py" "\$@"
     EOF
+    ln -s ${viewer}/bin/unity-image-viewer "$out/bin/unity-quantal-viewer"
     chmod +x "$out/bin/unity-quantal-isolated"
     python "$out/libexec/unity-quantal/isolated.py" install "$out"
     # ly reads its sessions directory only at startup; a stable Exec keeps a
@@ -298,12 +349,12 @@ stdenvNoCC.mkDerivation {
     EOF
   '';
   passthru = {
-    inherit runtime fonts;
+    inherit runtime fonts viewer;
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
         xwininfo xdpyinfo xdotool xmessage glib dbus weston xwayland mesa-demos imagemagick xrandr setxkbmap xrdb
-        ffmpeg-headless ];
+        ffmpeg-headless pulseaudio alsa-utils ];
     };
     providedSessions = [ "unity-quantal" ];
   };

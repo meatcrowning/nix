@@ -200,6 +200,8 @@ def base_namespace(run, client=False, app=None):
     for name in ["bin", "sbin", "usr", "lib", "lib64", "etc", "var"]:
         if (root / name).exists():
             command += ["--ro-bind", str(root / name), "/" + name]
+    command += ["--ro-bind", CONFIG["legacyGtkModule"],
+                "/usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libcanberra-gtk3-module.so"]
     loader = root / "lib64/ld-linux-x86-64.so.2"
     target = os.readlink(loader) if loader.is_symlink() else "/lib64/ld-linux-x86-64.so.2"
     command += ["--ro-bind", CONFIG["loader"], target,
@@ -240,11 +242,14 @@ def base_namespace(run, client=False, app=None):
             # The library is read-only: 2.97 keeps ratings and play counts in its own database.
             command += ["--bind", str(profile), "/home/legacy", "--dir", "/home/legacy/Music",
                         "--ro-bind-try", str(library), "/home/legacy/Music"]
-            if pulse.is_socket():
-                command += ["--ro-bind", str(pulse), "/run/user/1000/pulse/native"]
         else:
             command += ["--ro-bind", str(run / "input"), "/home/legacy/Input",
                         "--bind", str(run / "output"), "/home/legacy/Documents"]
+        # All original GTK apps need the event backend, not just Rhythmbox.
+        # Share only this socket, never the host session bus or sound devices.
+        pulse = media_paths()[2]
+        if pulse.is_socket():
+            command += ["--ro-bind", str(pulse), "/run/user/1000/pulse/native"]
         if app == "eog" and (run / "images.json").is_file():
             # Read-only file mounts avoid copying and hashing full-size images
             # before the first window appears. Unrelated files stay hidden.
@@ -277,12 +282,19 @@ def worker(app, files):
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
         "UBUNTU_MENUPROXY": "0", "GIO_USE_VFS": "local",
         "GIO_EXTRA_MODULES": "", "GIO_MODULE_DIR": "/nonexistent", "GSETTINGS_BACKEND": "memory",
-        "GTK_MODULES": "", "GTK_IM_MODULE": "gtk-im-context-simple",
+        "GTK_MODULES": "canberra-gtk-module", "GTK_IM_MODULE": "gtk-im-context-simple",
+        "CANBERRA_DRIVER": "pulse", "PULSE_SERVER": "unix:/run/user/1000/pulse/native",
         "PATH": CONFIG["archivePath"] + ":/usr/bin:/bin", "XDG_DATA_DIRS": "/usr/share",
     })
     settings = Path.home() / ".config/gtk-3.0/settings.ini"
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text("[Settings]\ngtk-theme-name=" + theme + "\ngtk-icon-theme-name=ubuntu-mono-dark\ngtk-font-name=Ubuntu 11\n")
+    sound_file = Path("/transport/sounds")
+    sounds = json.loads(sound_file.read_text()) if sound_file.exists() else {
+        "theme-name": "ubuntu", "event-sounds": True, "input-feedback-sounds": True}
+    settings.write_text("[Settings]\ngtk-theme-name=" + theme + "\ngtk-icon-theme-name=ubuntu-mono-dark\ngtk-font-name=Ubuntu 11\n"
+                        "gtk-sound-theme-name=" + sounds["theme-name"] + "\n"
+                        "gtk-enable-event-sounds=" + str(int(sounds["event-sounds"])) + "\n"
+                        "gtk-enable-input-feedback-sounds=" + str(int(sounds["input-feedback-sounds"])) + "\n")
     if app in MEDIA:
         environment.update({"GSETTINGS_BACKEND": "dconf", "GSETTINGS_SCHEMA_DIR": CONFIG["mediaSchemas"],
                             "PULSE_SERVER": "unix:/run/user/1000/pulse/native"})
@@ -342,6 +354,13 @@ def run_session(run, app, files, *, attach=True):
         media_paths()[0].mkdir(parents=True, mode=0o700, exist_ok=True)
     (run / "transport/exit-status").unlink(missing_ok=True)
     (run / "transport/theme").write_text(current_theme())
+    sound_preferences = {}
+    for key in ["theme-name", "event-sounds", "input-feedback-sounds"]:
+        result = subprocess.run([str(HERE.parent.parent / "bin/unity-quantal-runtime"), "/usr/bin/gsettings", "get",
+                                 "org.gnome.desktop.sound", key], capture_output=True, text=True, timeout=10)
+        sound_preferences[key] = (result.stdout.strip().strip("'") if key == "theme-name" else result.stdout.strip() == "true") \
+            if result.returncode == 0 else ("ubuntu" if key == "theme-name" else True)
+    (run / "transport/sounds").write_text(json.dumps(sound_preferences))
     (run / "passwd").write_text(f"legacy:x:{os.getuid()}:{os.getgid()}:Legacy application:/home/legacy:/bin/sh\n")
     (run / "group").write_text(f"legacy:x:{os.getgid()}:legacy\n")
     (run / "machine-id").write_text("a" * 32 + "\n")

@@ -43,6 +43,7 @@ SERVICES = {
     "org.unity_quantal.CpuFreq": [stable_command("unity-quantal-cpufreq")],
     "org.unity_quantal.Weather": [stable_command("unity-quantal-weather")],
     "org.unity_quantal.SettingsMirror": [stable_command("unity-quantal-settings-mirror")],
+    "org.unity_quantal.Sounds": [stable_command("unity-quantal-sounds")],
 }
 ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller", "nact",
                  "gnome-tweak-tool", "rhythmbox"]
@@ -89,6 +90,12 @@ def prepare(directory, environment):
     for subdir in ["applications", "bridge-bin", "autostart", "native-data/dbus-1/services",
                    "native-data/cinnamon-session/sessions", "native-data/applications"]:
         (directory / subdir).mkdir(parents=True, exist_ok=True)
+    sounds = directory / "native-data/sounds"
+    sounds.mkdir(exist_ok=True)
+    for theme in ["ubuntu", "freedesktop"]:
+        link = sounds / theme
+        link.unlink(missing_ok=True)
+        link.symlink_to(ROOT / "usr/share/sounds" / theme)
     for name in BRIDGES:
         target = directory / "bridge-bin" / name
         target.write_bytes((HERE / "bridge.py").read_bytes())
@@ -250,6 +257,7 @@ def prepare(directory, environment):
         "unity-quantal-cpufreq": (SERVICES["org.unity_quantal.CpuFreq"][0], "Application"),
         "unity-quantal-weather": (SERVICES["org.unity_quantal.Weather"][0], "Application"),
         "unity-quantal-settings-mirror": (SERVICES["org.unity_quantal.SettingsMirror"][0], "Application"),
+        "unity-quantal-sounds": (SERVICES["org.unity_quantal.Sounds"][0], "Application"),
     }
     for name, (command, phase) in components.items():
         text = (f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\n"
@@ -294,6 +302,8 @@ def runtime(arguments):
     for name in ["bin", "sbin", "usr", "lib", "lib64", "etc", "var"]:
         if (ROOT / name).exists():
             command += ["--ro-bind", str(ROOT / name), "/" + name]
+    command += ["--ro-bind", CONFIG["legacyGtkModule"],
+                "/usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libcanberra-gtk3-module.so"]
     command += ["--ro-bind", "/nix", "/nix", "--proc", "/proc", "--dev-bind", "/dev", "/dev",
                 "--ro-bind", "/sys", "/sys", "--tmpfs", "/tmp", "--tmpfs", "/run",
                 "--bind", user_home, user_home,
@@ -347,6 +357,7 @@ def runtime(arguments):
         "DCONF_PROFILE": str(HERE / "dconf-profile"),
         "GSETTINGS_SCHEMA_DIR": "/usr/share/glib-2.0/schemas",
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
+        "GTK_MODULES": "canberra-gtk-module", "CANBERRA_DRIVER": "pulse",
     })
     if arguments[0] == "/usr/bin/compiz":
         environment["LD_PRELOAD"] = CONFIG["scrollGrab"]
@@ -481,6 +492,10 @@ def session():
         str(directory / "native-data"), CONFIG["sessionData"],
         environment.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share"),
     ])
+    environment["GTK_MODULES"] = ":".join(filter(None, [environment.get("GTK_MODULES"),
+        "canberra-gtk-module"]))
+    environment["GTK_PATH"] = ":".join(filter(None, [str(Path(CONFIG["nativeGtkModules"]).parent),
+        environment.get("GTK_PATH")]))
     service_dirs = [str(directory / "native-data/dbus-1/services"),
                     CONFIG["dconfServices"], CONFIG["vfsServices"]]
     bus_config = ("<busconfig><type>session</type><listen>" + escape(environment["DBUS_SESSION_BUS_ADDRESS"]) +
@@ -519,9 +534,10 @@ def session():
                            stdout=log, stderr=subprocess.STDOUT, check=True, timeout=10)
         # Hardware policy and media keys come from the native session. The old
         # daemon still supplies Unity's X settings, backgrounds, and keyboard.
-        for plugin in ["power", "media-keys", "sound", "housekeeping", "mouse"]:
+        for plugin in ["power", "media-keys", "housekeeping", "mouse"]:
             subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.settings-daemon.plugins." + plugin,
                             "active", "false"], env=environment, stdout=log, stderr=subprocess.STDOUT, check=False, timeout=10)
+        prepare_sound_settings(environment, log)
         apply_preferences(environment, log)
         # Native applications read Xcursor.theme once, when they start.
         subprocess.run([str(PACKAGE / "bin/unity-quantal-settings-mirror"), "cursor"], env=environment,
@@ -558,6 +574,19 @@ def session():
             bus.kill()
             bus.wait()
         log.close()
+
+
+def prepare_sound_settings(environment, log=None):
+    # The sound plugin only maintains the sample cache; it does not own hardware.
+    subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.settings-daemon.plugins.sound",
+                    "active", "true"], env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=10)
+    marker = Path(environment.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "unity-quantal/sounds-v1"
+    if not marker.exists():
+        for key, value in [("theme-name", "'ubuntu'"), ("event-sounds", "true"), ("input-feedback-sounds", "true")]:
+            subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.desktop.sound", key, value],
+                           env=environment, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=10)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
 
 
 def apply_preferences(environment, log=None):
@@ -605,6 +634,10 @@ def refresh():
     environment = os.environ.copy()
     environment["XDG_DATA_DIRS"] = ":".join(state["data_dirs"])
     prepare(directory, environment)
+    prepare_sound_settings(environment)
+    # Installing/restarting the sound service during a live refresh is not a
+    # login event, including sessions which predate the service entirely.
+    (directory / "login-sound-played").touch(exist_ok=True)
     subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "org.gnome.settings-daemon.plugins.mouse",
                     "active", "false"], env=environment, check=True)
     apply_preferences(environment)

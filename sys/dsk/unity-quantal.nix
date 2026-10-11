@@ -13,6 +13,12 @@ in
   fonts.packages = [ unity.fonts ];
   system.build.unityQuantal = unity;
   security.pam.services.cinnamon-screensaver = { };
+  # Keep ly. These hooks run at greeter startup and after its child session has
+  # ended, never on a rebuild or while the logged-in desktop owns the seat.
+  services.displayManager.ly.settings = {
+    start_cmd = "${unity}/bin/unity-quantal-greeter-sound";
+    logout_cmd = "${unity}/bin/unity-quantal-greeter-sound";
+  };
   programs.dconf.enable = true;
 
   xdg.portal.config.unity = {
