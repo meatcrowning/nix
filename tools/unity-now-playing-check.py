@@ -99,6 +99,11 @@ props['Metadata'] = GLib.Variant('a{sv}', metadata)
 bus.emit_signal(None, media.OBJECT, media.PROPERTIES, 'PropertiesChanged',
     GLib.Variant('(sa{sv}as)', (media.PLAYER, props, [])))
 short = wait(lambda: (r if (r := entry()) and r[7] != initial else None), 'Track did not update')
+short_width, short_height, short_data = pixels(short)
+assert 28 < short_width < 248 and short_height == 22, 'Short text kept the maximum width'
+last_ink = max(x for y in range(short_height) for x in range(short_width)
+               if short_data[(y * short_width + x) * 4 + 3])
+assert short_width - last_ink <= 4, 'Unused space remains after the text'
 subprocess.run(['xdotool', 'mousemove', '501', '501'], check=True)
 end = time.monotonic() + 2
 while time.monotonic() < end:

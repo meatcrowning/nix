@@ -1,4 +1,4 @@
-/* A fixed-size, theme-rendered Rhythmbox entry in the original Unity panel.
+/* A content-sized, theme-rendered Rhythmbox entry in the original Unity panel.
  * The panel supplies hit testing; no pointer grabs or synthetic input. */
 #include "now-playing.h"
 #include <gio/gio.h>
@@ -42,7 +42,13 @@ static PangoLayout *text_layout(NowPlaying *self)
 
 static void render(NowPlaying *self, gint offset)
 {
-    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, WIDTH, HEIGHT);
+    PangoLayout *layout = text_layout(self);
+    gint natural_width;
+    pango_layout_get_pixel_size(layout, &natural_width, NULL);
+    /* Reserve the maximum only for overflowing text; hover keeps that width. */
+    gint text_width = MIN(MAX(natural_width, 1), TEXT_WIDTH);
+    gint width = TEXT_X + text_width;
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, HEIGHT);
     cairo_t *cr = cairo_create(surface);
     GdkRGBA color;
     gtk_style_context_get_color(self->style, GTK_STATE_FLAG_NORMAL, &color);
@@ -58,19 +64,18 @@ static void render(NowPlaying *self, gint offset)
         cairo_arc(cr, 11, 11, 2, 0, 2*G_PI);
         cairo_stroke(cr);
     }
-    PangoLayout *layout = text_layout(self);
     if (offset < 0) {
         pango_layout_set_width(layout, TEXT_WIDTH * PANGO_SCALE);
         pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
     }
     gint w, h;
     pango_layout_get_pixel_size(layout, &w, &h);
-    cairo_rectangle(cr, TEXT_X, 0, TEXT_WIDTH, HEIGHT);
+    cairo_rectangle(cr, TEXT_X, 0, text_width, HEIGHT);
     cairo_clip(cr);
     gdk_cairo_set_source_rgba(cr, &color);
     cairo_move_to(cr, TEXT_X - MAX(offset, 0), (HEIGHT-h)/2.);
     pango_cairo_show_layout(cr, layout);
-    GdkPixbuf *pixels = gdk_pixbuf_get_from_surface(surface, 0, 0, WIDTH, HEIGHT);
+    GdkPixbuf *pixels = gdk_pixbuf_get_from_surface(surface, 0, 0, width, HEIGHT);
     gtk_image_set_from_pixbuf(self->image, pixels);
     g_object_unref(pixels);
     g_object_unref(layout);
