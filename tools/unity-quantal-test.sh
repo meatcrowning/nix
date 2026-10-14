@@ -61,6 +61,7 @@ cp "$repo/tools/unity-tweaks-check.py" "$run/tweaks-check.py"
 cp "$repo/tools/unity-input-check.py" "$run/input-check.py"
 cp "$repo/tools/unity-sounds-check.py" "$run/sounds-check.py"
 cp "$repo/tools/unity-indicators-check.py" "$run/indicators-check.py"
+cp "$repo/tools/unity-now-playing-check.py" "$run/now-playing-check.py"
 if [ "${UNITY_TEST_INDICATORS_ONLY:-0}" = 1 ]; then
   cat > "$run/profile/bin/nvidia-smi" <<EOF
 #!$test_tools/bin/bash
@@ -145,6 +146,11 @@ for _ in {1..60}; do
   sleep 0.1
 done
 gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsSessionRunning | grep true
+if [ "$UNITY_TEST_NOW_PLAYING_ONLY" = 1 ]; then
+  bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
+  "$bridge_python" /work/now-playing-check.py
+  exit 0
+fi
 if [ "$UNITY_TEST_MATCHING_ONLY" = 1 ]; then
   cat > "$HOME/browser-probe.py" <<'PY'
 from gi.repository import Gtk
@@ -742,6 +748,7 @@ fi
   --setenv UNITY_TEST_VIVALDI "$(readlink -f "$(command -v vivaldi || true)")" \
   --setenv UNITY_TEST_INPUT_ONLY "${UNITY_TEST_INPUT_ONLY:-0}" \
   --setenv UNITY_TEST_MATCHING_ONLY "${UNITY_TEST_MATCHING_ONLY:-0}" \
+  --setenv UNITY_TEST_NOW_PLAYING_ONLY "${UNITY_TEST_NOW_PLAYING_ONLY:-0}" \
   --setenv UNITY_TEST_INDICATORS_ONLY "${UNITY_TEST_INDICATORS_ONLY:-0}" \
   --setenv UNITY_TEST_PREVIEWS_ONLY "${UNITY_TEST_PREVIEWS_ONLY:-0}" \
   --setenv UNITY_TEST_SOUNDS_ONLY "${UNITY_TEST_SOUNDS_ONLY:-0}" \

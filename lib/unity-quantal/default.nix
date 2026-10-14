@@ -36,6 +36,7 @@ let
       --panel "$out/usr/lib/control-center-1/panels/libbackground.so"
   '';
   viewer = callPackage ./viewer.nix { inherit runtime legacyGtkModule; };
+  panel = callPackage ./panel.nix { inherit runtime; };
   # Ambiance Dark for current GTK 3 applications, whose CSS the 12.10 theme
   # predates: Ubuntu 18.04's port of Ambiance, under the same palette and name.
   nativeThemeDeb = fetchurl {
@@ -208,6 +209,7 @@ stdenvNoCC.mkDerivation {
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers musicLibrary;
+      panel = "${panel}/bin/unity-panel-service";
       viewer = "${viewer}/bin/unity-image-viewer";
       scrollGrab = "${scrollGrab}/lib/scroll-grab.so";
       volumeCompat = "${volumeCompat}/lib/volume-compat.so";

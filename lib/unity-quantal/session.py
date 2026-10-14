@@ -333,6 +333,7 @@ def runtime(arguments):
             command += ["--ro-bind", str(ROOT / name), "/" + name]
     command += ["--ro-bind", CONFIG["legacyGtkModule"],
                 "/usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libcanberra-gtk3-module.so"]
+    command += ["--ro-bind", CONFIG["panel"], "/usr/lib/unity/unity-panel-service"]
     command += ["--ro-bind", "/nix", "/nix", "--proc", "/proc", "--dev-bind", "/dev", "/dev",
                 "--ro-bind", "/sys", "/sys", "--tmpfs", "/tmp", "--tmpfs", "/run",
                 "--bind", user_home, user_home,
