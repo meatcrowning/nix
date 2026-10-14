@@ -233,7 +233,10 @@ def prepare(directory, environment):
         name = entry.get("Name", "")
         # The native services handle modern apps and the host's user database.
         # Isolated apps start only through their sandbox, never by activation.
-        if name == "ca.desrt.dconf" or name.startswith(("org.gtk.vfs.", "org.gtk.Private.", "org.a11y.", "org.freedesktop.secrets")) \
+        # Quantal's GIO uses the old Private bus name/protocol for volumes;
+        # the host's modern org.gtk.vfs monitor cannot serve those clients.
+        legacy_volumes = name == "org.gtk.Private.UDisks2VolumeMonitor"
+        if name == "ca.desrt.dconf" or (not legacy_volumes and name.startswith(("org.gtk.vfs.", "org.gtk.Private.", "org.a11y.", "org.freedesktop.secrets"))) \
                 or Path(entry.get("Exec", "").split(" ")[0]).name in isolated.APPS:
             stale = directory / "native-data/dbus-1/services" / file.name
             if stale.exists():
@@ -332,6 +335,11 @@ def runtime(arguments):
                 "--ro-bind", "/tmp/.X11-unix", "/tmp/.X11-unix",
                 "--ro-bind", str(directory / "applications"), "/usr/share/applications",
                 "--ro-bind", str(directory / "bridge-bin"), "/usr/local/bin"]
+    # Mount the parent, not today's individual disks, so later hotplug mounts
+    # remain visible too. Nautilus must be able to edit files on these volumes.
+    for path in ["/run/media", "/media", "/mnt"]:
+        if Path(path).is_dir():
+            command += ["--bind", path, path]
     if (directory / "bridge-bin/eog").is_file():
         command += ["--ro-bind", str(directory / "bridge-bin/eog"), "/usr/bin/eog"]
     for source, target in [
