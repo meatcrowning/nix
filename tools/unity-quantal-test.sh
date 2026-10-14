@@ -70,6 +70,9 @@ EOF
   echo 'Test GPU, 63, 2048, 8192, 47' > "$run/home/gpu-reading"
   printf '[Desktop Entry]\nType=Application\nName=Vivaldi\nExec=/bin/true\nIcon=web-browser\n' > "$run/home/.local/share/applications/vivaldi-stable.desktop"
 fi
+if [ "${UNITY_TEST_MATCHING_ONLY:-0}" = 1 ]; then
+  printf '[Desktop Entry]\nType=Application\nName=Vivaldi\nExec=/bin/true\nIcon=web-browser\nStartupWMClass=vivaldi\n' > "$run/home/.local/share/applications/vivaldi-stable.desktop"
+fi
 cat > "$run/inside.sh" <<'EOF'
 set -euo pipefail
 source /guard.sh
@@ -142,6 +145,34 @@ for _ in {1..60}; do
   sleep 0.1
 done
 gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsSessionRunning | grep true
+if [ "$UNITY_TEST_MATCHING_ONLY" = 1 ]; then
+  cat > "$HOME/browser-probe.py" <<'PY'
+from gi.repository import Gtk
+window = Gtk.Window(title='Vivaldi matching probe')
+window.set_wmclass('vivaldi-stable', 'Vivaldi-stable')
+window.show_all()
+Gtk.main()
+PY
+  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/python "$HOME/browser-probe.py" >/work/browser-probe.log 2>&1 &
+  if [ "$UNITY_BASE_PACKAGE" != "$UNITY_PACKAGE" ]; then
+    sleep 2
+    export XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11
+    "$UNITY_PACKAGE/bin/unity-quantal-refresh"
+  fi
+  for _ in {1..60}; do
+    probe=$(xwininfo -root -tree | sed -n 's/^ *\(0x[0-9a-f]*\) "Vivaldi matching probe".*/\1/p' | head -n1)
+    if [ -n "$probe" ]; then
+      application=$(gdbus call --session --dest org.ayatana.bamf --object-path /org/ayatana/bamf/matcher --method org.ayatana.bamf.matcher.ApplicationForXid "$((probe))" | cut -d "'" -f 2)
+      if [ -n "$application" ] && gdbus call --session --dest org.ayatana.bamf --object-path "$application" --method org.ayatana.bamf.application.DesktopFile | grep -q "'/usr/share/applications/vivaldi-stable.desktop'"; then
+        echo 'PASS: Vivaldi window matches its pinned desktop entry'
+        exit 0
+      fi
+    fi
+    sleep 0.2
+  done
+  echo 'FAIL: Vivaldi window did not match its desktop entry' >&2
+  exit 1
+fi
 if [ "$UNITY_TEST_SOUNDS_ONLY" = 1 ]; then
   bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
   "$bridge_python" /work/sounds-check.py
@@ -710,6 +741,7 @@ fi
   --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
   --setenv UNITY_TEST_VIVALDI "$(readlink -f "$(command -v vivaldi || true)")" \
   --setenv UNITY_TEST_INPUT_ONLY "${UNITY_TEST_INPUT_ONLY:-0}" \
+  --setenv UNITY_TEST_MATCHING_ONLY "${UNITY_TEST_MATCHING_ONLY:-0}" \
   --setenv UNITY_TEST_INDICATORS_ONLY "${UNITY_TEST_INDICATORS_ONLY:-0}" \
   --setenv UNITY_TEST_PREVIEWS_ONLY "${UNITY_TEST_PREVIEWS_ONLY:-0}" \
   --setenv UNITY_TEST_SOUNDS_ONLY "${UNITY_TEST_SOUNDS_ONLY:-0}" \

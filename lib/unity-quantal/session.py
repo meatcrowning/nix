@@ -130,6 +130,11 @@ def prepare(directory, environment):
                 entry.pop("TryExec", None)
             parser["Desktop Entry"]["DBusActivatable"] = "false"
             parser["Desktop Entry"]["Terminal"] = "false"
+            # Vivaldi's upstream class is "vivaldi", but stable X11 windows
+            # advertise "Vivaldi-stable". BAMF needs the actual class to join
+            # an already-running browser to its pinned launcher.
+            if file.name == "vivaldi-stable.desktop":
+                parser["Desktop Entry"]["StartupWMClass"] = "Vivaldi-stable"
             write_desktop(directory / "applications" / file.name, parser)
 
     # The original settings panels configure Unity's private dconf profile.
