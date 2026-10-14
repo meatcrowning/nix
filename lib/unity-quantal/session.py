@@ -392,6 +392,8 @@ def runtime(arguments):
     })
     if arguments[0] == "/usr/bin/compiz":
         environment["LD_PRELOAD"] = CONFIG["scrollGrab"]
+    if arguments[0] == "/usr/lib/gvfs/gvfs-udisks2-volume-monitor":
+        environment["LD_PRELOAD"] = CONFIG["volumeCompat"]
     if arguments[0] == "/usr/lib/bamf/bamfdaemon":
         # Match windows only against the session catalog, the paths launcher
         # favorites resolve to. Isolated apps carry sandbox PIDs, so bamf falls

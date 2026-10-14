@@ -165,6 +165,16 @@ let
     mkdir -p "$out/lib"
     $CC -Wall -Wextra -Werror -shared -fPIC -O2 ${./scroll-grab.c} -lX11 -ldl -o "$out/lib/scroll-grab.so"
   '';
+  volumeCompat = runCommand "unity-quantal-volume-compat" {
+    nativeBuildInputs = [ stdenv.cc ];
+  } ''
+    mkdir -p "$out/lib"
+    # Headers only: resolve GIO/UDisks symbols from the original process,
+    # never load modern GLib into Quantal's monitor.
+    $CC -Wall -Wextra -Werror -shared -fPIC -O2 \
+      -I${glib.dev}/include/glib-2.0 -I${glib.out}/lib/glib-2.0/include \
+      ${./volume-compat.c} -o "$out/lib/volume-compat.so"
+  '';
   restrict = runCommand "unity-isolated-restrict" {
     nativeBuildInputs = [ stdenv.cc ];
     buildInputs = [ libseccomp ];
@@ -200,6 +210,7 @@ stdenvNoCC.mkDerivation {
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers musicLibrary;
       viewer = "${viewer}/bin/unity-image-viewer";
       scrollGrab = "${scrollGrab}/lib/scroll-grab.so";
+      volumeCompat = "${volumeCompat}/lib/volume-compat.so";
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
       mediaSchemas = "${mediaSchemas}";
       isolatedClosure = "${isolatedClosure}/store-paths";
