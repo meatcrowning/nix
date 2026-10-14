@@ -114,15 +114,11 @@ static void update(NowPlaying *self)
     g_free(owner);
     GVariant *metadata = g_dbus_proxy_get_cached_property(self->proxy, "Metadata");
     const gchar *title = NULL, *uri = NULL;
-    gchar **artists = NULL;
     if (metadata && g_variant_is_of_type(metadata, G_VARIANT_TYPE("a{sv}"))) {
         g_variant_lookup(metadata, "xesam:title", "&s", &title);
-        g_variant_lookup(metadata, "xesam:artist", "^as", &artists);
         g_variant_lookup(metadata, "mpris:artUrl", "&s", &uri);
     }
-    gchar *artist = artists ? g_strjoinv(", ", artists) : NULL;
-    gchar *text = title && *title ?
-        (artist && *artist ? g_strdup_printf("%s — %s", title, artist) : g_strdup(title)) : g_strdup("Rhythmbox");
+    gchar *text = g_strdup(title && *title ? title : "Rhythmbox");
     if (g_strcmp0(text, self->text) || g_strcmp0(uri, self->art_uri) || visible != self->visible) {
         g_free(self->text);
         self->text = g_strdup(text);
@@ -144,8 +140,6 @@ static void update(NowPlaying *self)
         indicator_object_set_visible(INDICATOR_OBJECT(self), visible);
     }
     g_free(text);
-    g_free(artist);
-    g_strfreev(artists);
     if (metadata) g_variant_unref(metadata);
 }
 
