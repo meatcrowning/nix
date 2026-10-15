@@ -8,6 +8,8 @@ Only the default mod list and latest save's mod list are changed; backups are
 stored outside the save and Workshop directories. --borderless also changes
 the display mode in options.ini; --disable-mod removes additional mod IDs.
 Use --skip-approvals when only changing mods or display settings.
+--vanilla-rendering disables third-party shader packs and shader-changing
+addons, and selects Viewpoint's built-in Vanilla mode. Quit the game first.
 """
 
 import argparse
@@ -16,6 +18,24 @@ import hashlib
 import json
 from pathlib import Path
 import re
+
+
+SHADER_MODS = (
+    'DeadwoodShaders', 'Halcyon', 'MitypointViewpointShader', 'QuietLightAssets',
+    'Redraw', 'ViewpointTrueWeathers', 'SimpleViewpointLockTrueWeathers',
+    'GrassierGrassViewpoint', 'ViewpointGrassierGrass', 'ViewpointTurbo',
+    'ViewpointFPSPlus', 'PoolPit', 'ViewpointPZOCompatibility',
+)
+
+
+def vanilla_rendering(data):
+    for key, value in [(b'debug.atlasGroups', b'false'),
+                       (b'graphics.mode', b'Vanilla'), (b'graphics.pack', b'normal')]:
+        data, count = re.subn(rb'(?m)^' + re.escape(key) + rb'=[^\r\n]*(\r?)$',
+                             key + b'=' + value + rb'\1', data)
+        if count != 1:
+            raise ValueError(f'Expected one {key.decode()} setting')
+    return data
 
 
 def accepted_jars(log):
@@ -92,7 +112,16 @@ def main():
     parser.add_argument('--skip-approvals', action='store_true')
     parser.add_argument('--disable-mod', action='append', default=[])
     parser.add_argument('--borderless', action='store_true')
+    parser.add_argument('--vanilla-rendering', action='store_true')
     args = parser.parse_args()
+    if args.apply:
+        for process in Path('/proc').glob('[0-9]*/comm'):
+            try:
+                if process.read_text().strip() == 'ProjectZomboid64':
+                    raise ValueError('Quit Zomboid before applying settings; it writes them on exit')
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+    disabled = args.disable_mod + (list(SHADER_MODS) if args.vanilla_rendering else [])
     approval_path = args.state / 'mod_approvals.json'
     old = approval_path.read_bytes() if approval_path.exists() else None
     new, count = (old, 0) if args.skip_approvals else approvals(args.zomboid / 'console.txt', args.workshop, old)
@@ -103,7 +132,7 @@ def main():
     for path in [args.zomboid / 'mods/default.txt', args.zomboid / 'Saves' / mode / save / 'mods.txt']:
         data = path.read_bytes()
         replacement = without_hills(data)
-        for mod in args.disable_mod:
+        for mod in disabled:
             if not mod or any(c in mod for c in '\r\n,'):
                 raise ValueError('Invalid mod ID')
             replacement = re.sub(rb'(?m)^[ \t]*mod = ' + re.escape(mod.encode()) + rb',[ \t]*\r?\n',
@@ -113,6 +142,10 @@ def main():
         path = args.zomboid / 'options.ini'
         data = path.read_bytes()
         changes.append((path, data, borderless(data)))
+    if args.vanilla_rendering:
+        path = args.zomboid / 'viewpoint-live.properties'
+        data = path.read_bytes()
+        changes.append((path, data, vanilla_rendering(data)))
     # All validation precedes writes.
     for path, original, replacement in changes:
         if original == replacement:
