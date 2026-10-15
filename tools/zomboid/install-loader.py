@@ -13,7 +13,7 @@ from pathlib import Path
 import zipfile
 
 
-def configure(data):
+def configure(data, heap_mib=None):
     config = json.loads(data)
     args = config['vmArgs']
     if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
@@ -23,8 +23,20 @@ def configure(data):
                 and 'zombiebuddy' in arg.lower()]
     if existing and existing != [agent]:
         raise ValueError('Existing ZombieBuddy agent arguments need review')
+    changed = False
+    if heap_mib is not None:
+        if not 1024 <= heap_mib <= 32768:
+            raise ValueError('Heap must be between 1024 and 32768 MiB')
+        heaps = [arg for arg in args if arg.startswith('-Xmx')]
+        if len(heaps) != 1:
+            raise ValueError('Expected exactly one maximum heap argument')
+        replacement = f'-Xmx{heap_mib}m'
+        changed = heaps[0] != replacement
+        args[args.index(heaps[0])] = replacement
     if not existing:
         args.append(agent)
+        changed = True
+    if changed:
         newline = '\r\n' if b'\r\n' in data else '\n'
         return (json.dumps(config, indent='\t') + '\n').replace('\n', newline).encode()
     return data
@@ -50,12 +62,13 @@ def main():
     parser.add_argument('--backup', type=Path, default=Path.home() /
                         '.local/state/zomboid-mod-patches/loader')
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--heap-mib', type=int, help='Set an explicit maximum Java heap')
     args = parser.parse_args()
     game = args.steamapps / 'common/ProjectZomboid/projectzomboid'
     source = args.steamapps / 'workshop/content/108600/3619862853/mods/ZombieBuddy/libs/ZombieBuddy.jar'
     launcher = game / 'ProjectZomboid64.json'
     # Validate both files before changing either one.
-    updated = configure(launcher.read_bytes())
+    updated = configure(launcher.read_bytes(), args.heap_mib)
     with zipfile.ZipFile(source) as jar:
         manifest = jar.read('META-INF/MANIFEST.MF').decode()
         if 'Premain-Class: me.zed_0xff.zombie_buddy.Agent' not in manifest:
