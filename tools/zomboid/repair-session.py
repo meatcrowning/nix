@@ -5,7 +5,9 @@ Use only when asked to remember the user's approvals. Reads ZombieBuddy's
 post-approval list, never its pre-approval list or all subscribed mods. Changed
 JARs still use ZombieBuddy's normal prompts. Dry-run unless --apply is passed.
 Only the default mod list and latest save's mod list are changed; backups are
-stored outside the save and Workshop directories.
+stored outside the save and Workshop directories. --borderless also changes
+the display mode in options.ini; --disable-mod removes additional mod IDs.
+Use --skip-approvals when only changing mods or display settings.
 """
 
 import argparse
@@ -69,6 +71,15 @@ def without_hills(data):
     return re.sub(rb'(?m)^[ \t]*mod = ViewpointRollingHills,[ \t]*\r?\n', b'', data)
 
 
+def borderless(data):
+    for key, value in [(b'fullScreen', b'false'), (b'borderless', b'true')]:
+        data, count = re.subn(rb'(?m)^' + key + rb'=(?:true|false)(\r?)$',
+                              key + b'=' + value + rb'\1', data)
+        if count != 1:
+            raise ValueError(f'Expected one {key.decode()} setting')
+    return data
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--zomboid', type=Path, default=Path.home() / 'Zomboid')
@@ -78,17 +89,30 @@ def main():
     parser.add_argument('--backup', type=Path, default=Path.home() /
                         '.local/state/zomboid-mod-patches/session')
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--skip-approvals', action='store_true')
+    parser.add_argument('--disable-mod', action='append', default=[])
+    parser.add_argument('--borderless', action='store_true')
     args = parser.parse_args()
     approval_path = args.state / 'mod_approvals.json'
     old = approval_path.read_bytes() if approval_path.exists() else None
-    new, count = approvals(args.zomboid / 'console.txt', args.workshop, old)
+    new, count = (old, 0) if args.skip_approvals else approvals(args.zomboid / 'console.txt', args.workshop, old)
     changes = [(approval_path, old, new)]
     save, mode = (args.zomboid / 'latestSave.ini').read_text().splitlines()[:2]
     if any(part in ('', '.', '..') or '/' in part or '\\' in part for part in (save, mode)):
         raise ValueError('Invalid latest save path')
     for path in [args.zomboid / 'mods/default.txt', args.zomboid / 'Saves' / mode / save / 'mods.txt']:
         data = path.read_bytes()
-        changes.append((path, data, without_hills(data)))
+        replacement = without_hills(data)
+        for mod in args.disable_mod:
+            if not mod or any(c in mod for c in '\r\n,'):
+                raise ValueError('Invalid mod ID')
+            replacement = re.sub(rb'(?m)^[ \t]*mod = ' + re.escape(mod.encode()) + rb',[ \t]*\r?\n',
+                                 b'', replacement)
+        changes.append((path, data, replacement))
+    if args.borderless:
+        path = args.zomboid / 'options.ini'
+        data = path.read_bytes()
+        changes.append((path, data, borderless(data)))
     # All validation precedes writes.
     for path, original, replacement in changes:
         if original == replacement:
