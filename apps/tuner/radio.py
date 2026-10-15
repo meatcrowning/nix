@@ -5,6 +5,7 @@ touches the dongle directly. Results come back through the callbacks, which
 are called on the radio thread; the GUI marshals them with GLib.idle_add.
 """
 
+import os
 import queue
 import threading
 import time
@@ -19,6 +20,8 @@ import rtl
 READ_BYTES = 384 * 512
 SAMPLE_RATES = [960000, 1200000, 1440000, 1680000, 1920000, 2160000, 2400000]
 DC_GUARD = 20000  # keep the tuned channel this far from the dongle's DC spike
+QUEUE_BLOCKS = 40   # about two seconds between the dongle and the DSP
+BACKLOG_BLOCKS = 8  # more than this waiting (0.4 s) means drift: drop one
 
 
 def nearest_rate(rate):
@@ -40,6 +43,11 @@ class Radio:
         self.gains = []
         self.tuner = ""
         self.playback = audio.Playback()
+        if os.environ.get("TUNER_TEST_SINK"):  # harnesses: write audio to a file, never play it
+            self.playback = audio.FileSink(os.environ["TUNER_TEST_SINK"])
+        self.samples_read = 0
+        self.dropped = 0
+        self.started = None
         self.udp = audio.UdpStream()
         self.udp_cfg = None  # (host, port, stereo) when streaming
         self.recorder = None
@@ -100,12 +108,44 @@ class Radio:
             self.freq = int(hw["frequency"])
             self._recentre(dongle, self.freq)
             dongle.reset_buffer()
+            blocks = queue.Queue(maxsize=QUEUE_BLOCKS)
+            reader_error = []
+
+            def on_data(raw):
+                try:
+                    blocks.put_nowait(raw)
+                except queue.Full:
+                    self.dropped += 1  # processing fell a second behind; skip
+
+            def read():
+                try:
+                    dongle.read_async(on_data, 15, READ_BYTES)
+                except OSError as exc:
+                    reader_error.append(str(exc))
+                blocks.put(None)
+
+            reader = threading.Thread(target=read, name="dongle", daemon=True)
+            reader.start()
             spectrum = dsp.Spectrum(4096)
             last_status = 0.0
             while self.running:
                 self._drain(dongle)
-                raw = dongle.read(READ_BYTES)
-                if not raw:
+                try:
+                    raw = blocks.get(timeout=1)
+                except queue.Empty:
+                    continue
+                if raw is None:
+                    if reader_error:
+                        raise OSError(reader_error[0])
+                    break
+                if self.started is None:
+                    self.started = time.monotonic()
+                self.samples_read += len(raw) // 2
+                # The dongle's clock runs a little fast or slow against the
+                # sound card's; when a backlog builds, drop a block rather
+                # than let the delay grow without bound.
+                if blocks.qsize() > BACKLOG_BLOCKS:
+                    self.dropped += 1
                     continue
                 u8 = np.frombuffer(raw, dtype=np.uint8)
                 self.overload = float(np.count_nonzero((u8 == 0) | (u8 == 255))) / len(u8) > 0.005
@@ -125,6 +165,8 @@ class Radio:
                     last_status = now
                     self.on_status(self.rx.level_db, self.rx.stereo, self.rx.squelched, self.overload,
                                    self.recorder.frames / audio.RATE if self.recorder else None)
+            dongle.cancel_async()
+            reader.join(timeout=3)
         except OSError as exc:
             self.on_error(str(exc))
         finally:

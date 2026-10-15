@@ -42,7 +42,7 @@ class Playback:
 
     def _open(self):
         cmd = ["pw-cat", "--playback", "--raw", "--format", "f32", "--rate", str(RATE),
-               "--channels", "2", "--latency", "60ms", "--media-role", "Music",
+               "--channels", "2", "--latency", "150ms", "--media-role", "Music",
                "-P", '{ node.name = "tuner" node.description = "Tuner" application.name = "Tuner" '
                      'application.icon-name = "gqrx" }']
         if self.target:
@@ -115,3 +115,25 @@ class Recorder:
     def close(self):
         self.wav.close()
         return self.path, self.frames / RATE
+
+
+class FileSink:
+    """Test stand-in for Playback: raw f32 frames to PATH, arrival times to PATH.times."""
+
+    def __init__(self, path):
+        self.path = path
+        self.target = None
+        self.data = open(path, "ab")
+        self.times = open(path + ".times", "a")
+
+    def write(self, frames):
+        self.times.write("%.4f %d\n" % (time.monotonic(), len(frames)))
+        self.times.flush()
+        self.data.write(np.ascontiguousarray(frames, dtype="<f4").tobytes())
+        self.data.flush()
+
+    def set_target(self, target):
+        pass
+
+    def close(self):
+        pass

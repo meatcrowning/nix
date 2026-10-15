@@ -22,12 +22,15 @@ cleanup() { kill "${apid:-}" 2>/dev/null || true; kill "$xpid" 2>/dev/null || tr
 trap cleanup EXIT
 sleep 1
 
+# SHOT_START=1 lets it start receiving (with TUNER_TEST_SINK, audio goes to a file).
+if [ -n "${SHOT_START:-}" ]; then start=(); else start=(--no-start); fi
+
 # Positive isolation check: the target display must be our Xvfb, never :0.
 [ "$display" != ":0" ] || exit 1
 env -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS -u PULSE_SERVER -u PIPEWIRE_REMOTE \
   DISPLAY="$display" GDK_BACKEND=x11 HOME="$scratch" XDG_CONFIG_HOME="$scratch/cfg" \
-  XDG_RUNTIME_DIR="$scratch/rt" TUNER_GQRX_DIR="$scratch/gqrx" TUNER_SHOT_FEED="${4:-}" \
-  NO_AT_BRIDGE=1 dbus-run-session -- "$bin" --no-start >"$scratch/log" 2>&1 &
+  XDG_RUNTIME_DIR="$scratch/rt" TUNER_GQRX_DIR="$scratch/gqrx" TUNER_SHOT_FEED="${4:-}" TUNER_TEST_SINK="${TUNER_TEST_SINK:-}" \
+  NO_AT_BRIDGE=1 dbus-run-session -- "$bin" "${start[@]}" >"$scratch/log" 2>&1 &
 apid=$!
 sleep "${SHOT_WAIT:-6}"
 "$magick" -display "$display" -window root "$out"

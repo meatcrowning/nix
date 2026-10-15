@@ -19,6 +19,7 @@ def _load():
 
 
 _lib = None
+READ_CALLBACK = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint32, ctypes.c_void_p)
 
 
 def lib():
@@ -41,6 +42,8 @@ def lib():
         _lib.rtlsdr_get_tuner_gains.argtypes = [p, ctypes.POINTER(ctypes.c_int)]
         _lib.rtlsdr_set_agc_mode.argtypes = [p, ctypes.c_int]
         _lib.rtlsdr_read_sync.argtypes = [p, ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+        _lib.rtlsdr_read_async.argtypes = [p, READ_CALLBACK, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32]
+        _lib.rtlsdr_cancel_async.argtypes = [p]
         if hasattr(_lib, "rtlsdr_set_bias_tee"):
             _lib.rtlsdr_set_bias_tee.argtypes = [p, ctypes.c_int]
     return _lib
@@ -115,6 +118,24 @@ class Dongle:
         if err < 0:
             raise OSError("reading from the dongle failed (error %d)" % err)
         return buf.raw[:got.value]
+
+    def read_async(self, on_data, buffers, length):
+        """Stream until cancel_async(), calling on_data(bytes) per buffer.
+
+        libusb keeps `buffers` transfers queued in the kernel, so samples keep
+        arriving while the caller is busy; read_sync loses whatever arrives
+        between calls.
+        """
+        def callback(buf, n, ctx):
+            on_data(ctypes.string_at(buf, n))
+
+        self._callback = READ_CALLBACK(callback)  # must outlive the call
+        err = self.rtl.rtlsdr_read_async(self.dev, self._callback, None, buffers, length)
+        if err < 0:
+            raise OSError("reading from the dongle failed (error %d)" % err)
+
+    def cancel_async(self):
+        self.rtl.rtlsdr_cancel_async(self.dev)
 
     @staticmethod
     def _ok(err, what):
