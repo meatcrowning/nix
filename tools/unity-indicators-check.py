@@ -144,7 +144,7 @@ def notification_visible():
     rows = call('com.canonical.Unity.Panel.Service', '/com/canonical/Unity/Panel/Service',
                 'com.canonical.Unity.Panel.Service.Sync')[0]
     return any(row[2] == 'unity-quantal-notifications' and row[8] and row[9] for row in rows)
-assert not notification_visible(), 'empty notification history must be hidden'
+wait_for(notification_visible, 'empty notification history remains visible')
 assert not Path(os.environ['UNITY_QUANTAL_SESSION_DIR'], 'autostart/unity-quantal-cpufreq.desktop').exists()
 
 applications = call('com.canonical.indicator.application', '/com/canonical/indicator/application/service',
@@ -219,5 +219,8 @@ call('org.freedesktop.Notifications', '/org/freedesktop/Notifications', 'org.fre
 assert not any(e['summary'] == 'Transient probe' for e in json.loads(history.read_text()))
 call('org.freedesktop.Notifications', '/org/unity_quantal/NotificationHistory', 'org.unity_quantal.NotificationHistory.Clear')
 assert json.loads(history.read_text()) == []
-wait_for(lambda: not notification_visible(), 'clearing notification history hides icon')
+notifications = next(row for row in applications if row[-1] == 'Recent Notifications')
+wait_for(lambda: 'No recent notifications' in str(call(notifications[2], notifications[3],
+    'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]')), 'cleared notification menu')
+assert notification_visible(), 'clearing notification history must keep the icon visible'
 print('PASS: CPU/GPU order, GPU readings and graph, all panel entries, stable meter menus; private session history, transient exclusion and clear', flush=True)

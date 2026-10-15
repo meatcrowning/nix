@@ -117,8 +117,7 @@ class Indicator:
             self.indicator.set_ordering_index(100002 if kind == 'load' else 100000)
         self.menu = Gtk.Menu()
         self.indicator.set_menu(self.menu)
-        self.indicator.set_status(AppIndicator3.IndicatorStatus.PASSIVE if kind == 'notifications'
-                                  else AppIndicator3.IndicatorStatus.ACTIVE)
+        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         Gio.bus_own_name_on_connection(self.bus, 'org.unity_quantal.' +
             {'load': 'Load', 'gpu': 'Gpu', 'temperature': 'Temperature', 'notifications': 'NotificationIndicator'}[kind],
@@ -217,8 +216,6 @@ class Indicator:
                 entries = json.loads(text) if text else []
             except ValueError:
                 entries = []
-            self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE if entries
-                                      else AppIndicator3.IndicatorStatus.PASSIVE)
             self.indicator.set_label(str(len(entries)) if entries else '', '30')
             self.replace()
             if not entries:
