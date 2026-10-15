@@ -131,9 +131,11 @@ class Iir:
         self.zi = None
 
     def __call__(self, x):
-        if self.zi is None or self.zi.dtype != x.dtype:
-            self.zi = np.zeros(max(len(self.a), len(self.b)) - 1, dtype=x.dtype)
-        y, self.zi = signal.lfilter(self.b, self.a, x, zi=self.zi)
+        if self.zi is None:
+            self.zi = np.zeros(max(len(self.a), len(self.b)) - 1)
+        # lfilter hands the state back as float64 whatever x is; keep it, or
+        # every block restarts from zero and clicks.
+        y, self.zi = signal.lfilter(self.b, self.a, x, zi=self.zi.astype(np.result_type(x, self.zi)))
         return y.astype(x.dtype)
 
 
@@ -305,6 +307,9 @@ class Receiver:
             # Mono and L-R share one 15 kHz FIR by riding as real/imag parts.
             self.audio_lp = FirDecimator(lowpass(WIDE_RATE, 15000, 3000), WIDE_RATE // AUDIO_RATE)
             self.pilot = PhaseTracker(WIDE_RATE, 19000, 960)  # 4 ms windows
+            # Empty guard band beside the pilot: noise there says how much of
+            # the "pilot" a noisy channel would show without one.
+            self.pilot_ref = PhaseTracker(WIDE_RATE, 17500, 960)
             self.deemph = [deemphasis(AUDIO_RATE, s["wfm_tau_us"]) for _ in range(2)]
         else:
             self.to_narrow = FirDecimator(lowpass(WIDE_RATE, 21000, 6000), WIDE_RATE // AUDIO_RATE)
@@ -388,7 +393,8 @@ class Receiver:
         mpx = self.fm(ch) * (WIDE_RATE / (2 * math.pi * 75000))  # 1.0 = 75 kHz deviation
         if stereo:
             phase, level = self.pilot(mpx)
-            self.stereo = 2 * level >= STEREO_PILOT_MIN
+            _, noise = self.pilot_ref(mpx)
+            self.stereo = 2 * level >= STEREO_PILOT_MIN and level > 4 * noise
         else:
             self.stereo = False
         if self.stereo:
