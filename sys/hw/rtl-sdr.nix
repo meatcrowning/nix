@@ -1,10 +1,13 @@
 { pkgs, user, ... }:
 
 let
-  # gr-osmosdr's UHD probe (USRP broadcast discovery) deadlocks in boost::asio
-  # inside gqrx's MainWindow constructor, so no window ever appears. Nothing
-  # here is a USRP; build gqrx's osmosdr without UHD.
-  osmosdrNoUhd = pkgs.gnuradioMinimal.pkgs.osmosdr.override { features.uhd = false; };
+  # UHD's USRP broadcast discovery intermittently deadlocks in boost::asio
+  # inside gqrx's MainWindow constructor, so no window ever appears. It is
+  # reached directly and through Soapy's soapyuhd module; gqrx drives the
+  # dongle with osmosdr's native rtl source, so build without both.
+  osmosdrNoUhd = pkgs.gnuradioMinimal.pkgs.osmosdr.override {
+    features = { uhd = false; soapy = false; };
+  };
   gqrx = pkgs.gqrx.overrideAttrs (old: {
     buildInputs = map (p: if (p.pname or "") == "gr-osmosdr" then osmosdrNoUhd else p) old.buildInputs;
   });
