@@ -139,6 +139,12 @@ panel = call('com.canonical.Unity.Panel.Service', '/com/canonical/Unity/Panel/Se
     'com.canonical.Unity.Panel.Service.Sync')[0]
 for name in ['unity-quantal-gpu', 'unity-quantal-load', 'unity-quantal-temperature']:
     assert any(row[2] == name and row[8] and row[9] for row in panel), (name, panel)
+user = next(row for row in panel if row[0] == 'libusermenu.so' and row[1])
+assert user[3] == 'Unity Test' and user[4] and user[5] and user[8] and user[9], user
+priorities = {row[0]: row[-1] for row in panel if row[1]}
+assert priorities['libdatetime.so'] < user[-1] < priorities['libsession.so'], priorities
+assert not any(priorities['libdatetime.so'] < priority < priorities['libsession.so']
+               for name, priority in priorities.items() if name != 'libusermenu.so'), priorities
 
 def notification_visible():
     rows = call('com.canonical.Unity.Panel.Service', '/com/canonical/Unity/Panel/Service',

@@ -9,8 +9,9 @@ def replace(old, new):
     assert source.count(old) == 1, old
     source = source.replace(old, new)
 
-replace('#include "panel-service.h"', '#include "panel-service.h"\n#include "now-playing.h"')
+replace('#include "panel-service.h"', '#include "panel-service.h"\n#include "now-playing.h"\n#include "user-menu.h"')
 replace('  {"libsoundmenu.so", NULL},', '  {"libnowplaying.so", NULL},\n  {"libsoundmenu.so", NULL},')
+replace('  {"libsession.so", NULL},', '  {"libusermenu.so", NULL},\n  {"libsession.so", NULL},')
 replace('static void\nload_indicators (PanelService *self)', '''static gboolean
 now_playing_hovered (gpointer panel, IndicatorObject *indicator)
 {
@@ -24,5 +25,6 @@ now_playing_hovered (gpointer panel, IndicatorObject *indicator)
 static void
 load_indicators (PanelService *self)''')
 replace('  g_dir_close (dir);', '''  g_dir_close (dir);
-  load_indicator (self, now_playing_new (now_playing_hovered, self), "libnowplaying.so");''')
+  load_indicator (self, now_playing_new (now_playing_hovered, self), "libnowplaying.so");
+  load_indicator (self, user_menu_new (), "libusermenu.so");''')
 path.write_text(source)

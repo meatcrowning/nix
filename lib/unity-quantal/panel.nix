@@ -1,4 +1,4 @@
-# Preserve the original panel service and libraries, adding only the music entry.
+# Preserve the original panel service and libraries, adding music and user menus.
 { stdenv, fetchurl, runtime, pkg-config, glib, gtk3, atk, at-spi2-core
 , libX11, libXi, python3, patchelf, libarchive }:
 let
@@ -25,6 +25,8 @@ in stdenv.mkDerivation {
     tar xf ${indicatorSource}
     cp ${./now-playing.c} services/now-playing.c
     cp ${./now-playing.h} services/now-playing.h
+    cp ${./user-menu.c} services/user-menu.c
+    cp ${./user-menu.h} services/user-menu.h
     python ${./panel-patch.py}
   '';
   buildPhase = ''
@@ -47,7 +49,7 @@ in stdenv.mkDerivation {
       -DINDICATORDIR='"/usr/lib/indicators3/7"' \
       -DINDICATORICONDIR='"/usr/share/libindicator/icons"' \
       -I. -I../libindicator-12.10.1 $(pkg-config --cflags gtk+-3.0 atk-bridge-2.0 x11 xi) \
-      panel-*.c now-playing.c -o unity-panel-service \
+      panel-*.c now-playing.c user-menu.c -o unity-panel-service \
       -Labi -Wl,-rpath-link,${runtime}/usr/lib/x86_64-linux-gnu:${runtime}/lib/x86_64-linux-gnu \
       -lgtk-3 -lgdk-3 -latk-1.0 -latk-bridge-2.0 -lgio-2.0 -lgobject-2.0 -lglib-2.0 \
       -lgmodule-2.0 -lgdk_pixbuf-2.0 -lpango-1.0 -lpangocairo-1.0 -lcairo -lindicator3 -lX11 -lXi \
