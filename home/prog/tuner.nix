@@ -30,6 +30,7 @@ let
     postFixup = ''
       makeWrapper ${pyEnv}/bin/python3 $out/bin/tuner \
         --add-flags /home/lam/nix/apps/tuner/main.py \
+        --set TUNER_NRSC5 ${pkgs.nrsc5}/lib/libnrsc5.so \
         --set TUNER_REDSEA ${redsea}/bin/redsea \
         --set TUNER_LIBRTLSDR ${pkgs.rtl-sdr}/lib/librtlsdr.so.0 \
         --prefix PATH : ${lib.makeBinPath [ pkgs.pipewire ]} \

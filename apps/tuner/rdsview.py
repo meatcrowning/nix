@@ -131,7 +131,10 @@ class RdsDisplay(Gtk.DrawingArea):
         cr.set_line_width(max(1.1, h * .065))
         for index, (start, end) in enumerate(SEGMENTS):
             lit = chr(ord('a') + index) in active
-            cr.set_source_rgba(1, .60, .16, .95 if lit else .055)
+            if lit:
+                cr.set_source_rgba(1, .60, .16, .95)
+            else:
+                cr.set_source_rgb(.13, .13, .13)
             cr.move_to(x + start[0] * w, y + start[1] * h)
             cr.line_to(x + end[0] * w, y + end[1] * h)
             cr.stroke()

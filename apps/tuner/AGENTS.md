@@ -12,6 +12,8 @@ The dongle and package are top-only
 | dsp.py | demodulators, filters, AGC, squelch, noise blankers; numpy/scipy only |
 | rds.py | bounded asynchronous Redsea MPX pipe and station metadata; no device access |
 | rdsview.py | scrolling fourteen-segment RDS display and its map/unmap timer |
+| hd.py | nrsc5 pipe API, HD metadata and streaming 44.1→48 kHz conversion; no device access |
+| hdreceiver.py | HD capture session and bounded burst-audio output worker |
 | radio.py | the radio thread: librtlsdr reads, retuning, playback/UDP/recorder |
 | rtl.py | ctypes librtlsdr binding (`TUNER_LIBRTLSDR` from the wrapper) |
 | audio.py | `pw-cat` playback, PipeWire sink list, gqrx-format UDP, WAV recorder |
@@ -32,7 +34,24 @@ lost-signal states are explicit. The marquee advances whole characters through
 fixed segment cells; GTK's animation setting governs it. Metadata resets must
 never discard the audio IQ queue; RDS conversion stays in its worker.
 
+HD uses `TUNER_NRSC5` (libnrsc5) in pipe mode; the existing RTL binding remains
+the sole dongle owner. HD fixes capture at 1,488,375 samples/s, centered on the
+station. The analog rate and receiver settings are retained but disabled in HD.
+Mode switches wait for the old receive thread to release the dongle. Discovered
+public subchannels populate the selector; retuning resets to HD1 and discards
+old station metadata/audio. Audio is resampled with continuous history to the
+existing 48 kHz playback/UDP/WAV contract. No automatic analog fallback or
+received metadata persistence.
+
 ## Verification
+
+- `tools/hd-test.py` checks the real nrsc5 pipe, metadata/channel separation,
+  continuous resampling, and a paced fake-dongle session with a memory sink.
+  Set `TUNER_NRSC5` to the wrapper library; optional `--sample PATH` accepts
+  upstream nrsc5 `support/sample.xz` for real HD1/HD2 decoding.
+- `bash tools/hd-ui-test.sh /path/to/tuner-python` runs HD controls, station
+  reset, mode handoff, persistence and segment-colour checks on private Xvfb
+  with scratch configuration, mocked device enumeration and no audio.
 
 - `tools/rds-test.py` uses synthetic FM IQ through the real receiver and Redsea
   to verify PS/RadioText, 0A/0B/2A/2B groups, reset, and decoder teardown. Run

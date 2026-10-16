@@ -16,6 +16,7 @@ import audio
 import dsp
 import rtl
 import rds
+import hdreceiver
 
 # 384 * 512 bytes = 98304 samples, about 51 ms at 1.92 MS/s.
 READ_BYTES = 384 * 512
@@ -57,19 +58,24 @@ class Radio:
         self.metadata_changed = 0.0
         self.rds = None
         self.on_rds = lambda generation, data: None
+        self.on_hd = lambda generation, data: None
+        self.hd_program = 0
+        self.hd_enabled = False
         self.on_recorded = lambda path, seconds: None
 
     # GUI-side API -------------------------------------------------------
 
     def start(self, hw):
         """hw: device, frequency, sample_rate, gain_db (None = auto), rtl_agc, ppm, bias_tee."""
-        if self.running:
+        if self.running or (self.thread and self.thread.is_alive()):
             return
+        self.hd_enabled = bool(hw.get("hd", False))
         self.invalidate_rds()
-        self.rds = rds.Decoder(lambda gen, data: self.on_rds(gen, data), self.metadata_generation)
+        if not self.hd_enabled:
+            self.rds = rds.Decoder(lambda gen, data: self.on_rds(gen, data), self.metadata_generation)
         self.running = True
         self.rate = nearest_rate(hw["sample_rate"])
-        self.rx = dsp.Receiver(self.rate, self.rx_settings)
+        self.rx = None if self.hd_enabled else dsp.Receiver(self.rate, self.rx_settings)
         self.thread = threading.Thread(target=self._run, args=(dict(hw),), name="radio", daemon=True)
         self.thread.start()
 
@@ -88,12 +94,12 @@ class Radio:
         self.jobs.put(("tune", int(freq)))
 
     def hardware(self, key, value):
-        if key in ("sample_rate", "ppm"):
+        if key == "ppm" or (key == "sample_rate" and not self.hd_enabled):
             self.invalidate_rds()
         self.jobs.put((key, value))
 
     def receiver(self, **changes):
-        if "mode" in changes:
+        if "mode" in changes and not self.hd_enabled:
             self.invalidate_rds()
         self.rx_settings.update(changes)
         if self.rx:
@@ -114,6 +120,9 @@ class Radio:
     # Radio thread -------------------------------------------------------
 
     def _run(self, hw):
+        if self.hd_enabled:
+            hdreceiver.run(self, hw)
+            return
         dongle = None
         try:
             dongle = rtl.Dongle(hw.get("device", 0))
@@ -241,13 +250,21 @@ class Radio:
                 self.rx = dsp.Receiver(self.rate, self.rx_settings)
                 self._recentre(dongle, self.freq)
                 dongle.reset_buffer()
-            elif key == "output":
-                self.playback.set_target(value)
-            elif key == "record":
-                if self.recorder:
-                    path, seconds = self.recorder.close()
-                    self.recorder = None
-                    self.on_recorded(path, seconds)
-                if value:
-                    directory, mode = value
-                    self.recorder = audio.Recorder(directory, self.freq, mode)
+            elif key in ("output", "record"):
+                self._output_job(key, value)
+
+    def select_hd(self, program):
+        self.hd_program = max(0, min(7, int(program)))
+        self.jobs.put(("hd_program", self.hd_program))
+
+    def _output_job(self, key, value):
+        if key == "output":
+            self.playback.set_target(value)
+        elif key == "record":
+            if self.recorder:
+                path, seconds = self.recorder.close()
+                self.recorder = None
+                self.on_recorded(path, seconds)
+            if value:
+                directory, mode = value
+                self.recorder = audio.Recorder(directory, self.freq, mode)

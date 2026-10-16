@@ -41,7 +41,7 @@ ZOOMS = [1, 2, 4, 8, 16]
 SHORT_MODES = {"WFM (stereo)": "WFM", "WFM (mono)": "WFM mono", "Narrow FM": "NFM"}
 
 HW_DEFAULTS = {"frequency": 96900000, "sample_rate": 1920000, "gain_db": None, "rtl_agc": False,
-               "ppm": 0, "bias_tee": False, "device": 0}
+               "ppm": 0, "bias_tee": False, "device": 0, "hd": False}
 OTHER_DEFAULTS = {"output": None, "udp_enabled": False, "udp_host": "localhost", "udp_port": 7355,
                   "udp_stereo": False, "rec_dir": str(Path.home()), "step": 100000, "zoom": 1,
                   "peak_hold": True, "auto_range": True, "floor_db": -80.0, "range_db": 60.0,
@@ -98,9 +98,13 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.updating = False
         self.save_pending = None
         self.radio = radio.Radio(self.rx, self._spectrum_cb, self._status_cb, self._error_cb, self._stopped_cb)
+        self.hd_data = {}
+        self.hd_restart = False
+        self.hd_channels = []
         self.rds_data = {}
         self.rds_seen = 0.0
         self.radio.on_rds = lambda gen, data: GLib.idle_add(self._rds_update, gen, data)
+        self.radio.on_hd = lambda gen, data: GLib.idle_add(self._hd_update, gen, data)
         self.radio.on_recorded = lambda path, secs: GLib.idle_add(self._recorded, path, secs)
         self.set_default_size(*self.s["window"])
         self.set_icon_name("gqrx")
@@ -136,7 +140,8 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.paned.pack1(frame, True, False)
         self.notebook = Gtk.Notebook()
         self.notebook.set_scrollable(True)
-        self.notebook.append_page(self._scrolled(self._receiver_page()), Gtk.Label(label="Receiver"))
+        self.receiver_page = self._receiver_page()
+        self.notebook.append_page(self._scrolled(self.receiver_page), Gtk.Label(label="Receiver"))
         self.notebook.append_page(self._scrolled(self._audio_page()), Gtk.Label(label="Audio"))
         self.notebook.append_page(self._scrolled(self._input_page()), Gtk.Label(label="Input"))
         self.notebook.append_page(self._scrolled(self._bookmarks_page()), Gtk.Label(label="Bookmarks"))
@@ -157,6 +162,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.paned.connect("notify::position", lambda p, _: self._save("pane", p.get_position()))
         self._sync_mode_controls()
         self.tune(self.s["frequency"], quiet=True)
+        self._sync_hd_controls()
         self._status("Stopped")
         if autostart and self.s["start_on_launch"]:
             GLib.idle_add(self._autostart)
@@ -288,6 +294,19 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.rds_button.set_active(self.s["rds_display"])
         self.rds_button.connect("toggled", self._toggle_rds)
         row.pack_start(self.rds_button, False, False, 0)
+
+        hd_controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.hd_button = Gtk.ToggleButton(label="HD", relief=Gtk.ReliefStyle.NONE)
+        self.hd_button.set_tooltip_text("Receive digital HD Radio instead of analog FM")
+        self.hd_button.set_active(self.s["hd"])
+        self.hd_button.connect("toggled", self._toggle_hd)
+        hd_controls.pack_start(self.hd_button, False, False, 0)
+        self.hd_combo = Gtk.ComboBoxText()
+        self.hd_combo.set_tooltip_text("HD channels detected on this frequency")
+        self.hd_combo.connect("changed", self._select_hd)
+        hd_controls.pack_start(self.hd_combo, False, False, 0)
+        hd_controls.set_valign(Gtk.Align.CENTER)
+        row.pack_start(hd_controls, False, False, 0)
 
         controls = Gtk.Grid(column_spacing=6, row_spacing=4)
         self.mode_combo = self._combo(dsp.MODES, self.rx["mode"])
@@ -521,6 +540,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         self._row(g, "Dongle", self.device_label)
         rates = ["%.2f MS/s" % (r / 1e6) for r in radio.SAMPLE_RATES]
         rate = self._combo(rates, "%.2f MS/s" % (self.s["sample_rate"] / 1e6))
+        self.rate_combo = rate
         rate.connect("changed", lambda c: self._hw("sample_rate", radio.SAMPLE_RATES[c.get_active()]))
         self._row(g, "Sample rate", rate, tip="Width of the spectrum view; higher rates use more CPU")
 
@@ -781,6 +801,11 @@ class TunerWindow(Gtk.ApplicationWindow):
         if self.radio.running:
             self.radio.tune(freq)
         self.rds_data, self.rds_seen = {}, 0.0
+        self.hd_data = {}
+        self.radio.hd_program = 0
+        if self.s["hd"]:
+            self.radio.select_hd(0)
+        self._sync_hd_channels([])
         self._refresh_rds()
         self._select_bookmark(freq)
         if not quiet:
@@ -800,7 +825,93 @@ class TunerWindow(Gtk.ApplicationWindow):
         self._refresh_rds()
         return False
 
+    def _toggle_hd(self, button):
+        self._save("hd", button.get_active())
+        self.rds_data, self.rds_seen = {}, 0.0
+        self.hd_data = {}
+        self._sync_hd_channels([])
+        self._sync_hd_controls()
+        if self.s["hd"]:
+            self.rds_button.set_active(True)
+        if self.radio.running:
+            # The old reader must release the dongle before the new mode starts.
+            if self.record_button.get_active():
+                self.record_button.set_active(False)
+            self.hd_restart = True
+            self.hd_button.set_sensitive(False)
+            self.radio.stop()
+        self._refresh_rds()
+
+    def _sync_hd_controls(self):
+        enabled = self.s["hd"]
+        self.rds_button.set_label("Text" if enabled else "RDS")
+        self.rds_button.set_tooltip_text("Switch between frequency and station text")
+        self.receiver_page.set_sensitive(not enabled)
+        self.receiver_page.set_tooltip_text("Analog receiver settings; HD uses its own decoder" if enabled else None)
+        self.spectrum.filter = (-200000, 200000) if enabled else (self.rx["filter_low"], self.rx["filter_high"])
+        self.spectrum.queue_draw()
+        self.mode_combo.set_sensitive(not enabled)
+        self.rate_combo.set_sensitive(not enabled)
+        self.rate_combo.set_tooltip_text("HD uses 1.488375 MS/s" if enabled else "Analog sample rate")
+        for control in (self.width_combo, self.low_spin, self.high_spin, self.squelch):
+            control.set_sensitive(not enabled)
+        self.hd_combo.set_no_show_all(not enabled)
+        self.hd_combo.set_visible(enabled)
+        self._sync_hd_channels(self.hd_data.get("channels", []))
+
+    def _sync_hd_channels(self, channels):
+        channels = sorted(set(channels))
+        selected = self.radio.hd_program
+        ids = sorted(set(channels + [selected]))
+        labels = [(p, "HD%d%s" % (p + 1, "" if p in channels else " · waiting")) for p in ids]
+        if labels != self.hd_channels:
+            self.hd_channels = labels
+            self.hd_combo.remove_all()
+            for program, label in labels:
+                self.hd_combo.append(str(program), label)
+        self.hd_combo.set_active_id(str(selected))
+        self.hd_combo.set_sensitive(self.s["hd"] and bool(channels) and len(ids) > 1)
+
+    def _select_hd(self, combo):
+        value = combo.get_active_id()
+        if value is not None and int(value) != self.radio.hd_program:
+            self.radio.select_hd(int(value))
+            self.hd_data = {k: v for k, v in self.hd_data.items()
+                            if k in ("station", "channels", "locked", "mer")}
+            self._refresh_rds()
+
+    def _hd_update(self, generation, data):
+        if (generation != self.radio.metadata_generation or not self.radio.running
+                or not self.s["hd"] or data.get("program", 0) != self.radio.hd_program):
+            return False
+        self.hd_data = data
+        self._sync_hd_channels(data.get("channels", []))
+        self._refresh_rds()
+        return False
+
+    def _refresh_hd(self):
+        data = self.hd_data
+        heading = "%.3f MHz  ·  HD%d" % (self.s["frequency"] / 1e6, self.radio.hd_program + 1)
+        if data.get("station"):
+            heading += "  ·  " + data["station"]
+        if not self.radio.running:
+            message = "Receiver stopped"
+        elif not data.get("locked"):
+            message = "HD signal lost" if data.get("station") else "Searching for HD Radio"
+        elif not data.get("audio"):
+            message = "HD locked - waiting for audio"
+        else:
+            message = " - ".join(filter(None, (data.get("artist"), data.get("title"))))
+            message = message or data.get("station") or "Digital audio"
+        detail = heading + "\n" + message
+        if data.get("mer"):
+            detail += "\nHD MER: %.1f / %.1f dB" % tuple(data["mer"])
+        self.rds_display.set_message(heading, message, detail)
+
     def _refresh_rds(self):
+        if self.s["hd"]:
+            self._refresh_hd()
+            return
         heading = "%.3f MHz  ·  RDS" % (self.s["frequency"] / 1e6)
         data = self.rds_data
         if not self.radio.running:
@@ -935,6 +1046,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.spectrum.filter = (rx["filter_low"], rx["filter_high"])
         self.spectrum.queue_draw()
         self.updating = False
+        self._sync_hd_controls()
 
     # Hardware, audio and view settings -------------------------------------
 
@@ -1026,6 +1138,7 @@ class TunerWindow(Gtk.ApplicationWindow):
             button.set_icon_name("media-playback-stop")
             button.set_label("Stop")
         else:
+            self.hd_restart = False
             self.radio.stop()
             button.set_icon_name("media-playback-start")
             button.set_label("Start")
@@ -1038,7 +1151,7 @@ class TunerWindow(Gtk.ApplicationWindow):
                 button.set_active(False)
                 self._warn("Start receiving before recording.")
                 return
-            self.radio.start_recording(self.s["rec_dir"], self.rx["mode"])
+            self.radio.start_recording(self.s["rec_dir"], "HD%d" % (self.radio.hd_program + 1) if self.s["hd"] else self.rx["mode"])
         else:
             self.radio.stop_recording()
 
@@ -1068,6 +1181,9 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.level_label.set_text("%.1f dBFS" % level)
         mode = self.rx["mode"]
         self.stereo_label.set_text("Stereo" if stereo else ("Mono" if mode in dsp.WFM_MODES else ""))
+        if self.s["hd"]:
+            mode = "HD%d" % (self.radio.hd_program + 1)
+            self.stereo_label.set_text("HD lock" if self.hd_data.get("locked") else "HD seek")
         parts = ["Receiving %.4f MHz %s" % (self.s["frequency"] / 1e6, mode)]
         if squelched:
             parts.append("squelched")
@@ -1079,6 +1195,16 @@ class TunerWindow(Gtk.ApplicationWindow):
         return False
 
     def _stopped(self):
+        if self.radio.thread and self.radio.thread.is_alive():
+            GLib.timeout_add(30, self._stopped)
+            return False
+        self.hd_button.set_sensitive(True)
+        if self.hd_restart:
+            self.hd_restart = False
+            self._toggle_start(self.start_button)
+            return False
+        self.hd_data = {}
+        self._sync_hd_channels([])
         self.rds_data, self.rds_seen = {}, 0.0
         self._refresh_rds()
         if self.start_button.get_active():
@@ -1131,6 +1257,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         return False
 
     def _quit(self, *args):
+        self.hd_restart = False
         self.radio.stop()
         if self.radio.thread:
             self.radio.thread.join(timeout=3)
