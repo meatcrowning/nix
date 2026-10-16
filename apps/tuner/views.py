@@ -1,6 +1,7 @@
 """Custom-drawn widgets: the frequency dial and the spectrum/waterfall."""
 
 import math
+import time
 
 import cairo
 import numpy as np
@@ -21,7 +22,27 @@ def _plasma_lut():
     return (r << 16) | (g << 8) | b
 
 
-LUT = _plasma_lut()
+def _colour_lut(anchors):
+    anchors = np.asarray(anchors, dtype=float)
+    x = np.linspace(0, 1, 256)
+    r, g, b = (np.round(np.interp(x, anchors[:, 0], anchors[:, i])).astype(np.uint32)
+               for i in (1, 2, 3))
+    return (r << 16) | (g << 8) | b
+
+
+COLOUR_MAPS = {
+    "Plasma": _plasma_lut(),
+    "Grey": _colour_lut([(0, 0, 0, 0), (1, 255, 255, 255)]),
+    "Ice": _colour_lut([(0, 0, 0, 0), (.35, 0, 30, 150), (.7, 0, 200, 255), (1, 255, 255, 255)]),
+    "Fire": _colour_lut([(0, 0, 0, 0), (.35, 150, 0, 0), (.7, 255, 150, 0), (1, 255, 255, 230)]),
+}
+DISPLAY_DEFAULTS = {
+    "colour_map": "Plasma", "intensity_db": 0.0, "contrast": 1.0,
+    "line_interval": 0.0, "spectrum_percent": 32.0, "smoothing": 60.0,
+    "peak_decay": 0.15, "show_grid": True, "fill_trace": True,
+    "show_bookmarks": True, "show_filter": True, "show_tuning_line": True,
+    "show_crosshair": True,
+}
 
 
 class FrequencyDial(Gtk.DrawingArea):
@@ -192,7 +213,11 @@ class SpectrumView(Gtk.DrawingArea):
         self.freq = 0
         self.filter = (-80000, 80000)
         self.zoom = 1
-        self.split = 0.32
+        for key, value in DISPLAY_DEFAULTS.items():
+            setattr(self, key, value)
+        self.waterfall_paused = False
+        self._pending_row = None
+        self._last_line = None
         self.floor = -80.0
         self.range_db = 60.0
         self.auto_range = True
@@ -214,7 +239,21 @@ class SpectrumView(Gtk.DrawingArea):
 
     def clear(self):
         self.rows, self.count, self.trace, self.peak = None, 0, None, None
+        self.head = 0
+        self._pending_row = None
+        self._last_line = None
         self.queue_draw()
+
+    def clear_waterfall(self):
+        self.count = 0
+        self._pending_row = None
+        self._last_line = None
+        self.queue_draw()
+
+    def pause_waterfall(self, paused):
+        self.waterfall_paused = paused
+        self._pending_row = None
+        self._last_line = None
 
     def push(self, row, center, rate):
         if self.rows is None or self.rows.shape[1] != len(row):
@@ -222,18 +261,30 @@ class SpectrumView(Gtk.DrawingArea):
             self.count = 0
             self.trace = None
             self.peak = None
+            self._pending_row = None
+            self._last_line = None
         if center != self.center or rate != self.rate:
             self.peak = None
+            self._pending_row = None
         self.center, self.rate = center, rate
-        self.head = (self.head + 1) % self.HISTORY
-        self.rows[self.head] = row
-        self.count = min(self.count + 1, self.HISTORY)
-        self.trace = row if self.trace is None else 0.6 * self.trace + 0.4 * row
+        if not self.waterfall_paused:
+            now = time.monotonic()
+            # Keep brief signals visible when several updates share one line.
+            self._pending_row = row.copy() if self._pending_row is None else np.maximum(self._pending_row, row)
+            if self._last_line is None or now - self._last_line >= self.line_interval:
+                self.head = (self.head + 1) % self.HISTORY
+                self.rows[self.head] = self._pending_row
+                self.count = min(self.count + 1, self.HISTORY)
+                self._pending_row = None
+                self._last_line = now
+        weight = self.smoothing / 100.0
+        first_trace = self.trace is None
+        self.trace = row.copy() if first_trace else weight * self.trace + (1 - weight) * row
         if self.peak_hold:
-            self.peak = self.trace.copy() if self.peak is None else np.maximum(self.peak - 0.15, self.trace)
+            self.peak = self.trace.copy() if self.peak is None else np.maximum(self.peak - self.peak_decay, self.trace)
         if self.auto_range:
             floor = float(np.percentile(row, 20)) - 6
-            self.floor = 0.95 * self.floor + 0.05 * floor if self.count > 1 else floor
+            self.floor = 0.95 * self.floor + 0.05 * floor if not first_trace else floor
         self.queue_draw()
 
     # Geometry -----------------------------------------------------------
@@ -257,7 +308,7 @@ class SpectrumView(Gtk.DrawingArea):
 
     def _draw(self, widget, cr):
         w, h = self.get_allocated_width(), self.get_allocated_height()
-        top = int(h * self.split)
+        top = int(h * self.spectrum_percent / 100.0)
         cr.set_source_rgb(0.07, 0.07, 0.065)
         cr.paint()
         if self.rows is None or self.rate <= 1:
@@ -280,9 +331,10 @@ class SpectrumView(Gtk.DrawingArea):
         count = min(self.count, rows)
         order = (self.head - np.arange(count)) % self.HISTORY
         data = self.rows[order][:, index]
-        level = np.clip((data - self.floor) / self.range_db * 255, 0, 255).astype(np.uint8)
+        normalized = np.clip((data - self.floor + self.intensity_db) / self.range_db, 0, 1)
+        level = (normalized ** self.contrast * 255).astype(np.uint8)
         pixels = np.zeros((rows, w), dtype=np.uint32)
-        pixels[:count] = LUT[level]
+        pixels[:count] = COLOUR_MAPS[self.colour_map][level]
         surface = cairo.ImageSurface.create_for_data(memoryview(pixels), cairo.FORMAT_RGB24, w, rows, w * 4)
         cr.set_source_surface(surface, 0, top)
         cr.paint()
@@ -296,11 +348,12 @@ class SpectrumView(Gtk.DrawingArea):
         # Grid: dB lines every 10 dB, frequency lines at a round step.
         cr.set_line_width(1)
         cr.set_source_rgba(1, 1, 1, 0.08)
-        for db in range(int(self.floor // 10 * 10), int(self.floor + self.range_db) + 1, 10):
-            y = self._y(db, top)
-            cr.move_to(0, int(y) + 0.5)
-            cr.line_to(w, int(y) + 0.5)
-        cr.stroke()
+        if self.show_grid:
+            for db in range(int(self.floor // 10 * 10), int(self.floor + self.range_db) + 1, 10):
+                y = self._y(db, top)
+                cr.move_to(0, int(y) + 0.5)
+                cr.line_to(w, int(y) + 0.5)
+            cr.stroke()
         low, high = self.span()
         step = _nice_step((high - low) / 8)
         layout = PangoCairo.create_layout(cr)
@@ -310,9 +363,10 @@ class SpectrumView(Gtk.DrawingArea):
         while f < high:
             x = int(self.x_of(f, w)) + 0.5
             cr.set_source_rgba(1, 1, 1, 0.08)
-            cr.move_to(x, 0)
-            cr.line_to(x, top)
-            cr.stroke()
+            if self.show_grid:
+                cr.move_to(x, 0)
+                cr.line_to(x, top)
+                cr.stroke()
             cr.set_source_rgba(1, 1, 1, 0.55)
             layout.set_text(_mhz(f, step), -1)
             tw, th = layout.get_pixel_size()
@@ -323,7 +377,7 @@ class SpectrumView(Gtk.DrawingArea):
             self._trace(cr, self.peak[index], top, (1, 1, 1, 0.25))
         if self.trace is not None:
             values = self.trace[index]
-            self._trace(cr, values, top, (0.85, 0.85, 0.82, 0.95), fill=True)
+            self._trace(cr, values, top, (0.85, 0.85, 0.82, 0.95), fill=self.fill_trace)
         cr.restore()
 
     def _trace(self, cr, values, top, colour, fill=False):
@@ -347,21 +401,23 @@ class SpectrumView(Gtk.DrawingArea):
         return top - (np.asarray(db) - self.floor) / self.range_db * (top - 14) - 14
 
     def _overlays(self, cr, w, h, top):
-        x0 = self.x_of(self.freq + self.filter[0], w)
-        x1 = self.x_of(self.freq + self.filter[1], w)
-        cr.set_source_rgba(*ORANGE, 0.16)
-        cr.rectangle(min(x0, x1), 0, max(abs(x1 - x0), 1), top)
-        cr.fill()
-        cr.set_source_rgba(*ORANGE, 0.9)
-        cr.set_line_width(1)
-        x = int(self.x_of(self.freq, w)) + 0.5
-        cr.move_to(x, 0)
-        cr.line_to(x, h)
-        cr.stroke()
+        if self.show_filter:
+            x0 = self.x_of(self.freq + self.filter[0], w)
+            x1 = self.x_of(self.freq + self.filter[1], w)
+            cr.set_source_rgba(*ORANGE, 0.16)
+            cr.rectangle(min(x0, x1), 0, max(abs(x1 - x0), 1), top)
+            cr.fill()
+        if self.show_tuning_line:
+            cr.set_source_rgba(*ORANGE, 0.9)
+            cr.set_line_width(1)
+            x = int(self.x_of(self.freq, w)) + 0.5
+            cr.move_to(x, 0)
+            cr.line_to(x, h)
+            cr.stroke()
         layout = PangoCairo.create_layout(cr)
         layout.set_font_description(Pango.FontDescription("Ubuntu 8"))
         low, high = self.span()
-        for freq, name, colour in self.bookmarks:
+        for freq, name, colour in (self.bookmarks if self.show_bookmarks else []):
             if not low <= freq <= high:
                 continue
             bx = int(self.x_of(freq, w)) + 0.5
@@ -374,7 +430,7 @@ class SpectrumView(Gtk.DrawingArea):
             layout.set_text(name, -1)
             cr.move_to(bx + 2, 0)
             PangoCairo.show_layout(cr, layout)
-        if self.hover_x is not None:
+        if self.show_crosshair and self.hover_x is not None:
             f = self.freq_of(self.hover_x, w)
             layout.set_text("%.4f MHz" % (f / 1e6), -1)
             tw, th = layout.get_pixel_size()

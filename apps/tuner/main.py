@@ -27,7 +27,7 @@ import dsp  # noqa: E402
 import gqrxfiles  # noqa: E402
 import radio  # noqa: E402
 import rtl  # noqa: E402
-from views import FrequencyDial, SpectrumView  # noqa: E402
+from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView  # noqa: E402
 
 APP_ID = "tuner"
 SETTINGS = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tuner/settings.json"
@@ -60,6 +60,7 @@ def load_settings(path):
         data = None
     settings = dict(HW_DEFAULTS)
     settings.update(OTHER_DEFAULTS)
+    settings.update(DISPLAY_DEFAULTS)
     rx = dict(dsp.Receiver.DEFAULTS)
     if data is None:
         seed = gqrxfiles.read_gqrx_settings()
@@ -116,6 +117,8 @@ class TunerWindow(Gtk.ApplicationWindow):
 
         self.paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         self.spectrum = SpectrumView()
+        for key in DISPLAY_DEFAULTS:
+            setattr(self.spectrum, key, self.s[key])
         self.spectrum.zoom = self.s["zoom"]
         self.spectrum.peak_hold = self.s["peak_hold"]
         self.spectrum.auto_range = self.s["auto_range"]
@@ -553,6 +556,54 @@ class TunerWindow(Gtk.ApplicationWindow):
         peak = self._check("Peak hold", self.s["peak_hold"], self._set_peak_hold)
         g.attach(peak, 1, g.next_row, 2, 1)
         g.next_row += 1
+        self._heading(g, "Waterfall")
+        palette = self._combo(list(COLOUR_MAPS), self.s["colour_map"])
+        palette.connect("changed", lambda c: self._set_display("colour_map", c.get_active_text()))
+        self._row(g, "Colours", palette)
+        for label, key, low, high, step, digits, tip in (
+            ("Intensity (dB)", "intensity_db", -40, 40, 1, 0,
+             "Brighten or darken the waterfall without changing the spectrum scale"),
+            ("Contrast", "contrast", 0.2, 3, 0.1, 1,
+             "Below 1 reveals weak signals; above 1 emphasizes strong signals"),
+            ("Line interval (s)", "line_interval", 0, 2, 0.05, 2,
+             "0 draws every update; longer intervals scroll more slowly and retain the strongest signal per bin"),
+        ):
+            control = self._spin(self.s[key], low, high, step, digits,
+                                 lambda value, key=key: self._set_display(key, value))
+            self._row(g, label, control, tip=tip)
+        actions = Gtk.Box(spacing=6)
+        pause = Gtk.ToggleButton(label="Pause waterfall")
+        pause.connect("toggled", lambda b: self.spectrum.pause_waterfall(b.get_active()))
+        clear = Gtk.Button(label="Clear waterfall")
+        clear.connect("clicked", lambda b: self.spectrum.clear_waterfall())
+        actions.pack_start(pause, False, False, 0)
+        actions.pack_start(clear, False, False, 0)
+        g.attach(actions, 0, g.next_row, 3, 1)
+        g.next_row += 1
+
+        self._heading(g, "Spectrum trace")
+        for label, key, low, high, step, digits, tip in (
+            ("Height (%)", "spectrum_percent", 10, 80, 1, 0,
+             "Share of the display used by the spectrum; the remainder is waterfall"),
+            ("Smoothing (%)", "smoothing", 0, 95, 5, 0,
+             "0 follows every update; higher values smooth the spectrum trace"),
+            ("Peak decay (dB/update)", "peak_decay", 0, 3, 0.05, 2,
+             "How quickly held peaks fall; 0 holds maxima until reset or retuned"),
+        ):
+            control = self._spin(self.s[key], low, high, step, digits,
+                                 lambda value, key=key: self._set_display(key, value))
+            self._row(g, label, control, tip=tip)
+        reset = Gtk.Button(label="Reset peaks")
+        reset.connect("clicked", lambda b: self._reset_peaks())
+        g.attach(reset, 1, g.next_row, 2, 1)
+        g.next_row += 1
+        self._heading(g, "Overlays")
+        for label, key in (("Grid", "show_grid"), ("Fill under trace", "fill_trace"),
+                           ("Bookmark labels", "show_bookmarks"), ("Filter shading", "show_filter"),
+                           ("Tuned frequency line", "show_tuning_line"), ("Pointer crosshair", "show_crosshair")):
+            control = self._check(label, self.s[key], lambda value, key=key: self._set_display(key, value))
+            g.attach(control, 1, g.next_row, 2, 1)
+            g.next_row += 1
         return g
 
     def _bookmarks_page(self):
@@ -853,6 +904,15 @@ class TunerWindow(Gtk.ApplicationWindow):
             self._save()
         s = self.s
         self.radio.set_udp((s["udp_host"], int(s["udp_port"]), s["udp_stereo"]) if s["udp_enabled"] else None)
+
+    def _set_display(self, key, value):
+        setattr(self.spectrum, key, value)
+        self.spectrum.queue_draw()
+        self._save(key, value)
+
+    def _reset_peaks(self):
+        self.spectrum.peak = None
+        self.spectrum.queue_draw()
 
     def _set_zoom(self, zoom):
         self.spectrum.zoom = zoom
