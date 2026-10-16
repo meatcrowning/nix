@@ -12,8 +12,7 @@ in
     # open-webui
   ] ++ lib.optionals isX86 [
     discord
-    # vcv-rack   # off for now: the vcv-rack-overlay drops a patch, so it has no
-                 # cache hit and compiles from source on every nixpkgs roll
+    vcv-rack
     vintagestory
     pcsx2
   ];
