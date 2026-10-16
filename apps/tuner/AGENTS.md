@@ -29,5 +29,5 @@ The dongle hands out only one reader: gqrx and tuner cannot run together.
   touches only the dongle, never the user's audio.
 - `tools/shot.sh OUT.png TUNER_BIN --feed synthetic` renders the window on a
   private Xvfb with a scratch config and a copy of the bookmarks; set
-  `TUNER_SHOT_TAB=0..3` for a notebook page. Never start the app on the real
+  `TUNER_SHOT_TAB=0..4` for a notebook page. Never start the app on the real
   display, and never let a test play audio.

@@ -44,7 +44,7 @@ OTHER_DEFAULTS = {"output": None, "udp_enabled": False, "udp_host": "localhost",
                   "udp_stereo": False, "rec_dir": str(Path.home()), "step": 100000, "zoom": 1,
                   "peak_hold": True, "auto_range": True, "floor_db": -80.0, "range_db": 60.0,
                   "start_on_launch": True, "tag_filter": "", "window": [1180, 760], "pane": 0,
-                  "tab": 0}
+                  "tab": 0, "bookmark_columns": []}
 
 
 def step_label(step):
@@ -127,11 +127,13 @@ class TunerWindow(Gtk.ApplicationWindow):
         frame.add(self.spectrum)
         self.paned.pack1(frame, True, False)
         self.notebook = Gtk.Notebook()
+        self.notebook.set_scrollable(True)
         self.notebook.append_page(self._scrolled(self._receiver_page()), Gtk.Label(label="Receiver"))
         self.notebook.append_page(self._scrolled(self._audio_page()), Gtk.Label(label="Audio"))
         self.notebook.append_page(self._scrolled(self._input_page()), Gtk.Label(label="Input"))
-        self.notebook.append_page(self._bookmarks_page(), Gtk.Label(label="Bookmarks"))
-        self.notebook.set_size_request(340, -1)
+        self.notebook.append_page(self._scrolled(self._bookmarks_page()), Gtk.Label(label="Bookmarks"))
+        self.notebook.append_page(self._scrolled(self._waterfall_page()), Gtk.Label(label="Waterfall"))
+        self.notebook.set_size_request(220, -1)
         self.paned.pack2(self.notebook, False, False)
         self.paned.set_border_width(6)
         box.pack_start(self.paned, True, True, 0)
@@ -299,7 +301,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     @staticmethod
     def _scrolled(child):
-        sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.AUTOMATIC)
         sw.add(child)
         return sw
 
@@ -526,7 +528,16 @@ class TunerWindow(Gtk.ApplicationWindow):
         g.attach(bias, 0, g.next_row, 3, 1)
         g.next_row += 1
 
-        self._heading(g, "Spectrum")
+        start = self._check("Start receiving when opened", self.s["start_on_launch"],
+                            lambda v: self._save("start_on_launch", v))
+        start.set_margin_top(8)
+        g.attach(start, 0, g.next_row, 3, 1)
+        g.next_row += 1
+        return g
+
+    def _waterfall_page(self):
+        g = self._page()
+        self._heading(g, "Spectrum and waterfall")
         zoom = self._combo(["%d×" % z for z in ZOOMS], "%d×" % self.s["zoom"])
         zoom.connect("changed", lambda c: self._set_zoom(ZOOMS[c.get_active()]))
         self.zoom_combo = zoom
@@ -541,11 +552,6 @@ class TunerWindow(Gtk.ApplicationWindow):
         self._row(g, "Floor", self.floor_scale)
         peak = self._check("Peak hold", self.s["peak_hold"], self._set_peak_hold)
         g.attach(peak, 1, g.next_row, 2, 1)
-        g.next_row += 1
-        start = self._check("Start receiving when opened", self.s["start_on_launch"],
-                            lambda v: self._save("start_on_launch", v))
-        start.set_margin_top(8)
-        g.attach(start, 0, g.next_row, 3, 1)
         g.next_row += 1
         return g
 
@@ -567,6 +573,8 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.tree.set_search_column(3)
         swatch = Gtk.CellRendererText(text="  ")
         col = Gtk.TreeViewColumn("", swatch, background=0)
+        col.bookmark_key = "colour"
+        col.set_reorderable(True)
         self.tree.append_column(col)
         for title, index, sort, expand in (("MHz", 2, 1, False), ("Name", 3, 3, True), ("Mode", 4, 4, False)):
             cell = Gtk.CellRendererText()
@@ -579,9 +587,22 @@ class TunerWindow(Gtk.ApplicationWindow):
             col.set_sort_column_id(sort)
             col.set_expand(expand)
             col.set_resizable(True)
+            col.set_reorderable(True)
+            col.bookmark_key = title
             self.tree.append_column(col)
+        columns = {col.bookmark_key: col for col in self.tree.get_columns()}
+        previous = None
+        saved_order = self.s["bookmark_columns"]
+        if isinstance(saved_order, list):
+            for key in saved_order:
+                col = columns.pop(key, None) if isinstance(key, str) else None
+                if col is not None:
+                    self.tree.move_column_after(col, previous)
+                    previous = col
+        self.tree.connect("columns-changed", lambda tree: self._save(
+            "bookmark_columns", [col.bookmark_key for col in tree.get_columns()]))
         self.tree.connect("row-activated", self._bookmark_activated)
-        self.tree.set_tooltip_text("Double-click a bookmark to tune to it")
+        self.tree.set_tooltip_text("Double-click a bookmark to tune to it; drag column headers to reorder")
         sw = Gtk.ScrolledWindow()
         sw.set_shadow_type(Gtk.ShadowType.IN)
         sw.add(self.tree)
