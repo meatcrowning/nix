@@ -15,6 +15,7 @@ import numpy as np
 import audio
 import dsp
 import rtl
+import rds
 
 # 384 * 512 bytes = 98304 samples, about 51 ms at 1.92 MS/s.
 READ_BYTES = 384 * 512
@@ -52,6 +53,10 @@ class Radio:
         self.udp_cfg = None  # (host, port, stereo) when streaming
         self.recorder = None
         self.overload = False
+        self.metadata_generation = 0
+        self.metadata_changed = 0.0
+        self.rds = None
+        self.on_rds = lambda generation, data: None
         self.on_recorded = lambda path, seconds: None
 
     # GUI-side API -------------------------------------------------------
@@ -60,22 +65,36 @@ class Radio:
         """hw: device, frequency, sample_rate, gain_db (None = auto), rtl_agc, ppm, bias_tee."""
         if self.running:
             return
+        self.invalidate_rds()
+        self.rds = rds.Decoder(lambda gen, data: self.on_rds(gen, data), self.metadata_generation)
         self.running = True
         self.rate = nearest_rate(hw["sample_rate"])
         self.rx = dsp.Receiver(self.rate, self.rx_settings)
         self.thread = threading.Thread(target=self._run, args=(dict(hw),), name="radio", daemon=True)
         self.thread.start()
 
+    def invalidate_rds(self):
+        self.metadata_generation += 1
+        self.metadata_changed = time.monotonic()
+        if self.rds:
+            self.rds.reset(self.metadata_generation)
+
     def stop(self):
+        self.invalidate_rds()
         self.running = False
 
     def tune(self, freq):
+        self.invalidate_rds()
         self.jobs.put(("tune", int(freq)))
 
     def hardware(self, key, value):
+        if key in ("sample_rate", "ppm"):
+            self.invalidate_rds()
         self.jobs.put((key, value))
 
     def receiver(self, **changes):
+        if "mode" in changes:
+            self.invalidate_rds()
         self.rx_settings.update(changes)
         if self.rx:
             self.rx.set(**changes)
@@ -128,8 +147,21 @@ class Radio:
             reader.start()
             spectrum = dsp.Spectrum(4096)
             last_status = 0.0
+            last_generation = self.metadata_generation
             while self.running:
+                generation = self.metadata_generation
                 self._drain(dongle)
+                if generation != last_generation:
+                    # Buffered IQ belongs to the previous tuning, not its new label.
+                    while True:
+                        try:
+                            old = blocks.get_nowait()
+                            if old is None:
+                                blocks.put(None)
+                                break
+                        except queue.Empty:
+                            break
+                    last_generation = generation
                 try:
                     raw = blocks.get(timeout=1)
                 except queue.Empty:
@@ -154,6 +186,9 @@ class Radio:
                 if row is not None:
                     self.on_spectrum(row, self.center, self.rate)
                 frames = self.rx.process(iq)
+                if (self.rx.last_mpx is not None and generation == self.metadata_generation
+                        and time.monotonic() - self.metadata_changed > 0.35):
+                    self.rds.submit(self.rx.last_mpx, generation)
                 self.playback.write(frames)
                 cfg = self.udp_cfg
                 if cfg:
@@ -171,6 +206,9 @@ class Radio:
             self.on_error(str(exc))
         finally:
             self.running = False
+            if self.rds:
+                self.rds.close()
+                self.rds = None
             self.playback.close()
             if self.recorder:
                 self.on_recorded(*self.recorder.close())

@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import gi
@@ -28,6 +29,7 @@ import gqrxfiles  # noqa: E402
 import radio  # noqa: E402
 import rtl  # noqa: E402
 from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView  # noqa: E402
+from rdsview import RdsDisplay  # noqa: E402
 
 APP_ID = "tuner"
 SETTINGS = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tuner/settings.json"
@@ -44,7 +46,7 @@ OTHER_DEFAULTS = {"output": None, "udp_enabled": False, "udp_host": "localhost",
                   "udp_stereo": False, "rec_dir": str(Path.home()), "step": 100000, "zoom": 1,
                   "peak_hold": True, "auto_range": True, "floor_db": -80.0, "range_db": 60.0,
                   "start_on_launch": True, "tag_filter": "", "window": [1180, 760], "pane": 0,
-                  "tab": 0, "bookmark_columns": []}
+                  "tab": 0, "bookmark_columns": [], "rds_display": False}
 
 
 def step_label(step):
@@ -96,6 +98,9 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.updating = False
         self.save_pending = None
         self.radio = radio.Radio(self.rx, self._spectrum_cb, self._status_cb, self._error_cb, self._stopped_cb)
+        self.rds_data = {}
+        self.rds_seen = 0.0
+        self.radio.on_rds = lambda gen, data: GLib.idle_add(self._rds_update, gen, data)
         self.radio.on_recorded = lambda path, secs: GLib.idle_add(self._recorded, path, secs)
         self.set_default_size(*self.s["window"])
         self.set_icon_name("gqrx")
@@ -144,6 +149,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         box.pack_start(self.statusbar, False, False, 0)
 
         self.show_all()
+        self.dial_stack.set_visible_child_name("rds" if self.s["rds_display"] else "frequency")
         if self.s["pane"]:
             self.paned.set_position(self.s["pane"])
         self.notebook.set_current_page(self.s["tab"])
@@ -271,7 +277,17 @@ class TunerWindow(Gtk.ApplicationWindow):
         row.set_border_width(6)
         self.dial = FrequencyDial()
         self.dial.connect("changed", lambda d, v: self.tune(v))
-        row.pack_start(self.dial, True, True, 0)
+        self.rds_display = RdsDisplay()
+        self.dial_stack = Gtk.Stack()
+        self.dial_stack.add_named(self.dial, "frequency")
+        self.dial_stack.add_named(self.rds_display, "rds")
+        row.pack_start(self.dial_stack, True, True, 0)
+        self.rds_button = Gtk.ToggleButton(label="RDS", relief=Gtk.ReliefStyle.NONE)
+        self.rds_button.set_valign(Gtk.Align.CENTER)
+        self.rds_button.set_tooltip_text("Switch between frequency and RDS station text")
+        self.rds_button.set_active(self.s["rds_display"])
+        self.rds_button.connect("toggled", self._toggle_rds)
+        row.pack_start(self.rds_button, False, False, 0)
 
         controls = Gtk.Grid(column_spacing=6, row_spacing=4)
         self.mode_combo = self._combo(dsp.MODES, self.rx["mode"])
@@ -764,9 +780,52 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.spectrum.queue_draw()
         if self.radio.running:
             self.radio.tune(freq)
+        self.rds_data, self.rds_seen = {}, 0.0
+        self._refresh_rds()
         self._select_bookmark(freq)
         if not quiet:
             self._save()
+
+    def _toggle_rds(self, button):
+        active = button.get_active()
+        self.dial_stack.set_visible_child_name("rds" if active else "frequency")
+        self._save("rds_display", active)
+        self._refresh_rds()
+
+    def _rds_update(self, generation, data):
+        if generation != self.radio.metadata_generation or not self.radio.running:
+            return False
+        self.rds_data = data
+        self.rds_seen = time.monotonic() if data.get("pi") else 0.0
+        self._refresh_rds()
+        return False
+
+    def _refresh_rds(self):
+        heading = "%.3f MHz  ·  RDS" % (self.s["frequency"] / 1e6)
+        data = self.rds_data
+        if not self.radio.running:
+            message = "Receiver stopped"
+        elif self.rx["mode"] not in dsp.WFM_MODES:
+            message = "Select WFM for RDS"
+        elif data.get("error"):
+            message = "RDS unavailable"
+        elif not self.rds_seen:
+            message = "Waiting for RDS"
+        elif time.monotonic() - self.rds_seen > 10:
+            self.rds_data = {}
+            data = {}
+            message = "RDS signal lost"
+        else:
+            heading += "  ·  " + data.get("ps", "PI " + data["pi"][2:].upper())
+            if data.get("prog_type"):
+                heading += "  ·  " + data["prog_type"]
+            message = data.get("radiotext") or data.get("ps") or "Reading station text"
+        detail = heading + "\n" + message
+        if data.get("pi"):
+            detail += "\nPI: " + data["pi"]
+        if data.get("error"):
+            detail += "\n" + data["error"]
+        self.rds_display.set_message(heading, message, detail)
 
     def _select_bookmark(self, freq):
         sel = self.tree.get_selection()
@@ -811,6 +870,8 @@ class TunerWindow(Gtk.ApplicationWindow):
         if changed:
             step = MODE_STEP[mode]
             self.s["step"] = step
+        self.rds_data, self.rds_seen = {}, 0.0
+        self._refresh_rds()
         self._sync_mode_controls()
         self._save()
 
@@ -1002,6 +1063,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         GLib.idle_add(self._stopped)
 
     def _show_status(self, level, stereo, squelched, overload, recording):
+        self._refresh_rds()
         self.level_bar.set_value(max(0.0, min(100.0, (level + 100) / 100 * 100)))
         self.level_label.set_text("%.1f dBFS" % level)
         mode = self.rx["mode"]
@@ -1017,6 +1079,8 @@ class TunerWindow(Gtk.ApplicationWindow):
         return False
 
     def _stopped(self):
+        self.rds_data, self.rds_seen = {}, 0.0
+        self._refresh_rds()
         if self.start_button.get_active():
             self.start_button.set_active(False)
         self.level_bar.set_value(0)

@@ -276,6 +276,7 @@ class Receiver:
         self.level_db = -150.0
         self.stereo = False
         self.squelched = False
+        self.last_mpx = None
 
     def set(self, **changes):
         with self.lock:
@@ -337,6 +338,7 @@ class Receiver:
                 self._build()
             s = dict(self.s)
         mode = s["mode"]
+        self.last_mpx = None
         if s["nb1"]:
             mag = np.abs(iq)
             iq = np.where(mag > s["nb1_threshold"] * (mag.mean() + 1e-9), 0, iq).astype(np.complex64)
@@ -391,6 +393,7 @@ class Receiver:
 
     def _wfm(self, ch, stereo):
         mpx = self.fm(ch) * (WIDE_RATE / (2 * math.pi * 75000))  # 1.0 = 75 kHz deviation
+        self.last_mpx = mpx  # Before de-emphasis, audio filtering, mute, or squelch.
         if stereo:
             phase, level = self.pilot(mpx)
             _, noise = self.pilot_ref(mpx)

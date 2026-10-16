@@ -2,13 +2,16 @@
 
 A GTK 3 / PyGObject app, unlike the Qt apps beside it: it is made for top's
 Unity 12.10 session, which themes host GTK apps with Ambiance Dark and the
-Ubuntu font, so it uses stock GTK widgets and draws only the dial and the
-spectrum/waterfall (views.py). The dongle and package are top-only
+Ubuntu font, so it uses stock GTK widgets and draws the dial and
+spectrum/waterfall (views.py), plus the amber segmented RDS face (rdsview.py).
+The dongle and package are top-only
 (sys/hw/rtl-sdr.nix, home/prog/tuner.nix); there is no air branch.
 
 | file | owns |
 |---|---|
 | dsp.py | demodulators, filters, AGC, squelch, noise blankers; numpy/scipy only |
+| rds.py | bounded asynchronous Redsea MPX pipe and station metadata; no device access |
+| rdsview.py | scrolling fourteen-segment RDS display and its map/unmap timer |
 | radio.py | the radio thread: librtlsdr reads, retuning, playback/UDP/recorder |
 | rtl.py | ctypes librtlsdr binding (`TUNER_LIBRTLSDR` from the wrapper) |
 | audio.py | `pw-cat` playback, PipeWire sink list, gqrx-format UDP, WAV recorder |
@@ -20,8 +23,19 @@ column format; keep the two programs able to share it.
 
 The dongle hands out only one reader: gqrx and tuner cannot run together.
 
+RDS uses the pre-audio 240 kHz FM multiplex in both WFM modes, independently
+of mute/squelch. The wrapper supplies `TUNER_REDSEA`; the subprocess never opens
+the dongle. Retuning, mode changes, and receive sessions invalidate decoder
+results by generation. Do not persist received station text or infer identity
+from a bookmark. The Hz/RDS toggle is persistent; unavailable, waiting, and
+lost-signal states are explicit. GTK's animation setting governs the marquee.
+
 ## Verification
 
+- `tools/rds-test.py` uses synthetic FM IQ through the real receiver and Redsea
+  to verify PS/RadioText, 0A/0B/2A/2B groups, reset, and decoder teardown. Run
+  with the wrapper's Python interpreter and `TUNER_REDSEA` executable path;
+  read those paths from the wrapper, never source it. No GUI or hardware.
 - `tools/dsp-test.py` checks every mode, WFM stereo separation and squelch on
   synthetic signals. `--iq FILE:OFFSET:MODE --wav DIR` decodes an `rtl_sdr -s
   1920000` capture and reports whether the result is programme audio rather
