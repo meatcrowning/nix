@@ -503,6 +503,22 @@ def drop_theme_bridges():
         themes.rmdir()
 
 
+def write_bus_config(directory):
+    # KDE applications can activate kded outside Plasma. Its GTK module then
+    # steals XSETTINGS from Unity, and its other modules manage the display.
+    # Restrict this session's bus only; KDE apps and Plasma keep their settings.
+    service_dirs = [str(directory / "native-data/dbus-1/services"),
+                    CONFIG["dconfServices"], CONFIG["vfsServices"]]
+    bus_config = ("<busconfig><type>session</type><listen>" + escape("unix:path=" + str(directory / "bus")) +
+                  "</listen><auth>EXTERNAL</auth><standard_session_servicedirs/>" +
+                  "".join("<servicedir>" + escape(path) + "</servicedir>" for path in service_dirs) +
+                  '<policy context="default"><allow send_destination="*" eavesdrop="true"/>'
+                  '<allow eavesdrop="true"/><allow own="*"/>'
+                  '<deny send_destination="org.kde.kded6"/>'
+                  '<deny own="org.kde.kded6"/></policy></busconfig>')
+    (directory / "bus.conf").write_text(bus_config)
+
+
 def session():
     if not os.environ.get("DISPLAY"):
         raise RuntimeError("Select Unity 12.10 at the greeter; an X11 display is required")
@@ -540,14 +556,7 @@ def session():
         "canberra-gtk-module"]))
     environment["GTK_PATH"] = ":".join(filter(None, [str(Path(CONFIG["nativeGtkModules"]).parent),
         environment.get("GTK_PATH")]))
-    service_dirs = [str(directory / "native-data/dbus-1/services"),
-                    CONFIG["dconfServices"], CONFIG["vfsServices"]]
-    bus_config = ("<busconfig><type>session</type><listen>" + escape(environment["DBUS_SESSION_BUS_ADDRESS"]) +
-                  "</listen><auth>EXTERNAL</auth><standard_session_servicedirs/>" +
-                  "".join("<servicedir>" + escape(path) + "</servicedir>" for path in service_dirs) +
-                  '<policy context="default"><allow send_destination="*" eavesdrop="true"/>'
-                  '<allow eavesdrop="true"/><allow own="*"/></policy></busconfig>')
-    (directory / "bus.conf").write_text(bus_config)
+    write_bus_config(directory)
     log_dir = Path(environment.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "unity-quantal"
     log_dir.mkdir(parents=True, exist_ok=True)
     log = (log_dir / "session.log").open("w", buffering=1)
@@ -691,6 +700,7 @@ def refresh():
                                "--object-path", "/org/freedesktop/DBus", "--method", "org.freedesktop.DBus." + method,
                                *arguments], env=environment, text=True, capture_output=True, timeout=10)
 
+    write_bus_config(directory)
     bus("ReloadConfig")
 
     def stop(name):
