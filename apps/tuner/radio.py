@@ -132,7 +132,7 @@ class Radio:
 
             def on_data(raw):
                 try:
-                    blocks.put_nowait(raw)
+                    blocks.put_nowait((raw, self.metadata_generation))
                 except queue.Full:
                     self.dropped += 1  # processing fell a second behind; skip
 
@@ -147,29 +147,18 @@ class Radio:
             reader.start()
             spectrum = dsp.Spectrum(4096)
             last_status = 0.0
-            last_generation = self.metadata_generation
             while self.running:
                 generation = self.metadata_generation
                 self._drain(dongle)
-                if generation != last_generation:
-                    # Buffered IQ belongs to the previous tuning, not its new label.
-                    while True:
-                        try:
-                            old = blocks.get_nowait()
-                            if old is None:
-                                blocks.put(None)
-                                break
-                        except queue.Empty:
-                            break
-                    last_generation = generation
                 try:
-                    raw = blocks.get(timeout=1)
+                    packet = blocks.get(timeout=1)
                 except queue.Empty:
                     continue
-                if raw is None:
+                if packet is None:
                     if reader_error:
                         raise OSError(reader_error[0])
                     break
+                raw, captured_generation = packet
                 if self.started is None:
                     self.started = time.monotonic()
                 self.samples_read += len(raw) // 2
@@ -186,10 +175,10 @@ class Radio:
                 if row is not None:
                     self.on_spectrum(row, self.center, self.rate)
                 frames = self.rx.process(iq)
-                if (self.rx.last_mpx is not None and generation == self.metadata_generation
+                self.playback.write(frames)
+                if (self.rx.last_mpx is not None and generation == captured_generation == self.metadata_generation
                         and time.monotonic() - self.metadata_changed > 0.35):
                     self.rds.submit(self.rx.last_mpx, generation)
-                self.playback.write(frames)
                 cfg = self.udp_cfg
                 if cfg:
                     self.udp.send(frames, *cfg)

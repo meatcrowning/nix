@@ -38,6 +38,17 @@ def display_text(text):
                    if not unicodedata.combining(c))
 
 
+def cell_text(text, cells, elapsed, animate=True):
+    """Characters move between fixed segment cells, never between pixel positions."""
+    text = display_text(text)
+    if len(text) <= cells or not animate:
+        return text[:cells].ljust(cells)
+    step = int(max(0, elapsed - 1.5) / .4)
+    cycle = text + '    '
+    start = step % len(cycle)
+    return (cycle + cycle)[start:start + cells]
+
+
 class RdsDisplay(Gtk.DrawingArea):
     def __init__(self):
         super().__init__()
@@ -46,6 +57,9 @@ class RdsDisplay(Gtk.DrawingArea):
         self.text = 'Receiver stopped'
         self.since = time.monotonic()
         self.timer = None
+        self._scrolling = False
+        self._last_step = 0
+        self._detail = None
         self.connect('draw', self._draw)
         self.connect('map', self._mapped)
         self.connect('unmap', self._unmapped)
@@ -53,6 +67,9 @@ class RdsDisplay(Gtk.DrawingArea):
         self.get_accessible().set_name('RDS display')
 
     def set_message(self, heading, text, detail=None):
+        if (heading, text, detail) == (self.heading, self.text, self._detail):
+            return
+        self._detail = detail
         if text != self.text:
             self.since = time.monotonic()
         self.heading, self.text = heading, text
@@ -64,7 +81,7 @@ class RdsDisplay(Gtk.DrawingArea):
     def _mapped(self, *args):
         self.since = time.monotonic()
         if self.timer is None:
-            self.timer = GLib.timeout_add(50, self._tick)
+            self.timer = GLib.timeout_add(100, self._tick)
 
     def _unmapped(self, *args):
         if self.timer is not None:
@@ -72,7 +89,10 @@ class RdsDisplay(Gtk.DrawingArea):
             self.timer = None
 
     def _tick(self):
-        if self.get_settings().get_property('gtk-enable-animations'):
+        step = int(max(0, time.monotonic() - self.since - 1.5) / .4)
+        if (self._scrolling and step != self._last_step
+                and self.get_settings().get_property('gtk-enable-animations')):
+            self._last_step = step
             self.queue_draw()
         return True
 
@@ -96,20 +116,12 @@ class RdsDisplay(Gtk.DrawingArea):
         glyph_h = max(14, h - title_h - 10)
         glyph_w = glyph_h * .55
         advance = glyph_w + 5
-        text = display_text(self.text)
-        available = max(w - 20, 1)
-        offset = 0
-        if len(text) * advance > available and self.get_settings().get_property('gtk-enable-animations'):
-            # A readable opening pause, then a steady car-stereo marquee.
-            offset = max(0, time.monotonic() - self.since - 1.5) * 30
-            cycle = (len(text) + 4) * advance
-            offset %= cycle
-            text = text + '    ' + text
+        cells = max(1, int(max(w - 20, 1) / advance))
+        self._scrolling = len(display_text(self.text)) > cells
+        text = cell_text(self.text, cells, time.monotonic() - self.since,
+                         self.get_settings().get_property('gtk-enable-animations'))
         for i, char in enumerate(text):
-            x = 10 + i * advance - offset
-            if x + advance < 8 or x > w - 8:
-                continue
-            self._glyph(cr, char, x, title_h + 5, glyph_w, glyph_h)
+            self._glyph(cr, char, 10 + i * advance, title_h + 5, glyph_w, glyph_h)
         cr.restore()
         return True
 

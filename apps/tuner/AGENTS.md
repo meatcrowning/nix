@@ -28,7 +28,9 @@ of mute/squelch. The wrapper supplies `TUNER_REDSEA`; the subprocess never opens
 the dongle. Retuning, mode changes, and receive sessions invalidate decoder
 results by generation. Do not persist received station text or infer identity
 from a bookmark. The Hz/RDS toggle is persistent; unavailable, waiting, and
-lost-signal states are explicit. GTK's animation setting governs the marquee.
+lost-signal states are explicit. The marquee advances whole characters through
+fixed segment cells; GTK's animation setting governs it. Metadata resets must
+never discard the audio IQ queue; RDS conversion stays in its worker.
 
 ## Verification
 

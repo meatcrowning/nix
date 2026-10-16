@@ -134,7 +134,7 @@ def main():
     # and a counting sink. Neither the USB library nor pw-cat is invoked.
     rotation = np.exp(2j*np.pi*(rate/4-30000)*np.arange(len(iq))/rate).astype(np.complex64)
     raw = np.clip((iq*rotation*.6).view(np.float32)*128+127.4,0,255).astype(np.uint8).tobytes()
-    cancel = threading.Event()
+    cancel, source_done = threading.Event(), threading.Event()
     class Dongle:
         tuner = 'synthetic'
         def __init__(self, device): pass
@@ -152,11 +152,26 @@ def main():
             for i in range(0,len(raw),radio.READ_BYTES):
                 if cancel.is_set(): break
                 callback(raw[i:i+radio.READ_BYTES])
-                cancel.wait(radio.READ_BYTES/(2*rate))
+                # Model USB buffering: keep four blocks queued ahead of playback.
+                if i >= 3 * radio.READ_BYTES:
+                    cancel.wait(radio.READ_BYTES/(2*rate))
+            source_done.set()
             cancel.wait(15)
     class Sink:
-        frames = 0
-        def write(self, frames): self.frames += len(frames)
+        def __init__(self):
+            self.frames = 0
+            self.deadline = None
+            self.arrivals = []
+        def write(self, frames):
+            now = time.monotonic()
+            self.arrivals.append(now)
+            self.frames += len(frames)
+            if len(self.arrivals) == 2:
+                receiver.invalidate_rds()  # Metadata reset with buffered audio.
+            if self.deadline is None:
+                self.deadline = now
+            self.deadline += len(frames) / dsp.AUDIO_RATE
+            time.sleep(max(0, self.deadline - time.monotonic()))
         def close(self): pass
     found, stopped = threading.Event(), threading.Event()
     errors=[]
@@ -167,13 +182,22 @@ def main():
         try:
             receiver.start({'frequency':102700000,'sample_rate':rate})
             assert found.wait(15), errors
+            assert source_done.wait(15)
+            expected = (len(raw)//2) * dsp.AUDIO_RATE // rate
+            limit = time.monotonic() + 3
+            while receiver.playback.frames < expected and time.monotonic() < limit:
+                time.sleep(.01)
+            assert receiver.playback.frames == expected, (receiver.playback.frames, expected)
+            assert receiver.dropped == 0, receiver.dropped
+            gaps = np.diff(receiver.playback.arrivals)
+            assert gaps.max() < radio.READ_BYTES/(2*rate) + .15, gaps.max()
         finally:
             receiver.stop()
             assert stopped.wait(4), 'radio worker did not stop'
             receiver.thread.join(1)
     assert not errors and receiver.playback.frames>0
     assert receiver.rds is None and not receiver.thread.is_alive()
-    print('PASS synthetic dongle -> radio worker -> RDS callback, concurrent audio, stop cleanup')
+    print('PASS paced radio + RDS: every audio sample delivered, no drops across metadata reset, bounded delivery gaps, stop cleanup')
 
 
 if __name__=='__main__':

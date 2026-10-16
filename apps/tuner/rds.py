@@ -11,6 +11,7 @@ import queue
 import shutil
 import subprocess
 import threading
+import time
 
 import numpy as np
 
@@ -60,9 +61,10 @@ class Decoder:
     def submit(self, mpx, generation):
         if self.done.is_set() or generation != self.generation:
             return
-        pcm = (np.clip(mpx, -1, 1) * 32767).astype("<i2").tobytes()
+        # Receiver creates a fresh MPX array per block and never mutates it.
+        # Hand ownership to the worker; PCM conversion is not audio work.
         try:
-            self.queue.put_nowait((generation, pcm))
+            self.queue.put_nowait((generation, mpx))
         except queue.Full:
             # A discontinuity must reacquire bit/group sync, not join stale PCM.
             self.gap.set()
@@ -93,6 +95,7 @@ class Decoder:
         proc, current, failed = None, None, False
         pending, output = bytearray(), bytearray()
         metadata = Metadata()
+        last_data, last_emit = None, 0.0
         try:
             while not self.done.is_set():
                 generation = self.generation
@@ -104,6 +107,7 @@ class Decoder:
                     pending.clear()
                     output.clear()
                     metadata = Metadata()
+                    last_data, last_emit = None, 0.0
                     if gap:
                         while True:
                             try:
@@ -112,9 +116,9 @@ class Decoder:
                                 break
                     self._emit(current, {})
                 try:
-                    gen, pcm = self.queue.get(timeout=0.01)
+                    gen, mpx = self.queue.get(timeout=0.01)
                     if gen == current and not failed:
-                        pending.extend(pcm)
+                        pending.extend((np.clip(mpx, -1, 1) * 32767).astype("<i2").tobytes())
                 except queue.Empty:
                     pass
                 if failed or not pending and proc is None:
@@ -150,8 +154,11 @@ class Decoder:
                         except (ValueError, UnicodeError):
                             continue
                         decoded = metadata.update(group)
-                        if decoded is not None:
+                        now = time.monotonic()
+                        # Unchanged groups only need a freshness heartbeat.
+                        if decoded is not None and (decoded != last_data or now - last_emit >= 1):
                             self._emit(current, decoded)
+                            last_data, last_emit = decoded, now
                     if len(output) > 65536 or len(pending) > 240000:
                         self.gap.set()
                 except OSError as exc:
