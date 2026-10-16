@@ -65,6 +65,7 @@ class Dongle:
     def __init__(self, index=0):
         self.rtl = lib()
         self.dev = ctypes.c_void_p()
+        self.gain_db = None
         err = self.rtl.rtlsdr_open(ctypes.byref(self.dev), index)
         if err < 0:
             raise OSError("could not open the dongle (error %d); is another program using it?" % err)
@@ -88,6 +89,9 @@ class Dongle:
 
     def set_center(self, freq):
         self._ok(self.rtl.rtlsdr_set_center_freq(self.dev, int(freq)), "frequency")
+        # The blog driver can reinitialize the tuner when leaving direct
+        # sampling (including the initial tune from 0 Hz), resetting its gain.
+        self.set_gain(self.gain_db)
 
     def set_ppm(self, ppm):
         # Returns -2 when the value is unchanged; that is not an error.
@@ -96,10 +100,11 @@ class Dongle:
     def set_gain(self, gain_db):
         """None selects the tuner's automatic gain."""
         if gain_db is None:
-            self.rtl.rtlsdr_set_tuner_gain_mode(self.dev, 0)
+            self._ok(self.rtl.rtlsdr_set_tuner_gain_mode(self.dev, 0), "automatic gain")
         else:
-            self.rtl.rtlsdr_set_tuner_gain_mode(self.dev, 1)
-            self.rtl.rtlsdr_set_tuner_gain(self.dev, int(round(gain_db * 10)))
+            self._ok(self.rtl.rtlsdr_set_tuner_gain_mode(self.dev, 1), "manual gain")
+            self._ok(self.rtl.rtlsdr_set_tuner_gain(self.dev, int(round(gain_db * 10))), "gain")
+        self.gain_db = gain_db
 
     def set_rtl_agc(self, on):
         self.rtl.rtlsdr_set_agc_mode(self.dev, 1 if on else 0)
