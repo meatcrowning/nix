@@ -118,9 +118,13 @@ def host_icons(directory, state, config):
             continue
         icon = entry.get("Icon", "")
         source = Path(icon) if icon.startswith("/") else candidates.get(icon, (None, None))[1]
+        if desktop.name == "painter.desktop":
+            source = Path(config["runtime"]) / "usr/share/icons/Humanity/categories/64/applications-graphics.svg"
         if not source or not source.is_file():
             continue
-        target = output / (desktop.stem + (".png" if source.suffix == ".svg" else source.suffix))
+        # Separate the native icon cache from a previously exported host seal.
+        stem = "painter-humanity" if desktop.name == "painter.desktop" else desktop.stem
+        target = output / (stem + (".png" if source.suffix == ".svg" else source.suffix))
         if not target.exists() or target.stat().st_mtime < source.stat().st_mtime:
             try:
                 if source.suffix == ".svg":

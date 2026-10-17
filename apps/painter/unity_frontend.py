@@ -56,7 +56,7 @@ class Window(Gtk.Window):
     def __init__(self, path):
         Gtk.Window.__init__(self, title='Painter')
         self.set_wmclass('painter', 'Painter')
-        self.set_icon_name('painter')
+        self.set_icon_name('applications-graphics')
         self.set_default_size(1180, 820)
         self.set_size_request(760, 560)
         self.loading = True
