@@ -5295,6 +5295,14 @@ def test_moss(win, ctl, tmp):
               not any((ctl.isEdit, ctl.isVideo, ctl.encoderControls, ctl.referenceImages,
                        ctl.supportsPatches, ctl.supportsLoras)))
         editor = find(win.contentItem(), "PromptEditor")
+        positive_box = find_all(editor, "PromptBox")[0]
+        input_box = find(positive_box, "QQuickTextEdit")
+        APP.set('positive', 'alpha omega')
+        spin(30)
+        input_box.setProperty('cursorPosition', 6)
+        wildcard_button = next(item for item in walk(editor) if item.objectName() == 'wildcard_pose')
+        wildcard_button.metaObject().invokeMethod(wildcard_button, 'clicked')
+        check(model + " inserts wildcard at positive caret", prop(APP, 'gen')['positive'] == 'alpha __pose__omega')
         check(model + " exposes both normal prompts", len(find_all(editor, "PromptBox")) == 2
               and g["promptTransform"] == "none")
         panes = find(win.contentItem(), "ParamsPane")

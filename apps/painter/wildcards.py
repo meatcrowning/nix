@@ -11,6 +11,11 @@ WILDCARDS = Path(__file__).resolve().parent / "wildcards"
 TOKEN = re.compile(r"__([A-Za-z0-9][A-Za-z0-9_.-]*)__")
 
 
+def names(root: Path = WILDCARDS) -> list[str]:
+    return sorted(p.stem for p in root.glob('*.txt')
+                  if p.is_file() and TOKEN.fullmatch('__' + p.stem + '__'))
+
+
 def choices(name: str, root: Path = WILDCARDS) -> list[str]:
     """Return usable lines for *name*, matching CTE's wildcard-file rules."""
     try:

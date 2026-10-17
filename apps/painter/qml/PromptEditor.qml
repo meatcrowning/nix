@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import "../../qmlcommon"
 
 Panel {
     id: panel
@@ -43,6 +44,34 @@ Panel {
     // Anima wants a single line; the editor still keeps your line breaks, they
     // are only collapsed on the way out.
     badge: root.gen.promptTransform === "single_line" ? "sent as one line" : ""
+
+    KineticFlickable {
+        width: parent.width
+        height: wildcardRow.implicitHeight + wildcardScroll.implicitHeight
+        contentWidth: wildcardRow.width
+        contentHeight: wildcardRow.implicitHeight
+        clip: true
+        ScrollBar.horizontal: ScrollBar { id: wildcardScroll }
+        Row {
+            id: wildcardRow
+            spacing: 2
+            Repeater {
+                model: App.wildcardNames
+                Button {
+                    required property string modelData
+                    objectName: "wildcard_" + modelData
+                    text: modelData
+                    focusPolicy: Qt.NoFocus
+                    ToolTip.visible: hovered
+                    ToolTip.text: "Insert __" + modelData + "__ into the positive prompt"
+                    onClicked: {
+                        panel.pillsWanted = false
+                        positive.insertWildcard(modelData)
+                    }
+                }
+            }
+        }
+    }
 
     PromptBox {
         id: positive

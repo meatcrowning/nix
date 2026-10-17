@@ -450,6 +450,7 @@ class Engine:
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,
                     queue=c.queue, elapsed=c.elapsed, rate=c.rate, messages=messages,
+                    wildcards=c.wildcardNames,
                     samplers=c.samplers, schedulers=c.schedulers, curves=c.curves, outsideWindows=c.outsideWindows,
                     gallery=gallery, total=c.gallery.count, offset=offset,
                     choices=c.choices._rows, loras=c.lorasSnapshot(),

@@ -76,6 +76,16 @@ def test():
             return True
         if step[0] == 0:
             assert notifications == ['Generation completed'], notifications
+            buttons = window.wildcard_buttons.get_children()
+            assert [b.get_label() for b in buttons] == window.state['wildcards']
+            buffer = window.controls['positive'].get_buffer()
+            buffer.set_text('alpha omega')
+            buffer.place_cursor(buffer.get_iter_at_offset(6))
+            next(b for b in buttons if b.get_label() == 'pose').clicked()
+            assert window.values()['positive'] == 'alpha __pose__omega'
+            buffer.select_range(buffer.get_iter_at_offset(6), buffer.get_iter_at_offset(14))
+            next(b for b in buttons if b.get_label() == 'gaze').clicked()
+            assert window.values()['positive'] == 'alpha __gaze__omega'
             window.original_active = window.is_active
             window.is_active = lambda: True
             window.message('Focused completion', completion=True)

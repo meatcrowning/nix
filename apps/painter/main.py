@@ -673,6 +673,10 @@ class Painter(QObject):
     jobCompleted = Signal(str)        # native frontend applies its focus policy
     logChanged = Signal()
 
+    @Property('QStringList', constant=True)
+    def wildcardNames(self):
+        return Wildcards.names()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.modeChanged.connect(self.editStateChanged)

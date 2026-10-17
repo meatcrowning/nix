@@ -204,6 +204,12 @@ class Window(Gtk.Window):
         self.model_info.set_line_wrap(True)
         self.model_info.set_no_show_all(True)
         params.pack_start(self.model_info, False, False, 0)
+        self.wildcard_names = None
+        self.wildcard_buttons = Gtk.Box(spacing=2)
+        wildcard_scroll = Gtk.ScrolledWindow()
+        wildcard_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        wildcard_scroll.add_with_viewport(self.wildcard_buttons)
+        params.pack_start(wildcard_scroll, False, False, 0)
         for key, title, height in [('positive', 'Prompt', 120), ('negative', 'Negative prompt', 65)]:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             box.pack_start(label(title), False, False, 0)
@@ -645,7 +651,28 @@ class Window(Gtk.Window):
         self.receive_media(state['media'])
         for message in state['messages']:
             self.message(message['text'], message['error'], message.get('completion', False))
+        names = state.get('wildcards', [])
+        if names != self.wildcard_names:
+            self.wildcard_names = names
+            for button in self.wildcard_buttons.get_children():
+                button.destroy()
+            for name in names:
+                button = Gtk.Button(label=name)
+                button.set_focus_on_click(False)
+                button.set_tooltip_text('Insert __' + name + '__ into the positive prompt')
+                button.connect('clicked', lambda _, name=name: self.insert_wildcard(name))
+                self.wildcard_buttons.pack_start(button, False, False, 0)
+            self.wildcard_buttons.show_all()
         return False
+
+    def insert_wildcard(self, name):
+        editor = self.controls['positive']
+        buffer = editor.get_buffer()
+        buffer.begin_user_action()
+        buffer.delete_selection(True, True)
+        buffer.insert_at_cursor('__' + name + '__')
+        buffer.end_user_action()
+        editor.grab_focus()
 
     def receive_media(self, media):
         if media['path'] == self.selection:

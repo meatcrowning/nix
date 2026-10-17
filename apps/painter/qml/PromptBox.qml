@@ -63,6 +63,17 @@ Rectangle {
     // The editor's own text, for callers that want to read it back.
     readonly property alias text: input.text
 
+    function insertWildcard(name) {
+        var start = input.selectionStart
+        var end = input.selectionEnd
+        var at = start !== end ? start : input.cursorPosition
+        if (start !== end) input.remove(start, end)
+        var token = "__" + name + "__"
+        input.insert(at, token)
+        input.cursorPosition = at + token.length
+        input.forceActiveFocus()
+    }
+
     //: THE TAG UNDER THE CARET. A prompt is comma-separated tags, weight groups
     //: and (on Anima) the odd natural-language clause, so the token is whatever
     //: lies between the nearest separators — and the caret has to be INSIDE it,

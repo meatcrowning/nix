@@ -22,6 +22,8 @@ with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     (root / "colour.txt").write_text("# ignored\nred\n\nblue\n", encoding="utf-8")
     (root / "pose.txt").write_text("standing\nsitting\n", encoding="utf-8")
+    (root / "bad name.txt").write_text("unused", encoding="utf-8")
+    check("button names match supported wildcard tokens", W.names(root) == ['colour', 'pose'])
 
     first = W.expand("a __colour__ cube", 4242, root)
     check("a fixed seed is repeatable", first == W.expand("a __colour__ cube", 4242, root))
