@@ -55,6 +55,20 @@ def select(name):
             return
     raise AssertionError('missing output: ' + name)
 
+def copied_pixels(width, height):
+    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+    # Quantal's GI bindings mis-marshal the atom array from wait_for_targets.
+    available = lambda target: clipboard.wait_is_target_available(Gdk.Atom.intern(target, False))
+    assert available('image/png')
+    for target in ('text/plain', 'text/plain;charset=utf-8', 'text/html',
+                   'text/uri-list', 'UTF8_STRING', 'STRING', 'TEXT',
+                   'x-special/gnome-copied-files'):
+        assert not available(target), target
+    data = clipboard.wait_for_contents(Gdk.Atom.intern('image/png', False)).get_data()
+    assert data.startswith(b'\x89PNG\r\n\x1a\n')
+    pixbuf = clipboard.wait_for_image()
+    assert (pixbuf.get_width(), pixbuf.get_height()) == (width, height)
+
 def test():
     try:
         if not window.state.get('model'):
@@ -127,6 +141,15 @@ def test():
             assert abs(window.viewer.scale - scale * 1.25) < .001
             window.fit_image()
             assert window.viewer.zoom == 0
+            # The preview menu copies the original, even when displayed enlarged.
+            class RightClick:
+                button = 3
+                time = 0
+            assert window.preview_menu(window.viewer.events, RightClick())
+            item = window.image_menu.get_children()[0]
+            assert item.get_label() == 'Copy Image'
+            window.image_menu.popdown()
+            item.activate()
             window.viewer.set_zoom(1)
             assert window.picture.get_pixbuf().get_width() == 80
             window.browse()
@@ -134,6 +157,17 @@ def test():
             assert window.picture.get_pixbuf() is not None
             select('edit.png')
         elif step[0] == 3:
+            copied_pixels(80, 60)
+            # Copy another thumbnail without changing the selected preview.
+            path = next(r['path'] for r in window.state['gallery'] if r['name'] == 'fixture.png')
+            menu = window.make_image_menu(path)
+            assert menu is not None
+            menu.get_children()[0].activate()
+            assert window.selection.endswith('/edit.png')
+            assert window.make_image_menu('live://generating') is None
+            assert window.make_image_menu('/missing.png') is None
+            clip = next(r['path'] for r in window.state['gallery'] if r['name'] == 'clip.mp4')
+            assert window.make_image_menu(clip) is None
             assert window.viewer.before is not None
             window.viewer.compare.set_value(0)
             red = window.picture.get_pixbuf().get_pixels()
@@ -142,6 +176,7 @@ def test():
             assert red != blue, 'comparison slider did not reveal before image'
             select('clip.mp4')
         elif step[0] == 4:
+            copied_pixels(80, 60)
             assert window.viewer.video
             assert window.picture.get_pixbuf() is not None
             assert window.viewer.natural_size == [96, 64]

@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import sys
+import threading
 try:
     from urllib import unquote
 except ImportError:
@@ -75,6 +76,8 @@ class Window(Gtk.Window):
         self.save_timer = None
         self.connected = True
         self.closing = False
+        self.copy_serial = 0
+        self.image_menu = None
         self.connection = Connection(path, self.receive)
         self.connect('delete-event', self.close_window)
         self.accels = Gtk.AccelGroup()
@@ -288,6 +291,7 @@ class Window(Gtk.Window):
         self.gallery.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.gallery.connect('selection-changed', self.selected)
         self.gallery.connect('item-activated', lambda *_: self.view())
+        self.gallery.connect('button-press-event', self.gallery_menu)
         self.browse_pane = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
         self.browse_pane.set_position(300)
         self.preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -297,6 +301,7 @@ class Window(Gtk.Window):
         self.full_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.pages.append_page(self.full_box, None)
         self.viewer = ImageView(self.message, lambda: self.send('playback'))
+        self.viewer.events.connect('button-press-event', self.preview_menu)
         self.picture = self.viewer.picture
         self.preview_box.pack_start(self.viewer, True, True, 0)
         nav = Gtk.Box(spacing=6)
@@ -694,6 +699,71 @@ class Window(Gtk.Window):
                                             state['offset'] + len(rows), state['total']))
         self.previous.set_sensitive(state['offset'] > 0)
         self.next.set_sensitive(state['offset'] + 60 < state['total'])
+
+    def copyable_image(self, path):
+        return any(row['path'] == path and not row['live'] and not row['is_video']
+                   for row in self.state.get('gallery', []))
+
+    def make_image_menu(self, path):
+        if not self.copyable_image(path):
+            return None
+        menu = Gtk.Menu()
+        item = Gtk.MenuItem(label='Copy Image')
+        item.connect('activate', lambda *_: self.copy_image(path))
+        menu.append(item)
+        menu.show_all()
+        return menu
+
+    def popup_image_menu(self, path, event):
+        self.image_menu = self.make_image_menu(path)
+        if self.image_menu is None:
+            return False
+        self.image_menu.popup(None, None, None, None, event.button, event.time)
+        return True
+
+    def preview_menu(self, widget, event):
+        if event.button != 3:
+            return False
+        return self.popup_image_menu(self.selection, event)
+
+    def gallery_menu(self, widget, event):
+        if event.button != 3:
+            return False
+        hit = widget.get_path_at_pos(int(event.x), int(event.y))
+        if hit is None:
+            return False
+        return self.popup_image_menu(self.tiles[hit][2], event)
+
+    def copy_image(self, path):
+        if not self.copyable_image(path):
+            return
+        self.copy_serial += 1
+        serial = self.copy_serial
+
+        def load():
+            try:
+                # Decode the output, never its thumbnail, zoom crop or comparison.
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
+                GLib.idle_add(publish, pixbuf, '')
+            except GLib.GError as exc:
+                GLib.idle_add(publish, None, str(exc))
+
+        def publish(pixbuf, error):
+            if self.closing or serial != self.copy_serial:
+                return False
+            if error:
+                self.message('Could not copy image: ' + error, True)
+                return False
+            # Native X11 image targets only: no URI list, path or prompt text.
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            clipboard.set_image(pixbuf)
+            clipboard.store()
+            self.message('Image copied', False)
+            return False
+
+        worker = threading.Thread(target=load)
+        worker.daemon = True
+        worker.start()
 
     def selected(self, *_):
         if self.rebuilding_gallery:

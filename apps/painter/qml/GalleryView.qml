@@ -181,6 +181,9 @@ Item {
     // (docs/DESIGN.md §10).
     function commonItems(index, path, isVideo, params) {
         var items = [{ label: "Open in Viewer", trigger: () => App.openExternally(path) }]
+        if (!isVideo) {
+            items.push({ label: "Copy Image", trigger: () => App.copyImage(path) })
+        }
         if (params && params.positive) {
             items.push({ label: "Copy Prompt",
                          trigger: () => App.copyPrompt(path) })

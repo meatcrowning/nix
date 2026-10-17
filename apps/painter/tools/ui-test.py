@@ -5032,6 +5032,10 @@ def test_preview_zoom(win, ctl, tmp):
     else:
         check("a completed still preview has a right-click target", False)
     RAN.clear()
+    items = view.commonItems(0, shot, False, {}).toVariant()
+    check("history still offers copy image", "Copy Image" in [i.get("label") for i in items])
+    items = view.commonItems(0, shot, True, {}).toVariant()
+    check("history video does not offer image copy", "Copy Image" not in [i.get("label") for i in items])
     ctl.copyImage(shot)
     spin(120)
     copied = [a for a in RAN if any(os.path.basename(x) == "clipfile.py" for x in a)]
