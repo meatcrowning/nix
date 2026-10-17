@@ -114,7 +114,7 @@ Item {
              : key === "editscale" ? App.isEdit
              : key === "editseed" ? (App.isEdit && !App.editSampling)
              : key === "video" ? (App.isVideo && !App.isEdit)
-             : key === "resolution" ? !App.isEdit
+             : key === "resolution" ? (!App.isEdit && !App.layoutSupport)
              : key === "sampling" ? (!App.isEdit || App.editSampling)
              : key === "patches" ? (!App.isVideo && (!App.isEdit || App.editPatches) && App.supportsPatches)
              : key === "lora" ? App.supportsLoras

@@ -19,7 +19,7 @@ def run(parent):
     assert e.side.get_visible()
     assert e.add_button.get_image() is not None
     assert e.add_button.get_tooltip_text() == 'Add region'
-    assert not e.list.region_scroll.get_visible()
+    assert not e.list.region_box.get_visible()
     u = e.ui
     from spelling_gtk import Spelling, text
     requests = []
@@ -84,13 +84,30 @@ def run(parent):
             event.button.x, event.button.y = ox + x * w, oy + y * h
             e.canvas.emit('button-press-event' if kind == Gdk.EventType.BUTTON_PRESS else 'button-release-event', event)
     assert len(e.model.doc['items']) == 1
-    assert e.list.region_scroll.get_visible()
+    assert e.list.region_box.get_visible()
     assert e.list.region_scroll.get_size_request()[1] < 80
     assert e.model.tool == 'select' and e.side.get_visible()
     e.buttons['Lock'].clicked()
     assert e.model.chosen()[0]['locked']
     e.buttons['Lock'].clicked()
     assert not e.model.chosen()[0]['locked']
+    e.buttons['Hide'].clicked()
+    assert not e.model.chosen()[0]['enabled']
+    e.buttons['Hide'].clicked()
+    assert e.model.chosen()[0]['enabled']
+    assert 'item.locked' not in e.fields and 'item.enabled' not in e.fields
+    for signal, kind, y in [('button-press-event', Gdk.EventType.BUTTON_PRESS, 100),
+                            ('motion-notify-event', Gdk.EventType.MOTION_NOTIFY, 180),
+                            ('button-release-event', Gdk.EventType.BUTTON_RELEASE, 180)]:
+        event = Gdk.Event.new(kind)
+        if kind == Gdk.EventType.MOTION_NOTIFY: event.motion.y_root = y
+        else:
+            event.button.button = 1
+            event.button.y_root = y
+        e.list.resize_handle.emit(signal, event)
+    assert parent.region_list_height >= 80
+    assert e.list.region_scroll.get_size_request()[1] == parent.region_list_height
+
     toolbar = e.add_button.get_parent()
     assert e.buttons['Duplicate'].get_parent() is toolbar
     assert e.buttons['Undo'].get_parent() is toolbar
@@ -112,7 +129,7 @@ def run(parent):
     u.set(e.units, 'pixels')
     u.set(e.fields['box.x'], 128)
     assert e.model.doc['items'][0]['box'][0] == .125
-    u.set(e.fields['item.locked'], True)
+    e.buttons['Lock'].clicked()
     assert not e.fields['box.x'][2].get_sensitive()
     e.set_reference('/home/test/out/fixture.png')
     e.refresh()

@@ -71,6 +71,7 @@ class Window(Gtk.Window):
         self.text_boxes = {}
         self.heights_loaded = False
         self.layout_height = 300
+        self.region_list_height = 0
         self.frame_tick = ''
         self.rebuilding_gallery = False
         self.walk_pending = None
@@ -202,17 +203,21 @@ class Window(Gtk.Window):
             self.rows[key] = box
 
         self.layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.rows['negative'].set_spacing(0)
-        self.rows['negative'].pack_start(self.layout_box, False, False, 0)
+        prompt_tail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        params.remove(self.rows['negative'])
+        params.pack_start(prompt_tail, False, False, 0)
+        prompt_tail.pack_start(self.rows['negative'], False, False, 0)
+        prompt_tail.pack_start(self.layout_box, False, False, 0)
 
         self.grid = Gtk.Grid()
         self.grid.set_row_spacing(6)
         self.grid.set_column_spacing(10)
-        params.pack_start(self.grid, False, False, 0)
+        self.placement_grid = self.grid
+        prompt_tail.pack_start(self.grid, False, False, 0)
+        prompt_tail.reorder_child(self.grid, 1)
         self.grid_row = 0
         self.combo('seedPolicy', 'Seed', ['Random', 'Fixed', 'Reuse last'])
         self.entry('seed', 'Seed number')
-        self.number('count', 'Jobs', 1, 100, 1)
         aspect = Gtk.Box(spacing=6)
         for key in ('aspectW', 'aspectH'):
             if key == 'aspectH':
@@ -231,6 +236,12 @@ class Window(Gtk.Window):
         self.dimensions = label('')
         self.grid.attach(self.dimensions, 0, self.grid_row, 2, 1)
         self.grid_row += 1
+        self.grid = Gtk.Grid()
+        self.grid.set_row_spacing(6)
+        self.grid.set_column_spacing(10)
+        params.pack_start(self.grid, False, False, 0)
+        self.grid_row = 0
+        self.number('count', 'Jobs', 1, 100, 1)
         self.number('steps', 'Steps', 1, 1000, 1)
         self.number('cfg', 'Guidance', 0, 100, .5, 2)
         self.combo('sampler_name', 'Sampler', [])
@@ -462,6 +473,10 @@ class Window(Gtk.Window):
             self.send('settings', sidebarWidth=max(200, self.sidebar_split.get_position()))
         return False
 
+    def region_list_resized(self, height):
+        self.region_list_height = height
+        self.send('settings', regionListHeight=height)
+
     def layout_resized(self, height):
         self.layout_height = height
         self.send('settings', layoutHeight=height)
@@ -541,6 +556,7 @@ class Window(Gtk.Window):
             self.browse_pane.set_position(state['previewHeight'])
             self.sidebar_split.set_position(state['sidebarWidth'])
             self.layout_height = state['layoutHeight']
+            self.region_list_height = state['regionListHeight']
             for key, height in state['heights'].items():
                 self.text_boxes[key].set_height(height)
             self.heights_loaded = True

@@ -91,6 +91,13 @@ Panel {
         onResized: function (h) { Prefs.set("prompt.negH", h) }
         onMenuRequested: (sx, sy, items) => panel.menuRequested(sx, sy, items)
     }
+    Column {
+        width: parent.width
+        visible: App.layoutSupport
+        spacing: 6
+        SeedField { width: parent.width }
+        ResolutionPanel { width: parent.width }
+    }
     Loader {
         width: parent.width
         height: active && item ? item.implicitHeight : 0

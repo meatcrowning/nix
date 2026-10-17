@@ -24,6 +24,7 @@ class LayoutUI(object):
         self.buttons['Clear all'] = u.button(tools, 'Clear all', self.clear)
         for title, fn in [('Undo', lambda: self.model.undo()), ('Redo', lambda: self.model.undo(True))]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
+        self.buttons['Hide'] = u.button(tools, 'Hide', lambda: self.command(self.toggle_hidden))
         u.spacer(tools)
         for title, fn in [('Lock', self.toggle_lock), ('Delete', self.model.delete), ('Duplicate', self.model.duplicate)]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
@@ -47,9 +48,7 @@ class LayoutUI(object):
         self.add(scene, 'summary.palette', 'Scene palette', 'palette')
         u.label(scene, 'Layout is experimental placement guidance. The preview is a composition sketch, not a generated result.')
         self.add(region, 'item.label', 'Region type', 'combo', M.KINDS)
-        self.add(region, 'item.enabled', 'Include in generation', 'check')
-        self.add(region, 'item.locked', 'Lock geometry', 'check')
-        self.add(region, 'item.caption', 'Appearance, pose, material and lighting', 'text')
+        self.add(region, 'item.caption', 'Region prompt', 'text')
         self.add(region, 'item.tags', 'Region tags (comma-separated)')
         self.add(region, 'item.palette', 'Region palette', 'palette')
         self.units = u.field(region, 'Coordinates', 'combo', ['percent', 'pixels'], self.units_changed)
@@ -79,6 +78,14 @@ class LayoutUI(object):
         u.label(canvas, 'Reference is a tracing aid only; it is not sent as image conditioning.')
         self.status = u.label(root, '')
         self.refresh()
+
+    def toggle_hidden(self):
+        rows = self.model.chosen()
+        if rows:
+            enabled = all(not row.get('enabled', True) for row in rows)
+            self.model.checkpoint()
+            for row in rows:
+                row['enabled'] = enabled
 
     def toggle_lock(self):
         rows = self.model.chosen()
@@ -228,6 +235,7 @@ class LayoutUI(object):
 
     def paint(self):
         chosen = self.model.chosen()
+        self.ui.button_checked(self.buttons['Hide'], bool(chosen) and all(not row.get('enabled', True) for row in chosen))
         self.ui.button_checked(self.buttons['Lock'], bool(chosen) and all(row.get('locked') for row in chosen))
         for title, button in self.buttons.items():
             enabled = bool(self.model.undo_stack) if title == 'Undo' else bool(self.model.redo_stack) if title == 'Redo' else True if title == 'Paste' else bool(self.model.selected)

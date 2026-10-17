@@ -79,7 +79,8 @@ Aspect integers plus the MP budget use the controller's family-specific `dims`;
 never derive the saved ratio back from rounded pixels. Prompt bottom handles
 share `prompt.posH`/`prompt.negH` with QML; GTK's system editor uses
 `unity.systemH` with the Qt system editor. Layout canvas height uses
-`layout.canvasHeight`; Unity's sidebar width uses `unity.sidebarWidth`. Save
+`layout.canvasHeight`, and its region list uses `layout.regionListHeight` (zero
+means fit the rows). Unity's sidebar width uses `unity.sidebarWidth`. Save
 handle sizes on release. Browse and View share one image
 widget and selection. Still zoom renders only the visible region; transient
 sampler/video frames cross the socket as bounded images. Clip decoding stays

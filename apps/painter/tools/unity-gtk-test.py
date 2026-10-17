@@ -327,6 +327,7 @@ if not failed[0]:
             assert window.sidebar_split.get_position() == 440
             assert window.state['sidebarWidth'] == 440
             assert window.layout_height == 380
+            assert window.region_list_height >= 80
             print('PASS: prompt heights and text survive closing and reopening')
         except Exception:
             traceback.print_exc()

@@ -78,13 +78,20 @@ class Toolkit(object):
 
     def button(self, parent, title, callback):
         icons = {'Add': Gtk.STOCK_ADD, 'Undo': Gtk.STOCK_UNDO, 'Redo': Gtk.STOCK_REDO,
-                 'Delete': Gtk.STOCK_REMOVE, 'Duplicate': Gtk.STOCK_COPY, 'Lock': Gtk.STOCK_DIALOG_AUTHENTICATION}
+                 'Delete': Gtk.STOCK_REMOVE, 'Duplicate': Gtk.STOCK_COPY, 'Lock': Gtk.STOCK_DIALOG_AUTHENTICATION, 'Hide': Gtk.STOCK_CLOSE}
         icon = icons.get(title) if hasattr(parent, 'sizes') else None
-        button = (Gtk.ToggleButton if title == 'Lock' else Gtk.Button)(label=None if icon else title)
+        button = (Gtk.ToggleButton if title in ('Lock', 'Hide') else Gtk.Button)(label=None if icon else title)
         if icon:
             image = Gtk.Image.new_from_stock(icon, Gtk.IconSize.MENU)
+            if title == 'Hide':
+                colour = button.get_style_context().get_color(Gtk.StateFlags.NORMAL)
+                stroke = '#%02x%02x%02x' % tuple(int(v * 255) for v in (colour.red, colour.green, colour.blue))
+                loader = GdkPixbuf.PixbufLoader.new_with_type('svg')
+                loader.write(('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><g fill="none" stroke="%s" stroke-width="1.5"><path d="M1 8 Q8 0 15 8 Q8 16 1 8Z"/><circle cx="8" cy="8" r="2"/><path d="M2 2L14 14"/></g></svg>' % stroke).encode('utf-8'))
+                loader.close()
+                image = Gtk.Image.new_from_pixbuf(loader.get_pixbuf())
             button.set_image(image)
-            tooltip = 'Add region' if title == 'Add' else 'Lock / unlock selected regions' if title == 'Lock' else title + ' selected regions' if title in ('Delete', 'Duplicate') else title
+            tooltip = 'Add region' if title == 'Add' else 'Lock / unlock selected regions' if title == 'Lock' else 'Hide / show selected regions in generation' if title == 'Hide' else title + ' selected regions' if title in ('Delete', 'Duplicate') else title
             button.set_tooltip_text(tooltip)
             button.get_accessible().set_name(tooltip)
         if hasattr(parent, 'sizes'):
@@ -221,11 +228,17 @@ class Toolkit(object):
         selection.set_mode(Gtk.SelectionMode.MULTIPLE)
         selection.connect('changed', lambda s: changed([model[path][0] for path in s.get_selected_rows()[1]]))
         scroll = Gtk.ScrolledWindow()
-        scroll.set_no_show_all(True)
+        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        list_box.set_no_show_all(True)
         view.show()
         scroll.add(view)
         view.region_scroll = scroll
-        parent.pack_start(scroll, False, False, 0)
+        list_box.pack_start(scroll, False, False, 0)
+        view.region_box = list_box
+        view.resize_handle = self.resize_handle(list_box, scroll, 28, 600, self.window.region_list_resized, 'Drag to resize the region list')
+        parent.pack_start(list_box, False, False, 0)
+        scroll.show()
+        view.resize_handle.show_all()
         return view
 
     def set_list(self, view, rows, selected):
@@ -237,8 +250,8 @@ class Toolkit(object):
                 view.get_selection().select_iter(it)
 
         scroll = view.region_scroll
-        scroll.set_size_request(-1, min(140, max(28, view.get_preferred_height()[1] + 4)))
-        scroll.set_visible(bool(rows))
+        scroll.set_size_request(-1, self.window.region_list_height or min(140, max(28, view.get_preferred_height()[1] + 4)))
+        view.region_box.set_visible(bool(rows))
 
     def canvas(self, parent, editor):
         image = Gtk.Image()
@@ -273,8 +286,13 @@ class Toolkit(object):
                 image.set_from_pixbuf(loader.get_pixbuf())
         events.connect('size-allocate', draw)
         parent.pack_start(events, False, False, 0)
+        events.resize_handle = self.resize_handle(parent, events, 140, 1200, self.window.layout_resized, 'Drag to resize the layout')
+        events.repaint = draw
+        return events
+
+    def resize_handle(self, parent, target, minimum, maximum, saved, tooltip):
         handle = Gtk.EventBox()
-        handle.set_tooltip_text('Drag to resize the layout')
+        handle.set_tooltip_text(tooltip)
         grip = Gtk.Label(label='⋯')
         grip.set_size_request(-1, 10)
         handle.add(grip)
@@ -287,23 +305,21 @@ class Toolkit(object):
             if action != 'move' and event.button != 1:
                 return False
             if action == 'press':
-                drag[:] = [event.y_root, events.get_allocated_height()]
+                drag[:] = [event.y_root, target.get_allocated_height()]
                 widget.grab_add()
             if not drag:
                 return False
-            height = max(140, min(1200, int(drag[1] + event.y_root - drag[0])))
-            events.set_size_request(180, height)
+            height = max(minimum, min(maximum, int(drag[1] + event.y_root - drag[0])))
+            target.set_size_request(target.get_size_request()[0], height)
             if action == 'release':
                 drag[:] = []
                 widget.grab_remove()
-                self.window.layout_resized(height)
+                saved(height)
             return True
         handle.connect('button-press-event', resize, 'press')
         handle.connect('motion-notify-event', resize, 'move')
         handle.connect('button-release-event', resize, 'release')
-        events.resize_handle = handle
-        events.repaint = draw
-        return events
+        return handle
 
     def redraw(self, canvas):
         canvas.repaint()

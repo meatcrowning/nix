@@ -5295,7 +5295,7 @@ def test_moss(win, ctl, tmp):
         panes = find(win.contentItem(), "ParamsPane")
         check(model + " exposes only standard sections", all(
             panes.sectionVisible(key) == expected for key, expected in {
-                "prompt": True, "resolution": True, "sampling": True,
+                "prompt": True, "resolution": False, "sampling": True,
                 "patches": False, "lora": False, "edit": False, "krea": False}.items()))
         canvas = next((item for item in walk(win.contentItem()) if item.objectName() == "mossLayoutCanvas"), None)
         add = next((item for item in walk(win.contentItem()) if item.objectName() == "layoutAdd"), None)
@@ -5330,6 +5330,14 @@ def test_moss(win, ctl, tmp):
         check(model + " drawing saves inline draft", len(prop(APP, "gen")["moss_layout"]["items"]) == 1)
         check(model + " outside drag clips to canvas", all(abs(a-b) < 1e-8 for a,b in zip(prop(APP, "gen")["moss_layout"]["items"][0]["box"][0::2], [0, 1])))
         check(model + " drawing returns to selection", ctl.layoutEditor.editor.model.tool == "select")
+        list_handle = next(item for item in walk(editor) if item.objectName() == "regionListResizeHandle")
+        if ancestor is not None:
+            point = list_handle.mapToItem(ancestor, QPointF(0, 0))
+            ancestor.setProperty('contentY', ancestor.property('contentY') + point.y() - 100)
+            spin(100)
+        drag(win, list_handle, list_handle.width() / 2, 5, list_handle.width() / 2, 45)
+        check(model + " remembers resized region list", layout_prefs.get("layout.regionListHeight") >= 40)
+
         if os.environ.get("PAINTER_LAYOUT_SHOT"):
             win.grabWindow().save(os.environ["PAINTER_LAYOUT_SHOT"])
         import spellcheck

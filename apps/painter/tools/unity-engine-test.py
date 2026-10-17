@@ -196,6 +196,7 @@ assert E.userprefs.load()['unity.systemH'] == 600
 assert E.userprefs.load()['unity.previewHeight'] == 360
 assert E.userprefs.load()['unity.sidebarWidth'] == 440
 assert E.userprefs.load()['layout.canvasHeight'] == 380
+assert E.userprefs.load()['layout.regionListHeight'] >= 80
 ctl._scan_pool.waitForDone()
 ctl.gallery._thumb_pool.waitForDone()
 print('PASS: GTK socket, submission, restore, persistence, stale model and pipeline contracts')

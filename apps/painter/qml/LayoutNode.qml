@@ -73,17 +73,17 @@ Item {
         Button {
             readonly property bool adding: node.spec.title === "Add"
             readonly property string actionIcon: ({Add: "list-add", Undo: "edit-undo", Redo: "edit-redo",
-                Lock: "object-locked", Delete: "list-remove", Duplicate: "edit-copy"})[node.spec.title] || ""
+                Hide: "view-hidden", Lock: "object-locked", Delete: "list-remove", Duplicate: "edit-copy"})[node.spec.title] || ""
             objectName: adding ? "layoutAdd" : ""
             text: node.spec.title
             implicitWidth: actionIcon ? implicitHeight : Math.max(implicitBackgroundWidth + leftInset + rightInset, implicitContentWidth + leftPadding + rightPadding)
             icon.name: actionIcon
-            checkable: node.spec.title === "Lock"
+            checkable: node.spec.title === "Lock" || node.spec.title === "Hide"
             checked: checkable && node.spec.value === true
             display: actionIcon ? AbstractButton.IconOnly : AbstractButton.TextOnly
             Accessible.name: adding ? "Add region" : text
             ToolTip.visible: hovered && actionIcon !== ""
-            ToolTip.text: adding ? "Add region" : node.spec.title === "Lock" ? "Lock / unlock selected regions" : text
+            ToolTip.text: adding ? "Add region" : node.spec.title === "Lock" ? "Lock / unlock selected regions" : node.spec.title === "Hide" ? "Hide / show selected regions in generation" : text
             onClicked: node.spec.activate()
         }
     }
@@ -148,23 +148,57 @@ Item {
     }
     Component {
         id: listComponent
-        KineticListView {
-            implicitHeight: Math.min(140, contentHeight)
-            clip: true
-            model: node.spec.rows
-            ScrollBar.vertical: VScroll { }
-            delegate: ItemDelegate {
-                required property var modelData
-                width: ListView.view.width
-                text: modelData.title
-                highlighted: node.spec.selected.indexOf(modelData.identity) >= 0
+        Item {
+            id: listBox
+            property int listHeight: Prefs.get("layout.regionListHeight") || 0
+            implicitHeight: regionList.height + 10
+            KineticListView {
+                id: regionList
+                width: parent.width
+                height: listBox.listHeight > 0 ? listBox.listHeight : Math.min(140, contentHeight)
+                clip: true
+                model: node.spec.rows
+                ScrollBar.vertical: VScroll { }
+                delegate: ItemDelegate {
+                    required property var modelData
+                    width: ListView.view.width
+                    text: modelData.title
+                    highlighted: node.spec.selected.indexOf(modelData.identity) >= 0
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: mouse => node.spec.pick(parent.modelData.identity, !!(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
+                    }
+                }
+            }
+            Rectangle {
+                y: regionList.height
+                width: parent.width
+                height: 10
+                color: listGrip.pressed || listGrip.containsMouse ? Theme.accent : "transparent"
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 3
+                    Repeater { model: 3; Rectangle { width: 3; height: 1; color: Theme.dim } }
+                }
                 MouseArea {
+                    id: listGrip
+                    objectName: "regionListResizeHandle"
                     anchors.fill: parent
-                    onClicked: mouse => node.spec.pick(parent.modelData.identity, !!(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeVerCursor
+                    preventStealing: true
+                    property real startY: 0
+                    property real startHeight: 0
+                    onPressed: mouse => { startY = mapToItem(null, mouse.x, mouse.y).y; startHeight = regionList.height }
+                    onPositionChanged: mouse => {
+                        if (pressed) listBox.listHeight = Math.max(28, Math.min(600, Math.round(startHeight + mapToItem(null, mouse.x, mouse.y).y - startY)))
+                    }
+                    onReleased: Prefs.set("layout.regionListHeight", listBox.listHeight)
                 }
             }
         }
     }
+
     Component {
         id: canvasComponent
         Item {

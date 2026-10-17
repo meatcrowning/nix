@@ -387,7 +387,8 @@ def svg(editor, vw, vh, reference=''):
     w, h = max(1, d['width'] * scale), max(1, d['height'] * scale)
     ox, oy = (vw - w) / 2, (vh - h) / 2
     s = ['<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="%d" height="%d">' % (vw, vh),
-         '<g transform="translate(%f,%f)"><rect width="%f" height="%f" fill="white" stroke="#777"/>' % (ox, oy, w, h)]
+         '<rect width="100%" height="100%" fill="black"/>',
+         '<g transform="translate(%f,%f)"><rect width="%f" height="%f" fill="black" stroke="#bbbbbb"/>' % (ox, oy, w, h)]
     if reference:
         s.append('<image width="%f" height="%f" opacity="%f" preserveAspectRatio="xMidYMid meet" xlink:href="data:image/png;base64,%s"/>' % (w, h, d['opacity'], reference))
     if d['grid']:
@@ -395,13 +396,13 @@ def svg(editor, vw, vh, reference=''):
             step = max(.01, d['grid_step'])
             for n in range(1, int(1 / step)):
                 v = n * step * dim
-                s.append('<path d="M %f %f L %f %f" stroke="#ddd"/>' % ((v, 0, v, h) if axis == 0 else (0, v, w, v)))
+                s.append('<path d="M %f %f L %f %f" stroke="#666666"/>' % ((v, 0, v, h) if axis == 0 else (0, v, w, v)))
     for axis, custom in [(0, d.get('custom_x', [])), (1, d.get('custom_y', []))]:
         pts = list(custom)
         if d['guides'] == 'thirds': pts += [1 / 3, 2 / 3]
         elif d['guides'] == 'center': pts += [.5]
         for v in pts:
-            s.append('<path d="M %f %f L %f %f" stroke="#a77820" stroke-dasharray="4 4"/>' % ((v * w, 0, v * w, h) if axis == 0 else (0, v * h, w, v * h)))
+            s.append('<path d="M %f %f L %f %f" stroke="#e8b85e" stroke-dasharray="4 4"/>' % ((v * w, 0, v * w, h) if axis == 0 else (0, v * h, w, v * h)))
     margin = d['margin']
     s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="#999" stroke-dasharray="3 3"/>' % (margin * w, margin * h, (1 - 2 * margin) * w, (1 - 2 * margin) * h))
     s.append('<defs><clipPath id="canvas"><rect width="%f" height="%f"/></clipPath></defs><g clip-path="url(#canvas)">' % (w, h))
@@ -409,8 +410,8 @@ def svg(editor, vw, vh, reference=''):
         x, y, bw, bh = item['box']
         x, y, bw, bh = x * w, y * h, bw * w, bh * h
         selected = item['id'] in editor.selected
-        colour = '#d36d18' if selected else '#345c88'
-        s.append('<g opacity="%s"><rect x="%f" y="%f" width="%f" height="%f" fill="%s" fill-opacity=".07" stroke="%s" stroke-width="%s"/>' % ('1' if item.get('enabled', True) else '.3', x, y, bw, bh, colour, colour, 2 if selected else 1))
+        colour = '#ffb454' if selected else '#79bfff'
+        s.append('<g opacity="%s"><rect x="%f" y="%f" width="%f" height="%f" fill="%s" fill-opacity=".07" stroke="%s" stroke-width="%s"/>' % ('1' if item.get('enabled', True) else '.6', x, y, bw, bh, colour, colour, 2 if selected else 1))
         title = '%d %s%s' % (n + 1, item['label'], ' [locked]' if item.get('locked') else '')
         caption = ' '.join(item.get('caption', '').split())
         if caption:
@@ -427,11 +428,12 @@ def svg(editor, vw, vh, reference=''):
             family = {'serif': 'serif', 'monospace': 'monospace', 'handwritten': 'cursive'}.get(style.get('family'), 'sans-serif')
             align = style.get('align', 'left')
             tx = x + bw / 2 if align == 'center' else x + bw - 3 if align == 'right' else x + 3
-            color = style.get('color') or '#222222'
+            color = style.get('color') or '#eeeeee'
             # Descriptive treatments compile to prose; preview only valid hex colours.
-            if not (len(color) == 7 and color.startswith('#') and all(c in '0123456789abcdefABCDEF' for c in color[1:])): color = '#222222'
+            if not (len(color) == 7 and color.startswith('#') and all(c in '0123456789abcdefABCDEF' for c in color[1:])): color = '#eeeeee'
+            outline = '#ffffff' if sum(int(color[i:i + 2], 16) for i in (1, 3, 5)) < 384 else '#000000'
             for j, line in enumerate(lines):
-                s.append('<text x="%f" y="%f" fill="%s" font-family="%s" font-weight="%s" font-size="%f" text-anchor="%s">%s</text>' % (tx, y + 18 + fs * (j + 1), color, family, 'bold' if style.get('weight') in ('bold', 'heavy') else 'normal', fs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
+                s.append('<text stroke="%s" stroke-width=".5" x="%f" y="%f" fill="%s" font-family="%s" font-weight="%s" font-size="%f" text-anchor="%s">%s</text>' % (outline, tx, y + 18 + fs * (j + 1), color, family, 'bold' if style.get('weight') in ('bold', 'heavy') else 'normal', fs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
         s.append('</g>')
         if selected and not item.get('locked'):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:
