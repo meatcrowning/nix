@@ -44,7 +44,6 @@ class LayoutUI(object):
         u.set(self.align, 'left')
         u.button(canvas, 'Align / distribute', lambda: self.command(lambda: self.model.align(u.get(self.align))))
         self.add(scene, 'enabled', 'Use layout for generation', 'check')
-        self.add(scene, 'summary.caption', 'Overall scene, style and relationships', 'text')
         self.add(scene, 'summary.canvas', 'Composition', 'combo', M.CANVASES)
         self.add(scene, 'summary.meta', 'Medium / genre tags (comma-separated)')
         self.add(scene, 'summary.palette', 'Scene palette', 'palette')

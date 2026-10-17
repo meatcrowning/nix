@@ -138,7 +138,7 @@ def qt():
     assert app.platformName() == 'offscreen'
     ui = Toolkit()
     accepted = []
-    editor = LayoutUI(ui, M.fresh(), accepted.append)
+    editor = LayoutUI(ui, M.fresh(caption='A poster'), accepted.append)
     app.processEvents()
     editor.render(700, 500)
     ox, oy, w, h = editor.rect
@@ -153,7 +153,6 @@ def qt():
     M.valid(accepted[-1])
     editor.model.undo(); editor.refresh()
     editor.model.add('text', [.1,.1,.6,.3]); editor.refresh()
-    editor.fields['summary.caption'].edit('A poster')
     editor.fields['item.caption'].edit('Large headline')
     editor.fields['item.text'].edit('Hello\n世界')
     editor.fields['type.family'].edit('serif')

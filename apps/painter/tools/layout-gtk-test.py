@@ -14,7 +14,7 @@ def run(parent):
     before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
     parent.layout_box.show()
     parent.pages.set_current_page(2)
-    e = open_editor(parent.layout_box, M.fresh(), accepted.append)
+    e = open_editor(parent.layout_box, M.fresh(caption='A travel poster'), accepted.append)
     assert [w for w in Gtk.Window.list_toplevels() if w.get_visible()] == before_windows
     assert e.canvas.get_toplevel() is parent
     assert not e.side.get_visible()
@@ -38,7 +38,6 @@ def run(parent):
     assert e.model.tool == 'select' and e.details
     row = e.model.doc['items'][0]
     assert row['label'] == 'text' and abs(row['box'][2] - .7) < .02
-    u.set(e.fields['summary.caption'], 'A travel poster')
     u.set(e.fields['summary.meta'], 'poster, illustration')
     u.set(e.fields['summary.palette'], '#ffffff, #123456')
     u.set(e.fields['item.caption'], 'Large heading')
