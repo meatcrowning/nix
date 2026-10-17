@@ -47,6 +47,7 @@ window.message('Generation completed')
 step = [0]
 failed = [False]
 video_tick = ['']
+zoom_point = [None]
 
 def select(name):
     for i, row in enumerate(window.tiles):
@@ -200,7 +201,31 @@ def test():
             assert window.viewer.original.get_width() == 80
             window.view()
             window.viewer.set_zoom(16)
-        elif step[0] == 9:
+        elif step[0] in (9, 11):
+            view = window.viewer
+            if step[0] == 9:
+                view.scroll.get_hadjustment().set_value(120)
+                view.scroll.get_vadjustment().set_value(90)
+            cx, cy = 210.0, 145.0
+            zoom_point[0] = ((cx + view.scroll.get_hadjustment().get_value() - view.image_origin[0]) / view.scale,
+                             (cy + view.scroll.get_vadjustment().get_value() - view.image_origin[1]) / view.scale)
+            event = Gdk.Event.new(Gdk.EventType.SCROLL)
+            event.scroll.direction = Gdk.ScrollDirection.DOWN if step[0] == 9 else Gdk.ScrollDirection.UP
+            event.scroll.x = cx + view.scroll.get_hadjustment().get_value() - view.visible_origin[0]
+            event.scroll.y = cy + view.scroll.get_vadjustment().get_value() - view.visible_origin[1]
+            view.events.emit('scroll-event', event)
+        elif step[0] in (10, 12):
+            view = window.viewer
+            assert abs(view.scale - (12.8 if step[0] == 10 else 16)) < .001
+            for actual, expected in zip(
+                    (view.image_origin[0] + zoom_point[0][0] * view.scale - view.scroll.get_hadjustment().get_value(),
+                     view.image_origin[1] + zoom_point[0][1] * view.scale - view.scroll.get_vadjustment().get_value()),
+                    (210, 145)):
+                assert abs(actual - expected) <= 1, ('cursor zoom drift', actual, expected)
+            if step[0] == 12:
+                view.scroll.get_hadjustment().set_value(0)
+                view.scroll.get_vadjustment().set_value(0)
+        elif step[0] == 13:
             view = window.viewer
             assert view.scale == 16
             assert view.picture.get_pixbuf().get_width() <= view.scroll.get_allocated_width()
@@ -216,6 +241,36 @@ def test():
             view.release(view.events, event)
             assert view.scroll.get_hadjustment().get_value() == 60
             assert view.scroll.get_vadjustment().get_value() == 40
+            window.browse()
+            view.set_zoom(0)
+        elif step[0] == 14:
+            view = window.viewer
+            # Fit is letterboxed here; only the height can scroll after zoom.
+            cx = view.canvas.get_allocated_width() / 2.0
+            cy = view.canvas.get_allocated_height() * .4
+            zoom_point[0] = (cx, cy, (cy - view.image_origin[1]) / view.scale)
+            event = Gdk.Event.new(Gdk.EventType.SCROLL)
+            event.scroll.direction = Gdk.ScrollDirection.UP
+            event.scroll.x = cx - view.visible_origin[0]
+            event.scroll.y = cy - view.visible_origin[1]
+            view.events.emit('scroll-event', event)
+        elif step[0] == 15:
+            view = window.viewer
+            cx, cy, iy = zoom_point[0]
+            actual = view.image_origin[1] + iy * view.scale - view.scroll.get_vadjustment().get_value()
+            assert abs(actual - cy) <= 1, ('fit-to-zoom cursor drift', actual, cy)
+            assert view.scroll.get_vadjustment().get_upper() > view.scroll.get_vadjustment().get_page_size()
+            event = Gdk.Event.new(Gdk.EventType.SCROLL)
+            event.scroll.direction = Gdk.ScrollDirection.DOWN
+            event.scroll.x = cx + view.scroll.get_hadjustment().get_value() - view.visible_origin[0]
+            event.scroll.y = cy + view.scroll.get_vadjustment().get_value() - view.visible_origin[1]
+            view.events.emit('scroll-event', event)
+        elif step[0] == 16:
+            view = window.viewer
+            cx, cy, iy = zoom_point[0]
+            actual = view.image_origin[1] + iy * view.scale - view.scroll.get_vadjustment().get_value()
+            assert abs(actual - cy) <= 1, ('zoom-to-fit cursor drift', actual, cy)
+            window.view()
             old = window.selection
             index = next(i for i, row in enumerate(window.tiles) if row[2] == old)
             window.walk(-1 if index else 1)

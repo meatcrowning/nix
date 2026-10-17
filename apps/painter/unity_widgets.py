@@ -80,6 +80,10 @@ class ImageView(Gtk.Box):
         self.render_timer = None
         self.rendering = False
         self.viewport_size = None
+        self.zoom_anchor = None
+        self.zoom_idle = None
+        self.image_origin = (0, 0)
+        self.visible_origin = (0, 0)
         self.picture = Gtk.Image()
         self.events = Gtk.EventBox()
         self.events.add(self.picture)
@@ -95,9 +99,10 @@ class ImageView(Gtk.Box):
         self.canvas = Gtk.Layout()
         self.canvas.put(self.events, 0, 0)
         self.scroll.add(self.canvas)
-        self.scroll.get_hadjustment().connect('value-changed', lambda *_: self.render())
-        self.scroll.get_vadjustment().connect('value-changed', lambda *_: self.render())
+        self.scroll.get_hadjustment().connect('value-changed', self.scrolled)
+        self.scroll.get_vadjustment().connect('value-changed', self.scrolled)
         self.scroll.connect('size-allocate', self.resized)
+        self.canvas.connect('size-allocate', self.resized)
         self.pack_start(self.scroll, True, True, 0)
         bar = Gtk.Box(spacing=6)
         self.info = Gtk.Label(label='Select an output')
@@ -150,6 +155,7 @@ class ImageView(Gtk.Box):
         self.path = (path, before, video)
         self.serial += 1
         self.zoom = 0.0
+        self.zoom_anchor = None
         self.video = video
         self.natural_size = None
         for button in self.zoom_buttons:
@@ -182,13 +188,17 @@ class ImageView(Gtk.Box):
         self.render()
 
     def resized(self, *args):
-        size = (self.scroll.get_allocated_width(), self.scroll.get_allocated_height())
+        size = (self.canvas.get_allocated_width(), self.canvas.get_allocated_height())
         if args and size == self.viewport_size:
             return
         self.viewport_size = size
         if self.render_timer:
             GLib.source_remove(self.render_timer)
         self.render_timer = GLib.timeout_add(60, self.render)
+
+    def scrolled(self, *args):
+        if not self.rendering:
+            self.render()
 
     def render(self):
         if self.render_timer:
@@ -198,13 +208,23 @@ class ImageView(Gtk.Box):
             return False
         self.rendering = True
         w, h = self.original.get_width(), self.original.get_height()
-        vw, vh = max(1, self.scroll.get_allocated_width() - 4), max(1, self.scroll.get_allocated_height() - 4)
+        vw, vh = max(1, self.canvas.get_allocated_width()), max(1, self.canvas.get_allocated_height())
         self.scale = self.zoom or min(float(vw) / w, float(vh) / h)
         width, height = max(1, int(w * self.scale)), max(1, int(h * self.scale))
         # The layout has the full virtual image size. Only the visible region
         # gets a bitmap, so zooming a large output never allocates zoom^2 pixels.
         self.canvas.set_size(max(vw, width), max(vh, height))
         x, y = max(0, (vw - width) // 2), max(0, (vh - height) // 2)
+        self.image_origin = (x, y)
+        if self.zoom_anchor is not None:
+            # Keep the anchor through GTK allocation: new scrollbars can change
+            # the viewport after the first render. User panning clears it.
+            ix, iy, cx, cy = self.zoom_anchor
+            for adjustment, target in (
+                    (self.scroll.get_hadjustment(), x + ix * self.scale - cx),
+                    (self.scroll.get_vadjustment(), y + iy * self.scale - cy)):
+                adjustment.set_value(max(0, min(adjustment.get_upper() -
+                                               adjustment.get_page_size(), target)))
         sx = int(self.scroll.get_hadjustment().get_value())
         sy = int(self.scroll.get_vadjustment().get_value())
         left, top = max(x, sx), max(y, sy)
@@ -220,6 +240,7 @@ class ImageView(Gtk.Box):
                 self.before.scale(pixbuf, 0, 0, cut, rh, x - left, y - top,
                                   float(width) / self.before.get_width(),
                                   float(height) / self.before.get_height(), GdkPixbuf.InterpType.BILINEAR)
+        self.visible_origin = (left, top)
         self.canvas.move(self.events, left, top)
         self.picture.set_from_pixbuf(pixbuf)
         nw, nh = self.natural_size or (w, h)
@@ -228,20 +249,41 @@ class ImageView(Gtk.Box):
         self.rendering = False
         return False
 
-    def set_zoom(self, value):
+    def set_zoom(self, value, cursor=None):
         if self.video:
             return
+        self.zoom_anchor = None
+        if value and self.original is not None:
+            cx, cy = cursor or (self.canvas.get_allocated_width() / 2.0,
+                                self.canvas.get_allocated_height() / 2.0)
+            self.zoom_anchor = (
+                (cx + self.scroll.get_hadjustment().get_value() - self.image_origin[0]) / self.scale,
+                (cy + self.scroll.get_vadjustment().get_value() - self.image_origin[1]) / self.scale,
+                cx, cy)
         self.zoom = max(.05, min(16, value)) if value else 0.0
         self.render()
+        if self.zoom_idle is not None:
+            GLib.source_remove(self.zoom_idle)
+        self.zoom_idle = GLib.idle_add(self.finish_zoom, priority=GLib.PRIORITY_LOW)
 
-    def zoom_by(self, factor):
-        self.set_zoom(self.scale * factor)
+    def finish_zoom(self):
+        # GTK updates adjustment bounds and scrollbar allocations asynchronously.
+        self.zoom_idle = None
+        self.render()
+        self.zoom_anchor = None
+        return False
+
+    def zoom_by(self, factor, cursor=None):
+        self.set_zoom(self.scale * factor, cursor)
 
     def wheel(self, widget, event):
+        # Events are local to the cropped bitmap, not the full image or viewport.
+        cursor = (event.x + self.visible_origin[0] - self.scroll.get_hadjustment().get_value(),
+                  event.y + self.visible_origin[1] - self.scroll.get_vadjustment().get_value())
         if event.direction == Gdk.ScrollDirection.UP:
-            self.zoom_by(1.25)
+            self.zoom_by(1.25, cursor)
         elif event.direction == Gdk.ScrollDirection.DOWN:
-            self.zoom_by(1 / 1.25)
+            self.zoom_by(1 / 1.25, cursor)
         return True
 
     def press(self, widget, event):
@@ -255,6 +297,7 @@ class ImageView(Gtk.Box):
     def motion(self, widget, event):
         if not self.drag or self.video:
             return False
+        self.zoom_anchor = None
         for adjustment, start, now, value in [
                 (self.scroll.get_hadjustment(), self.drag[0], event.x_root, self.drag[2]),
                 (self.scroll.get_vadjustment(), self.drag[1], event.y_root, self.drag[3])]:
