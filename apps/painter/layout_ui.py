@@ -32,9 +32,10 @@ class LayoutUI(object):
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
         self.buttons['Hide'] = u.button(tools, 'Hide', lambda: self.command(self.toggle_hidden))
         u.spacer(tools)
-        self.fields['box.position'] = u.field(tools, 'Position (X, Y)', 'pair', None, lambda: self.geometry_pair('position'))
-        self.fields['box.size'] = u.field(tools, 'Size (W, H)', 'pair', None, lambda: self.geometry_pair('size'))
-        self.units = u.field(tools, '', 'combo', ['percent', 'pixels'], self.units_changed)
+        coordinates = u.compact_fields(tools)
+        self.fields['box.position'] = u.field(coordinates, 'Position (X, Y)', 'pair', None, lambda: self.geometry_pair('position'))
+        self.fields['box.size'] = u.field(coordinates, 'Size (W, H)', 'pair', None, lambda: self.geometry_pair('size'))
+        self.units = u.field(coordinates, '', 'combo', ['percent', 'pixels'], self.units_changed)
         u.spacer(tools)
         for title, fn in [('Lock', self.toggle_lock), ('Delete', lambda: self.model.delete()), ('Duplicate', lambda: self.model.duplicate())]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))

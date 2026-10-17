@@ -85,6 +85,7 @@ class Toolkit(QObject):
 
     def row(self, parent, expand=False): return Node('row', parent=parent, expand=expand)
     def toolbar(self, parent): return Node('toolbar', parent=parent)
+    def compact_fields(self, parent): return Node('compact', parent=parent)
     def spacer(self, parent): return Node('spacer', parent=parent, expand=True)
     def button_checked(self, button, checked): self.set(button, checked)
     def column(self, parent): return Node('inspector', parent=parent)

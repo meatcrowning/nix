@@ -19,6 +19,7 @@ Item {
         sourceComponent: {
             switch (node.spec.kind) {
             case "row": case "toolbar": return rowComponent
+            case "compact": return compactComponent
             case "spacer": return spacerComponent
             case "column": case "page": case "inspector": return columnComponent
             case "button": return buttonComponent
@@ -33,6 +34,31 @@ Item {
     }
     Component { id: spacerComponent; Item { implicitWidth: 0; implicitHeight: 0 } }
     Component {
+        id: compactComponent
+        Item {
+            objectName: "layoutCoordinates"
+            implicitWidth: fields.implicitWidth
+            implicitHeight: fields.implicitHeight
+            RowLayout {
+                id: fields
+                objectName: "layoutCoordinateFields"
+                anchors.centerIn: parent
+                spacing: 2
+                visible: parent.width >= implicitWidth
+                Repeater {
+                    model: node.spec.nodes
+                    Loader {
+                        required property QtObject modelData
+                        Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
+                        Layout.preferredWidth: item ? item.implicitWidth : 0
+                        Layout.preferredHeight: item ? item.implicitHeight : 0
+                        Layout.fillHeight: true
+                    }
+                }
+            }
+        }
+    }
+    Component {
         id: rowComponent
         RowLayout {
             spacing: node.spec.kind === "toolbar" ? 2 : 6
@@ -46,7 +72,9 @@ Item {
                     Layout.fillWidth: modelData.expand
                     Layout.fillHeight: node.spec.kind === "toolbar" || modelData.expand || modelData.kind === "inspector"
                     Layout.preferredWidth: modelData.kind === "inspector" ? 300 : (item ? item.implicitWidth : 0)
-                    Layout.minimumWidth: modelData.kind === "canvas" ? 140 : 0
+                    Layout.minimumWidth: modelData.kind === "canvas" ? 140
+                        : node.spec.kind === "toolbar" && modelData.kind !== "compact" && modelData.kind !== "spacer"
+                          ? (item ? item.implicitWidth : 0) : 0
                 }
             }
         }

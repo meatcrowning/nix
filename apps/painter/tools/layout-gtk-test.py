@@ -113,6 +113,26 @@ def run(parent):
     assert e.buttons['Duplicate'].get_parent() is toolbar
     assert e.buttons['Undo'].get_parent() is toolbar
     assert e.buttons['Delete'].get_parent() is toolbar
+    coordinates = e.units[2].get_parent()
+    holder = coordinates.get_parent()
+    minimum, natural = toolbar.get_preferred_width()
+    assert natural - minimum >= coordinates.get_preferred_width()[0]
+    assert parent.params_scroll.get_preferred_width()[0] <= minimum + 42, (
+        'another sidebar control prevents compact toolbar sizing', minimum,
+        parent.params_scroll.get_preferred_width()[0])
+    allocation = toolbar.get_allocation()
+    saved_width = allocation.width
+    allocation.width = minimum
+    toolbar.size_allocate(allocation)
+    assert not coordinates.get_child_visible(), 'coordinates prevented toolbar shrinking'
+    buttons = [e.add_button] + [e.buttons[k] for k in ('Clear all', 'Undo', 'Redo', 'Hide', 'Lock', 'Delete', 'Duplicate')]
+    assert all(b.get_allocated_width() >= b.get_preferred_width()[0] for b in buttons)
+    allocation.width = natural + 100
+    toolbar.size_allocate(allocation)
+    assert coordinates.get_child_visible(), ('coordinates did not return at wide width', minimum, natural,
+        holder.get_preferred_width(), holder.get_allocated_width(), coordinates.get_preferred_width())
+    allocation.width = saved_width
+    toolbar.size_allocate(allocation)
     row = e.model.doc['items'][0]
     assert row['label'] == 'text' and abs(row['box'][2] - .7) < .02
     u.set(e.tool, 'character')

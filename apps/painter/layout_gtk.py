@@ -6,6 +6,29 @@ from gi.repository import Gtk, Gdk, GdkPixbuf
 from layout_ui import LayoutUI
 
 
+class CompactFields(Gtk.Bin):
+    """Optional toolbar fields contribute natural width, but no minimum."""
+    def do_get_request_mode(self):
+        return Gtk.SizeRequestMode.CONSTANT_SIZE
+
+    def do_get_preferred_width(self):
+        return 0, self.get_child().get_preferred_width()[1]
+
+    def do_get_preferred_height(self):
+        return self.get_child().get_preferred_height()
+
+    def do_get_preferred_width_for_height(self, height):
+        return self.do_get_preferred_width()
+
+    def do_size_allocate(self, allocation):
+        self.set_allocation(allocation)
+        child = self.get_child()
+        fits = allocation.width >= child.get_preferred_width()[0]
+        child.set_child_visible(fits)
+        if fits:
+            child.size_allocate(allocation)
+
+
 class Toolkit(object):
     def __init__(self, parent):
         self.window = parent.get_toplevel()
@@ -53,6 +76,14 @@ class Toolkit(object):
 
     def spacer(self, parent):
         parent.pack_start(Gtk.Box(), True, True, 0)
+
+    def compact_fields(self, parent):
+        holder = CompactFields()
+        box = Gtk.Box(spacing=2)
+        box.sizes = parent.sizes
+        holder.add(box)
+        parent.pack_start(holder, False, True, 0)
+        return box
 
     def button_checked(self, button, checked):
         button.syncing = True
