@@ -80,6 +80,7 @@ class Window(Gtk.Window):
         self.image_menu = None
         self.layout_doc = {}
         self.layout_editor = None
+        self.layout_model = ''
         self.connection = Connection(path, self.receive)
         self.connect('delete-event', self.close_window)
         self.accels = Gtk.AccelGroup()
@@ -182,7 +183,7 @@ class Window(Gtk.Window):
             self.controls[key] = text
             self.rows[key] = box
 
-        self.layout_button = Gtk.Button(label='Layout…')
+        self.layout_button = Gtk.Button(label='Layout')
         self.layout_button.connect('clicked', lambda *_: self.open_layout())
         params.pack_start(self.layout_button, False, False, 0)
 
@@ -305,14 +306,18 @@ class Window(Gtk.Window):
         self.preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.browse_pane.pack1(self.preview_box, False, False)
         self.browse_pane.pack2(scroll(self.gallery), True, False)
-        self.pages.append_page(self.browse_pane, None)
+        self.pages.append_page(self.browse_pane, Gtk.Label(label='Browse'))
         self.full_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.pages.append_page(self.full_box, None)
+        self.pages.append_page(self.full_box, Gtk.Label(label='View'))
+        self.layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.pages.append_page(self.layout_box, Gtk.Label(label='Layout'))
+        self.pages.connect_after('switch-page', self.page_switched)
         self.viewer = ImageView(self.message, lambda: self.send('playback'))
         self.viewer.events.connect('button-press-event', self.preview_menu)
         self.picture = self.viewer.picture
         self.preview_box.pack_start(self.viewer, True, True, 0)
         nav = Gtk.Box(spacing=6)
+        self.gallery_nav = nav
         self.previous = Gtk.Button.new_from_stock(Gtk.STOCK_GO_BACK)
         self.previous.connect('clicked', lambda *_: self.change_page(-60))
         self.next = Gtk.Button.new_from_stock(Gtk.STOCK_GO_FORWARD)
@@ -488,6 +493,8 @@ class Window(Gtk.Window):
                 for value in sorted(set(state[source] + ([current] if current else []))):
                     self.controls[key].append(value, value)
                 self.controls[key].set_active_id(current)
+        if old.get('model') != state['model']:
+            self.layout_model = ''
         if settings_changed:
             self.revision = state['revision']
             self.apply_settings(state['settings'])
@@ -501,8 +508,10 @@ class Window(Gtk.Window):
         self.loading = False
         self.visibility()
         self.update_actions()
-        if op == 'layout':
-            self.show_layout()
+        if state.get('flags', {}).get('layoutSupport'):
+            self.sync_layout()
+        elif self.pages.get_current_page() == 2:
+            self.browse()
         self.status.set_text('%s   |   %s queued' % (state['status'], state['queue']))
         self.progress.set_fraction(max(0, min(1, state['progress'])))
         self.progress.set_text('%d%%' % (state['progress'] * 100) if state['busy'] else '')
@@ -569,7 +578,9 @@ class Window(Gtk.Window):
         self.layout_button.set_visible(bool(flags.get('layoutSupport')))
         self.controls['megapixels'].set_digits(6 if flags.get('layoutSupport') else 1)
         self.controls['megapixels'].set_range(.05 if flags.get('layoutSupport') else .1, 16 if flags.get('layoutSupport') else 8)
-        self.layout_button.set_label('Layout… (enabled)' if self.layout_doc.get('enabled') else 'Layout…')
+        self.layout_button.set_label('Layout (enabled)' if self.layout_doc.get('enabled') else 'Layout')
+        self.pages.set_show_tabs(bool(flags.get('layoutSupport')))
+        self.layout_box.set_visible(bool(flags.get('layoutSupport')))
         edit, video = flags.get('isEdit', False), flags.get('isVideo', False)
         still = self.controls['still'].get_active()
         sampling = not edit or flags.get('editSampling', False)
@@ -642,33 +653,56 @@ class Window(Gtk.Window):
                 self.send('mode', save=True, name=row[0])
 
     def open_layout(self):
-        self.send('layout', save=True)
+        self.sync_layout()
+        self.pages.set_current_page(2)
 
-    def show_layout(self):
+    def sync_layout(self):
+        if self.save_timer and self.layout_model == self.state['model']:
+            return
         import moss_layout as layout
         from layout_gtk import open_editor
         values = self.values()
         g = self.state['settings']
-        width, height = g['width'], g['height']
-        doc = layout.resize(self.layout_doc, width, height) if self.layout_doc else layout.fresh(width, height)
-        doc['summary']['caption'] = values['positive']
-        model = self.state['model']
-        def accepted(result):
-            if self.state['model'] != model:
-                self.message('The model changed while editing the layout.', True)
+        try:
+            doc = layout.resize(self.layout_doc, g['width'], g['height']) if self.layout_doc else layout.fresh(g['width'], g['height'])
+            doc['summary']['caption'] = values['positive']
+            if self.layout_editor and self.layout_model == self.state['model']:
+                self.layout_editor.load(doc)
                 return
-            self.layout_doc = result
-            self.controls['positive'].get_buffer().set_text(result['summary']['caption'])
-            # Keep ratios within the main editor's integer range by reducing them.
-            a, b = result['width'], result['height']
-            while b:
-                a, b = b, a % b
-            self.controls['aspectW'].set_value(result['width'] // a)
-            self.controls['aspectH'].set_value(result['height'] // a)
-            self.controls['megapixels'].set_value(result['width'] * result['height'] / 1000000.0)
-            self.changed()
-            self.save()
-        self.layout_editor = open_editor(self, doc, accepted)
+            for child in self.layout_box.get_children():
+                child.destroy()
+            self.layout_model = self.state['model']
+            self.layout_editor = open_editor(self.layout_box, doc, self.layout_changed)
+            self.pages.set_current_page(2)
+        except (ValueError, TypeError, KeyError) as exc:
+            self.message(str(exc), True)
+
+    def layout_changed(self, result):
+        self.layout_doc = result
+        was_loading = self.loading
+        self.loading = True
+        self.controls['positive'].get_buffer().set_text(result['summary']['caption'])
+        a, b = result['width'], result['height']
+        while b:
+            a, b = b, a % b
+        self.controls['aspectW'].set_value(result['width'] // a)
+        self.controls['aspectH'].set_value(result['height'] // a)
+        self.controls['megapixels'].set_value(result['width'] * result['height'] / 1000000.0)
+        self.loading = was_loading
+        self.changed()
+
+    def page_switched(self, notebook, page, number):
+        if not hasattr(self, 'viewer'):
+            return
+        if number in (0, 1):
+            box = self.preview_box if number == 0 else self.full_box
+            if self.viewer.get_parent() != box:
+                self.viewer.reparent(box)
+                box.set_child_packing(self.viewer, True, True, 0, Gtk.PackType.START)
+            self.viewer.resized()
+        self.search.set_visible(number == 0)
+        if hasattr(self, 'gallery_nav'):
+            self.gallery_nav.set_visible(number == 0)
 
     def generate(self):
         self.info.hide()

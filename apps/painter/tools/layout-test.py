@@ -101,26 +101,26 @@ def core():
 
 def qt():
     assert os.environ.get('QT_QPA_PLATFORM') == 'offscreen'
-    from PySide6 import QtWidgets as W, QtGui as G
+    from PySide6 import QtGui as G
     from layout_qt import Toolkit
     from layout_ui import LayoutUI
-    app = W.QApplication([])
+    app = G.QGuiApplication([])
     assert app.platformName() == 'offscreen'
     ui = Toolkit()
     accepted = []
     editor = LayoutUI(ui, M.fresh(), accepted.append)
-    ui.window.show(); app.processEvents()
+    app.processEvents()
     editor.model.add('text', [.1,.1,.6,.3]); editor.refresh()
-    ui.set(editor.fields['summary.caption'], 'A poster')
-    ui.set(editor.fields['item.caption'], 'Large headline')
-    ui.set(editor.fields['item.text'], 'Hello\n世界')
-    ui.set(editor.fields['type.family'], 'serif')
-    ui.set(editor.fields['item.palette'], '#ff0000, #00ff00')
-    ui.set(editor.fields['enabled'], True)
+    editor.fields['summary.caption'].edit('A poster')
+    editor.fields['item.caption'].edit('Large headline')
+    editor.fields['item.text'].edit('Hello\n世界')
+    editor.fields['type.family'].edit('serif')
+    editor.fields['item.palette'].edit('#ff0000, #00ff00')
+    editor.fields['enabled'].edit(True)
     assert editor.model.doc['items'][0]['text'] == 'Hello\n世界'
     assert editor.model.doc['items'][0]['palette'] == ['#ff0000','#00ff00']
-    ui.set(editor.units, 'pixels')
-    ui.set(editor.fields['box.x'], 128)
+    editor.units.edit('pixels')
+    editor.fields['box.x'].edit(128)
     assert editor.model.doc['items'][0]['box'][0] == .125
     editor.key('Right')
     assert editor.model.doc['items'][0]['box'][0] == .125 + 1/1024
@@ -141,8 +141,8 @@ def qt():
     ui.paste = lambda: copied[0]
     editor.copy(); editor.paste()
     assert len(editor.model.doc['items']) == 2
-    editor.apply(); assert accepted and accepted[0]['enabled']
-    print('PASS: native Qt layout form, palette, multiline text, pixels, underlay and apply')
+    editor.publish(); assert accepted and accepted[-1]['enabled']
+    print('PASS: native Qt layout form, palette, multiline text, pixels, underlay and autosave')
 
 
 if __name__ == '__main__':

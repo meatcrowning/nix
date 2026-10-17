@@ -8,20 +8,37 @@ from layout_ui import LayoutUI
 
 class Toolkit(object):
     def __init__(self, parent):
-        self.window = Gtk.Window(title='MOSS Layout — Painter')
-        self.window.set_transient_for(parent)
-        self.window.set_modal(True)
-        self.window.set_default_size(1100, 800)
-        self.window.set_icon_name('applications-graphics')
+        self.window = parent.get_toplevel()
         self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.root.set_border_width(10)
-        self.window.add(self.root)
+        self.root.set_border_width(6)
+        parent.pack_start(self.root, True, True, 0)
+
+    def show_widget(self, widget, visible):
+        widget.set_visible(visible)
+
+    def drawing_cursor(self, widget, drawing):
+        if widget.get_window():
+            widget.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.CROSSHAIR if drawing else Gdk.CursorType.LEFT_PTR))
+
+    def menu(self, parent, title):
+        button = Gtk.Button(label=title)
+        menu = Gtk.Menu()
+        button.connect('clicked', lambda *_: menu.popup(None, None, None, None, 0, Gtk.get_current_event_time()))
+        parent.pack_start(button, False, False, 0)
+        return menu
+
+    def menu_item(self, menu, title, callback):
+        item = Gtk.MenuItem(label=title)
+        item.connect('activate', lambda *_: callback())
+        menu.append(item)
+        item.show()
+        return item
 
     def enable_widget(self, widget, enabled):
         widget.set_sensitive(enabled)
 
     def close(self):
-        self.window.destroy()
+        self.root.destroy()
 
     def row(self, parent, expand=False):
         box = Gtk.Box(spacing=6)
@@ -30,7 +47,7 @@ class Toolkit(object):
 
     def column(self, parent):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_size_request(370, -1)
+        box.set_size_request(280, -1)
         parent.pack_start(box, False, True, 0)
         return box
 
@@ -38,7 +55,7 @@ class Toolkit(object):
         label = Gtk.Label(label=text)
         label.set_alignment(0, .5)
         label.set_line_wrap(True)
-        label.set_max_width_chars(42)
+        label.set_max_width_chars(32)
         parent.pack_start(label, False, False, 0)
         return label
 
@@ -188,9 +205,13 @@ class Toolkit(object):
 
     def canvas(self, parent, editor):
         image = Gtk.Image()
+        image.set_alignment(0, 0)
         events = Gtk.EventBox()
-        events.set_size_request(400, 400)
-        events.add(image)
+        events.set_size_request(180, 180)
+        surface = Gtk.Layout()
+        surface.put(image, 0, 0)
+        events.add(surface)
+        events.set_above_child(True)
         events.set_can_focus(True)
         events.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.POINTER_MOTION_MASK)
         def pointer(widget, event, action):
@@ -245,7 +266,8 @@ class Toolkit(object):
 def open_editor(parent, doc, accepted):
     toolkit = Toolkit(parent)
     editor = LayoutUI(toolkit, doc, accepted)
-    toolkit.window.show_all()
+    toolkit.root.show_all()
+    toolkit.show_widget(editor.side, False)
     editor.region_visibility()
-    toolkit.window.editor = editor
+    toolkit.root.editor = editor
     return editor

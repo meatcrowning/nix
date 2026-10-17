@@ -10,10 +10,19 @@ from layout_gtk import open_editor
 
 def run(parent):
     accepted = []
-    e = open_editor(parent, M.fresh(), accepted.append)
+    initial_width = parent.get_allocated_width()
+    before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
+    parent.layout_box.show()
+    parent.pages.set_current_page(2)
+    e = open_editor(parent.layout_box, M.fresh(), accepted.append)
+    assert [w for w in Gtk.Window.list_toplevels() if w.get_visible()] == before_windows
+    assert e.canvas.get_toplevel() is parent
+    assert not e.side.get_visible()
     u = e.ui
     while Gtk.events_pending(): Gtk.main_iteration()
     u.set(e.tool, 'text')
+    e.add_button.clicked()
+    assert e.model.tool == 'text'
     ox, oy, w, h = e.rect
     for kind, x, y in [(Gdk.EventType.BUTTON_PRESS, .15, .2), (Gdk.EventType.MOTION_NOTIFY, .7, .5), (Gdk.EventType.BUTTON_RELEASE, .7, .5)]:
         event = Gdk.Event.new(kind)
@@ -26,6 +35,7 @@ def run(parent):
             event.button.x, event.button.y = ox + x * w, oy + y * h
             e.canvas.emit('button-press-event' if kind == Gdk.EventType.BUTTON_PRESS else 'button-release-event', event)
     assert len(e.model.doc['items']) == 1
+    assert e.model.tool == 'select' and e.details
     row = e.model.doc['items'][0]
     assert row['label'] == 'text' and abs(row['box'][2] - .55) < .02
     u.set(e.fields['summary.caption'], 'A travel poster')
@@ -60,14 +70,17 @@ def run(parent):
     u.set(e.fields['custom_y'], '25, 75')
     assert e.model.doc['custom_x'] == [.2,.8]
     while Gtk.events_pending(): Gtk.main_iteration()
+    assert parent.get_allocated_width() == initial_width, 'inline inspector enlarged the main window'
     window = u.window.get_window()
     pixbuf = Gdk.pixbuf_get_from_window(window, 0, 0, u.window.get_allocated_width(), u.window.get_allocated_height())
     pixbuf.savev('/home/test/layout.png', 'png', [], [])
-    e.apply()
-    assert accepted and accepted[0]['enabled']
-    compiled = M.compile(accepted[0])
+    e.publish()
+    assert accepted and accepted[-1]['enabled']
+    compiled = M.compile(accepted[-1])
     assert 'HELLO' in compiled and 'reference' not in compiled
-    print('PASS: GTK layout drawing, text, palettes, geometry locks, guides, underlay, copy and apply')
+    e.ui.close()
+    parent.browse()
+    print('PASS: GTK inline layout drawing, text, palettes, geometry locks, guides, underlay, copy and autosave')
 
 if 'parent' in globals():
     run(parent)

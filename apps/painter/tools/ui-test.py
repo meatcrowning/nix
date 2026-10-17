@@ -5296,6 +5296,18 @@ def test_moss(win, ctl, tmp):
             panes.sectionVisible(key) == expected for key, expected in {
                 "prompt": True, "resolution": True, "sampling": True,
                 "patches": False, "lora": False, "edit": False, "krea": False}.items()))
+        canvas = next((item for item in walk(win.contentItem()) if item.objectName() == "mossLayoutCanvas"), None)
+        add = next((item for item in walk(win.contentItem()) if item.objectName() == "layoutAdd"), None)
+        check(model + " shows inline canvas by default", prop(APP, "showLayout") and canvas is not None and canvas.isVisible() and canvas.width() > 100)
+        check(model + " has an Add button", add is not None and add.isVisible())
+        click(win, add)
+        check(model + " Add arms drawing", ctl.layoutEditor.editor.model.tool == "object")
+        ox, oy, cw, ch = ctl.layoutEditor.editor.rect
+        drag(win, canvas, ox + cw * .2, oy + ch * .2, ox + cw * .6, oy + ch * .6)
+        check(model + " drawing saves inline draft", len(prop(APP, "gen")["moss_layout"]["items"]) == 1)
+        check(model + " drawing returns to selection", ctl.layoutEditor.editor.model.tool == "select")
+        if os.environ.get("PAINTER_LAYOUT_SHOT"):
+            win.grabWindow().save(os.environ["PAINTER_LAYOUT_SHOT"])
         import moss_layout
         document = moss_layout.fresh(1280, 720, "A poster")
         layout_editor = moss_layout.Editor(document)

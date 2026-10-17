@@ -12,6 +12,7 @@ Item {
     id: root
 
     property Item app
+    readonly property bool layoutOpen: !!app && App.layoutSupport && app.showLayout && !root.inView
 
     readonly property color fgAccent: app ? app.fgAccent : Theme.accent
     readonly property bool winActive: app ? app.winActive : true
@@ -64,6 +65,24 @@ Item {
     // instead, and the viewer and the history grid are transparent over it
     // (`Theme.paneFill`); only the tiles and controls keep an inset colour.
 
+    Row {
+        id: layoutTabs
+        visible: App.layoutSupport
+        height: visible ? implicitHeight : 0
+        spacing: 10
+        TextButton { label: "Layout"; lit: root.layoutOpen; onClicked: { root.app.inView = false; root.app.showLayout = true } }
+        TextButton { label: "Outputs"; lit: !root.layoutOpen; onClicked: root.app.showLayout = false }
+    }
+    Loader {
+        anchors.top: layoutTabs.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        active: App.layoutSupport
+        visible: root.layoutOpen
+        sourceComponent: LayoutEditor { generation: root.app ? root.app.gen : ({}) }
+    }
+
     PreviewPane {
         id: preview
         compare: root.app ? root.app.showCompare : true
@@ -74,13 +93,13 @@ Item {
         selPath: galleryView.selection.length === 1 ? galleryView.selection[0] : ""
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: parent.top
+        anchors.top: layoutTabs.bottom
         anchors.margins: root.width < 320 ? 4 : 10
         anchors.bottomMargin: 0
         // The live viewport is a browsing affordance: in View the whole pane is
         // already one output, and a second smaller copy of a different one
         // above it is noise.
-        open: root.showPreview && !root.inView
+        open: root.showPreview && !root.inView && !root.layoutOpen
         // Double-click a finished result to open it properly.
         onOpenRequested: (path) => { if (root.app) root.app.enterView(path) }
         onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
@@ -92,7 +111,7 @@ Item {
         id: outputView
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: preview.visible ? preview.bottom : parent.top
+        anchors.top: preview.visible ? preview.bottom : layoutTabs.bottom
         anchors.bottom: parent.bottom
         anchors.margins: root.width < 320 ? 4 : 10
         anchors.topMargin: preview.visible ? 8 : 0
@@ -105,12 +124,12 @@ Item {
 
     GalleryView {
         id: galleryView
-        visible: !root.inView
+        visible: !root.inView && !root.layoutOpen
         // 0 = automatic, the width-driven default; see Root's `gridColumns`.
         columns: root.app ? root.app.gridColumns : 0
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: preview.visible ? preview.bottom : parent.top
+        anchors.top: preview.visible ? preview.bottom : layoutTabs.bottom
         anchors.bottom: parent.bottom
         anchors.margins: root.width < 320 ? 4 : 10
         // FLUSH WITH THE CHROME when there is no preview above it: the grid's

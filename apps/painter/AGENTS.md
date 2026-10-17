@@ -168,8 +168,10 @@ owns normalized geometry and compilation to centered pixel coordinates;
 `layout_gtk.py` and `layout_qt.py`. Only `registry.build` compiles conditioning,
 using the actual output dimensions and current positive prompt as scene caption.
 Keep reference underlays, groups, locks and guides out of model-facing JSON.
-The Qt editor runs as a separate Widgets process because the Hyprland face uses
-QGuiApplication; Unity opens the GTK adapter in its historical process.
+Layouts are edited inline in the main results area. GTK embeds `layout_gtk.py`;
+Qt Quick renders the `layout_qt.py` descriptor tree through `LayoutNode.qml`.
+Add arms one box-drawing gesture, then returns to selection. Draft edits persist
+immediately, including incomplete regions; generation validates required captions.
 Verify geometry/compiler and Qt controls with `tools/layout-test.py --qt`
 offscreen; `tools/unity-test.sh` includes the native GTK layout checks.
 

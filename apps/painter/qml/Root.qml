@@ -129,6 +129,7 @@ Item {
     readonly property color fgAccent: winActive ? Theme.accent : Theme.inactive
 
     // Live generation settings, seeded from the selected model's family.
+    property bool showLayout: false
     property var gen: ({
         positive: "", negative: "", moss_layout: ({}),
         system_prompt: "", krea_sampling: "native", krea_shift: 1.15,
@@ -440,6 +441,8 @@ Item {
         target: App
         function onModelChanged() {
             root.applyDefaults()
+            root.showLayout = App.layoutSupport
+            if (App.layoutSupport) root.inView = false
             // The LoRA chain the model landed with (startup restore only —
             // `selectModel` always clears the stack, so this is what puts it
             // back, once, for the remembered selection). A later switch in
@@ -947,7 +950,7 @@ Item {
         else if (id === "copyprompt") { if (root.selOne !== "") App.copyPrompt(root.selOne) }
         else if (id === "clearprompt") root.set("positive", "")
         else if (id === "import") importDialog.open()
-        else if (id === "browse") root.inView = false
+        else if (id === "browse") { root.inView = false; root.showLayout = false }
         else if (id === "viewone") root.enterView("")
         else if (id === "zoomin") results.output.zoomIn()
         else if (id === "zoomout") results.output.zoomOut()
