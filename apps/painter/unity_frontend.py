@@ -199,6 +199,7 @@ class Window(Gtk.Window):
         self.grid.attach(aspect, 1, self.grid_row, 1, 1)
         self.grid_row += 1
         self.rows['aspectW'] = self.rows['aspectH'] = (self.aspect_label, aspect)
+        self.number('megapixels', 'Megapixels', .1, 8, .1, 1)
         self.dimensions = label('')
         self.grid.attach(self.dimensions, 0, self.grid_row, 2, 1)
         self.grid_row += 1
@@ -211,7 +212,6 @@ class Window(Gtk.Window):
         self.check('still', 'Generate a still frame')
         self.number('duration', 'Seconds', .1, 120, .5, 1)
         self.number('fps', 'Frames per second', 1, 120, 1)
-        self.number('megapixels', 'Megapixels', .1, 8, .1, 1)
         self.check('editNoScale', 'Keep source image size')
         self.number('editMegapixels', 'Edit pixel budget (MP)', .1, 16, .1, 2)
         self.check('useInputImage', 'Use first frame')
