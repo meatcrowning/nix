@@ -37,7 +37,6 @@ Item {
     function setMs(key, value) { if (app) app.setMs(key, value) }
     function recomputeDims() { if (app) app.recomputeDims() }
     function releaseFocus() { if (app) app.releaseFocus() }
-    function openLayout() { if (app) { app.inView = false; app.showLayout = true } }
     function importImage() { if (app) app.importImage() }
 
     // The two scene-level overlays a `Picker` and a right-click need. The app's

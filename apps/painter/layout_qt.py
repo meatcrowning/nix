@@ -147,9 +147,6 @@ class Bridge(QObject):
     def load(self, model, document, width, height, caption):
         doc = M.resize(document, width, height) if document else M.fresh(width, height)
         doc['summary']['caption'] = caption
-        if model != self.model_name:
-            self.editor.details = False
-            self.toolkit.show_widget(self.editor.side, False)
         self.model_name = model
         self.editor.load(doc)
 

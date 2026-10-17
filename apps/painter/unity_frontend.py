@@ -156,6 +156,7 @@ class Window(Gtk.Window):
         params = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         params.set_border_width(12)
         params_scroll = Gtk.ScrolledWindow()
+        self.params_scroll = params_scroll
         params_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         params_scroll.add_with_viewport(params)
         split.pack1(params_scroll, False, False)
@@ -185,9 +186,8 @@ class Window(Gtk.Window):
             self.controls[key] = text
             self.rows[key] = box
 
-        self.layout_button = Gtk.Button(label='Layout')
-        self.layout_button.connect('clicked', lambda *_: self.open_layout())
-        params.pack_start(self.layout_button, False, False, 0)
+        self.layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        params.pack_start(self.layout_box, False, False, 0)
 
         self.grid = Gtk.Grid()
         self.grid.set_row_spacing(6)
@@ -311,8 +311,6 @@ class Window(Gtk.Window):
         self.pages.append_page(self.browse_pane, Gtk.Label(label='Browse'))
         self.full_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.pages.append_page(self.full_box, Gtk.Label(label='View'))
-        self.layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.pages.append_page(self.layout_box, Gtk.Label(label='Layout'))
         self.pages.connect_after('switch-page', self.page_switched)
         self.viewer = ImageView(self.message, lambda: self.send('playback'))
         self.viewer.events.connect('button-press-event', self.preview_menu)
@@ -516,8 +514,6 @@ class Window(Gtk.Window):
         self.update_actions()
         if state.get('flags', {}).get('layoutSupport'):
             self.sync_layout()
-        elif self.pages.get_current_page() == 2:
-            self.browse()
         status = '%s   |   %s queued' % (state['status'], state['queue'])
         if state['busy']:
             seconds = max(0, int(state.get('elapsed', 0)))
@@ -589,11 +585,8 @@ class Window(Gtk.Window):
 
     def visibility(self):
         flags = self.state.get('flags', {})
-        self.layout_button.set_visible(bool(flags.get('layoutSupport')))
         self.controls['megapixels'].set_digits(6 if flags.get('layoutSupport') else 1)
         self.controls['megapixels'].set_range(.05 if flags.get('layoutSupport') else .1, 16 if flags.get('layoutSupport') else 8)
-        self.layout_button.set_label('Layout (enabled)' if self.layout_doc.get('enabled') else 'Layout')
-        self.pages.set_show_tabs(bool(flags.get('layoutSupport')))
         self.layout_box.set_visible(bool(flags.get('layoutSupport')))
         edit, video = flags.get('isEdit', False), flags.get('isVideo', False)
         still = self.controls['still'].get_active()
@@ -666,10 +659,6 @@ class Window(Gtk.Window):
             if row[2]:
                 self.send('mode', save=True, name=row[0])
 
-    def open_layout(self):
-        self.sync_layout()
-        self.pages.set_current_page(2)
-
     def sync_layout(self):
         if self.save_timer and self.layout_model == self.state['model']:
             return
@@ -686,8 +675,10 @@ class Window(Gtk.Window):
             for child in self.layout_box.get_children():
                 child.destroy()
             self.layout_model = self.state['model']
+            heading = label('Layout')
+            self.layout_box.pack_start(heading, False, False, 0)
+            heading.show()
             self.layout_editor = open_editor(self.layout_box, doc, self.layout_changed)
-            self.pages.set_current_page(2)
         except (ValueError, TypeError, KeyError) as exc:
             self.message(str(exc), True)
 

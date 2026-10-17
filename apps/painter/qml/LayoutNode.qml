@@ -12,7 +12,7 @@ Item {
     visible: spec.shown
     enabled: spec.enabled
     implicitWidth: content.item ? content.item.implicitWidth : 0
-    implicitHeight: visible && content.item ? content.item.implicitHeight : 0
+    implicitHeight: !visible ? 0 : spec.kind === "tabs" ? 440 : content.item ? content.item.implicitHeight : 0
     Loader {
         id: content
         anchors.fill: parent
@@ -150,7 +150,7 @@ Item {
         LayoutCanvas {
             objectName: "mossLayoutCanvas"
             implicitWidth: 240
-            implicitHeight: 240
+            implicitHeight: 300
             bridge: node.bridge
             HoverHandler { cursorShape: node.bridge.toolkitObject.drawing ? Qt.CrossCursor : Qt.ArrowCursor }
         }

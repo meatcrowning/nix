@@ -5272,6 +5272,7 @@ def test_krea(win, ctl, tmp):
 def test_moss(win, ctl, tmp):
     import importlib.util
     import unity_engine as E
+    from PySide6.QtCore import QPointF
     spec = importlib.util.spec_from_file_location("moss_checks", Path(__file__).with_name("moss-test.py"))
     checks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checks)
@@ -5298,8 +5299,19 @@ def test_moss(win, ctl, tmp):
                 "patches": False, "lora": False, "edit": False, "krea": False}.items()))
         canvas = next((item for item in walk(win.contentItem()) if item.objectName() == "mossLayoutCanvas"), None)
         add = next((item for item in walk(win.contentItem()) if item.objectName() == "layoutAdd"), None)
-        check(model + " shows inline canvas by default", prop(APP, "showLayout") and canvas is not None and canvas.isVisible() and canvas.width() > 100)
+        check(model + " shows inline canvas by default", canvas is not None and canvas.isVisible() and canvas.width() > 100)
         check(model + " has an Add button", add is not None and add.isVisible())
+        inspector_tabs = next(item for item in walk(editor) if item.property('spec') is not None and item.property('spec').property('kind') == 'tabs')
+        check(model + " always shows details below canvas", inspector_tabs.height() >= 400 and inspector_tabs.mapToItem(editor, QPointF(0, 0)).y() >= canvas.mapToItem(editor, QPointF(0, canvas.height())).y())
+        # The canvas is now in the scrollable prompt panel.
+        ancestor = canvas.parentItem()
+        while ancestor is not None and ancestor.property('contentY') is None:
+            ancestor = ancestor.parentItem()
+        if ancestor is not None:
+            point = add.mapToItem(ancestor, QPointF(0, 0))
+            ancestor.setProperty('contentY', ancestor.property('contentY') + point.y() - 12)
+            spin(100)
+        check(model + " keeps layout below prompts", canvas.mapToItem(editor, QPointF(0, 0)).y() > 150)
         click(win, add)
         check(model + " Add arms drawing", ctl.layoutEditor.editor.model.tool == "object")
         ox, oy, cw, ch = ctl.layoutEditor.editor.rect

@@ -70,6 +70,7 @@ class Toolkit(object):
 
     def tabs(self, parent):
         tabs = Gtk.Notebook()
+        tabs.set_size_request(-1, 420)
         parent.pack_start(tabs, True, True, 0)
         return tabs
 
@@ -210,7 +211,7 @@ class Toolkit(object):
         image = Gtk.Image()
         image.set_alignment(0, 0)
         events = Gtk.EventBox()
-        events.set_size_request(180, 180)
+        events.set_size_request(180, 300)
         surface = Gtk.Layout()
         surface.put(image, 0, 0)
         events.add(surface)
@@ -270,7 +271,6 @@ def open_editor(parent, doc, accepted):
     toolkit = Toolkit(parent)
     editor = LayoutUI(toolkit, doc, accepted)
     toolkit.root.show_all()
-    toolkit.show_widget(editor.side, False)
     editor.region_visibility()
     toolkit.root.editor = editor
     return editor

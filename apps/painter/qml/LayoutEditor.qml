@@ -5,6 +5,7 @@ import QtQuick.Controls
 Control {
     id: editor
     background: null
+    implicitHeight: tree.implicitHeight + 12
     readonly property bool nativeStyle: typeof DeskStyle !== "undefined" && DeskStyle.plasma
     Binding { target: editor; property: "palette.window"; value: Theme.bg; when: !editor.nativeStyle }
     Binding { target: editor; property: "palette.base"; value: Theme.bg; when: !editor.nativeStyle }
@@ -30,7 +31,7 @@ Control {
     onGenerationChanged: sync()
     Component.onCompleted: sync()
     Connections { target: App; function onModelChanged() { editor.sync() } }
-    LayoutNode { anchors.fill: parent; anchors.margins: 6; spec: editor.bridge.root; bridge: editor.bridge }
+    LayoutNode { id: tree; anchors.fill: parent; anchors.margins: 6; spec: editor.bridge.root; bridge: editor.bridge }
     Connections { target: editor.bridge.toolkitObject; function onReferenceRequested() { reference.open() } }
     FileDialog {
         id: reference

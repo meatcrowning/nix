@@ -13,11 +13,10 @@ def run(parent):
     initial_width = parent.get_allocated_width()
     before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
     parent.layout_box.show()
-    parent.pages.set_current_page(2)
     e = open_editor(parent.layout_box, M.fresh(caption='A travel poster'), accepted.append)
     assert [w for w in Gtk.Window.list_toplevels() if w.get_visible()] == before_windows
     assert e.canvas.get_toplevel() is parent
-    assert not e.side.get_visible()
+    assert e.side.get_visible()
     u = e.ui
     from spelling_gtk import Spelling, text
     requests = []
@@ -46,6 +45,8 @@ def run(parent):
         control.destroy()
     assert all(any(f.control is parent.controls[key] for f in parent.spelling.fields.values()) for key in ('positive', 'negative', 'system_prompt'))
     while Gtk.events_pending(): Gtk.main_iteration()
+    assert e.side.get_allocation().y >= e.canvas.get_allocation().y + e.canvas.get_allocated_height()
+    parent.params_scroll.get_vadjustment().set_value(parent.layout_box.get_allocation().y)
     u.set(e.tool, 'text')
     e.add_button.clicked()
     assert e.model.tool == 'text'
@@ -61,7 +62,7 @@ def run(parent):
             event.button.x, event.button.y = ox + x * w, oy + y * h
             e.canvas.emit('button-press-event' if kind == Gdk.EventType.BUTTON_PRESS else 'button-release-event', event)
     assert len(e.model.doc['items']) == 1
-    assert e.model.tool == 'select' and e.details
+    assert e.model.tool == 'select' and e.side.get_visible()
     row = e.model.doc['items'][0]
     assert row['label'] == 'text' and abs(row['box'][2] - .7) < .02
     u.set(e.fields['summary.meta'], 'poster, illustration')

@@ -61,13 +61,6 @@ Panel {
         onMenuRequested: (sx, sy, items) => panel.menuRequested(sx, sy, items)
     }
 
-    TextButton {
-        visible: App.layoutSupport
-        height: visible ? implicitHeight : 0
-        label: root.gen.moss_layout && root.gen.moss_layout.enabled ? "Layout (enabled)" : "Layout"
-        onClicked: root.openLayout()
-    }
-
     // NO NEGATIVE PROMPT FOR VIDEO OR FOR EDIT. MiniMaxH3ImageToVideo takes the prompt
     // itself and produces the conditioning — there is no second CLIPTextEncode
     // for a negative to reach, so a box for one would be typing into nothing.
@@ -98,4 +91,12 @@ Panel {
         onResized: function (h) { Prefs.set("prompt.negH", h) }
         onMenuRequested: (sx, sy, items) => panel.menuRequested(sx, sy, items)
     }
+    Loader {
+        width: parent.width
+        height: active && item ? item.implicitHeight : 0
+        active: App.layoutSupport
+        visible: active
+        sourceComponent: LayoutEditor { generation: root.gen }
+    }
+
 }

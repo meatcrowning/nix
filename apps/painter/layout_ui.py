@@ -21,7 +21,7 @@ class LayoutUI(object):
         self.add_button = u.button(tools, 'Add', self.arm_add)
         self.tool = u.field(tools, 'New region', 'combo', ['object', 'character', 'text'], lambda: None)
         u.set(self.tool, 'object')
-        u.button(tools, 'Details', self.toggle_details)
+        tools = u.row(root)
         self.buttons['Clear all'] = u.button(tools, 'Clear all', self.clear)
         for title, fn in [('Undo', lambda: self.model.undo()), ('Redo', lambda: self.model.undo(True))]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
@@ -31,10 +31,8 @@ class LayoutUI(object):
                                ('Copy', self.copy), ('Paste', self.paste)]:
             self.buttons[title] = u.menu_item(menu, title, lambda fn=command: self.command(fn))
         self.instructions = u.label(root, 'Click Add, then drag on the layout to draw a region.')
-        body = u.row(root, expand=True)
-        self.canvas = u.canvas(body, self)
-        self.side = u.column(body)
-        self.details = False
+        self.canvas = u.canvas(root, self)
+        self.side = u.column(root)
         self.list = u.region_list(self.side, self.selection_changed)
         tabs = u.tabs(self.side)
         scene = u.tab(tabs, 'Scene')
@@ -81,7 +79,6 @@ class LayoutUI(object):
         u.label(canvas, 'Reference is a tracing aid only; it is not sent as image conditioning.')
         self.status = u.label(root, '')
         self.refresh()
-        u.show_widget(self.side, False)
 
     def arm_add(self):
         self.model.tool = self.ui.get(self.tool) or 'object'
@@ -92,10 +89,6 @@ class LayoutUI(object):
         self.command(self.model.clear)
         self.ui.drawing_cursor(self.canvas, False)
         self.ui.set_label(self.instructions, 'Click Add, then drag on the layout to draw a region.')
-
-    def toggle_details(self):
-        self.details = not self.details
-        self.ui.show_widget(self.side, self.details)
 
     def publish(self):
         if not self.model.drag and self.model.doc != self.last_doc:
@@ -265,13 +258,10 @@ class LayoutUI(object):
                 return
             self.model.motion(x, y, 7 / min(w, h))
         else:
-            drawing = bool(self.model.drag and self.model.drag[0] == 'draw')
             self.model.motion(x, y, 7 / min(w, h))
             self.model.release()
             self.ui.drawing_cursor(self.canvas, False)
             self.ui.set_label(self.instructions, 'Click Add to draw another region. Select a region to move or resize it.')
-            if drawing and not self.details:
-                self.toggle_details()
         if action == 'move':
             self.paint()
         else:
