@@ -33,7 +33,7 @@ establish the user's live session.
 | oracle/ | local-ollama chat | home/prog/oracle.nix |
 | tuner/ | RTL-SDR receiver (GTK, top's Unity session) | home/prog/tuner.nix |
 | pylib/ | shared Python helpers | imported, not packaged |
-| collage/ | portable browser collage userscript | `.user.js` with pinned CDN library, no host package |
+| collage/ | private browser collage userscript | symlink to `docs/apps/collage/`; local updater, no host package |
 | qmlcommon/ | shared QML components | imported, not packaged |
 
 ## Packaging, defaults, and source layout
