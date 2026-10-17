@@ -54,6 +54,7 @@ ctl._set_status('Ready (isolated fixture)')
 engine = E.Engine(ctl, P.Prefs())
 assert len(engine.snapshot({})['models']) == 2
 json.dumps(engine.snapshot({}))  # no QObject/registry entries on the wire
+assert engine.snapshot({})['rate'] == ctl.rate
 
 image = QImage(80, 60, QImage.Format_RGB32)
 image.fill(QColor('red'))

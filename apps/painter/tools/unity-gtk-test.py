@@ -266,6 +266,14 @@ def test():
             event.scroll.y = cy + view.scroll.get_vadjustment().get_value() - view.visible_origin[1]
             view.events.emit('scroll-event', event)
         elif step[0] == 16:
+            original = dict(window.state)
+            for rate, expected in [(2.5, '2.50 it/s'), (.25, '4.00 s/it'), (0, '')]:
+                state = dict(original, busy=True, progress=.42, elapsed=125, rate=rate)
+                window.receive('poll', dict(ok=True, state=state))
+                assert window.status.get_text().startswith('2:05   |')
+                assert window.progress.get_text() == '42%' + ('   |   ' + expected if expected else '')
+            window.receive('poll', dict(ok=True, state=original))
+            assert window.progress.get_text() == ''
             import runpy
             runpy.run_path('/home/test/nix/apps/painter/tools/layout-gtk-test.py', init_globals={'parent': window})
             view = window.viewer

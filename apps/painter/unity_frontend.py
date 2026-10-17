@@ -512,9 +512,17 @@ class Window(Gtk.Window):
             self.sync_layout()
         elif self.pages.get_current_page() == 2:
             self.browse()
-        self.status.set_text('%s   |   %s queued' % (state['status'], state['queue']))
+        status = '%s   |   %s queued' % (state['status'], state['queue'])
+        if state['busy']:
+            seconds = max(0, int(state.get('elapsed', 0)))
+            status = '%d:%02d   |   %s' % (seconds // 60, seconds % 60, status)
+        self.status.set_text(status)
         self.progress.set_fraction(max(0, min(1, state['progress'])))
-        self.progress.set_text('%d%%' % (state['progress'] * 100) if state['busy'] else '')
+        progress = '%d%%' % (state['progress'] * 100)
+        rate = state.get('rate', 0)
+        if rate > 0:
+            progress += '   |   ' + ('%.2f it/s' % rate if rate >= 1 else '%.2f s/it' % (1 / rate))
+        self.progress.set_text(progress if state['busy'] else '')
         self.progress.set_show_text(True)
         self.source_info.set_text('\n'.join([p for p in [state['input'], state['last']] + state['references'] if p]))
         if op == 'generate':
