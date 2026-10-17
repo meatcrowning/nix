@@ -5296,6 +5296,22 @@ def test_moss(win, ctl, tmp):
             panes.sectionVisible(key) == expected for key, expected in {
                 "prompt": True, "resolution": True, "sampling": True,
                 "patches": False, "lora": False, "edit": False, "krea": False}.items()))
+        import moss_layout
+        document = moss_layout.fresh(1280, 720, "A poster")
+        layout_editor = moss_layout.Editor(document)
+        layout_editor.add("text")["caption"] = "A large headline"
+        layout_editor.doc["items"][0]["text"] = "Hello"
+        layout_editor.doc["enabled"] = True
+        check(model + " exposes layout editor", ctl.layoutSupport)
+        ctl.layoutEdited.emit(model, layout_editor.doc)
+        spin(30)
+        updated = prop(APP, "gen")
+        check(model + " accepts editable layout", updated["moss_layout"]["enabled"] and
+              updated["positive"] == "A poster" and updated["width"] == 1280 and updated["height"] == 720)
+        APP.injectAll({"positive": "A poster", "moss_layout": layout_editor.doc, "width": 1280, "height": 720})
+        check(model + " restores exact layout dimensions", prop(APP, "gen")["width"] == 1280 and prop(APP, "gen")["height"] == 720)
+        APP.injectPrompt({"positive": "ordinary prompt"})
+        check(model + " old output clears layout", not prop(APP, "gen")["moss_layout"])
         # The GTK adapter consumes the same defaults and submits the same graph.
         settings = dict(E.BASE, **{k: v for k, v in ctl.modelDefaults().items() if k in E.BASE})
         settings.update(positive="a lake", negative="blur", width=1280, height=720)

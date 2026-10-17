@@ -656,6 +656,7 @@ class Tags(QObject):
 
 
 class Painter(QObject):
+    layoutEdited = Signal(str, "QVariantMap")
     editStateChanged = Signal()
     statusChanged = Signal()
     modelChanged = Signal()
@@ -882,6 +883,7 @@ class Painter(QObject):
     separatePairing = Property(bool, lambda self: bool(self._selected_family()) and
                                self._selected_family().get("loader_shape") != "checkpoint",
                                notify=modelChanged)
+    layoutSupport = Property(bool, lambda self: self._selected_family().get("id") == "moss_image", notify=modelChanged)
     familyLabel = Property(str, lambda self: self._fam_label, notify=modelChanged)
     # The selected model's own name. The model panel collapses now, and collapsed
     # its header badge is the only thing left saying what will be generated with.
@@ -1662,6 +1664,45 @@ class Painter(QObject):
             self.selectModel(self._selected)
 
     # -- generating --------------------------------------------------------
+
+    @Slot("QVariantMap", int, int, str)
+    def editLayout(self, document, width, height, caption):
+        if not self.layoutSupport:
+            return
+        if getattr(self, "_layout_process", None) is not None:
+            self.toast.emit("A layout editor is already open", True)
+            return
+        import moss_layout
+        try:
+            doc = moss_layout.resize(document, width, height) if document else moss_layout.fresh(width, height)
+            doc["summary"]["caption"] = caption
+        except (ValueError, TypeError, KeyError) as exc:
+            self.toast.emit(str(exc), True)
+            return
+        model = self.selectedName
+        process = QProcess(self)
+        self._layout_process = process
+        def finished(*_):
+            raw = bytes(process.readAllStandardOutput()).decode("utf-8").strip()
+            self._layout_process = None
+            if process.exitCode():
+                self.toast.emit("Layout editor failed: " + bytes(process.readAllStandardError()).decode("utf-8")[-500:], True)
+            elif raw:
+                try:
+                    self.layoutEdited.emit(model, moss_layout.valid(json.loads(raw)))
+                except (ValueError, TypeError, KeyError) as exc:
+                    self.toast.emit("Invalid layout: " + str(exc), True)
+            process.deleteLater()
+        process.finished.connect(finished)
+        QGuiApplication.instance().aboutToQuit.connect(process.kill)
+        def failed(error):
+            if error == QProcess.FailedToStart:
+                self._layout_process = None
+                self.toast.emit("Could not open layout editor: " + process.errorString(), True)
+                process.deleteLater()
+        process.errorOccurred.connect(failed)
+        process.started.connect(lambda: (process.write((json.dumps(doc) + "\n").encode("utf-8")), process.closeWriteChannel()))
+        process.start(sys.executable, [str(HERE / "layout_qt.py")])
 
     @Slot(float, result=int)
     def videoFrames(self, duration):

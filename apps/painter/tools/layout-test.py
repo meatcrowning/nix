@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Layout geometry/compiler and native Qt controls, entirely offscreen."""
+import copy
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import moss_layout as M
+
+
+def core():
+    e = M.Editor(M.fresh(1024, 1024, 'A travel poster'))
+    a = e.add('text', [.1, .2, .4, .2])
+    a.update(caption='A large heading', text='旅へ\nEXPLORE', palette=['#123456'], tags=['title'])
+    a['typography'] = dict(family='serif', weight='bold', align='center', color='#123456', outline='white', shadow='soft', surface='paper')
+    e.doc['enabled'] = True
+    e.doc['summary'].update(meta=['poster'], palette=['#eeeeee'], canvas='multi_panel')
+    e.doc['reference'] = '/never/condition/this.png'
+    compiled = json.loads(M.compile(e.doc, 2048, 2048))
+    assert compiled['items'][0]['bbox'] == [-615, -820, -204, 0]
+    assert compiled['items'][0]['text'] == '旅へ\nEXPLORE'
+    assert 'Text on surface: paper.' in compiled['items'][0]['caption']
+    assert compiled['summary']['palette'] == ['#eeeeee']
+    assert 'reference' not in json.dumps(compiled) and 'locked' not in json.dumps(compiled)
+    assert M.resize(e.doc, 2048, 2048)['items'][0]['box'] == a['box']
+    fit = M.resize(e.doc, 2048, 1024, 'fit')['items'][0]['box']
+    assert all(abs(x-y) < 1e-8 for x,y in zip(fit, [.3, .2, .2, .2]))
+    stretch = M.resize(e.doc, 2048, 1024, 'stretch')['items'][0]['box']
+    assert stretch == a['box']
+    keep = M.resize(e.doc, 2048, 512, 'keep sizes')['items'][0]['box']
+    assert abs(keep[2] * 2048 - .4 * 1024) < 1e-7
+    assert abs(keep[3] * 512 - .2 * 1024) < 1e-7
+    e.doc['items'][0]['enabled'] = False
+    try: M.compile(e.doc)
+    except ValueError: pass
+    else: raise AssertionError('empty layout accepted')
+    e.doc['items'][0]['enabled'] = True
+    e.duplicate()
+    assert len(e.doc['items']) == 2 and len(set(r['id'] for r in e.doc['items'])) == 2
+    e.undo(); assert len(e.doc['items']) == 1
+    e.undo(True); assert len(e.doc['items']) == 2
+    e.selected = [r['id'] for r in e.doc['items']]
+    e.group()
+    e.select(e.selected[0]); assert len(e.selected) == 2
+    before = copy.deepcopy(e.doc['items'])
+    e.move(.1, .1)
+    for old, new in zip(before, e.doc['items']):
+        assert abs(new['box'][0] - old['box'][0] - .1) < 1e-8
+    e.doc['items'][0]['locked'] = True
+    old = list(e.doc['items'][0]['box'])
+    e.move(-.1, -.1); assert e.doc['items'][0]['box'] == old
+    raw = e.copy()
+    other = M.Editor(M.fresh())
+    other.paste(raw); assert len(other.doc['items']) == 2
+    other.group(True)
+    assert not any(r.get('group') for r in other.doc['items'])
+    other.doc['items'][0]['locked'] = False
+    other.align('left')
+    assert other.doc['items'][0]['box'][0] == other.doc['items'][1]['box'][0]
+    other.add('object', [.7, .2, .1, .1])
+    other.selected = [r['id'] for r in other.doc['items']]
+    other.align('distribute horizontal')
+    M.valid(other.doc)
+    ordered = sorted(other.doc['items'], key=lambda r: r['box'][0])
+    gaps = [b['box'][0] - a['box'][0] - a['box'][2] for a,b in zip(ordered, ordered[1:])]
+    assert abs(gaps[0] - gaps[1]) < 1e-8
+    assert abs(other.snap(.299, 0, .01) - .3) < 1e-8
+    other.doc['snap'] = False
+    assert other.snap(.299, 0, .01) == .299
+    draw = M.Editor(M.fresh())
+    draw.tool = 'character'
+    draw.press(.2, .3); draw.motion(.6, .8); draw.release()
+    assert all(abs(x-y)<1e-8 for x,y in zip(draw.chosen()[0]['box'], [.2,.3,.4,.5]))
+    draw.press(.6, .8); draw.motion(.7, .9); draw.release()
+    assert abs(draw.chosen()[0]['box'][2] - .5) < 1e-8
+    draw.doc['items'][0]['locked'] = True
+    before = copy.deepcopy(draw.doc)
+    draw.press(.4, .4); draw.motion(.5, .5); draw.release()
+    assert before == draw.doc
+    malformed = copy.deepcopy(e.doc); malformed['items'][0]['box'][0] = float('nan')
+    try: M.valid(malformed)
+    except ValueError: pass
+    else: raise AssertionError('nonfinite box accepted')
+    # Native graph uses the compiled JSON, with the original editable document in metadata.
+    spec = importlib.util.spec_from_file_location('moss_fixture', Path(__file__).with_name('moss-test.py'))
+    fixture = importlib.util.module_from_spec(spec); spec.loader.exec_module(fixture)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp); fixture.models(root)
+        reg = fixture.R.Registry(str(root), fixture.R.Overrides(str(root/'overrides.json')), use_cache=False)
+        for entry in reg.base_models():
+            built = reg.build(entry, dict(positive='Overall scene', negative='blur', width=1024, height=1024, moss_layout=e.doc))
+            node = next(n for n in built['prompt'].values() if n['_meta']['painter_role'] == 'encode_pos')
+            assert json.loads(node['inputs']['text'])['summary']['caption'] == 'Overall scene'
+            assert built['params']['moss_layout'] == e.doc
+            assert built['params']['prompt_boxes']['positive'] == 'Overall scene'
+    print('PASS: layout compiler, rescaling, geometry, locks, groups, undo and both MOSS graphs')
+
+
+def qt():
+    assert os.environ.get('QT_QPA_PLATFORM') == 'offscreen'
+    from PySide6 import QtWidgets as W, QtGui as G
+    from layout_qt import Toolkit
+    from layout_ui import LayoutUI
+    app = W.QApplication([])
+    assert app.platformName() == 'offscreen'
+    ui = Toolkit()
+    accepted = []
+    editor = LayoutUI(ui, M.fresh(), accepted.append)
+    ui.window.show(); app.processEvents()
+    editor.model.add('text', [.1,.1,.6,.3]); editor.refresh()
+    ui.set(editor.fields['summary.caption'], 'A poster')
+    ui.set(editor.fields['item.caption'], 'Large headline')
+    ui.set(editor.fields['item.text'], 'Hello\n世界')
+    ui.set(editor.fields['type.family'], 'serif')
+    ui.set(editor.fields['item.palette'], '#ff0000, #00ff00')
+    ui.set(editor.fields['enabled'], True)
+    assert editor.model.doc['items'][0]['text'] == 'Hello\n世界'
+    assert editor.model.doc['items'][0]['palette'] == ['#ff0000','#00ff00']
+    ui.set(editor.units, 'pixels')
+    ui.set(editor.fields['box.x'], 128)
+    assert editor.model.doc['items'][0]['box'][0] == .125
+    editor.key('Right')
+    assert editor.model.doc['items'][0]['box'][0] == .125 + 1/1024
+    editor.key('z', True)
+    assert editor.model.doc['items'][0]['box'][0] == .125
+    editor.key('Z', True, True)
+    assert editor.model.doc['items'][0]['box'][0] == .125 + 1/1024
+    with tempfile.TemporaryDirectory() as tmp:
+        path = str(Path(tmp) / 'ref.png')
+        image = G.QImage(80,60,G.QImage.Format_RGB32); image.fill(G.QColor('red')); image.save(path)
+        editor.set_reference(path); editor.refresh()
+        assert editor.reference
+        assert b'data:image/png;base64,' in editor.render(700,600)
+        app.processEvents()
+    # Clipboard methods are replaced: never touch the host clipboard in a test.
+    copied = []
+    ui.copy = copied.append
+    ui.paste = lambda: copied[0]
+    editor.copy(); editor.paste()
+    assert len(editor.model.doc['items']) == 2
+    editor.apply(); assert accepted and accepted[0]['enabled']
+    print('PASS: native Qt layout form, palette, multiline text, pixels, underlay and apply')
+
+
+if __name__ == '__main__':
+    core()
+    if '--qt' in sys.argv: qt()

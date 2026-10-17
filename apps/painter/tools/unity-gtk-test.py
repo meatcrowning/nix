@@ -266,6 +266,8 @@ def test():
             event.scroll.y = cy + view.scroll.get_vadjustment().get_value() - view.visible_origin[1]
             view.events.emit('scroll-event', event)
         elif step[0] == 16:
+            import runpy
+            runpy.run_path('/home/test/nix/apps/painter/tools/layout-gtk-test.py', init_globals={'parent': window})
             view = window.viewer
             cx, cy, iy = zoom_point[0]
             actual = view.image_origin[1] + iy * view.scale - view.scroll.get_vadjustment().get_value()

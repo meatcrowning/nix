@@ -78,6 +78,8 @@ class Window(Gtk.Window):
         self.closing = False
         self.copy_serial = 0
         self.image_menu = None
+        self.layout_doc = {}
+        self.layout_editor = None
         self.connection = Connection(path, self.receive)
         self.connect('delete-event', self.close_window)
         self.accels = Gtk.AccelGroup()
@@ -179,6 +181,10 @@ class Window(Gtk.Window):
             params.pack_start(box, False, False, 0)
             self.controls[key] = text
             self.rows[key] = box
+
+        self.layout_button = Gtk.Button(label='Layout…')
+        self.layout_button.connect('clicked', lambda *_: self.open_layout())
+        params.pack_start(self.layout_button, False, False, 0)
 
         self.grid = Gtk.Grid()
         self.grid.set_row_spacing(6)
@@ -374,7 +380,7 @@ class Window(Gtk.Window):
         self.rows[key] = (control,)
 
     def values(self):
-        values = {}
+        values = {'moss_layout': self.layout_doc}
         for key, control in self.controls.items():
             if key == 'seedPolicy':
                 continue
@@ -495,6 +501,8 @@ class Window(Gtk.Window):
         self.loading = False
         self.visibility()
         self.update_actions()
+        if op == 'layout':
+            self.show_layout()
         self.status.set_text('%s   |   %s queued' % (state['status'], state['queue']))
         self.progress.set_fraction(max(0, min(1, state['progress'])))
         self.progress.set_text('%d%%' % (state['progress'] * 100) if state['busy'] else '')
@@ -527,6 +535,7 @@ class Window(Gtk.Window):
             self.frame_tick = media['tick']
 
     def apply_settings(self, values):
+        self.layout_doc = values.get('moss_layout') or {}
         for key, control in self.controls.items():
             if key == 'seedPolicy':
                 control.set_active_id('Reuse last' if values.get('reuseSeed') else
@@ -557,6 +566,10 @@ class Window(Gtk.Window):
 
     def visibility(self):
         flags = self.state.get('flags', {})
+        self.layout_button.set_visible(bool(flags.get('layoutSupport')))
+        self.controls['megapixels'].set_digits(6 if flags.get('layoutSupport') else 1)
+        self.controls['megapixels'].set_range(.05 if flags.get('layoutSupport') else .1, 16 if flags.get('layoutSupport') else 8)
+        self.layout_button.set_label('Layout… (enabled)' if self.layout_doc.get('enabled') else 'Layout…')
         edit, video = flags.get('isEdit', False), flags.get('isVideo', False)
         still = self.controls['still'].get_active()
         sampling = not edit or flags.get('editSampling', False)
@@ -627,6 +640,35 @@ class Window(Gtk.Window):
             row = self.mode_store[active]
             if row[2]:
                 self.send('mode', save=True, name=row[0])
+
+    def open_layout(self):
+        self.send('layout', save=True)
+
+    def show_layout(self):
+        import moss_layout as layout
+        from layout_gtk import open_editor
+        values = self.values()
+        g = self.state['settings']
+        width, height = g['width'], g['height']
+        doc = layout.resize(self.layout_doc, width, height) if self.layout_doc else layout.fresh(width, height)
+        doc['summary']['caption'] = values['positive']
+        model = self.state['model']
+        def accepted(result):
+            if self.state['model'] != model:
+                self.message('The model changed while editing the layout.', True)
+                return
+            self.layout_doc = result
+            self.controls['positive'].get_buffer().set_text(result['summary']['caption'])
+            # Keep ratios within the main editor's integer range by reducing them.
+            a, b = result['width'], result['height']
+            while b:
+                a, b = b, a % b
+            self.controls['aspectW'].set_value(result['width'] // a)
+            self.controls['aspectH'].set_value(result['height'] // a)
+            self.controls['megapixels'].set_value(result['width'] * result['height'] / 1000000.0)
+            self.changed()
+            self.save()
+        self.layout_editor = open_editor(self, doc, accepted)
 
     def generate(self):
         self.info.hide()

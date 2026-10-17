@@ -21,11 +21,11 @@ import userprefs
 from unityipc import Server
 
 
-FLAGS = ('isVideo', 'isEdit', 'editSampling', 'editPatches', 'supportsPatches',
+FLAGS = ('layoutSupport', 'isVideo', 'isEdit', 'editSampling', 'editPatches', 'supportsPatches',
          'supportsLoras', 'encoderControls', 'referenceImages', 'optionalEditImage',
          'fixedSampling', 'nativeScheduler')
 HEIGHT_KEYS = {'positive': 'prompt.posH', 'negative': 'prompt.negH', 'system_prompt': 'unity.systemH'}
-BASE = dict(positive='', negative='', aspectW=1, aspectH=1, width=1024, height=1024, steps=20, cfg=7.0,
+BASE = dict(moss_layout={}, positive='', negative='', aspectW=1, aspectH=1, width=1024, height=1024, steps=20, cfg=7.0,
             denoise=1.0, sampler_name='euler', scheduler='normal', seed=-1,
             randomSeed=True, reuseSeed=False, count=1, batch_size=1,
             duration=5.0, fps=24.0, megapixels=1.0, still=False,
@@ -39,7 +39,7 @@ BASE = dict(positive='', negative='', aspectW=1, aspectH=1, width=1024, height=1
 
 def submission(g, ctl):
     """The three graph contracts, matching Root.qml's submit()."""
-    keys = ['positive', 'seed', 'randomSeed', 'reuseSeed']
+    keys = ['moss_layout', 'positive', 'seed', 'randomSeed', 'reuseSeed']
     if ctl.isEdit:
         keys += ['editNoScale', 'editMegapixels']
         if ctl.editSampling:
@@ -55,6 +55,8 @@ def submission(g, ctl):
             if ctl.encoderControls:
                 keys += ['system_prompt', 'krea_sampling', 'krea_shift', 'reference_megapixels']
     p = {key: g[key] for key in keys}
+    if not getattr(ctl, 'layoutSupport', False):
+        p.pop('moss_layout', None)
     if ctl.isEdit:
         p['edit'] = True
     elif ctl.isVideo and not g['still']:
@@ -197,6 +199,9 @@ class Engine:
                     raise ValueError('Invalid sampling option')
             elif not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError('Invalid sampling value')
+        if g.get('moss_layout'):
+            from moss_layout import valid
+            g['moss_layout'] = valid(g['moss_layout'])
         self.settings = g
         self.resolve_dims()
         self.save()
@@ -320,7 +325,7 @@ class Engine:
             self.open(self.output_path(request['path']))
         elif op == 'folder':
             self.open(str(__import__('gallery').OUT_DIR))
-        elif op not in ('hello', 'poll', 'settings'):
+        elif op not in ('hello', 'poll', 'settings', 'layout'):
             raise ValueError('Unknown request')
         if op not in ('poll', 'hello', 'settings', 'view', 'playback'):
             self.save()
@@ -351,13 +356,15 @@ class Engine:
             c.setMode('')
             c.selectModel(index)
         g = self.settings
+        g['moss_layout'] = p.get('moss_layout') or {}
         g.update({key: value for key, value in p.items() if key in BASE})
         g.update({key: value for key, value in (p.get('prompt_boxes') or {}).items()
                   if key in ('positive', 'negative')})
         if p.get('width', 0) > 0 and p.get('height', 0) > 0:
             divisor = math.gcd(int(p['width']), int(p['height']))
             g.update(aspectW=int(p['width']) // divisor, aspectH=int(p['height']) // divisor,
-                     megapixels=round(p['width'] * p['height'] / 100000) / 10)
+                     megapixels=(p['width'] * p['height'] / 1000000 if p.get('moss_layout') else
+                                 round(p['width'] * p['height'] / 100000) / 10))
         if 'seed' in p:
             g.update(randomSeed=False, reuseSeed=False)
         if 'toggles' in p:

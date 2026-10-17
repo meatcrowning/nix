@@ -130,7 +130,7 @@ Item {
 
     // Live generation settings, seeded from the selected model's family.
     property var gen: ({
-        positive: "", negative: "",
+        positive: "", negative: "", moss_layout: ({}),
         system_prompt: "", krea_sampling: "native", krea_shift: 1.15,
         reference_megapixels: 0.25, useReferences: false,
         steps: 20, cfg: 1.0, denoise: 1.0,
@@ -313,6 +313,7 @@ Item {
         if (root.defaultsFor) root.genByModel[root.defaultsFor] = snapshotGen()
         root.defaultsFor = App.selectedName
         var g = clone(gen)
+        g.moss_layout = ({})
         g.system_prompt = d.system_prompt !== undefined ? d.system_prompt : ""
         g.krea_sampling = d.krea_sampling || "native"
         g.krea_shift = d.krea_shift !== undefined ? d.krea_shift : 1.15
@@ -416,7 +417,7 @@ Item {
             return
         }
         var imageParams = {
-            positive: g.positive, negative: g.negative,
+            positive: g.positive, negative: g.negative, moss_layout: App.layoutSupport ? (g.moss_layout || {}) : ({}),
             steps: g.steps, cfg: g.cfg, denoise: g.denoise,
             sampler_name: g.sampler_name, scheduler: g.scheduler,
             seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed,
@@ -448,6 +449,19 @@ Item {
                 try { App.restoreLoras(JSON.parse(Prefs.get("loras") || "[]")) }
                 catch (e) { /* a corrupt list just leaves the stack empty */ }
             }
+        }
+        function onLayoutEdited(model, document) {
+            if (model !== App.selectedName) { toast.show("The model changed while editing the layout.", true); return }
+            var g = root.clone(root.gen)
+            g.moss_layout = document
+            g.positive = document.summary.caption
+            var a = document.width, b = document.height
+            while (b) { var t = a % b; a = b; b = t }
+            g.aspectW = document.width / a
+            g.aspectH = document.height / a
+            g.megapixels = document.width * document.height / 1000000
+            root.gen = g
+            root.recomputeDims()
         }
         function onToast(msg, isError) { toast.show(msg, isError) }
     }
@@ -1216,6 +1230,7 @@ Item {
         // NegPip's execution metadata has both editor prompts folded into its
         // positive conditioning. New outputs also carry the original boxes;
         // old outputs fall back to the execution values they have always had.
+        g.moss_layout = p.moss_layout || ({})
         var words = p.prompt_boxes || p
         if (words.positive !== undefined) g.positive = words.positive
         if (words.negative !== undefined) g.negative = words.negative
@@ -1251,7 +1266,8 @@ Item {
             while (b) { var t = a % b; a = b; b = t }
             g.aspectW = Math.round(p.width / a)
             g.aspectH = Math.round(p.height / a)
-            g.megapixels = Math.round(p.width * p.height / 100000) / 10
+            g.megapixels = p.moss_layout && p.moss_layout.version ? p.width * p.height / 1000000
+                          : Math.round(p.width * p.height / 100000) / 10
         }
         if (p.toggles) {
             g.negpip = p.toggles.negpip === true

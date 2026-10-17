@@ -99,12 +99,30 @@ engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
 assert engine.settings['seed'] == 42 and not engine.settings['randomSeed']
 assert engine.settings['positive'] == 'restored prompt'
 
+# Layout state survives settings persistence and is cleared by an older output.
+import moss_layout
+layout_editor = moss_layout.Editor(moss_layout.fresh(640, 768, 'A poster'))
+layout_editor.add('object')['caption'] = 'A red cup'
+layout_editor.doc['enabled'] = True
+engine.dispatch(dict(op='settings', model=engine.model, settings={'moss_layout': layout_editor.doc}))
+assert E.userprefs.saved_for(engine.model)['moss_layout'] == layout_editor.doc
+original = Path('/home/test/out/fixture.png').read_bytes()
+Path('/home/test/out/fixture.png').write_bytes(P.pngmeta.upsert_text(original, {
+    'painter': json.dumps(dict(params, moss_layout=layout_editor.doc, width=1280, height=720))}))
+engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
+assert engine.settings['moss_layout'] == layout_editor.doc
+assert engine.settings['megapixels'] == .9216
+Path('/home/test/out/fixture.png').write_bytes(original)
+engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
+assert engine.settings['moss_layout'] == {}
+
 # Different pipelines must not inherit controls their graphs ignore.
 from types import SimpleNamespace
 for edit, video in [(False, False), (True, False), (False, True)]:
     flags = SimpleNamespace(isEdit=edit, isVideo=video, editSampling=False,
                             editPatches=False, encoderControls=False)
     wire = E.submission(engine.settings, flags)
+    assert 'moss_layout' not in wire
     if edit:
         assert 'cfg' not in wire and 'width' not in wire and wire['edit']
     elif video:

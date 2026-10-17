@@ -1,0 +1,251 @@
+# -*- coding: utf-8 -*-
+"""Native Quantal GTK adapter for the shared MOSS composition editor."""
+from __future__ import unicode_literals
+import base64
+from gi.repository import Gtk, Gdk, GdkPixbuf
+from layout_ui import LayoutUI
+
+
+class Toolkit(object):
+    def __init__(self, parent):
+        self.window = Gtk.Window(title='MOSS Layout — Painter')
+        self.window.set_transient_for(parent)
+        self.window.set_modal(True)
+        self.window.set_default_size(1100, 800)
+        self.window.set_icon_name('applications-graphics')
+        self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.root.set_border_width(10)
+        self.window.add(self.root)
+
+    def enable_widget(self, widget, enabled):
+        widget.set_sensitive(enabled)
+
+    def close(self):
+        self.window.destroy()
+
+    def row(self, parent, expand=False):
+        box = Gtk.Box(spacing=6)
+        parent.pack_start(box, expand, expand, 0)
+        return box
+
+    def column(self, parent):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_size_request(370, -1)
+        parent.pack_start(box, False, True, 0)
+        return box
+
+    def label(self, parent, text):
+        label = Gtk.Label(label=text)
+        label.set_alignment(0, .5)
+        label.set_line_wrap(True)
+        label.set_max_width_chars(42)
+        parent.pack_start(label, False, False, 0)
+        return label
+
+    def set_label(self, label, text):
+        label.set_text(text)
+
+    def button(self, parent, title, callback):
+        button = Gtk.Button(label=title)
+        button.connect('clicked', lambda *_: callback())
+        parent.pack_start(button, False, False, 0)
+        return button
+
+    def tabs(self, parent):
+        tabs = Gtk.Notebook()
+        parent.pack_start(tabs, True, True, 0)
+        return tabs
+
+    def tab(self, tabs, title):
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_border_width(8)
+        scroll.add_with_viewport(box)
+        tabs.append_page(scroll, Gtk.Label(label=title))
+        return box
+
+    def field(self, parent, title, kind, options, callback):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        parent.pack_start(box, False, False, 0)
+        if kind != 'check':
+            self.label(box, title)
+        swatches = None
+        if kind == 'combo':
+            control = Gtk.ComboBoxText()
+            for value in options:
+                control.append(value or '_empty', value or 'Unspecified')
+            control.connect('changed', lambda *_: callback())
+            box.pack_start(control, False, False, 0)
+        elif kind == 'check':
+            control = Gtk.CheckButton(label=title)
+            control.connect('toggled', lambda *_: callback())
+            box.pack_start(control, False, False, 0)
+        elif kind == 'number':
+            control = Gtk.SpinButton.new_with_range(*options)
+            control.set_digits(2 if options[2] < 1 else 0)
+            control.connect('value-changed', lambda *_: callback())
+            box.pack_start(control, False, False, 0)
+        elif kind == 'text':
+            control = Gtk.TextView()
+            control.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            control.get_buffer().connect('changed', lambda *_: callback())
+            scroll = Gtk.ScrolledWindow()
+            scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            scroll.set_shadow_type(Gtk.ShadowType.IN)
+            scroll.set_size_request(-1, 95)
+            scroll.add(control)
+            box.pack_start(scroll, False, False, 0)
+        else:
+            control = Gtk.Entry()
+            control.connect('changed', lambda *_: callback())
+            box.pack_start(control, False, False, 0)
+            if kind == 'palette':
+                swatches = self.row(box)
+                picker = Gtk.ColorButton()
+                picker.set_title(title)
+                def picked(*_):
+                    c = picker.get_rgba()
+                    value = '#%02x%02x%02x' % (int(round(c.red * 255)), int(round(c.green * 255)), int(round(c.blue * 255)))
+                    old = control.get_text().strip()
+                    control.set_text(value if title == 'Text colour' or not old else old + ', ' + value)
+                picker.connect('color-set', picked)
+                chooser = self.row(box)
+                self.label(chooser, 'Choose colour' if title == 'Text colour' else 'Add colour')
+                chooser.pack_start(picker, False, False, 0)
+                picker.set_tooltip_text('Choose a colour to add; edit the list above to remove colours.')
+        field = (kind, control, box, swatches)
+        if kind == 'palette':
+            control.connect('changed', lambda *_: self.swatches(field))
+        return field
+
+    def swatches(self, field):
+        for child in field[3].get_children():
+            field[3].remove(child)
+        for value in field[1].get_text().split(',')[:12]:
+            c = Gdk.RGBA()
+            if c.parse(value.strip()):
+                button = Gtk.ColorButton()
+                button.set_rgba(c)
+                button.set_size_request(22, 22)
+                button.set_tooltip_text(value.strip())
+                button.connect('color-set', self.replace_colour, field, value.strip())
+                field[3].pack_start(button, False, False, 0)
+        field[3].show_all()
+
+    def replace_colour(self, button, field, original):
+        c = button.get_rgba()
+        value = '#%02x%02x%02x' % (int(round(c.red * 255)), int(round(c.green * 255)), int(round(c.blue * 255)))
+        field[1].set_text(', '.join(value if v.strip() == original else v.strip() for v in field[1].get_text().split(',')))
+
+    def get(self, field):
+        kind, control = field[:2]
+        if kind == 'check': return control.get_active()
+        if kind == 'number': return control.get_value()
+        if kind == 'combo': return (control.get_active_id() or '').replace('_empty', '')
+        if kind == 'text':
+            b = control.get_buffer()
+            value = b.get_text(b.get_start_iter(), b.get_end_iter(), True)
+            return value.decode('utf-8') if isinstance(value, bytes) else value
+        value = control.get_text()
+        return value.decode('utf-8') if isinstance(value, bytes) else value
+
+    def set(self, field, value):
+        kind, control = field[:2]
+        if kind == 'check': control.set_active(bool(value))
+        elif kind == 'number': control.set_value(float(value or 0))
+        elif kind == 'combo': control.set_active_id(value or '_empty')
+        elif kind == 'text': control.get_buffer().set_text(value or '')
+        else: control.set_text(value or '')
+
+    def sensitive(self, field, enabled):
+        field[2].set_sensitive(enabled)
+
+    def visible(self, field, visible):
+        field[2].set_visible(visible)
+
+    def region_list(self, parent, changed):
+        model = Gtk.ListStore(str, str)
+        view = Gtk.TreeView(model=model)
+        view.set_headers_visible(False)
+        view.append_column(Gtk.TreeViewColumn('Regions', Gtk.CellRendererText(), text=1))
+        selection = view.get_selection()
+        selection.set_mode(Gtk.SelectionMode.MULTIPLE)
+        selection.connect('changed', lambda s: changed([model[path][0] for path in s.get_selected_rows()[1]]))
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_size_request(-1, 140)
+        scroll.add(view)
+        parent.pack_start(scroll, False, False, 0)
+        return view
+
+    def set_list(self, view, rows, selected):
+        model = view.get_model()
+        model.clear()
+        for identity, title in rows:
+            it = model.append([identity, title])
+            if identity in selected:
+                view.get_selection().select_iter(it)
+
+    def canvas(self, parent, editor):
+        image = Gtk.Image()
+        events = Gtk.EventBox()
+        events.set_size_request(400, 400)
+        events.add(image)
+        events.set_can_focus(True)
+        events.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.POINTER_MOTION_MASK)
+        def pointer(widget, event, action):
+            if action != 'move' and event.button != 1:
+                return False
+            if action == 'press':
+                widget.grab_focus()
+                widget.grab_add()
+            editor.pointer(action, event.x, event.y, bool(event.state & Gdk.ModifierType.SHIFT_MASK))
+            if action == 'release': widget.grab_remove()
+            return True
+        events.connect('key-press-event', lambda widget, event: editor.key(Gdk.keyval_name(event.keyval), bool(event.state & Gdk.ModifierType.CONTROL_MASK), bool(event.state & Gdk.ModifierType.SHIFT_MASK)))
+        events.connect('button-press-event', pointer, 'press')
+        events.connect('button-release-event', pointer, 'release')
+        events.connect('motion-notify-event', pointer, 'move')
+        def draw(*_):
+            w, h = events.get_allocated_width(), events.get_allocated_height()
+            if w > 10 and h > 10:
+                loader = GdkPixbuf.PixbufLoader.new_with_type('svg')
+                loader.write(editor.render(w, h))
+                loader.close()
+                image.set_from_pixbuf(loader.get_pixbuf())
+        events.connect('size-allocate', draw)
+        parent.pack_start(events, True, True, 0)
+        events.repaint = draw
+        return events
+
+    def redraw(self, canvas):
+        canvas.repaint()
+
+    def reference(self, path):
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 1600, 1600, True)
+        ok, data = pixbuf.save_to_bufferv('png', [], [])
+        return base64.b64encode(data).decode('ascii') if ok else ''
+
+    def choose_file(self):
+        dialog = Gtk.FileChooserDialog('Reference underlay', self.window, Gtk.FileChooserAction.OPEN,
+                                      (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+        path = dialog.get_filename() if dialog.run() == Gtk.ResponseType.OK else ''
+        dialog.destroy()
+        return path
+
+    def copy(self, text):
+        clip = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clip.set_text(text, -1)
+        clip.store()
+
+    def paste(self):
+        return Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_text() or ''
+
+
+def open_editor(parent, doc, accepted):
+    toolkit = Toolkit(parent)
+    editor = LayoutUI(toolkit, doc, accepted)
+    toolkit.window.show_all()
+    editor.region_visibility()
+    toolkit.window.editor = editor
+    return editor

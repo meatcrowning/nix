@@ -162,6 +162,17 @@ missing/empty files leave tokens literal. Store expanded conditioning in output
 parameters and literal text in `prompt_boxes` for lossless injection. Prompt
 pills/completion must not reformat arbitrary user text.
 
+MOSS layout documents live in the per-model `moss_layout` setting. `moss_layout.py`
+owns normalized geometry and compilation to centered pixel coordinates;
+`layout_ui.py` owns editor actions, with native GTK and Qt adapters in
+`layout_gtk.py` and `layout_qt.py`. Only `registry.build` compiles conditioning,
+using the actual output dimensions and current positive prompt as scene caption.
+Keep reference underlays, groups, locks and guides out of model-facing JSON.
+The Qt editor runs as a separate Widgets process because the Hyprland face uses
+QGuiApplication; Unity opens the GTK adapter in its historical process.
+Verify geometry/compiler and Qt controls with `tools/layout-test.py --qt`
+offscreen; `tools/unity-test.sh` includes the native GTK layout checks.
+
 ## Headless generation and saved preferences
 
 `tools/smoke.py` is a real generation client used by Chatter, not automatically

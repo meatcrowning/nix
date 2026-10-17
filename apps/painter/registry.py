@@ -531,6 +531,20 @@ class Registry:
         # --- prompts ---------------------------------------------------------
         transform = fam.get("prompt_transform")
         pos = G.apply_prompt_transform(p.get("positive", ""), transform)
+        layout = p.get("moss_layout") or {}
+        if layout.get("enabled"):
+            if fam["id"] != "moss_image":
+                raise G.GraphError("Layout prompting is only supported by MOSS")
+            import moss_layout
+            try:
+                res = fam.get("resolution", {})
+                width, height = p.get("width"), p.get("height")
+                if not width or not height:
+                    width, height = calc_dims(res.get("aspect", "1:1"), res.get("megapixels", 1), res.get("multiple", 16))
+                pos = moss_layout.compile(layout, width, height, pos)
+            except (ValueError, TypeError, KeyError) as exc:
+                raise G.GraphError("Invalid MOSS layout: " + str(exc)) from exc
+
         neg = G.apply_prompt_transform(p.get("negative", ""), transform)
         # NegPip makes a negative weight meaningful inside the positive
         # conditioning. Keep the two editors independent while composing, then

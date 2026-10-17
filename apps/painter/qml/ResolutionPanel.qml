@@ -61,8 +61,8 @@ Panel {
         Row {
             spacing: 6
             Spin {
-                width: 60
-                value: root.gen.megapixels; from: 0.1; to: 8; step: 0.1; decimals: 1
+                width: App.layoutSupport ? 100 : 60
+                value: root.gen.megapixels; from: App.layoutSupport ? 0.05 : 0.1; to: App.layoutSupport ? 16 : 8; step: 0.1; decimals: App.layoutSupport ? 6 : 1
                 onEdited: function (v) {
                     root.set("megapixels", v)
                     root.recomputeDims()

@@ -74,3 +74,7 @@ INNER
 if [ -n "${PAINTER_UNITY_SHOT:-}" ]; then
   cp "$run/home/window.png" "$PAINTER_UNITY_SHOT"
 fi
+
+if [ -n "${PAINTER_LAYOUT_SHOT:-}" ]; then
+  cp "$run/home/layout.png" "$PAINTER_LAYOUT_SHOT"
+fi
