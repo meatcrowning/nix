@@ -8,6 +8,7 @@ from __future__ import division, unicode_literals
 import copy
 import json
 import math
+import textwrap
 import uuid
 from xml.sax.saxutils import escape
 
@@ -391,12 +392,19 @@ def view_rect(d, vw, vh, zoom=1, pan=(0, 0)):
     return (vw - w) / 2 + pan[0], (vh - h) / 2 + pan[1], w, h
 
 
+def preview_lines(text, width, font_size):
+    """Conservative character widths for the toolkit-independent SVG sketch."""
+    columns = max(1, int(width / (font_size * .65)))
+    return [line for paragraph in text.split('\n')
+            for line in (textwrap.wrap(paragraph, columns) or [''])]
+
+
 def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0)):
     """Portable rough composition preview; not a prediction of generated pixels."""
     d = editor.doc
     ox, oy, w, h = view_rect(d, vw, vh, zoom, pan)
     s = ['<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="%d" height="%d">' % (vw, vh),
-         '<g transform="translate(%f,%f)"><rect width="%f" height="%f" fill="black" stroke="#bbbbbb"/>' % (ox, oy, w, h)]
+         '<g transform="translate(%f,%f)"><rect width="%f" height="%f" fill="none" stroke="#bbbbbb"/>' % (ox, oy, w, h)]
     if reference:
         s.append('<image width="%f" height="%f" opacity="%f" preserveAspectRatio="xMidYMid meet" xlink:href="data:image/png;base64,%s"/>' % (w, h, d['opacity'], reference))
     if d['grid']:
@@ -427,24 +435,23 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0)):
         caption = ' '.join(item.get('caption', '').split())
         if caption:
             title += ' — ' + caption
-        columns = max(1, int((bw - label_offset - 3) / 6))
-        if len(title) > columns:
-            title = title[:max(0, columns - 1)] + '…'
+        labels = preview_lines(title, bw - label_offset - 3, 11)
         s.append('<defs><clipPath id="label%d"><rect x="%f" y="%f" width="%f" height="%f"/></clipPath></defs>' % (n, x, y, bw, bh))
-        s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="%s" font-size="11">%s</text>' % (n, x + label_offset, y + 13, colour, escape(title)))
+        for j, line in enumerate(labels):
+            s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="white" font-size="11">%s</text>' % (n, x + label_offset, y + 13 * (j + 1), escape(line)))
         if item['label'] == 'text':
             style = item.get('typography', {})
-            lines = item.get('text', '').split('\n')
-            fs = max(4, min(32, bw / max(1, max(len(line) for line in lines)) * 1.5, max(4, bh - 18) / max(1, len(lines)) / 1.2))
+            label_height = 13 * len(labels) + 5
+            fs = 32
+            lines = preview_lines(item.get('text', ''), bw - 6, fs)
+            while fs > 4 and len(lines) * fs * 1.2 > bh - label_height:
+                fs -= 1
+                lines = preview_lines(item.get('text', ''), bw - 6, fs)
             family = {'serif': 'serif', 'monospace': 'monospace', 'handwritten': 'cursive'}.get(style.get('family'), 'sans-serif')
             align = style.get('align', 'left')
             tx = x + bw / 2 if align == 'center' else x + bw - 3 if align == 'right' else x + 3
-            color = style.get('color') or '#eeeeee'
-            # Descriptive treatments compile to prose; preview only valid hex colours.
-            if not (len(color) == 7 and color.startswith('#') and all(c in '0123456789abcdefABCDEF' for c in color[1:])): color = '#eeeeee'
-            outline = '#ffffff' if sum(int(color[i:i + 2], 16) for i in (1, 3, 5)) < 384 else '#000000'
             for j, line in enumerate(lines):
-                s.append('<text stroke="%s" stroke-width=".5" x="%f" y="%f" fill="%s" font-family="%s" font-weight="%s" font-size="%f" text-anchor="%s">%s</text>' % (outline, tx, y + 18 + fs * (j + 1), color, family, 'bold' if style.get('weight') in ('bold', 'heavy') else 'normal', fs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
+                s.append('<text clip-path="url(#label%d)" stroke="black" stroke-width=".5" x="%f" y="%f" fill="white" font-family="%s" font-weight="%s" font-size="%f" text-anchor="%s">%s</text>' % (n, tx, y + label_height + fs * (j + 1) * 1.2, family, 'bold' if style.get('weight') in ('bold', 'heavy') else 'normal', fs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
         s.append('</g>')
         if selected and not item.get('locked'):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:

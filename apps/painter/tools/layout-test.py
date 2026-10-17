@@ -150,7 +150,23 @@ def core():
     assert '1 character — Red coat &amp; blue scarf &lt;bright&gt;' in svg
     assert 'clip-path="url(#label0)"' in svg
     preview.chosen()[0]['caption'] = 'long description ' * 100
-    assert '…' in M.svg(preview, 700, 700)[0].decode('utf-8')
+    import xml.etree.ElementTree as ET
+    rendered = ET.fromstring(M.svg(preview, 700, 700)[0])
+    ns = {'s': 'http://www.w3.org/2000/svg'}
+    labels = rendered.findall('.//s:text', ns)
+    assert len(labels) > 1 and all(t.attrib['fill'] == 'white' for t in labels)
+    assert '…' not in ''.join(t.text or '' for t in labels)
+    assert rendered.find('s:g/s:rect', ns).attrib['fill'] == 'none'
+    row = preview.add('text', [.1, .1, .3, .8])
+    row['caption'] = 'Title'
+    row['text'] = 'A long line of exact wording that should wrap\nA second explicit line'
+    row['typography']['color'] = '#ff0000'
+    before = copy.deepcopy(preview.doc)
+    rendered = ET.fromstring(M.svg(preview, 700, 700)[0])
+    wording = [t for t in rendered.findall('.//s:text', ns) if 'font-family' in t.attrib]
+    assert len(wording) > 2
+    assert all(t.attrib['fill'] == 'white' and 'clip-path' in t.attrib for t in wording)
+    assert preview.doc == before, 'visual wrapping must not change generation wording or colours'
     print('PASS: layout compiler, rescaling, geometry, locks, groups, undo and both MOSS graphs')
 
 
