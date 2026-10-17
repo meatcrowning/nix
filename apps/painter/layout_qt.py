@@ -84,6 +84,9 @@ class Toolkit(QObject):
         self.cursorChanged.emit()
 
     def row(self, parent, expand=False): return Node('row', parent=parent, expand=expand)
+    def toolbar(self, parent): return Node('toolbar', parent=parent)
+    def spacer(self, parent): return Node('spacer', parent=parent, expand=True)
+    def button_checked(self, button, checked): self.set(button, checked)
     def column(self, parent): return Node('inspector', parent=parent)
     def label(self, parent, text): return Node('label', text, parent)
     def set_label(self, node, text):

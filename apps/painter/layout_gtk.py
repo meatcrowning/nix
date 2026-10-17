@@ -10,7 +10,7 @@ class Toolkit(object):
     def __init__(self, parent):
         self.window = parent.get_toplevel()
         self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.root.set_border_width(6)
+        self.root.set_border_width(0)
         parent.pack_start(self.root, True, True, 0)
 
     def show_widget(self, widget, visible):
@@ -45,6 +45,20 @@ class Toolkit(object):
         parent.pack_start(box, expand, expand, 0)
         return box
 
+    def toolbar(self, parent):
+        box = self.row(parent)
+        box.set_spacing(2)
+        box.sizes = Gtk.SizeGroup.new(Gtk.SizeGroupMode.VERTICAL)
+        return box
+
+    def spacer(self, parent):
+        parent.pack_start(Gtk.Box(), True, True, 0)
+
+    def button_checked(self, button, checked):
+        button.syncing = True
+        button.set_active(checked)
+        button.syncing = False
+
     def column(self, parent):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.set_size_request(280, -1)
@@ -63,12 +77,19 @@ class Toolkit(object):
         label.set_text(text)
 
     def button(self, parent, title, callback):
-        button = Gtk.Button(label=title if title != 'Add' else None)
-        if title == 'Add':
-            button.set_image(Gtk.Image.new_from_stock(Gtk.STOCK_ADD, Gtk.IconSize.BUTTON))
-            button.set_tooltip_text('Add region')
-            button.get_accessible().set_name('Add region')
-        button.connect('clicked', lambda *_: callback())
+        icons = {'Add': Gtk.STOCK_ADD, 'Undo': Gtk.STOCK_UNDO, 'Redo': Gtk.STOCK_REDO,
+                 'Delete': Gtk.STOCK_REMOVE, 'Duplicate': Gtk.STOCK_COPY, 'Lock': Gtk.STOCK_DIALOG_AUTHENTICATION}
+        icon = icons.get(title) if hasattr(parent, 'sizes') else None
+        button = (Gtk.ToggleButton if title == 'Lock' else Gtk.Button)(label=None if icon else title)
+        if icon:
+            image = Gtk.Image.new_from_stock(icon, Gtk.IconSize.MENU)
+            button.set_image(image)
+            tooltip = 'Add region' if title == 'Add' else 'Lock / unlock selected regions' if title == 'Lock' else title + ' selected regions' if title in ('Delete', 'Duplicate') else title
+            button.set_tooltip_text(tooltip)
+            button.get_accessible().set_name(tooltip)
+        if hasattr(parent, 'sizes'):
+            parent.sizes.add_widget(button)
+        button.connect('clicked', lambda *_: callback() if not getattr(button, 'syncing', False) else None)
         parent.pack_start(button, False, False, 0)
         return button
 
@@ -90,7 +111,7 @@ class Toolkit(object):
     def field(self, parent, title, kind, options, callback):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         parent.pack_start(box, False, False, 0)
-        if kind != 'check':
+        if kind != 'check' and title:
             self.label(box, title)
         swatches = None
         if kind == 'combo':
@@ -99,6 +120,8 @@ class Toolkit(object):
                 control.append(value or '_empty', value or 'Unspecified')
             control.connect('changed', lambda *_: callback())
             box.pack_start(control, False, False, 0)
+            if hasattr(parent, 'sizes'):
+                parent.sizes.add_widget(control)
         elif kind == 'check':
             control = Gtk.CheckButton(label=title)
             control.connect('toggled', lambda *_: callback())

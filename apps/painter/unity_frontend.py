@@ -202,7 +202,8 @@ class Window(Gtk.Window):
             self.rows[key] = box
 
         self.layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        params.pack_start(self.layout_box, False, False, 0)
+        self.rows['negative'].set_spacing(0)
+        self.rows['negative'].pack_start(self.layout_box, False, False, 0)
 
         self.grid = Gtk.Grid()
         self.grid.set_row_spacing(6)

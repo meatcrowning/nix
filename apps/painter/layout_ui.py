@@ -17,19 +17,16 @@ class LayoutUI(object):
         root = u.root
         self.last_doc = copy.deepcopy(self.model.doc)
         self.buttons = {}
-        tools = u.row(root)
+        tools = u.toolbar(root)
         self.add_button = u.button(tools, 'Add', self.arm_add)
-        self.tool = u.field(tools, 'New region', 'combo', ['object', 'character', 'text'], lambda: None)
+        self.tool = u.field(tools, '', 'combo', ['object', 'character', 'text'], lambda: None)
         u.set(self.tool, 'object')
-        tools = u.row(root)
         self.buttons['Clear all'] = u.button(tools, 'Clear all', self.clear)
         for title, fn in [('Undo', lambda: self.model.undo()), ('Redo', lambda: self.model.undo(True))]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
-        menu = u.menu(tools, 'Edit')
-        for title, command in [('Duplicate', lambda: self.model.duplicate()), ('Delete', lambda: self.model.delete()),
-                               ('Group', lambda: self.model.group()), ('Ungroup', lambda: self.model.group(True)),
-                               ('Copy', self.copy), ('Paste', self.paste)]:
-            self.buttons[title] = u.menu_item(menu, title, lambda fn=command: self.command(fn))
+        u.spacer(tools)
+        for title, fn in [('Lock', self.toggle_lock), ('Delete', self.model.delete), ('Duplicate', self.model.duplicate)]:
+            self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
         self.canvas = u.canvas(root, self)
         self.side = u.column(root)
         self.list = u.region_list(self.side, self.selection_changed)
@@ -37,6 +34,10 @@ class LayoutUI(object):
         scene = u.tab(tabs, 'Scene')
         region = u.tab(tabs, 'Region')
         canvas = u.tab(tabs, 'Canvas')
+        menu = u.menu(canvas, 'Edit')
+        for title, command in [('Group', lambda: self.model.group()), ('Ungroup', lambda: self.model.group(True)),
+                               ('Copy', self.copy), ('Paste', self.paste)]:
+            self.buttons[title] = u.menu_item(menu, title, lambda fn=command: self.command(fn))
         self.align = u.field(canvas, 'Align / distribute selected regions', 'combo', ['left', 'center', 'right', 'top', 'middle', 'bottom', 'distribute horizontal', 'distribute vertical'], lambda: None)
         u.set(self.align, 'left')
         u.button(canvas, 'Align / distribute', lambda: self.command(lambda: self.model.align(u.get(self.align))))
@@ -78,6 +79,14 @@ class LayoutUI(object):
         u.label(canvas, 'Reference is a tracing aid only; it is not sent as image conditioning.')
         self.status = u.label(root, '')
         self.refresh()
+
+    def toggle_lock(self):
+        rows = self.model.chosen()
+        if rows:
+            locked = not all(row.get('locked') for row in rows)
+            self.model.checkpoint()
+            for row in rows:
+                row['locked'] = locked
 
     def arm_add(self):
         self.model.tool = self.ui.get(self.tool) or 'object'
@@ -218,6 +227,8 @@ class LayoutUI(object):
         self.publish()
 
     def paint(self):
+        chosen = self.model.chosen()
+        self.ui.button_checked(self.buttons['Lock'], bool(chosen) and all(row.get('locked') for row in chosen))
         for title, button in self.buttons.items():
             enabled = bool(self.model.undo_stack) if title == 'Undo' else bool(self.model.redo_stack) if title == 'Redo' else True if title == 'Paste' else bool(self.model.selected)
             if title == 'Clear all':

@@ -18,7 +18,8 @@ Item {
         anchors.fill: parent
         sourceComponent: {
             switch (node.spec.kind) {
-            case "row": return rowComponent
+            case "row": case "toolbar": return rowComponent
+            case "spacer": return spacerComponent
             case "column": case "page": case "inspector": return columnComponent
             case "button": return buttonComponent
             case "label": return labelComponent
@@ -30,10 +31,11 @@ Item {
             }
         }
     }
+    Component { id: spacerComponent; Item { implicitWidth: 0; implicitHeight: 0 } }
     Component {
         id: rowComponent
         RowLayout {
-            spacing: 6
+            spacing: node.spec.kind === "toolbar" ? 2 : 6
             Repeater {
                 model: node.spec.nodes
                 Loader {
@@ -42,7 +44,7 @@ Item {
                     visible: modelData.shown
                     Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
                     Layout.fillWidth: modelData.expand
-                    Layout.fillHeight: modelData.expand || modelData.kind === "inspector"
+                    Layout.fillHeight: node.spec.kind === "toolbar" || modelData.expand || modelData.kind === "inspector"
                     Layout.preferredWidth: modelData.kind === "inspector" ? 300 : (item ? item.implicitWidth : 0)
                     Layout.minimumWidth: modelData.kind === "canvas" ? 140 : 0
                 }
@@ -70,13 +72,18 @@ Item {
         id: buttonComponent
         Button {
             readonly property bool adding: node.spec.title === "Add"
+            readonly property string actionIcon: ({Add: "list-add", Undo: "edit-undo", Redo: "edit-redo",
+                Lock: "object-locked", Delete: "list-remove", Duplicate: "edit-copy"})[node.spec.title] || ""
             objectName: adding ? "layoutAdd" : ""
             text: node.spec.title
-            icon.name: adding ? "list-add" : ""
-            display: adding ? AbstractButton.IconOnly : AbstractButton.TextOnly
+            implicitWidth: actionIcon ? implicitHeight : Math.max(implicitBackgroundWidth + leftInset + rightInset, implicitContentWidth + leftPadding + rightPadding)
+            icon.name: actionIcon
+            checkable: node.spec.title === "Lock"
+            checked: checkable && node.spec.value === true
+            display: actionIcon ? AbstractButton.IconOnly : AbstractButton.TextOnly
             Accessible.name: adding ? "Add region" : text
-            ToolTip.visible: hovered && adding
-            ToolTip.text: "Add region"
+            ToolTip.visible: hovered && actionIcon !== ""
+            ToolTip.text: adding ? "Add region" : node.spec.title === "Lock" ? "Lock / unlock selected regions" : text
             onClicked: node.spec.activate()
         }
     }
@@ -211,8 +218,8 @@ Item {
     Component {
         id: fieldComponent
         ColumnLayout {
-            implicitWidth: node.spec.kind === "combo" ? 140 : 200
-            Label { text: node.spec.title; visible: node.spec.kind !== "check"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            implicitWidth: node.spec.kind === "combo" ? (node.spec.title ? 140 : 90) : 200
+            Label { text: node.spec.title; visible: node.spec.kind !== "check" && node.spec.title !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Loader {
                 Layout.fillWidth: true
                 sourceComponent: {

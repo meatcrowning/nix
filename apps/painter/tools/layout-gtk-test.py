@@ -87,6 +87,14 @@ def run(parent):
     assert e.list.region_scroll.get_visible()
     assert e.list.region_scroll.get_size_request()[1] < 80
     assert e.model.tool == 'select' and e.side.get_visible()
+    e.buttons['Lock'].clicked()
+    assert e.model.chosen()[0]['locked']
+    e.buttons['Lock'].clicked()
+    assert not e.model.chosen()[0]['locked']
+    toolbar = e.add_button.get_parent()
+    assert e.buttons['Duplicate'].get_parent() is toolbar
+    assert e.buttons['Undo'].get_parent() is toolbar
+    assert e.buttons['Delete'].get_parent() is toolbar
     row = e.model.doc['items'][0]
     assert row['label'] == 'text' and abs(row['box'][2] - .7) < .02
     u.set(e.fields['summary.meta'], 'poster, illustration')
