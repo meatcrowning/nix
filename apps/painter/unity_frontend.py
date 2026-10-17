@@ -55,6 +55,16 @@ def label(text):
 
 
 class Window(Gtk.Window):
+    def do_key_press_event(self, event):
+        # GtkWindow activates menu accelerators before forwarding to the editor.
+        # Let multiline text consume Enter and navigation before gallery shortcuts.
+        if (isinstance(self.get_focus(), (Gtk.TextView, Gtk.Entry)) and
+                not event.state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK) and
+                event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_Page_Up, Gdk.KEY_Page_Down)):
+            self.propagate_key_event(event)
+            return True
+        return Gtk.Window.do_key_press_event(self, event)
+
     def __init__(self, path):
         Gtk.Window.__init__(self, title='Painter')
         self.set_wmclass('painter', 'Painter')

@@ -133,6 +133,28 @@ def run(parent):
             event.button.y_root = y
         prompt.resize_handle.emit(signal, event)
     assert parent.region_prompt_height > 95
+    u.set(e.fields['item.text'], 'HELLO')
+    wording = e.fields['item.text'][1]
+    parent.browse()
+    parent.layout_box.show()
+    wording.get_ancestor(Gtk.Notebook).set_current_page(0)
+    wording.grab_focus()
+    while Gtk.events_pending(): Gtk.main_iteration()
+    # The fixture's non-MOSS settings poll hides this manually attached editor.
+    parent.layout_box.show()
+    wording.grab_focus()
+    assert wording.get_realized() and wording.get_mapped()
+    assert parent.get_focus() is wording
+    wording.get_buffer().place_cursor(wording.get_buffer().get_end_iter())
+    before_page = parent.pages.get_current_page()
+    event = Gdk.Event.new(Gdk.EventType.KEY_PRESS)
+    event.key.window = wording.get_window(Gtk.TextWindowType.TEXT)
+    event.key.keyval = Gdk.KEY_Return
+    event.key.state = Gdk.ModifierType(0)
+    event.key.send_event = True
+    parent.emit('key-press-event', event)
+    assert u.get(e.fields['item.text']) == 'HELLO\n', 'Enter was stolen from Exact wording'
+    assert parent.pages.get_current_page() == before_page
     u.set(e.fields['item.text'], 'HELLO\n世界')
     u.set(e.fields['type.family'], 'serif')
     u.set(e.fields['type.color'], '#123456')
