@@ -1,0 +1,32 @@
+{
+  "id": "moss_image",
+  "label": "MOSS-Image",
+  "detect": "moss_image",
+  "graph": "universal.json",
+  "loader_shape": "unet",
+  "loader_class": "UNETLoader",
+  "prompt_transform": "none",
+  "latent_class": "EmptyFlux2LatentImage",
+  "text_encoder": {
+    "te_model": "QWEN35_9B",
+    "clip_type": "moss_image",
+    "hidden": 4096,
+    "require_hidden": true
+  },
+  "vae": {
+    "arch": "flux2",
+    "prefer": ["moss-image-vae.safetensors"]
+  },
+  "supports_patches": false,
+  "supports_loras": false,
+  "toggles": {"negpip": false, "model_sampling": false},
+  "defaults": {
+    "steps": 50,
+    "cfg": 3.0,
+    "sampler_name": "euler",
+    "scheduler": "sgm_uniform",
+    "denoise": 1.0,
+    "add_noise": true
+  },
+  "resolution": {"megapixels": 1.0, "multiple": 16, "aspect": "1:1"}
+}

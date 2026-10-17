@@ -487,6 +487,13 @@ class Registry:
 
         # --- optional nodes --------------------------------------------------
         toggles = {**(fam.get("toggles") or {}), **(p.get("toggles") or {})}
+        if fam["id"] == "moss_image":
+            # The initial MOSS surface is plain text-to-image. Its official
+            # guidance is part of the graph, independent of other models' patches.
+            toggles = {"negpip": False, "model_sampling": False}
+            p.pop("model_sampling", None)
+            if p.get("loras"):
+                raise G.GraphError("MOSS LoRAs are not exposed yet")
         if toggles.get("model_sampling", False):
             ms = {**(fam.get("model_sampling") or {}), **(p.get("model_sampling") or {})}
             g.set_inputs("model_sampling", ms)
@@ -499,6 +506,15 @@ class Registry:
                 "value_strength": 1.0, "patch_txtfusion_refiners": False,
                 "block_start": 0, "block_end": 27, "block_stride": 1,
                 "debug": "off"})
+
+        if fam["id"] == "moss_image":
+            source = [g.id_of("loader"), 0]
+            # Native MOSS already uses shift 5 with normalized timesteps.
+            # ModelSamplingSD3 would replace its multiplier with 1000.
+            slg = g.add_node("SkipLayerGuidanceDiTSimple", {
+                "model": source, "double_layers": "", "single_layers": "22",
+                "start_percent": 0.0, "end_percent": 1.0}, "moss_guidance")
+            g.retarget(source, [slg, 0], skip={slg})
 
         # --- LoRA chain ------------------------------------------------------
         loras = p.get("loras") or []

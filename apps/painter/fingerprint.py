@@ -17,7 +17,7 @@ import os
 import struct
 import sys
 
-SCHEMA = 5
+SCHEMA = 6
 
 MODEL_EXTS = (".safetensors", ".sft", ".gguf", ".ckpt", ".pt", ".bin")
 
@@ -211,6 +211,7 @@ _PREFIXES = ("", "model.diffusion_model.", "diffusion_model.", "net.")
 
 # Signals used only to score which prefix strips cleanest.
 _PROBES = (
+    "video_embedder.bias",
     "txtfusion.projector.weight",
     "cap_embedder.1.weight",
     "double_blocks.0.img_attn.qkv.weight",
@@ -421,6 +422,12 @@ def detect_diffusion(v: View):
             "blocks": v.count_prefix("transformer_blocks."),
         }
 
+    if v.has("video_embedder.bias", "text_embedder.proj.weight",
+             "shared_block_modulation.weight", "layers.0.q_norm.weight",
+             "final_linear_video.weight"):
+        return "moss_image", {"blocks": v.count_prefix("layers."),
+                              "hidden": v.dim("video_embedder.bias", 0)}
+
     return None, {}
 
 
@@ -451,6 +458,12 @@ def detect_checkpoint(header: Header):
 
 def detect_text_encoder(header: Header):
     h = header
+    for prefix in ("model.language_model.", "language_model."):
+        if h.has(prefix + "layers.0.linear_attn.A_log",
+                 prefix + "layers.0.input_layernorm.weight"):
+            hidden = h.dim(prefix + "layers.0.input_layernorm.weight", 0)
+            return ("QWEN35_9B" if hidden == 4096 else f"QWEN35_{hidden}"), {
+                "hidden": hidden, "layers": h.count_prefix(prefix + "layers.")}
     if h.dim("encoder.block.23.layer.1.DenseReluDense.wi_1.weight", 0) == 10240:
         return "T5_XXL", {"hidden": h.dim("shared.weight", 1)}
     if h.any("encoder.block.0.layer.0.SelfAttention.k.weight"):

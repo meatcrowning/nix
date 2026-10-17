@@ -235,6 +235,7 @@ class Window(Gtk.Window):
         params.pack_start(self.source_info, False, False, 0)
 
         advanced = Gtk.Expander(label='Advanced')
+        self.advanced = advanced
         params.pack_start(advanced, False, False, 0)
         advanced_grid = Gtk.Grid()
         advanced_grid.set_row_spacing(6)
@@ -578,7 +579,10 @@ class Window(Gtk.Window):
         self.last_button.set_visible(video and not still)
         self.reference_button.set_visible(bool(edit or flags.get('referenceImages')))
         self.clear_button.set_visible(bool(images))
-        self.loras_button.set_sensitive(bool(flags.get('supportsLoras', False)))
+        loras = bool(flags.get('supportsLoras', False))
+        self.loras_button.set_sensitive(loras)
+        self.loras_button.set_visible(loras)
+        self.advanced.set_visible(bool(patches or flags.get('encoderControls') or loras))
 
     def update_actions(self):
         for key, widgets in self.actions.items():

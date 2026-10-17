@@ -65,6 +65,20 @@ def test():
             assert len(window.state['models']) == 2
             assert window.get_title() == 'Painter'
             assert window.actions['generate'][0].get_sensitive()
+            # Plain text-to-image families such as MOSS expose no advanced UI.
+            flags = window.state['flags']
+            window.state['flags'] = dict(isEdit=False, isVideo=False, supportsPatches=False,
+                                        supportsLoras=False, encoderControls=False,
+                                        referenceImages=False, optionalEditImage=False)
+            window.visibility()
+            assert not window.advanced.get_visible()
+            assert not window.input_button.get_visible()
+            for key in ('positive', 'negative', 'steps', 'cfg', 'sampler_name',
+                        'scheduler', 'denoise', 'megapixels', 'aspectW'):
+                rows = window.rows[key]
+                assert all(w.get_visible() for w in (rows if isinstance(rows, tuple) else (rows,))), key
+            window.state['flags'] = flags
+            window.visibility()
             shot = Gdk.pixbuf_get_from_window(window.get_window(), 0, 0, window.get_allocated_width(), window.get_allocated_height())
             shot.savev('/home/test/window.png', 'png', [], [])
             assert window.text_boxes['positive'].height == 210

@@ -5265,6 +5265,41 @@ def test_krea(win, ctl, tmp):
         ctl._start_jobs, ctl.client.upload_image, ctl._object_info = original_start, original_upload, original_oi
 
 
+def test_moss(win, ctl, tmp):
+    import importlib.util
+    import unity_engine as E
+    spec = importlib.util.spec_from_file_location("moss_checks", Path(__file__).with_name("moss-test.py"))
+    checks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checks)
+    checks.models(Path(os.environ["PAINTER_MODELS"]))
+    ctl.setMode("")
+    ctl.rescan()
+    spin(150)
+    for model in ("moss-base-int8.safetensors", "moss-sft-int8.safetensors"):
+        ctl.selectModelByName(model)
+        spin(150)
+        g = prop(APP, "gen")
+        check(model + " has author defaults", (g["steps"], g["cfg"], g["sampler_name"],
+              g["scheduler"]) == (50, 3, "euler", "sgm_uniform"))
+        check(model + " is a manual text-to-image choice", ctl.mode == "" and
+              not any((ctl.isEdit, ctl.isVideo, ctl.encoderControls, ctl.referenceImages,
+                       ctl.supportsPatches, ctl.supportsLoras)))
+        editor = find(win.contentItem(), "PromptEditor")
+        check(model + " exposes both normal prompts", len(find_all(editor, "PromptBox")) == 2
+              and g["promptTransform"] == "none")
+        panes = find(win.contentItem(), "ParamsPane")
+        check(model + " exposes only standard sections", all(
+            panes.sectionVisible(key) == expected for key, expected in {
+                "prompt": True, "resolution": True, "sampling": True,
+                "patches": False, "lora": False, "edit": False, "krea": False}.items()))
+        # The GTK adapter consumes the same defaults and submits the same graph.
+        settings = dict(E.BASE, **{k: v for k, v in ctl.modelDefaults().items() if k in E.BASE})
+        settings.update(positive="a lake", negative="blur", width=1280, height=720)
+        built = ctl.reg.build(ctl.reg.find(model), E.submission(settings, ctl))
+        check(model + " GTK submission preserves prompts", built["params"]["prompt_boxes"] ==
+              {"positive": "a lake", "negative": "blur"})
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -5279,9 +5314,11 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea"):
+                "pairing", "source", "tags", "tab", "krea", "moss"):
         print("== %s ==" % only)
-        if only == "krea":
+        if only == "moss":
+            test_moss(win, ctl, tmp)
+        elif only == "krea":
             test_krea(win, ctl, tmp)
         elif only == "tab":
             test_tab_complete(win, ctl, keep)
