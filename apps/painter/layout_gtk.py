@@ -194,8 +194,10 @@ class Toolkit(object):
         selection.set_mode(Gtk.SelectionMode.MULTIPLE)
         selection.connect('changed', lambda s: changed([model[path][0] for path in s.get_selected_rows()[1]]))
         scroll = Gtk.ScrolledWindow()
-        scroll.set_size_request(-1, 140)
+        scroll.set_no_show_all(True)
+        view.show()
         scroll.add(view)
+        view.region_scroll = scroll
         parent.pack_start(scroll, False, False, 0)
         return view
 
@@ -207,11 +209,15 @@ class Toolkit(object):
             if identity in selected:
                 view.get_selection().select_iter(it)
 
+        scroll = view.region_scroll
+        scroll.set_size_request(-1, min(140, max(28, view.get_preferred_height()[1] + 4)))
+        scroll.set_visible(bool(rows))
+
     def canvas(self, parent, editor):
         image = Gtk.Image()
         image.set_alignment(0, 0)
         events = Gtk.EventBox()
-        events.set_size_request(180, 300)
+        events.set_size_request(180, self.window.layout_height)
         surface = Gtk.Layout()
         surface.put(image, 0, 0)
         events.add(surface)
@@ -263,6 +269,7 @@ class Toolkit(object):
             if action == 'release':
                 drag[:] = []
                 widget.grab_remove()
+                self.window.layout_resized(height)
             return True
         handle.connect('button-press-event', resize, 'press')
         handle.connect('motion-notify-event', resize, 'move')

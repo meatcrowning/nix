@@ -70,6 +70,7 @@ class Window(Gtk.Window):
         self.selection = ''
         self.text_boxes = {}
         self.heights_loaded = False
+        self.layout_height = 300
         self.frame_tick = ''
         self.rebuilding_gallery = False
         self.walk_pending = None
@@ -151,7 +152,10 @@ class Window(Gtk.Window):
         outer.pack_start(self.info, False, False, 0)
 
         split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.sidebar_split = split
         split.set_position(380)
+        split.connect_after('button-release-event', self.sidebar_resized)
+        split.connect_after('accept-position', self.sidebar_resized)
         outer.pack_start(split, True, True, 0)
         params = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         params.set_border_width(12)
@@ -434,6 +438,15 @@ class Window(Gtk.Window):
         self.send('settings', save=True)
         return False
 
+    def sidebar_resized(self, *_):
+        if self.heights_loaded:
+            self.send('settings', sidebarWidth=max(200, self.sidebar_split.get_position()))
+        return False
+
+    def layout_resized(self, height):
+        self.layout_height = height
+        self.send('settings', layoutHeight=height)
+
     def preview_resized(self, *_):
         if self.heights_loaded and self.pages.get_current_page() == 0:
             self.send('settings', previewHeight=self.browse_pane.get_position())
@@ -504,6 +517,8 @@ class Window(Gtk.Window):
             self.apply_settings(state['settings'])
         if not self.heights_loaded:
             self.browse_pane.set_position(state['previewHeight'])
+            self.sidebar_split.set_position(state['sidebarWidth'])
+            self.layout_height = state['layoutHeight']
             for key, height in state['heights'].items():
                 self.text_boxes[key].set_height(height)
             self.heights_loaded = True

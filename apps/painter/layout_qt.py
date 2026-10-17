@@ -109,6 +109,7 @@ class Toolkit(QObject):
     def set_list(self, view, rows, selected):
         view._rows = [dict(identity=i, title=t) for i,t in rows]
         view._selected = list(selected)
+        view._visible = bool(rows)
         view.changed.emit()
     def canvas(self, parent, editor): return Node('canvas', parent=parent, expand=True)
     def redraw(self, canvas): self.repaint.emit()

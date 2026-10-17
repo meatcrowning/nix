@@ -17,6 +17,7 @@ def run(parent):
     assert [w for w in Gtk.Window.list_toplevels() if w.get_visible()] == before_windows
     assert e.canvas.get_toplevel() is parent
     assert e.side.get_visible()
+    assert not e.list.region_scroll.get_visible()
     u = e.ui
     from spelling_gtk import Spelling, text
     requests = []
@@ -59,6 +60,10 @@ def run(parent):
         e.canvas.resize_handle.emit(signal, event)
     assert e.canvas.get_size_request()[1] == original_height + 80
     assert not e.canvas.resize_handle.has_grab()
+    assert parent.layout_height == original_height + 80
+    reopened = open_editor(parent.layout_box, M.fresh(), accepted.append)
+    assert reopened.canvas.get_size_request()[1] == original_height + 80
+    reopened.ui.close()
     e.canvas.set_size_request(180, original_height)
     while Gtk.events_pending(): Gtk.main_iteration()
     parent.params_scroll.get_vadjustment().set_value(parent.layout_box.get_allocation().y)
@@ -77,6 +82,8 @@ def run(parent):
             event.button.x, event.button.y = ox + x * w, oy + y * h
             e.canvas.emit('button-press-event' if kind == Gdk.EventType.BUTTON_PRESS else 'button-release-event', event)
     assert len(e.model.doc['items']) == 1
+    assert e.list.region_scroll.get_visible()
+    assert e.list.region_scroll.get_size_request()[1] < 80
     assert e.model.tool == 'select' and e.side.get_visible()
     row = e.model.doc['items'][0]
     assert row['label'] == 'text' and abs(row['box'][2] - .7) < .02

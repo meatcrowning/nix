@@ -81,6 +81,8 @@ class Engine:
         self._restored = False
         height = prefs.get('unity.previewHeight')
         self.preview_height = max(0, min(10000, int(300 if height is None else height)))
+        self.sidebar_width = max(200, min(10000, int(prefs.get('unity.sidebarWidth') or 380)))
+        self.layout_height = max(140, min(1200, int(prefs.get('layout.canvasHeight') or 300)))
         self.heights = {key: max(40, min(600, int(prefs.get(pref) or default)))
                        for (key, pref), default in zip(HEIGHT_KEYS.items(), (130, 64, 90))}
         self.view_path = ''
@@ -143,6 +145,8 @@ class Engine:
                        loras=json.dumps(self.ctl.lorasSnapshot()))
         doc.update({pref: self.heights[key] for key, pref in HEIGHT_KEYS.items()})
         doc['unity.previewHeight'] = self.preview_height
+        doc['unity.sidebarWidth'] = self.sidebar_width
+        doc['layout.canvasHeight'] = self.layout_height
         self.prefs._doc = doc
         # Prefs.set owns the atomic write; force one changed key without losing
         # any unrelated desktop settings.
@@ -150,6 +154,14 @@ class Engine:
         self.prefs.set('unityRevision', self.revision)
 
     def update(self, request):
+        for key, attr, low, high in [('sidebarWidth', 'sidebar_width', 200, 10000),
+                                     ('layoutHeight', 'layout_height', 140, 1200)]:
+            if key in request:
+                value = request[key]
+                if type(value) is not int or not low <= value <= high:
+                    raise ValueError('Invalid ' + key)
+                setattr(self, attr, value)
+                self.save()
         if 'previewHeight' in request:
             height = request['previewHeight']
             if type(height) is not int or not 0 <= height <= 10000:
@@ -424,7 +436,8 @@ class Engine:
         return dict(model=self.model, models=[{k: v for k, v in row.items() if k != 'entry'}
                                               for row in c.models._rows], modes=c.modes(), mode=c.mode,
                     settings=self.settings, revision=self.revision, heights=self.heights, multiple=self.multiple,
-                    previewHeight=self.preview_height,
+                    previewHeight=self.preview_height, sidebarWidth=self.sidebar_width,
+                    layoutHeight=self.layout_height,
                     media=self.media(request), replacement=self.replacement,
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,

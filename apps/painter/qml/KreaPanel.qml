@@ -23,7 +23,8 @@ Panel {
         PromptBox {
             objectName: "kreaSystemPrompt"
             width: parent.width
-            boxHeight: 100
+            boxHeight: Prefs.get("unity.systemH") > 0 ? Prefs.get("unity.systemH") : 100
+            onResized: h => Prefs.set("unity.systemH", h)
             placeholder: "Encoder system prompt (empty for no instruction)"
             value: root.gen.system_prompt
             onEdited: function(t) { root.set("system_prompt", t) }

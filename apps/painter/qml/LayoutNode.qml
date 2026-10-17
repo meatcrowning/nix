@@ -129,7 +129,7 @@ Item {
     Component {
         id: listComponent
         KineticListView {
-            implicitHeight: 100
+            implicitHeight: Math.min(140, contentHeight)
             clip: true
             model: node.spec.rows
             ScrollBar.vertical: VScroll { }
@@ -149,7 +149,7 @@ Item {
         id: canvasComponent
         Item {
             id: canvasBox
-            property int canvasHeight: 300
+            property int canvasHeight: Math.max(140, Math.min(1200, Prefs.get("layout.canvasHeight") || 300))
             implicitWidth: 240
             implicitHeight: canvasHeight + 12
             LayoutCanvas {
@@ -185,6 +185,7 @@ Item {
                         startY = mapToItem(null, mouse.x, mouse.y).y
                         startHeight = canvasBox.canvasHeight
                     }
+                    onReleased: Prefs.set("layout.canvasHeight", canvasBox.canvasHeight)
                     onPositionChanged: mouse => {
                         if (pressed)
                             canvasBox.canvasHeight = Math.max(140, Math.min(1200,

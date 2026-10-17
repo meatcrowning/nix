@@ -78,6 +78,8 @@ def test():
             assert notifications == ['Generation completed'], notifications
             assert not window.info.get_visible()
             assert len(window.state['models']) == 2
+            window.sidebar_split.set_position(440)
+            window.sidebar_split.emit('accept-position')
             window.browse_pane.set_position(360)
             window.browse_pane.emit('button-release-event', Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE))
             assert window.get_title() == 'Painter'
@@ -312,6 +314,9 @@ if not failed[0]:
             assert window.values()['positive'] == 'last edit before closing'
             assert window.browse_pane.get_position() == 360, (window.browse_pane.get_position(), window.state['previewHeight'])
             assert window.state['previewHeight'] == 360
+            assert window.sidebar_split.get_position() == 440
+            assert window.state['sidebarWidth'] == 440
+            assert window.layout_height == 380
             print('PASS: prompt heights and text survive closing and reopening')
         except Exception:
             traceback.print_exc()
