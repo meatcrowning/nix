@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 Panel {
     id: panel
@@ -95,8 +96,56 @@ Panel {
         width: parent.width
         visible: App.layoutSupport
         spacing: 6
-        SeedField { width: parent.width }
-        ResolutionPanel { width: parent.width }
+        function seedMode(random) {
+            root.set("seed", random ? -1 : (root.gen.seed < 0 ? App.freshSeed() : root.gen.seed))
+            root.set("randomSeed", random)
+            root.set("reuseSeed", false)
+        }
+        Row {
+            width: parent.width
+            spacing: 4
+            Button {
+                icon.name: "media-playlist-shuffle"
+                display: AbstractButton.IconOnly
+                implicitWidth: implicitHeight
+                Accessible.name: "Randomize seed"
+                ToolTip.visible: hovered
+                ToolTip.text: "Randomize seed for each generation"
+                onClicked: parent.parent.seedMode(true)
+            }
+            Button {
+                text: "New fixed seed"
+                onClicked: {
+                    root.set("seed", App.freshSeed())
+                    parent.parent.seedMode(false)
+                }
+            }
+            ComboBox {
+                model: ["Fixed", "Random"]
+                currentIndex: root.gen.randomSeed ? 1 : 0
+                onActivated: index => parent.parent.seedMode(index === 1)
+            }
+        }
+        Field {
+            width: parent.width
+            label: "Seed number"
+            SeedInput {
+                width: parent.width
+                enabled: !root.gen.randomSeed
+                value: root.gen.seed
+                onEdited: value => root.set("seed", value)
+            }
+        }
+        Row {
+            width: parent.width
+            spacing: 4
+            PixelText { text: "Aspect"; anchors.verticalCenter: parent.verticalCenter }
+            Spin { width: 48; value: root.gen.aspectW; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectW", Math.round(v)); root.recomputeDims() } }
+            PixelText { text: ":"; anchors.verticalCenter: parent.verticalCenter }
+            Spin { width: 48; value: root.gen.aspectH; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectH", Math.round(v)); root.recomputeDims() } }
+            PixelText { text: "MP"; anchors.verticalCenter: parent.verticalCenter }
+            Spin { width: 95; value: root.gen.megapixels; from: .05; to: 16; step: .1; decimals: 6; onEdited: v => { root.set("megapixels", v); root.recomputeDims() } }
+        }
     }
     Loader {
         width: parent.width

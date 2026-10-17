@@ -149,6 +149,7 @@ class Editor(object):
         self.undo_stack, self.redo_stack = [], []
         self.drag = None
         self.tool = 'select'
+        self.marquee = None
         self.units = 'percent'
 
     def checkpoint(self):
@@ -282,6 +283,7 @@ class Editor(object):
         return target if abs(target - value) < threshold else value
 
     def press(self, x, y, toggle=False, threshold=.01):
+        self.marquee = None
         if self.tool != 'select':
             self.add(self.tool, [x, y, .001, .001])
             self.drag = ('draw', x, y, copy.deepcopy(self.doc['items']))
@@ -348,13 +350,16 @@ class Editor(object):
                 left, top = min(.999, left), min(.999, top)
             row['box'] = [left, top, max(.001, right - left), max(.001, bottom - top)]
         else:
+            self.marquee = [min(sx, x), min(sy, y), abs(x - sx), abs(y - sy)]
             self.selected = list(self.drag[4])
             for r in self.doc['items']:
                 bx, by, bw, bh = r['box']
                 if min(sx, x) <= bx and bx + bw <= max(sx, x) and min(sy, y) <= by and by + bh <= max(sy, y):
-                    self.selected.append(r['id'])
+                    if r['id'] not in self.selected:
+                        self.selected.append(r['id'])
 
     def release(self):
+        self.marquee = None
         if self.drag and self.drag[0] == 'draw':
             row = self.chosen()[0]
             x, y, w, h = row['box']
@@ -438,5 +443,8 @@ def svg(editor, vw, vh, reference=''):
         if selected and not item.get('locked'):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:
                 s.append('<rect x="%f" y="%f" width="6" height="6" fill="white" stroke="%s"/>' % (x + hx * bw - 3, y + hy * bh - 3, colour))
+    if editor.marquee:
+        x, y, bw, bh = editor.marquee
+        s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="#79bfff" fill-opacity=".15" stroke="white" stroke-dasharray="4 3"/>' % (x * w, y * h, bw * w, bh * h))
     s.append('</g></g></svg>')
     return ''.join(s).encode('utf-8'), (ox, oy, w, h)

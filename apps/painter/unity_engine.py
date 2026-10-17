@@ -83,6 +83,7 @@ class Engine:
         self.preview_height = max(0, min(10000, int(300 if height is None else height)))
         self.sidebar_width = max(200, min(10000, int(prefs.get('unity.sidebarWidth') or 380)))
         self.layout_height = max(140, min(1200, int(prefs.get('layout.canvasHeight') or 300)))
+        self.region_prompt_height = max(40, min(600, int(prefs.get('layout.regionPromptHeight') or 95)))
         self.region_list_height = max(0, min(600, int(prefs.get('layout.regionListHeight') or 0)))
         self.heights = {key: max(40, min(600, int(prefs.get(pref) or default)))
                        for (key, pref), default in zip(HEIGHT_KEYS.items(), (130, 64, 90))}
@@ -149,6 +150,7 @@ class Engine:
         doc['unity.sidebarWidth'] = self.sidebar_width
         doc['layout.canvasHeight'] = self.layout_height
         doc['layout.regionListHeight'] = self.region_list_height
+        doc['layout.regionPromptHeight'] = self.region_prompt_height
         self.prefs._doc = doc
         # Prefs.set owns the atomic write; force one changed key without losing
         # any unrelated desktop settings.
@@ -158,7 +160,8 @@ class Engine:
     def update(self, request):
         for key, attr, low, high in [('sidebarWidth', 'sidebar_width', 200, 10000),
                                      ('layoutHeight', 'layout_height', 140, 1200),
-                                     ('regionListHeight', 'region_list_height', 28, 600)]:
+                                     ('regionListHeight', 'region_list_height', 28, 600),
+                                     ('regionPromptHeight', 'region_prompt_height', 40, 600)]:
             if key in request:
                 value = request[key]
                 if type(value) is not int or not low <= value <= high:
@@ -441,6 +444,7 @@ class Engine:
                     settings=self.settings, revision=self.revision, heights=self.heights, multiple=self.multiple,
                     previewHeight=self.preview_height, sidebarWidth=self.sidebar_width,
                     layoutHeight=self.layout_height, regionListHeight=self.region_list_height,
+                    regionPromptHeight=self.region_prompt_height,
                     media=self.media(request), replacement=self.replacement,
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,

@@ -296,7 +296,7 @@ Item {
         ComboBox {
             model: node.spec.options
             currentIndex: node.spec.options.indexOf(node.spec.value)
-            displayText: currentText || "Unspecified"
+            displayText: currentText || (node.spec.title === "" ? "Mixed" : "Unspecified")
             onActivated: index => node.spec.edit(node.spec.options[index])
         }
     }
@@ -318,25 +318,56 @@ Item {
     }
     Component {
         id: textField
-        KineticFlickable {
-            id: textViewport
-            implicitHeight: 95
-            contentWidth: width
-            contentHeight: textEdit.implicitHeight
-            clip: true
-            ScrollBar.vertical: VScroll { }
-            TextArea {
-                id: textEdit
-                objectName: "layoutField_" + node.spec.title
+        Item {
+            id: textBox
+            readonly property bool resizablePrompt: node.spec.title === "Region prompt"
+            property int promptHeight: resizablePrompt ? Math.max(40, Math.min(600, Prefs.get("layout.regionPromptHeight") || 95)) : 95
+            implicitHeight: promptHeight + (resizablePrompt ? 10 : 0)
+            KineticFlickable {
+                id: textViewport
                 width: parent.width
-                text: node.spec.value || ""
-                wrapMode: TextEdit.Wrap
-                persistentSelection: true
-                onTextChanged: if (text !== node.spec.value) node.spec.edit(text)
+                height: textBox.promptHeight
+                contentWidth: width
+                contentHeight: textEdit.implicitHeight
+                clip: true
+                ScrollBar.vertical: VScroll { }
+                TextArea {
+                    id: textEdit
+                    objectName: "layoutField_" + node.spec.title
+                    width: parent.width
+                    text: node.spec.value || ""
+                    wrapMode: TextEdit.Wrap
+                    persistentSelection: true
+                    onTextChanged: if (text !== node.spec.value) node.spec.edit(text)
+                }
+                Spelling { target: textEdit; viewport: textViewport }
             }
-            Spelling { target: textEdit; viewport: textViewport }
+            Rectangle {
+                visible: textBox.resizablePrompt
+                y: textBox.promptHeight
+                width: parent.width
+                height: 10
+                color: promptGrip.pressed || promptGrip.containsMouse ? Theme.accent : "transparent"
+                Row { anchors.centerIn: parent; spacing: 3; Repeater { model: 3; Rectangle { width: 3; height: 1; color: Theme.dim } } }
+                MouseArea {
+                    id: promptGrip
+                    objectName: "regionPromptResizeHandle"
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeVerCursor
+                    preventStealing: true
+                    property real startY: 0
+                    property real startHeight: 0
+                    onPressed: mouse => { startY = mapToItem(null, mouse.x, mouse.y).y; startHeight = textBox.promptHeight }
+                    onPositionChanged: mouse => {
+                        if (pressed) textBox.promptHeight = Math.max(40, Math.min(600, Math.round(startHeight + mapToItem(null, mouse.x, mouse.y).y - startY)))
+                    }
+                    onReleased: Prefs.set("layout.regionPromptHeight", textBox.promptHeight)
+                }
+            }
         }
     }
+
     Component {
         id: entryField
         Item {

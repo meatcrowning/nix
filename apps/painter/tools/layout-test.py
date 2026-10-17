@@ -70,6 +70,24 @@ def core():
     assert abs(other.snap(.299, 0, .01) - .3) < 1e-8
     other.doc['snap'] = False
     assert other.snap(.299, 0, .01) == .299
+    selection = M.Editor(M.fresh())
+    selection.doc['snap'] = False
+    selection.add('object', [.1, .1, .15, .15])
+    selection.add('character', [.4, .2, .15, .15])
+    selection.selected = []
+    selection.press(.01, .01)
+    selection.motion(.7, .5)
+    assert selection.marquee and len(selection.selected) == 2
+    assert b'stroke-dasharray="4 3"' in M.svg(selection, 500, 500)[0]
+    selection.release()
+    assert selection.marquee is None
+    before = copy.deepcopy(selection.doc['items'])
+    selection.press(.18, .18)
+    selection.motion(.9, .9)
+    selection.release()
+    offsets = [(b['box'][0] - a['box'][0], b['box'][1] - a['box'][1]) for a, b in zip(before, selection.doc['items'])]
+    assert all(abs(a-b) < 1e-8 for a,b in zip(offsets[0], offsets[1]))
+    assert max(r['box'][0]+r['box'][2] for r in selection.doc['items']) <= 1
     draw = M.Editor(M.fresh())
     draw.tool = 'character'
     draw.press(.2, .3); draw.motion(.6, .8); draw.release()
@@ -159,7 +177,13 @@ def qt():
     assert all(abs(x-y) < 1e-8 for x,y in zip(accepted[-1]['items'][0]['box'], [0,.2,.6,.5]))
     M.valid(accepted[-1])
     editor.model.undo(); editor.refresh()
-    editor.model.add('text', [.1,.1,.6,.3]); editor.refresh()
+    editor.model.add('object', [.1,.1,.6,.3]); editor.refresh()
+    editor.tool.edit('text')
+    assert editor.model.chosen()[0]['label'] == 'text'
+    editor.model.undo(); editor.refresh()
+    assert editor.model.chosen()[0]['label'] == 'object'
+    editor.tool.edit('text')
+    assert 'item.label' not in editor.fields
     editor.fields['item.caption'].edit('Large headline')
     editor.fields['item.text'].edit('Hello\n世界')
     editor.fields['type.family'].edit('serif')

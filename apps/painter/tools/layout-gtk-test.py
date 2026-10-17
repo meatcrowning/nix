@@ -114,9 +114,24 @@ def run(parent):
     assert e.buttons['Delete'].get_parent() is toolbar
     row = e.model.doc['items'][0]
     assert row['label'] == 'text' and abs(row['box'][2] - .7) < .02
+    u.set(e.tool, 'character')
+    assert e.model.chosen()[0]['label'] == 'character'
+    u.set(e.tool, 'text')
+    assert e.model.chosen()[0]['label'] == 'text'
     u.set(e.fields['summary.meta'], 'poster, illustration')
     u.set(e.fields['summary.palette'], '#ffffff, #123456')
     u.set(e.fields['item.caption'], 'Large heading')
+    prompt = e.fields['item.caption'][1]
+    for signal, kind, y in [('button-press-event', Gdk.EventType.BUTTON_PRESS, 100),
+                            ('motion-notify-event', Gdk.EventType.MOTION_NOTIFY, 180),
+                            ('button-release-event', Gdk.EventType.BUTTON_RELEASE, 180)]:
+        event = Gdk.Event.new(kind)
+        if kind == Gdk.EventType.MOTION_NOTIFY: event.motion.y_root = y
+        else:
+            event.button.button = 1
+            event.button.y_root = y
+        prompt.resize_handle.emit(signal, event)
+    assert parent.region_prompt_height > 95
     u.set(e.fields['item.text'], 'HELLO\n世界')
     u.set(e.fields['type.family'], 'serif')
     u.set(e.fields['type.color'], '#123456')

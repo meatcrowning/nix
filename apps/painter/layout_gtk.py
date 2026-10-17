@@ -145,9 +145,11 @@ class Toolkit(object):
             scroll = Gtk.ScrolledWindow()
             scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             scroll.set_shadow_type(Gtk.ShadowType.IN)
-            scroll.set_size_request(-1, 95)
+            scroll.set_size_request(-1, self.window.region_prompt_height if title == 'Region prompt' else 95)
             scroll.add(control)
             box.pack_start(scroll, False, False, 0)
+            if title == 'Region prompt':
+                control.resize_handle = self.resize_handle(box, scroll, 40, 600, self.window.region_prompt_resized, 'Drag to resize the region prompt')
         else:
             control = Gtk.Entry()
             control.connect('changed', lambda *_: callback())
@@ -209,7 +211,8 @@ class Toolkit(object):
         kind, control = field[:2]
         if kind == 'check': control.set_active(bool(value))
         elif kind == 'number': control.set_value(float(value or 0))
-        elif kind == 'combo': control.set_active_id(value or '_empty')
+        elif kind == 'combo':
+            if not control.set_active_id(value or '_empty'): control.set_active(-1)
         elif kind == 'text': control.get_buffer().set_text(value or '')
         else: control.set_text(value or '')
 

@@ -19,7 +19,8 @@ class LayoutUI(object):
         self.buttons = {}
         tools = u.toolbar(root)
         self.add_button = u.button(tools, 'Add', self.arm_add)
-        self.tool = u.field(tools, '', 'combo', ['object', 'character', 'text'], lambda: None)
+        self.new_kind = 'object'
+        self.tool = u.field(tools, '', 'combo', ['object', 'character', 'text'], self.type_changed)
         u.set(self.tool, 'object')
         self.buttons['Clear all'] = u.button(tools, 'Clear all', self.clear)
         for title, fn in [('Undo', lambda: self.model.undo()), ('Redo', lambda: self.model.undo(True))]:
@@ -32,8 +33,8 @@ class LayoutUI(object):
         self.side = u.column(root)
         self.list = u.region_list(self.side, self.selection_changed)
         tabs = u.tabs(self.side)
-        scene = u.tab(tabs, 'Scene')
         region = u.tab(tabs, 'Region')
+        scene = u.tab(tabs, 'Scene')
         canvas = u.tab(tabs, 'Canvas')
         menu = u.menu(canvas, 'Edit')
         for title, command in [('Group', lambda: self.model.group()), ('Ungroup', lambda: self.model.group(True)),
@@ -47,14 +48,13 @@ class LayoutUI(object):
         self.add(scene, 'summary.meta', 'Medium / genre tags (comma-separated)')
         self.add(scene, 'summary.palette', 'Scene palette', 'palette')
         u.label(scene, 'Layout is experimental placement guidance. The preview is a composition sketch, not a generated result.')
-        self.add(region, 'item.label', 'Region type', 'combo', M.KINDS)
         self.add(region, 'item.caption', 'Region prompt', 'text')
+        self.add(region, 'item.text', 'Exact wording', 'text')
         self.add(region, 'item.tags', 'Region tags (comma-separated)')
         self.add(region, 'item.palette', 'Region palette', 'palette')
         self.units = u.field(region, 'Coordinates', 'combo', ['percent', 'pixels'], self.units_changed)
         for key, title in [('x', 'Left'), ('y', 'Top'), ('w', 'Width'), ('h', 'Height')]:
             self.fields['box.' + key] = u.field(region, title, 'number', (0, 16384, .1), lambda k=key: self.geometry_changed(k))
-        self.add(region, 'item.text', 'Exact wording (line breaks preserved)', 'text')
         for key, title, choices in M.TYPE_FIELDS:
             self.add(region, 'type.' + key, title, 'combo' if choices else 'palette' if key == 'color' else 'entry', choices)
         u.label(region, 'Typography and surfaces are descriptive instructions. Installed fonts are not sent to MOSS.')
@@ -95,8 +95,27 @@ class LayoutUI(object):
             for row in rows:
                 row['locked'] = locked
 
+    def type_changed(self):
+        if self.syncing:
+            return
+        kind = self.ui.get(self.tool)
+        if not kind:
+            return
+        self.new_kind = kind
+        if self.model.tool != 'select':
+            self.model.tool = kind
+        if self.model.chosen():
+            def change():
+                self.model.checkpoint()
+                for row in self.model.chosen():
+                    row['label'] = kind
+            self.command(change)
+
     def arm_add(self):
-        self.model.tool = self.ui.get(self.tool) or 'object'
+        self.new_kind = self.ui.get(self.tool) or self.new_kind
+        self.model.selected = []
+        self.model.tool = self.new_kind
+        self.refresh()
         self.ui.drawing_cursor(self.canvas, True)
 
     def clear(self):
@@ -212,6 +231,9 @@ class LayoutUI(object):
 
     def refresh(self):
         self.syncing = True
+        chosen = self.model.chosen()
+        kinds = set(row['label'] for row in chosen)
+        self.ui.set(self.tool, next(iter(kinds)) if len(kinds) == 1 else self.new_kind if not chosen else '')
         for key, field in self.fields.items():
             if key.startswith('box.'):
                 index = ['x', 'y', 'w', 'h'].index(key[4:])

@@ -9,6 +9,7 @@ from __future__ import unicode_literals
 import base64
 import json
 import os
+import random
 import sys
 import threading
 try:
@@ -72,6 +73,7 @@ class Window(Gtk.Window):
         self.heights_loaded = False
         self.layout_height = 300
         self.region_list_height = 0
+        self.region_prompt_height = 95
         self.frame_tick = ''
         self.rebuilding_gallery = False
         self.walk_pending = None
@@ -216,9 +218,23 @@ class Window(Gtk.Window):
         prompt_tail.pack_start(self.grid, False, False, 0)
         prompt_tail.reorder_child(self.grid, 1)
         self.grid_row = 0
-        self.combo('seedPolicy', 'Seed', ['Random', 'Fixed', 'Reuse last'])
+        seed_actions = Gtk.Box(spacing=4)
+        randomize = Gtk.Button()
+        randomize.set_image(Gtk.Image.new_from_icon_name('media-playlist-shuffle', Gtk.IconSize.MENU))
+        randomize.set_tooltip_text('Randomize seed for each generation')
+        randomize.connect('clicked', self.randomize_seed)
+        fixed = Gtk.Button(label='New fixed seed')
+        fixed.connect('clicked', self.new_fixed_seed)
+        policy = Gtk.ComboBoxText()
+        for value in ('Fixed', 'Random'): policy.append(value, value)
+        policy.connect('changed', self.seed_policy_changed)
+        self.controls['seedPolicy'] = policy
+        for widget in (randomize, fixed, policy): seed_actions.pack_start(widget, False, False, 0)
+        self.rows['seedPolicy'] = (seed_actions,)
+        self.grid.attach(seed_actions, 0, self.grid_row, 2, 1)
+        self.grid_row += 1
         self.entry('seed', 'Seed number')
-        aspect = Gtk.Box(spacing=6)
+        aspect = Gtk.Box(spacing=2)
         for key in ('aspectW', 'aspectH'):
             if key == 'aspectH':
                 aspect.pack_start(label(':'), False, False, 0)
@@ -227,12 +243,22 @@ class Window(Gtk.Window):
             control.connect('value-changed', self.changed)
             self.controls[key] = control
             aspect.pack_start(control, True, True, 0)
-        self.grid.attach(label('Aspect'), 0, self.grid_row, 1, 1)
-        self.aspect_label = self.grid.get_child_at(0, self.grid_row)
-        self.grid.attach(aspect, 1, self.grid_row, 1, 1)
+        dimensions_row = Gtk.Box(spacing=4)
+        self.aspect_label = label('Aspect')
+        dimensions_row.pack_start(self.aspect_label, False, False, 0)
+        dimensions_row.pack_start(aspect, True, True, 0)
+        self.grid.attach(dimensions_row, 0, self.grid_row, 2, 1)
         self.grid_row += 1
         self.rows['aspectW'] = self.rows['aspectH'] = (self.aspect_label, aspect)
-        self.number('megapixels', 'Megapixels', .1, 8, .1, 1)
+        self.number('megapixels', 'MP', .1, 8, .1, 1)
+        mp_label, mp = self.rows['megapixels']
+        mp_label.set_tooltip_text('Megapixels')
+        self.grid.remove(mp_label)
+        self.grid.remove(mp)
+        dimensions_row.pack_start(mp_label, False, False, 0)
+        dimensions_row.pack_start(mp, True, True, 0)
+        mp.set_width_chars(5)
+        self.grid_row -= 1
         self.dimensions = label('')
         self.grid.attach(self.dimensions, 0, self.grid_row, 2, 1)
         self.grid_row += 1
@@ -473,6 +499,28 @@ class Window(Gtk.Window):
             self.send('settings', sidebarWidth=max(200, self.sidebar_split.get_position()))
         return False
 
+    def region_prompt_resized(self, height):
+        self.region_prompt_height = height
+        self.send('settings', regionPromptHeight=height)
+
+    def new_fixed_seed(self, *_):
+        self.controls['seed'].set_text(str(random.SystemRandom().getrandbits(53)))
+        self.controls['seedPolicy'].set_active_id('Fixed')
+        self.changed()
+
+    def seed_policy_changed(self, *_):
+        if self.loading:
+            return
+        if self.controls['seedPolicy'].get_active_id() == 'Fixed' and self.controls['seed'].get_text().strip() in ('', '-1'):
+            self.new_fixed_seed()
+        else:
+            self.changed()
+
+    def randomize_seed(self, *_):
+        self.controls['seed'].set_text('-1')
+        self.controls['seedPolicy'].set_active_id('Random')
+        self.changed()
+
     def region_list_resized(self, height):
         self.region_list_height = height
         self.send('settings', regionListHeight=height)
@@ -557,6 +605,7 @@ class Window(Gtk.Window):
             self.sidebar_split.set_position(state['sidebarWidth'])
             self.layout_height = state['layoutHeight']
             self.region_list_height = state['regionListHeight']
+            self.region_prompt_height = state['regionPromptHeight']
             for key, height in state['heights'].items():
                 self.text_boxes[key].set_height(height)
             self.heights_loaded = True
@@ -610,10 +659,11 @@ class Window(Gtk.Window):
         self.layout_doc = values.get('moss_layout') or {}
         for key, control in self.controls.items():
             if key == 'seedPolicy':
-                control.set_active_id('Reuse last' if values.get('reuseSeed') else
-                                      'Random' if values.get('randomSeed') else 'Fixed')
+                control.set_active_id('Random' if values.get('randomSeed') else 'Fixed')
                 continue
             value = values.get('ms', {}).get(key[3:]) if key.startswith('ms.') else values.get(key)
+            if key == 'seed' and values.get('reuseSeed') and self.state.get('lastSeed', -1) >= 0:
+                value = self.state['lastSeed']
             if value is None:
                 continue
             if isinstance(control, Gtk.TextView):

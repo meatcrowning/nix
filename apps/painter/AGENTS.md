@@ -80,7 +80,8 @@ never derive the saved ratio back from rounded pixels. Prompt bottom handles
 share `prompt.posH`/`prompt.negH` with QML; GTK's system editor uses
 `unity.systemH` with the Qt system editor. Layout canvas height uses
 `layout.canvasHeight`, and its region list uses `layout.regionListHeight` (zero
-means fit the rows). Unity's sidebar width uses `unity.sidebarWidth`. Save
+means fit the rows). Region prompt height uses `layout.regionPromptHeight`.
+Unity's sidebar width uses `unity.sidebarWidth`. Save
 handle sizes on release. Browse and View share one image
 widget and selection. Still zoom renders only the visible region; transient
 sampler/video frames cross the socket as bounded images. Clip decoding stays
@@ -174,8 +175,10 @@ Keep reference underlays, groups, locks and guides out of model-facing JSON.
 Layouts sit beneath the prompt boxes, with the inspector always below the canvas.
 GTK embeds `layout_gtk.py`; Qt Quick renders the `layout_qt.py` descriptor tree
 through `LayoutNode.qml`.
-Add arms one box-drawing gesture, then returns to selection. Draft edits persist
-immediately, including incomplete regions; generation validates required captions.
+Add arms one box-drawing gesture, then returns to selection. The toolbar type
+selector changes selected regions, or the next added type when none are selected.
+Drag on empty canvas to box-select; moving a selection keeps its spacing.
+Draft edits persist immediately, including incomplete regions; generation validates required captions.
 Verify geometry/compiler and Qt controls with `tools/layout-test.py --qt`
 offscreen; `tools/unity-test.sh` includes the native GTK layout checks.
 

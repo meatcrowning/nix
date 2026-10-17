@@ -130,6 +130,10 @@ def test():
             window.controls['megapixels'].set_value(.8)
             window.controls['positive'].get_buffer().set_text('a native GTK prompt')
             window.controls['count'].set_value(2)
+            window.randomize_seed()
+            assert window.values()['randomSeed']
+            window.new_fixed_seed()
+            assert not window.values()['randomSeed'] and 0 <= window.values()['seed'] < 2**53
             window.controls['seedPolicy'].set_active_id('Fixed')
             window.controls['seed'].set_text('1234')
             window.generate()
@@ -324,10 +328,11 @@ if not failed[0]:
             assert window.values()['positive'] == 'last edit before closing'
             assert window.browse_pane.get_position() == 360, (window.browse_pane.get_position(), window.state['previewHeight'])
             assert window.state['previewHeight'] == 360
-            assert window.sidebar_split.get_position() == 440
+            assert window.sidebar_split.get_position() == 440, (window.sidebar_split.get_position(), window.placement_grid.get_preferred_width(), [(key, window.controls[key].get_preferred_width()) for key in ('seed', 'aspectW', 'aspectH', 'megapixels')])
             assert window.state['sidebarWidth'] == 440
             assert window.layout_height == 380
             assert window.region_list_height >= 80
+            assert window.region_prompt_height > 95
             print('PASS: prompt heights and text survive closing and reopening')
         except Exception:
             traceback.print_exc()
