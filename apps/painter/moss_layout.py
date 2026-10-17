@@ -399,9 +399,13 @@ def preview_lines(text, width, font_size):
             for line in (textwrap.wrap(paragraph, columns) or [''])]
 
 
-def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0)):
+def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None):
     """Portable rough composition preview; not a prediction of generated pixels."""
     d = editor.doc
+    font = font or dict(family='sans-serif', size=11, height=13, weight=400, style='normal')
+    fs, leading = font['size'], font['height']
+    font_attrs = 'font-family="%s" font-size="%f" font-weight="%s" font-style="%s"' % (
+        escape(font['family'], {'"': '&quot;'}), fs, font['weight'], font['style'])
     ox, oy, w, h = view_rect(d, vw, vh, zoom, pan)
     s = ['<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="%d" height="%d">' % (vw, vh),
          '<g transform="translate(%f,%f)"><rect width="%f" height="%f" fill="none" stroke="#bbbbbb"/>' % (ox, oy, w, h)]
@@ -427,7 +431,7 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0)):
         x, y, bw, bh = x * w, y * h, bw * w, bh * h
         selected = item['id'] in editor.selected
         colour = '#ffb454' if selected else '#79bfff'
-        s.append('<g opacity="%s"><rect x="%f" y="%f" width="%f" height="%f" fill="%s" fill-opacity=".07" stroke="%s" stroke-width="%s"/>' % ('1' if item.get('enabled', True) else '.6', x, y, bw, bh, colour, colour, 2 if selected else 1))
+        s.append('<g><rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="%s" stroke-width="%s" stroke-opacity="%s"/>' % (x, y, bw, bh, colour, 2 if selected else 1, '1' if item.get('enabled', True) else '.6'))
         title = '%d %s' % (n + 1, item['label'])
         label_offset = 14 if item.get('locked') else 3
         if item.get('locked'):
@@ -435,29 +439,24 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0)):
         caption = ' '.join(item.get('caption', '').split())
         if caption:
             title += ' — ' + caption
-        labels = preview_lines(title, bw - label_offset - 3, 11)
+        labels = preview_lines(title, bw - label_offset - 3, fs)
         s.append('<defs><clipPath id="label%d"><rect x="%f" y="%f" width="%f" height="%f"/></clipPath></defs>' % (n, x, y, bw, bh))
         for j, line in enumerate(labels):
-            s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="white" font-size="11">%s</text>' % (n, x + label_offset, y + 13 * (j + 1), escape(line)))
+            s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="white" %s>%s</text>' % (n, x + label_offset, y + fs + 2 + leading * j, font_attrs, escape(line)))
         if item['label'] == 'text':
             style = item.get('typography', {})
-            label_height = 13 * len(labels) + 5
-            fs = 32
+            label_height = leading * len(labels) + 5
             lines = preview_lines(item.get('text', ''), bw - 6, fs)
-            while fs > 4 and len(lines) * fs * 1.2 > bh - label_height:
-                fs -= 1
-                lines = preview_lines(item.get('text', ''), bw - 6, fs)
-            family = {'serif': 'serif', 'monospace': 'monospace', 'handwritten': 'cursive'}.get(style.get('family'), 'sans-serif')
             align = style.get('align', 'left')
             tx = x + bw / 2 if align == 'center' else x + bw - 3 if align == 'right' else x + 3
             for j, line in enumerate(lines):
-                s.append('<text clip-path="url(#label%d)" stroke="black" stroke-width=".5" x="%f" y="%f" fill="white" font-family="%s" font-weight="%s" font-size="%f" text-anchor="%s">%s</text>' % (n, tx, y + label_height + fs * (j + 1) * 1.2, family, 'bold' if style.get('weight') in ('bold', 'heavy') else 'normal', fs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
+                s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="white" %s text-anchor="%s">%s</text>' % (n, tx, y + label_height + fs + leading * j, font_attrs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
         s.append('</g>')
         if selected and not item.get('locked'):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:
                 s.append('<rect x="%f" y="%f" width="6" height="6" fill="white" stroke="%s"/>' % (x + hx * bw - 3, y + hy * bh - 3, colour))
     if editor.marquee:
         x, y, bw, bh = editor.marquee
-        s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="#79bfff" fill-opacity=".15" stroke="white" stroke-dasharray="4 3"/>' % (x * w, y * h, bw * w, bh * h))
+        s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="white" stroke-dasharray="4 3"/>' % (x * w, y * h, bw * w, bh * h))
     s.append('</g></g></svg>')
     return ''.join(s).encode('utf-8'), (ox, oy, w, h)

@@ -2,7 +2,7 @@
 """Native Quantal GTK adapter for the shared MOSS composition editor."""
 from __future__ import unicode_literals
 import base64
-from gi.repository import Gtk, Gdk, GdkPixbuf
+from gi.repository import Gtk, Gdk, GdkPixbuf, Pango
 from layout_ui import LayoutUI
 
 
@@ -333,8 +333,18 @@ class Toolkit(object):
         def draw(*_):
             w, h = events.get_allocated_width(), events.get_allocated_height()
             if w > 10 and h > 10:
+                prompt = self.window.controls['positive']
+                context = prompt.get_pango_context()
+                desc = context.get_font_description()
+                dpi = prompt.get_settings().get_property('gtk-xft-dpi') / 1024.0
+                size = desc.get_size() / float(Pango.SCALE)
+                if not desc.get_size_is_absolute(): size *= (dpi if dpi > 0 else 96) / 72.0
+                metrics = context.get_metrics(desc, context.get_language())
+                font = dict(family=desc.get_family(), size=size, weight=int(desc.get_weight()),
+                            style='normal' if desc.get_style() == Pango.Style.NORMAL else 'italic',
+                            height=(metrics.get_ascent() + metrics.get_descent()) / float(Pango.SCALE))
                 loader = GdkPixbuf.PixbufLoader.new_with_type('svg')
-                loader.write(editor.render(w, h))
+                loader.write(editor.render(w, h, font))
                 loader.close()
                 image.set_from_pixbuf(loader.get_pixbuf())
         events.connect('size-allocate', draw)

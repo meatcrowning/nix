@@ -21,10 +21,17 @@ def run(parent):
     assert e.add_button.get_tooltip_text() == 'Add region'
     assert not e.list.region_box.get_visible()
     u = e.ui
+    assert e.list.get_ancestor(Gtk.Notebook) is e.fields['item.caption'][1].get_ancestor(Gtk.Notebook)
     saved_values, saved_settings = parent.values(), parent.state['settings']
     saved_doc, saved_loading = parent.layout_doc, parent.loading
     parent.loading = True
+    mp_digits = parent.controls['megapixels'].get_digits()
     try:
+        mp = parent.controls['megapixels']
+        mp.set_digits(6)
+        for value, display in [(1.0, '1'), (1.6, '1.6'), (.998656, '0.998656')]:
+            mp.set_value(value)
+            assert mp.get_text() == display, mp.get_text()
         parent.state['settings'] = dict(saved_settings, width=1328, height=752)
         for key, value in [('aspectW', 16), ('aspectH', 9), ('megapixels', 1.0)]:
             parent.controls[key].set_value(value)
@@ -35,6 +42,7 @@ def run(parent):
         values = parent.values()
         assert (values['aspectW'], values['aspectH'], values['megapixels']) == (8, 5, 1.6)
     finally:
+        parent.controls['megapixels'].set_digits(mp_digits)
         parent.state['settings'], parent.layout_doc = saved_settings, saved_doc
         for key in ('aspectW', 'aspectH', 'megapixels'):
             parent.controls[key].set_value(saved_values[key])

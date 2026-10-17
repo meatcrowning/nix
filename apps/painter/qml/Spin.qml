@@ -10,6 +10,7 @@ Rectangle {
     property real to: 1000000
     property real step: 1
     property int decimals: 0
+    property bool trimZeros: false
     property int textHorizontalAlignment: TextInput.AlignLeft
     property bool editing: input.activeFocus
 
@@ -23,7 +24,10 @@ Rectangle {
     border.width: Theme.ctrlBorder
 
     function clamp(v) { return Math.max(from, Math.min(to, v)) }
-    function fmt(v) { return decimals > 0 ? v.toFixed(decimals) : String(Math.round(v)) }
+    function fmt(v) {
+        var text = decimals > 0 ? v.toFixed(decimals) : String(Math.round(v))
+        return trimZeros && decimals > 0 ? text.replace(/\.?0+$/, "") : text
+    }
     function showValue(v) { input.text = fmt(v) }
     // NEVER assign `value` here. It is bound to the model (`root.gen.steps` and
     // friends), and writing a bound property in QML DESTROYS the binding — so

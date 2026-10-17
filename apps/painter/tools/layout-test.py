@@ -163,10 +163,16 @@ def core():
     row['typography']['color'] = '#ff0000'
     before = copy.deepcopy(preview.doc)
     rendered = ET.fromstring(M.svg(preview, 700, 700)[0])
-    wording = [t for t in rendered.findall('.//s:text', ns) if 'font-family' in t.attrib]
+    wording = [t for t in rendered.findall('.//s:text', ns) if 'text-anchor' in t.attrib]
     assert len(wording) > 2
     assert all(t.attrib['fill'] == 'white' and 'clip-path' in t.attrib for t in wording)
     assert preview.doc == before, 'visual wrapping must not change generation wording or colours'
+    rendered = ET.fromstring(M.svg(preview, 700, 700, font=dict(
+        family='Ubuntu', size=14, height=18, weight=400, style='normal'))[0])
+    assert all(t.attrib['font-family'] == 'Ubuntu' and float(t.attrib['font-size']) == 14
+               and t.attrib['font-weight'] == '400' and 'stroke' not in t.attrib
+               for t in rendered.findall('.//s:text', ns))
+    assert not any('fill-opacity' in r.attrib for r in rendered.findall('.//s:rect', ns))
     print('PASS: layout compiler, rescaling, geometry, locks, groups, undo and both MOSS graphs')
 
 

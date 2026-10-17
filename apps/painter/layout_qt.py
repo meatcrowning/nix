@@ -1,7 +1,7 @@
 """Qt Quick adapter for the shared inline layout editor; no secondary window."""
 import base64
 from PySide6.QtCore import QObject, Property, Signal, Slot, Qt, QBuffer, QIODevice, QByteArray, QUrl
-from PySide6.QtGui import QColor, QGuiApplication, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QFont, QFontInfo, QFontMetricsF
 from PySide6.QtQuick import QQuickPaintedItem
 from PySide6.QtQml import qmlRegisterType
 from PySide6.QtSvg import QSvgRenderer
@@ -166,10 +166,12 @@ class Bridge(QObject):
 
 class LayoutCanvas(QQuickPaintedItem):
     bridgeChanged = Signal()
+    previewFontChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bridge = None
+        self._preview_font = QFont()
         self.setAcceptedMouseButtons(Qt.LeftButton | Qt.MiddleButton)
         self.setAntialiasing(True)
 
@@ -184,9 +186,20 @@ class LayoutCanvas(QQuickPaintedItem):
 
     bridge = Property(QObject, lambda s: s._bridge, set_bridge, notify=bridgeChanged)
 
+    def set_preview_font(self, font):
+        if self._preview_font == font: return
+        self._preview_font = QFont(font)
+        self.previewFontChanged.emit()
+        self.update()
+
+    previewFont = Property(QFont, lambda s: s._preview_font, set_preview_font, notify=previewFontChanged)
+
     def paint(self, painter):
         if self._bridge:
-            QSvgRenderer(self._bridge.editor.render(int(self.width()), int(self.height()))).render(painter)
+            f = self._preview_font
+            font = dict(family=f.family(), size=QFontInfo(f).pixelSize(), weight=int(f.weight()),
+                        style='italic' if f.italic() else 'normal', height=QFontMetricsF(f).height())
+            QSvgRenderer(self._bridge.editor.render(int(self.width()), int(self.height()), font)).render(painter)
 
     def mousePressEvent(self, event):
         self.forceActiveFocus()

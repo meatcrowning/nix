@@ -173,7 +173,7 @@ Panel {
             PixelText { text: ":"; anchors.verticalCenter: parent.verticalCenter }
             Spin { width: 48; value: root.gen.aspectH; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectH", Math.round(v)); root.recomputeDims() } }
             PixelText { text: "MP"; anchors.verticalCenter: parent.verticalCenter }
-            Spin { width: 95; value: root.gen.megapixels; from: .05; to: 16; step: .1; decimals: 6; onEdited: v => { root.set("megapixels", v); root.recomputeDims() } }
+            Spin { width: 95; value: root.gen.megapixels; from: .05; to: 16; step: .1; decimals: 6; trimZeros: true; onEdited: v => { root.set("megapixels", v); root.recomputeDims() } }
         }
     }
     Loader {

@@ -268,6 +268,10 @@ class Window(Gtk.Window):
         self.rows['aspectW'] = self.rows['aspectH'] = (self.aspect_label, aspect)
         self.number('megapixels', 'MP', .1, 8, .1, 1)
         mp_label, mp = self.rows['megapixels']
+        def format_mp(control):
+            control.set_text(('%.*f' % (int(control.get_digits()), control.get_value())).rstrip('0').rstrip('.'))
+            return True
+        mp.connect('output', format_mp)
         mp_label.set_tooltip_text('Megapixels')
         self.grid.remove(mp_label)
         self.grid.remove(mp)

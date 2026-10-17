@@ -240,6 +240,10 @@ Item {
                 width: parent.width
                 height: canvasBox.canvasHeight
                 bridge: node.bridge
+                previewFont: (typeof DeskStyle !== "undefined" && DeskStyle
+                              && typeof DeskStyle.editorFontForScale === "function")
+                             ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)
+                             : Theme.editorFontForScale(Screen.devicePixelRatio)
                 HoverHandler { cursorShape: node.bridge.toolkitObject.drawing ? Qt.CrossCursor : Qt.ArrowCursor }
             }
             Rectangle {

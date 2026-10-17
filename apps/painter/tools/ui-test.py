@@ -5295,6 +5295,9 @@ def test_moss(win, ctl, tmp):
               not any((ctl.isEdit, ctl.isVideo, ctl.encoderControls, ctl.referenceImages,
                        ctl.supportsPatches, ctl.supportsLoras)))
         editor = find(win.contentItem(), "PromptEditor")
+        mp = next(item for item in walk(editor) if item.property('trimZeros') is True)
+        check(model + ' MP trims padding without losing precision',
+              mp.fmt(1.0) == '1' and mp.fmt(1.6) == '1.6' and mp.fmt(.998656) == '0.998656')
         positive_box = find_all(editor, "PromptBox")[0]
         input_box = find(positive_box, "QQuickTextEdit")
         APP.set('positive', 'alpha omega')

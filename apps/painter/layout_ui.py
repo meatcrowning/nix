@@ -41,9 +41,9 @@ class LayoutUI(object):
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
         self.canvas = u.canvas(root, self)
         self.side = u.column(root)
-        self.list = u.region_list(self.side, self.selection_changed)
         tabs = u.tabs(self.side)
         region = u.tab(tabs, 'Region')
+        self.list = u.region_list(region, self.selection_changed)
         scene = u.tab(tabs, 'Scene')
         canvas = u.tab(tabs, 'Canvas')
         menu = u.menu(canvas, 'Edit')
@@ -294,9 +294,9 @@ class LayoutUI(object):
         self.ui.set_label(self.reference_label, path or 'No reference underlay')
         self.ui.redraw(self.canvas)
 
-    def render(self, w, h):
+    def render(self, w, h, font=None):
         self.viewport = (max(100, w), max(100, h))
-        data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan)
+        data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan, font)
         return data
 
     def zoom_at(self, x, y, steps):
