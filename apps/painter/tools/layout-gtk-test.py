@@ -17,6 +17,8 @@ def run(parent):
     assert [w for w in Gtk.Window.list_toplevels() if w.get_visible()] == before_windows
     assert e.canvas.get_toplevel() is parent
     assert e.side.get_visible()
+    assert e.add_button.get_image() is not None
+    assert e.add_button.get_tooltip_text() == 'Add region'
     assert not e.list.region_scroll.get_visible()
     u = e.ui
     from spelling_gtk import Spelling, text

@@ -66,7 +66,20 @@ Item {
             }
         }
     }
-    Component { id: buttonComponent; Button { objectName: node.spec.title === "Add" ? "layoutAdd" : ""; text: node.spec.title; onClicked: node.spec.activate() } }
+    Component {
+        id: buttonComponent
+        Button {
+            readonly property bool adding: node.spec.title === "Add"
+            objectName: adding ? "layoutAdd" : ""
+            text: node.spec.title
+            icon.name: adding ? "list-add" : ""
+            display: adding ? AbstractButton.IconOnly : AbstractButton.TextOnly
+            Accessible.name: adding ? "Add region" : text
+            ToolTip.visible: hovered && adding
+            ToolTip.text: "Add region"
+            onClicked: node.spec.activate()
+        }
+    }
     Component { id: labelComponent; Label { text: node.spec.title; wrapMode: Text.Wrap; visible: text.length > 0 } }
     Component {
         id: menuComponent

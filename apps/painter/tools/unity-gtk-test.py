@@ -78,6 +78,16 @@ def test():
             assert notifications == ['Generation completed'], notifications
             assert not window.info.get_visible()
             assert len(window.state['models']) == 2
+            assert window.selectors.get_orientation() == Gtk.Orientation.HORIZONTAL
+            assert window.selector_columns[0].get_allocation().y == window.selector_columns[1].get_allocation().y
+            narrow = Gdk.Rectangle()
+            narrow.width = 300
+            window.arrange_selectors(window.selectors, narrow)
+            assert window.selectors.get_orientation() == Gtk.Orientation.VERTICAL
+            window.arrange_selectors(window.selectors, window.selectors.get_allocation())
+            selected_model = next(m for m in window.state['models'] if m['name'] == window.state['model'])
+            assert window.model_info.get_text() == (selected_model.get('problem') or '')
+            assert window.model_info.get_visible() == bool(selected_model.get('problem'))
             window.sidebar_split.set_position(440)
             window.sidebar_split.emit('accept-position')
             window.browse_pane.set_position(360)

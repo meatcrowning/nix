@@ -30,7 +30,6 @@ class LayoutUI(object):
                                ('Group', lambda: self.model.group()), ('Ungroup', lambda: self.model.group(True)),
                                ('Copy', self.copy), ('Paste', self.paste)]:
             self.buttons[title] = u.menu_item(menu, title, lambda fn=command: self.command(fn))
-        self.instructions = u.label(root, 'Click Add, then drag on the layout to draw a region.')
         self.canvas = u.canvas(root, self)
         self.side = u.column(root)
         self.list = u.region_list(self.side, self.selection_changed)
@@ -82,13 +81,11 @@ class LayoutUI(object):
 
     def arm_add(self):
         self.model.tool = self.ui.get(self.tool) or 'object'
-        self.ui.set_label(self.instructions, 'Drag on the layout to draw a %s. Drawing returns to selection afterward.' % self.model.tool)
         self.ui.drawing_cursor(self.canvas, True)
 
     def clear(self):
         self.command(self.model.clear)
         self.ui.drawing_cursor(self.canvas, False)
-        self.ui.set_label(self.instructions, 'Click Add, then drag on the layout to draw a region.')
 
     def publish(self):
         if not self.model.drag and self.model.doc != self.last_doc:
@@ -261,7 +258,6 @@ class LayoutUI(object):
             self.model.motion(x, y, 7 / min(w, h))
             self.model.release()
             self.ui.drawing_cursor(self.canvas, False)
-            self.ui.set_label(self.instructions, 'Click Add to draw another region. Select a region to move or resize it.')
         if action == 'move':
             self.paint()
         else:

@@ -63,7 +63,11 @@ class Toolkit(object):
         label.set_text(text)
 
     def button(self, parent, title, callback):
-        button = Gtk.Button(label=title)
+        button = Gtk.Button(label=title if title != 'Add' else None)
+        if title == 'Add':
+            button.set_image(Gtk.Image.new_from_stock(Gtk.STOCK_ADD, Gtk.IconSize.BUTTON))
+            button.set_tooltip_text('Add region')
+            button.get_accessible().set_name('Add region')
         button.connect('clicked', lambda *_: callback())
         parent.pack_start(button, False, False, 0)
         return button

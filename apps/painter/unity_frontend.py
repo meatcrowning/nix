@@ -24,7 +24,7 @@ if not os.path.exists('/usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules/im-ibus
     os.environ.setdefault('GTK_IM_MODULE', 'gtk-im-context-simple')
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, GObject, Gio
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, GObject, Gio, Pango
 from unity_widgets import ResizableText, ImageView
 
 
@@ -171,14 +171,25 @@ class Window(Gtk.Window):
         self.mode.add_attribute(cell, 'text', 1)
         self.mode.add_attribute(cell, 'sensitive', 2)
         self.mode.connect('changed', self.mode_changed)
-        params.pack_start(label('Mode'), False, False, 0)
-        params.pack_start(self.mode, False, False, 0)
+        self.selectors = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.selector_columns = []
+        params.pack_start(self.selectors, False, False, 0)
         self.models = Gtk.ComboBoxText()
         self.models.connect('changed', self.model_changed)
-        params.pack_start(label('Model'), False, False, 0)
-        params.pack_start(self.models, False, False, 0)
+        for title, selector in [('Mode', self.mode), ('Model', self.models)]:
+            column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            column.pack_start(label(title), False, False, 0)
+            column.pack_start(selector, False, False, 0)
+            self.selectors.pack_start(column, True, True, 0)
+            self.selector_columns.append(column)
+            for renderer in selector.get_cells():
+                renderer.set_property('ellipsize', Pango.EllipsizeMode.END)
+                renderer.set_property('width-chars', 10)
+                renderer.set_property('max-width-chars', 18)
+        self.selectors.connect('size-allocate', self.arrange_selectors)
         self.model_info = label('Looking for models…')
         self.model_info.set_line_wrap(True)
+        self.model_info.set_no_show_all(True)
         params.pack_start(self.model_info, False, False, 0)
         for key, title, height in [('positive', 'Prompt', 120), ('negative', 'Negative prompt', 65)]:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -438,6 +449,13 @@ class Window(Gtk.Window):
         self.send('settings', save=True)
         return False
 
+    def arrange_selectors(self, widget, allocation):
+        horizontal = allocation.width >= 320
+        orientation = Gtk.Orientation.HORIZONTAL if horizontal else Gtk.Orientation.VERTICAL
+        if widget.get_orientation() != orientation:
+            widget.set_orientation(orientation)
+            widget.set_homogeneous(horizontal)
+
     def sidebar_resized(self, *_):
         if self.heights_loaded:
             self.send('settings', sidebarWidth=max(200, self.sidebar_split.get_position()))
@@ -498,7 +516,10 @@ class Window(Gtk.Window):
                 self.mode.set_active(index)
                 break
         selected = next((m for m in state['models'] if m['name'] == state['model']), {})
-        self.model_info.set_text(selected.get('problem') or selected.get('label') or '')
+        problem = selected.get('problem') or ''
+        self.model_info.set_text(problem)
+        self.model_info.set_visible(bool(problem))
+        self.models.set_tooltip_text(state['model'])
         settings_changed = self.revision != state['revision']
         for key, source in [('sampler_name', 'samplers'), ('scheduler', 'schedulers'),
                             ('ms.curve', 'curves'), ('ms.outside_window', 'outsideWindows')]:
@@ -690,9 +711,6 @@ class Window(Gtk.Window):
             for child in self.layout_box.get_children():
                 child.destroy()
             self.layout_model = self.state['model']
-            heading = label('Layout')
-            self.layout_box.pack_start(heading, False, False, 0)
-            heading.show()
             self.layout_editor = open_editor(self.layout_box, doc, self.layout_changed)
         except (ValueError, TypeError, KeyError) as exc:
             self.message(str(exc), True)
