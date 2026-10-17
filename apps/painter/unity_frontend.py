@@ -294,8 +294,10 @@ class Window(Gtk.Window):
         self.gallery.connect('button-press-event', self.gallery_menu)
         self.browse_pane = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
         self.browse_pane.set_position(300)
+        self.browse_pane.connect_after('button-release-event', self.preview_resized)
+        self.browse_pane.connect_after('accept-position', self.preview_resized)
         self.preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.browse_pane.pack1(self.preview_box, True, False)
+        self.browse_pane.pack1(self.preview_box, False, False)
         self.browse_pane.pack2(scroll(self.gallery), True, False)
         self.pages.append_page(self.browse_pane, None)
         self.full_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -420,6 +422,11 @@ class Window(Gtk.Window):
         self.send('settings', save=True)
         return False
 
+    def preview_resized(self, *_):
+        if self.heights_loaded and self.pages.get_current_page() == 0:
+            self.send('settings', previewHeight=self.browse_pane.get_position())
+        return False
+
     def poll(self):
         if not self.connected or self.closing:
             return False
@@ -479,6 +486,7 @@ class Window(Gtk.Window):
             self.revision = state['revision']
             self.apply_settings(state['settings'])
         if not self.heights_loaded:
+            self.browse_pane.set_position(state['previewHeight'])
             for key, height in state['heights'].items():
                 self.text_boxes[key].set_height(height)
             self.heights_loaded = True

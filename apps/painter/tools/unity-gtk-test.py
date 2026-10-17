@@ -77,6 +77,8 @@ def test():
             assert notifications == ['Generation completed'], notifications
             assert not window.info.get_visible()
             assert len(window.state['models']) == 2
+            window.browse_pane.set_position(360)
+            window.browse_pane.emit('button-release-event', Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE))
             assert window.get_title() == 'Painter'
             assert window.actions['generate'][0].get_sensitive()
             # Plain text-to-image families such as MOSS expose no advanced UI.
@@ -243,6 +245,8 @@ if not failed[0]:
             assert window.text_boxes['negative'].height == 40
             assert window.text_boxes['system_prompt'].height == 600
             assert window.values()['positive'] == 'last edit before closing'
+            assert window.browse_pane.get_position() == 360, (window.browse_pane.get_position(), window.state['previewHeight'])
+            assert window.state['previewHeight'] == 360
             print('PASS: prompt heights and text survive closing and reopening')
         except Exception:
             traceback.print_exc()

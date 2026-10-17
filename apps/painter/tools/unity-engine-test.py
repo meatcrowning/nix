@@ -160,6 +160,7 @@ assert E.userprefs.saved_for(engine.model)['positive'] == 'last edit before clos
 assert E.userprefs.load()['prompt.posH'] == 285
 assert E.userprefs.load()['prompt.negH'] == 40
 assert E.userprefs.load()['unity.systemH'] == 600
+assert E.userprefs.load()['unity.previewHeight'] == 360
 ctl._scan_pool.waitForDone()
 ctl.gallery._thumb_pool.waitForDone()
 print('PASS: GTK socket, submission, restore, persistence, stale model and pipeline contracts')

@@ -77,6 +77,8 @@ class Engine:
         self.messages = collections.deque(maxlen=30)
         self.revision = 0
         self._restored = False
+        height = prefs.get('unity.previewHeight')
+        self.preview_height = max(0, min(10000, int(300 if height is None else height)))
         self.heights = {key: max(40, min(600, int(prefs.get(pref) or default)))
                        for (key, pref), default in zip(HEIGHT_KEYS.items(), (130, 64, 90))}
         self.view_path = ''
@@ -138,6 +140,7 @@ class Engine:
                        editExtra=json.dumps(self.ctl.editExtraImages), lastSeed=self.ctl.lastSeed,
                        loras=json.dumps(self.ctl.lorasSnapshot()))
         doc.update({pref: self.heights[key] for key, pref in HEIGHT_KEYS.items()})
+        doc['unity.previewHeight'] = self.preview_height
         self.prefs._doc = doc
         # Prefs.set owns the atomic write; force one changed key without losing
         # any unrelated desktop settings.
@@ -145,6 +148,12 @@ class Engine:
         self.prefs.set('unityRevision', self.revision)
 
     def update(self, request):
+        if 'previewHeight' in request:
+            height = request['previewHeight']
+            if type(height) is not int or not 0 <= height <= 10000:
+                raise ValueError('Invalid preview height')
+            self.preview_height = height
+            self.save()
         if 'heights' in request:
             for key, value in request['heights'].items():
                 if key in HEIGHT_KEYS:
@@ -398,6 +407,7 @@ class Engine:
         return dict(model=self.model, models=[{k: v for k, v in row.items() if k != 'entry'}
                                               for row in c.models._rows], modes=c.modes(), mode=c.mode,
                     settings=self.settings, revision=self.revision, heights=self.heights, multiple=self.multiple,
+                    previewHeight=self.preview_height,
                     media=self.media(request), replacement=self.replacement,
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,
