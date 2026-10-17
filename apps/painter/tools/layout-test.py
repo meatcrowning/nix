@@ -80,6 +80,36 @@ def core():
     before = copy.deepcopy(draw.doc)
     draw.press(.4, .4); draw.motion(.5, .5); draw.release()
     assert before == draw.doc
+    # Draw from/to every outside edge and corner, in both directions.
+    for start, end, expected in [
+            ((-.2, .2), (.6, .8), [0, .2, .6, .6]),
+            ((1.2, .2), (.6, .8), [.6, .2, .4, .6]),
+            ((.2, -.2), (.8, .6), [.2, 0, .6, .6]),
+            ((.2, 1.2), (.8, .6), [.2, .6, .6, .4]),
+            ((-.2, -.3), (1.2, 1.3), [0, 0, 1, 1])]:
+        for a, b in [(start, end), (end, start)]:
+            outside = M.Editor(M.fresh())
+            outside.doc['snap'] = False
+            outside.tool = 'object'
+            outside.press(*a)
+            assert outside.drag[1:3] == a
+            outside.motion(*b)
+            raw = outside.chosen()[0]['box']
+            assert abs(raw[2] - abs(a[0] - b[0])) < 1e-8
+            assert b'clip-path="url(#canvas)"' in M.svg(outside, 500, 500)[0]
+            outside.release()
+            assert all(abs(x-y) < 1e-8 for x,y in zip(outside.chosen()[0]['box'], expected))
+            M.valid(outside.doc)
+            outside.undo(); assert not outside.doc['items']
+            outside.undo(True); M.valid(outside.doc)
+    outside = M.Editor(M.fresh())
+    outside.tool = 'object'
+    outside.press(-.4, .2); outside.motion(-.2, .8); outside.release()
+    assert not outside.doc['items'] and not outside.undo_stack
+    # Leaving and returning tracks the original anchor, without a stuck edge.
+    outside.tool = 'object'
+    outside.press(.2, .3); outside.motion(1.4, 1.5); outside.motion(.7, .8); outside.release()
+    assert all(abs(x-y) < 1e-8 for x,y in zip(outside.chosen()[0]['box'], [.2,.3,.5,.5]))
     malformed = copy.deepcopy(e.doc); malformed['items'][0]['box'][0] = float('nan')
     try: M.valid(malformed)
     except ValueError: pass
@@ -110,6 +140,18 @@ def qt():
     accepted = []
     editor = LayoutUI(ui, M.fresh(), accepted.append)
     app.processEvents()
+    editor.render(700, 500)
+    ox, oy, w, h = editor.rect
+    editor.arm_add()
+    editor.pointer('press', ox - 10, oy + h * .2)
+    editor.pointer('move', ox + w * 1.2, oy + h * .8)
+    assert not accepted, 'unfinished outside geometry must not autosave'
+    # Release position matters even when there was no final motion event.
+    editor.pointer('release', ox + w * .6, oy + h * .7)
+    assert len(accepted) == 1
+    assert all(abs(x-y) < 1e-8 for x,y in zip(accepted[-1]['items'][0]['box'], [0,.2,.6,.5]))
+    M.valid(accepted[-1])
+    editor.model.undo(); editor.refresh()
     editor.model.add('text', [.1,.1,.6,.3]); editor.refresh()
     editor.fields['summary.caption'].edit('A poster')
     editor.fields['item.caption'].edit('Large headline')

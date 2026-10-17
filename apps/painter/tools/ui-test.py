@@ -5303,8 +5303,9 @@ def test_moss(win, ctl, tmp):
         click(win, add)
         check(model + " Add arms drawing", ctl.layoutEditor.editor.model.tool == "object")
         ox, oy, cw, ch = ctl.layoutEditor.editor.rect
-        drag(win, canvas, ox + cw * .2, oy + ch * .2, ox + cw * .6, oy + ch * .6)
+        drag(win, canvas, ox - 5, oy + ch * .2, ox + cw + 5, oy + ch * .6)
         check(model + " drawing saves inline draft", len(prop(APP, "gen")["moss_layout"]["items"]) == 1)
+        check(model + " outside drag clips to canvas", all(abs(a-b) < 1e-8 for a,b in zip(prop(APP, "gen")["moss_layout"]["items"][0]["box"][0::2], [0, 1])))
         check(model + " drawing returns to selection", ctl.layoutEditor.editor.model.tool == "select")
         if os.environ.get("PAINTER_LAYOUT_SHOT"):
             win.grabWindow().save(os.environ["PAINTER_LAYOUT_SHOT"])

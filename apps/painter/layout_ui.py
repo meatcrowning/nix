@@ -93,12 +93,12 @@ class LayoutUI(object):
         self.ui.show_widget(self.side, self.details)
 
     def publish(self):
-        if self.model.doc != self.last_doc:
+        if not self.model.drag and self.model.doc != self.last_doc:
             self.last_doc = copy.deepcopy(self.model.doc)
             self.accepted(copy.deepcopy(self.model.doc))
 
     def load(self, doc):
-        if doc == self.model.doc:
+        if self.model.drag or doc == self.model.doc:
             return
         self.model = M.Editor(doc)
         self.last_doc = copy.deepcopy(doc)
@@ -249,8 +249,6 @@ class LayoutUI(object):
         ox, oy, w, h = self.rect
         x, y = (x - ox) / w, (y - oy) / h
         if action == 'press':
-            if not (0 <= x <= 1 and 0 <= y <= 1):
-                return
             drawing = self.model.tool != 'select'
             self.model.press(x, y, shift, 7 / min(w, h))
             if drawing:
@@ -261,6 +259,7 @@ class LayoutUI(object):
             self.model.motion(x, y, 7 / min(w, h))
         else:
             drawing = bool(self.model.drag and self.model.drag[0] == 'draw')
+            self.model.motion(x, y, 7 / min(w, h))
             self.model.release()
             self.ui.drawing_cursor(self.canvas, False)
             self.ui.set_label(self.instructions, 'Click Add to draw another region. Select a region to move or resize it.')

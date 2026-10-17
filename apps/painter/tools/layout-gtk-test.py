@@ -24,7 +24,7 @@ def run(parent):
     e.add_button.clicked()
     assert e.model.tool == 'text'
     ox, oy, w, h = e.rect
-    for kind, x, y in [(Gdk.EventType.BUTTON_PRESS, .15, .2), (Gdk.EventType.MOTION_NOTIFY, .7, .5), (Gdk.EventType.BUTTON_RELEASE, .7, .5)]:
+    for kind, x, y in [(Gdk.EventType.BUTTON_PRESS, -5 / w, .2), (Gdk.EventType.MOTION_NOTIFY, 1.2, .5), (Gdk.EventType.BUTTON_RELEASE, .7, .5)]:
         event = Gdk.Event.new(kind)
         if kind == Gdk.EventType.MOTION_NOTIFY:
             event.motion.x, event.motion.y = ox + x * w, oy + y * h
@@ -37,7 +37,7 @@ def run(parent):
     assert len(e.model.doc['items']) == 1
     assert e.model.tool == 'select' and e.details
     row = e.model.doc['items'][0]
-    assert row['label'] == 'text' and abs(row['box'][2] - .55) < .02
+    assert row['label'] == 'text' and abs(row['box'][2] - .7) < .02
     u.set(e.fields['summary.caption'], 'A travel poster')
     u.set(e.fields['summary.meta'], 'poster, illustration')
     u.set(e.fields['summary.palette'], '#ffffff, #123456')

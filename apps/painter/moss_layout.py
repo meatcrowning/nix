@@ -273,7 +273,6 @@ class Editor(object):
 
     def press(self, x, y, toggle=False, threshold=.01):
         if self.tool != 'select':
-            x, y = min(.999, x), min(.999, y)
             self.add(self.tool, [x, y, .001, .001])
             self.drag = ('draw', x, y, copy.deepcopy(self.doc['items']))
             return
@@ -304,7 +303,8 @@ class Editor(object):
             return
         mode, sx, sy, original = self.drag[:4]
         self.doc['items'] = copy.deepcopy(original)
-        x, y = max(0, min(1, x)), max(0, min(1, y))
+        if mode != 'draw':
+            x, y = max(0, min(1, x)), max(0, min(1, y))
         if mode == 'move':
             rows = [r for r in self.chosen() if not r.get('locked')]
             if not rows:
@@ -334,7 +334,8 @@ class Editor(object):
                 if hx == 1: right = max(x, left + .001)
                 if hy == 0: top = min(y, bottom - .001)
                 if hy == 1: bottom = max(y, top + .001)
-            left, top = min(.999, left), min(.999, top)
+            if mode != 'draw':
+                left, top = min(.999, left), min(.999, top)
             row['box'] = [left, top, max(.001, right - left), max(.001, bottom - top)]
         else:
             self.selected = list(self.drag[4])
@@ -344,6 +345,17 @@ class Editor(object):
                     self.selected.append(r['id'])
 
     def release(self):
+        if self.drag and self.drag[0] == 'draw':
+            row = self.chosen()[0]
+            x, y, w, h = row['box']
+            left, top = max(0, x), max(0, y)
+            right, bottom = min(1, x + w), min(1, y + h)
+            if right > left and bottom > top:
+                row['box'] = [left, top, right - left, bottom - top]
+            else:
+                # A gesture wholly outside the canvas must not create an edge sliver.
+                self.doc = self.undo_stack.pop()
+                self.selected = []
         self.drag = None
         self.tool = 'select'
 
@@ -382,6 +394,7 @@ def svg(editor, vw, vh, reference=''):
             s.append('<path d="M %f %f L %f %f" stroke="#a77820" stroke-dasharray="4 4"/>' % ((v * w, 0, v * w, h) if axis == 0 else (0, v * h, w, v * h)))
     margin = d['margin']
     s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="#999" stroke-dasharray="3 3"/>' % (margin * w, margin * h, (1 - 2 * margin) * w, (1 - 2 * margin) * h))
+    s.append('<defs><clipPath id="canvas"><rect width="%f" height="%f"/></clipPath></defs><g clip-path="url(#canvas)">' % (w, h))
     for n, item in enumerate(d['items']):
         x, y, bw, bh = item['box']
         x, y, bw, bh = x * w, y * h, bw * w, bh * h
@@ -406,5 +419,5 @@ def svg(editor, vw, vh, reference=''):
         if selected and not item.get('locked'):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:
                 s.append('<rect x="%f" y="%f" width="6" height="6" fill="white" stroke="%s"/>' % (x + hx * bw - 3, y + hy * bh - 3, colour))
-    s.append('</g></svg>')
+    s.append('</g></g></svg>')
     return ''.join(s).encode('utf-8'), (ox, oy, w, h)
