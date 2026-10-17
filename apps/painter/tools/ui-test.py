@@ -5309,6 +5309,34 @@ def test_moss(win, ctl, tmp):
         check(model + " drawing returns to selection", ctl.layoutEditor.editor.model.tool == "select")
         if os.environ.get("PAINTER_LAYOUT_SHOT"):
             win.grabWindow().save(os.environ["PAINTER_LAYOUT_SHOT"])
+        import spellcheck
+        from PySide6.QtCore import QMetaObject, Q_ARG, Qt
+        checker = spellcheck._ENGINE
+        class FixtureSpelling:
+            available = True
+            def check(self, word): return word != 'helo'
+            def suggest(self, word): return ['hello']
+        spellcheck._ENGINE = FixtureSpelling()
+        from PySide6.QtQml import qmlContext
+        spell_object = qmlContext(APP).contextProperty("Spell")
+        spell_object.availableChanged.emit()
+        try:
+            for key in ('item.caption', 'item.tags'):
+                field = ctl.layoutEditor.editor.fields[key]
+                field.edit('helo')
+                spin(400)
+                mark = next(item for item in walk(win.contentItem()) if item.objectName() == 'layoutField_' + field.title + 'Spelling')
+                check(model + ' marks ' + key, bool(prop(mark, 'spans')))
+                QMetaObject.invokeMethod(mark, 'correct', Qt.DirectConnection,
+                    Q_ARG('QVariant', 0), Q_ARG('QVariant', 4), Q_ARG('QVariant', 'hello'))
+                spin(80)
+                check(model + ' corrects ' + key, field.value == 'hello')
+                QMetaObject.invokeMethod(prop(mark, 'target'), 'undo', Qt.DirectConnection)
+                spin(80)
+                check(model + ' undoes correction in one step ' + key, field.value == 'helo')
+        finally:
+            spellcheck._ENGINE = checker
+            spell_object.availableChanged.emit()
         import moss_layout
         document = moss_layout.fresh(1280, 720, "A poster")
         layout_editor = moss_layout.Editor(document)

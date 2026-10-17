@@ -34,6 +34,7 @@ def local_path(uri):
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
 from unitygtk import Connection
+from spelling_gtk import Spelling
 
 
 def scroll(child, height=None):
@@ -82,6 +83,7 @@ class Window(Gtk.Window):
         self.layout_editor = None
         self.layout_model = ''
         self.connection = Connection(path, self.receive)
+        self.spelling = Spelling(self.connection.send)
         self.connect('delete-event', self.close_window)
         self.accels = Gtk.AccelGroup()
         self.add_accel_group(self.accels)
@@ -346,6 +348,7 @@ class Window(Gtk.Window):
     def text_box(self, key, height):
         box = ResizableText(height, lambda value: self.send('settings', heights={key: value}))
         box.text.get_buffer().connect('changed', self.changed)
+        self.spelling.attach(box.text)
         self.text_boxes[key] = box
         return box
 
@@ -459,6 +462,9 @@ class Window(Gtk.Window):
                 self.update_actions()
             return False
         state = reply['state']
+        if op in ('spell', 'spell_learn'):
+            if op == 'spell': self.spelling.receive(state)
+            return False
         if op == 'frame':
             self.receive_media(state['media'])
             return False

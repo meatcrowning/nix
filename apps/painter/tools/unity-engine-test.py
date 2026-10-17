@@ -55,6 +55,20 @@ engine = E.Engine(ctl, P.Prefs())
 assert len(engine.snapshot({})['models']) == 2
 json.dumps(engine.snapshot({}))  # no QObject/registry entries on the wire
 assert engine.snapshot({})['rate'] == ctl.rate
+import spellcheck
+real_checker = spellcheck._ENGINE
+class FixtureSpelling:
+    available = True
+    def check(self, word): return word != 'helo'
+    def suggest(self, word): return ['hello']
+    def learn(self, word): self.learned = word
+spellcheck._ENGINE = FixtureSpelling()
+spelling = engine.dispatch(dict(op='spell', field=7, text='é helo world'))
+assert spelling['words'] == [dict(start=2, end=6, word='helo', suggestions=['hello'])]
+assert spelling['field'] == 7
+engine.dispatch(dict(op='spell_learn', word='helo'))
+assert spellcheck._ENGINE.learned == 'helo'
+spellcheck._ENGINE = real_checker
 
 image = QImage(80, 60, QImage.Format_RGB32)
 image.fill(QColor('red'))

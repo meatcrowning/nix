@@ -19,6 +19,32 @@ def run(parent):
     assert e.canvas.get_toplevel() is parent
     assert not e.side.get_visible()
     u = e.ui
+    from spelling_gtk import Spelling, text
+    requests = []
+    checker = Spelling(requests.append)
+    for control in (Gtk.TextView(), Gtk.Entry()):
+        field = checker.attach(control)
+        if isinstance(control, Gtk.TextView): control.get_buffer().set_text('é helo world')
+        else: control.set_text('é helo world')
+        field.check()
+        assert requests[-1]['text'] == 'é helo world'
+        result = dict(field=field.identity, text='é helo world', words=[dict(start=2, end=6, word='helo', suggestions=['hello'])])
+        checker.receive(result)
+        if isinstance(control, Gtk.TextView):
+            assert field.tag in control.get_buffer().get_iter_at_offset(3).get_tags()
+        else:
+            assert control.get_attributes() is not None
+        field.position = 3
+        menu = Gtk.Menu()
+        field.menu(control, menu)
+        assert menu.get_children()[0].get_label() == 'hello'
+        menu.get_children()[0].activate()
+        assert text(control) == 'é hello world'
+        checker.receive(result)
+        assert field.checked == 'é helo world', 'stale result changed the checked text'
+        menu.destroy()
+        control.destroy()
+    assert all(any(f.control is parent.controls[key] for f in parent.spelling.fields.values()) for key in ('positive', 'negative', 'system_prompt'))
     while Gtk.events_pending(): Gtk.main_iteration()
     u.set(e.tool, 'text')
     e.add_button.clicked()

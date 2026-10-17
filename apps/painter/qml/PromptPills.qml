@@ -303,12 +303,19 @@ Item {
                                       ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)
                                       : Theme.editorFontForScale(Screen.devicePixelRatio)
                                 selectByMouse: true
+                                persistentSelection: true
                                 onVisibleChanged: if (visible) { forceActiveFocus(); selectAll() }
                                 Keys.onReturnPressed: pills.replaceTag(cell.tagId, text)
                                 Keys.onEnterPressed: pills.replaceTag(cell.tagId, text)
                                 Keys.onEscapePressed: pills.editingId = -1
-                                onActiveFocusChanged: if (!activeFocus && visible)
+                                onActiveFocusChanged: if (!activeFocus && visible && !pillSpelling.menuOpen)
                                                           pills.replaceTag(cell.tagId, text)
+                            }
+                            Spelling {
+                                id: pillSpelling
+                                target: edit
+                                visible: edit.visible
+                                enabled: visible
                             }
                             // FLAT, NOT A BUTTON. In the Plasma session a
                             // TextButton is a real KDE button, and a framed

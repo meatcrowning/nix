@@ -534,6 +534,7 @@ Rectangle {
         SpellMarks {
             id: marks
             target: input
+            replaceFn: (start, end, word) => App.correctSpelling(input, start, end, word)
             viewport: flick
             x: input.x
             y: input.y

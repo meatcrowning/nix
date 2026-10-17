@@ -131,6 +131,9 @@ class Toolkit(object):
                 self.label(chooser, 'Choose colour' if title == 'Text colour' else 'Add colour')
                 chooser.pack_start(picker, False, False, 0)
                 picker.set_tooltip_text('Choose a colour to add; edit the list above to remove colours.')
+        if kind in ('text', 'entry', 'palette') and title not in ('Vertical guides (%; comma-separated)', 'Horizontal guides (%; comma-separated)'):
+            spelling = getattr(self.window, 'spelling', None)
+            if spelling: spelling.attach(control)
         field = (kind, control, box, swatches)
         if kind == 'palette':
             control.connect('changed', lambda *_: self.swatches(field))

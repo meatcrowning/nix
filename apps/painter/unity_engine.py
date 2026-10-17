@@ -271,6 +271,16 @@ class Engine:
     def dispatch(self, request):
         c = self.ctl
         op = request.get('op')
+        if op in ('spell', 'spell_learn'):
+            from spellcheck import SpellCheck
+            spell = SpellCheck()
+            if op == 'spell_learn':
+                spell.learn(request.get('word', ''))
+                return {}
+            text = request.get('text', '')
+            words = [dict(start=a, end=b, word=text[a:b], suggestions=spell.suggest(text[a:b]))
+                     for a, b in spell.spans(text, 0, min(len(text), 32768))[:128]]
+            return dict(field=request.get('field'), text=text, words=words)
         if op == 'frame':
             return dict(media=self.media(request))
         self.update(request)

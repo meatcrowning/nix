@@ -37,7 +37,7 @@ from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
                             QObject, Property, QProcess, QRunnable,
                             QSortFilterProxyModel, Qt, QThreadPool,
                             QTimer, QUrl, Signal, Slot)
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QWindow
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QInputMethodEvent, QWindow
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickImageProvider
 import layout_qt
@@ -1665,6 +1665,14 @@ class Painter(QObject):
             self.selectModel(self._selected)
 
     # -- generating --------------------------------------------------------
+
+    @Slot(QObject, int, int, str)
+    def correctSpelling(self, target, start, end, replacement):
+        # A native commit replaces the range as one edit, retaining Undo.
+        target.setProperty('cursorPosition', start)
+        event = QInputMethodEvent()
+        event.setCommitString(replacement, 0, end - start)
+        QGuiApplication.sendEvent(target, event)
 
     @Property(QObject, constant=True)
     def layoutEditor(self):

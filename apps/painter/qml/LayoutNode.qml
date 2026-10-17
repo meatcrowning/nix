@@ -225,6 +225,7 @@ Item {
     Component {
         id: textField
         KineticFlickable {
+            id: textViewport
             implicitHeight: 95
             contentWidth: width
             contentHeight: textEdit.implicitHeight
@@ -232,12 +233,33 @@ Item {
             ScrollBar.vertical: VScroll { }
             TextArea {
                 id: textEdit
+                objectName: "layoutField_" + node.spec.title
                 width: parent.width
                 text: node.spec.value || ""
                 wrapMode: TextEdit.Wrap
+                persistentSelection: true
                 onTextChanged: if (text !== node.spec.value) node.spec.edit(text)
+            }
+            Spelling { target: textEdit; viewport: textViewport }
+        }
+    }
+    Component {
+        id: entryField
+        Item {
+            implicitHeight: entry.implicitHeight
+            TextField {
+                id: entry
+                objectName: "layoutField_" + node.spec.title
+                anchors.fill: parent
+                text: node.spec.value || ""
+                persistentSelection: true
+                onTextChanged: if (text !== node.spec.value) node.spec.edit(text)
+            }
+            Spelling {
+                target: entry
+                enabled: node.spec.title !== "Vertical guides (%; comma-separated)" && node.spec.title !== "Horizontal guides (%; comma-separated)"
+                visible: enabled
             }
         }
     }
-    Component { id: entryField; TextField { text: node.spec.value || ""; onTextEdited: node.spec.edit(text) } }
 }
