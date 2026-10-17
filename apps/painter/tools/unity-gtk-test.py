@@ -250,13 +250,29 @@ def test():
                 x_root = 400
                 y_root = 300
             event = Event()
+            view.render()  # Finish the previous zoom/scroll before counting pan work.
+            original_render = view.render
+            renders = []
+            def counted_render():
+                renders.append(True)
+                return original_render()
+            view.render = counted_render
             view.press(view.events, event)
-            event.x_root -= 60
-            event.y_root -= 40
-            view.motion(view.events, event)
+            for _ in range(10):
+                event.x_root -= 6
+                event.y_root -= 4
+                view.motion(view.events, event)
+            assert not renders, 'pan rescaled synchronously for intermediate pointer positions'
+            # A release can contain movement without a preceding motion event.
+            event.x_root -= 3
+            event.y_root -= 2
             view.release(view.events, event)
-            assert view.scroll.get_hadjustment().get_value() == 60
-            assert view.scroll.get_vadjustment().get_value() == 40
+            assert view.scroll.get_hadjustment().get_value() == 63
+            assert view.scroll.get_vadjustment().get_value() == 42
+            while Gtk.events_pending(): Gtk.main_iteration()
+            assert len(renders) == 1, ('pan should coalesce both axes and pending motion', len(renders))
+            assert view.visible_origin == (63, 42)
+            view.render = original_render
             window.browse()
             view.set_zoom(0)
         elif step[0] == 14:

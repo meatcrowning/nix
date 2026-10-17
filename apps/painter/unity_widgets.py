@@ -197,8 +197,10 @@ class ImageView(Gtk.Box):
         self.render_timer = GLib.timeout_add(60, self.render)
 
     def scrolled(self, *args):
-        if not self.rendering:
-            self.render()
+        # Both axes change during a drag. Drain input first, then scale only
+        # the latest viewport once before GTK paints, not once per adjustment.
+        if not self.rendering and self.render_timer is None:
+            self.render_timer = GLib.idle_add(self.render, priority=GLib.PRIORITY_HIGH_IDLE)
 
     def render(self):
         if self.render_timer:
@@ -307,6 +309,7 @@ class ImageView(Gtk.Box):
 
     def release(self, widget, event):
         if event.button == 1 and self.drag:
+            self.motion(widget, event)
             self.drag = None
             widget.grab_remove()
             if self.video:
