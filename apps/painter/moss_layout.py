@@ -167,9 +167,9 @@ class Editor(object):
     def chosen(self):
         return [i for i in self.doc['items'] if i['id'] in self.selected]
 
-    def select(self, identity, toggle=False):
+    def select(self, identity, toggle=False, include_locked=True):
         row = next((r for r in self.doc['items'] if r['id'] == identity), None)
-        ids = [r['id'] for r in self.doc['items'] if row and (r['id'] == identity or
+        ids = [r['id'] for r in self.doc['items'] if row and (include_locked or not r.get('locked')) and (r['id'] == identity or
                (row.get('group') and r.get('group') == row['group']))]
         if toggle:
             self.selected = [i for i in self.selected if i not in ids] if identity in self.selected else list(set(self.selected + ids))
@@ -298,11 +298,11 @@ class Editor(object):
                     self.checkpoint()
                     self.drag = ('resize', x, y, copy.deepcopy(self.doc['items']), row['id'], hx, hy)
                     return
-        hit = next((r for r in reversed(self.doc['items']) if r['box'][0] <= x <= r['box'][0] + r['box'][2]
+        hit = next((r for r in reversed(self.doc['items']) if not r.get('locked') and r['box'][0] <= x <= r['box'][0] + r['box'][2]
                     and r['box'][1] <= y <= r['box'][1] + r['box'][3]), None)
         if hit:
             if toggle or hit['id'] not in self.selected or (hit.get('group') and any(r.get('group') == hit['group'] and r['id'] not in self.selected for r in self.doc['items'])):
-                self.select(hit['id'], toggle)
+                self.select(hit['id'], toggle, include_locked=False)
             self.checkpoint()
             self.drag = ('move', x, y, copy.deepcopy(self.doc['items']))
         else:
@@ -354,7 +354,7 @@ class Editor(object):
             self.selected = list(self.drag[4])
             for r in self.doc['items']:
                 bx, by, bw, bh = r['box']
-                if min(sx, x) <= bx and bx + bw <= max(sx, x) and min(sy, y) <= by and by + bh <= max(sy, y):
+                if not r.get('locked') and min(sx, x) <= bx and bx + bw <= max(sx, x) and min(sy, y) <= by and by + bh <= max(sy, y):
                     if r['id'] not in self.selected:
                         self.selected.append(r['id'])
 
@@ -385,14 +385,17 @@ def text_warning(item, width, height):
     return 'Text may be too small or crowded at this output size.' if estimate < 16 else ''
 
 
-def svg(editor, vw, vh, reference=''):
+def view_rect(d, vw, vh, zoom=1, pan=(0, 0)):
+    scale = min((vw - 24) / d['width'], (vh - 24) / d['height']) * zoom
+    w, h = max(1, d['width'] * scale), max(1, d['height'] * scale)
+    return (vw - w) / 2 + pan[0], (vh - h) / 2 + pan[1], w, h
+
+
+def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0)):
     """Portable rough composition preview; not a prediction of generated pixels."""
     d = editor.doc
-    scale = min((vw - 24) / d['width'], (vh - 24) / d['height'])
-    w, h = max(1, d['width'] * scale), max(1, d['height'] * scale)
-    ox, oy = (vw - w) / 2, (vh - h) / 2
+    ox, oy, w, h = view_rect(d, vw, vh, zoom, pan)
     s = ['<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="%d" height="%d">' % (vw, vh),
-         '<rect width="100%" height="100%" fill="black"/>',
          '<g transform="translate(%f,%f)"><rect width="%f" height="%f" fill="black" stroke="#bbbbbb"/>' % (ox, oy, w, h)]
     if reference:
         s.append('<image width="%f" height="%f" opacity="%f" preserveAspectRatio="xMidYMid meet" xlink:href="data:image/png;base64,%s"/>' % (w, h, d['opacity'], reference))
@@ -417,15 +420,18 @@ def svg(editor, vw, vh, reference=''):
         selected = item['id'] in editor.selected
         colour = '#ffb454' if selected else '#79bfff'
         s.append('<g opacity="%s"><rect x="%f" y="%f" width="%f" height="%f" fill="%s" fill-opacity=".07" stroke="%s" stroke-width="%s"/>' % ('1' if item.get('enabled', True) else '.6', x, y, bw, bh, colour, colour, 2 if selected else 1))
-        title = '%d %s%s' % (n + 1, item['label'], ' [locked]' if item.get('locked') else '')
+        title = '%d %s' % (n + 1, item['label'])
+        label_offset = 14 if item.get('locked') else 3
+        if item.get('locked'):
+            s.append('<g transform="translate(%f,%f)" fill="none" stroke="%s" stroke-width="1.3"><path d="M2 5V3a3 3 0 0 1 6 0v2"/><rect x="1" y="5" width="8" height="6" fill="black"/></g>' % (x + 3, y + 3, colour))
         caption = ' '.join(item.get('caption', '').split())
         if caption:
             title += ' — ' + caption
-        columns = max(1, int((bw - 6) / 6))
+        columns = max(1, int((bw - label_offset - 3) / 6))
         if len(title) > columns:
             title = title[:max(0, columns - 1)] + '…'
         s.append('<defs><clipPath id="label%d"><rect x="%f" y="%f" width="%f" height="%f"/></clipPath></defs>' % (n, x, y, bw, bh))
-        s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="%s" font-size="11">%s</text>' % (n, x + 3, y + 13, colour, escape(title)))
+        s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="%s" font-size="11">%s</text>' % (n, x + label_offset, y + 13, colour, escape(title)))
         if item['label'] == 'text':
             style = item.get('typography', {})
             lines = item.get('text', '').split('\n')

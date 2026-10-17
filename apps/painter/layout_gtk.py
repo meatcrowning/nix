@@ -118,7 +118,7 @@ class Toolkit(object):
     def field(self, parent, title, kind, options, callback):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         parent.pack_start(box, False, False, 0)
-        if kind != 'check' and title:
+        if kind != 'check' and title and not hasattr(parent, 'sizes'):
             self.label(box, title)
         swatches = None
         if kind == 'combo':
@@ -140,7 +140,7 @@ class Toolkit(object):
             box.pack_start(control, False, False, 0)
         elif kind == 'text':
             control = Gtk.TextView()
-            control.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            control.set_wrap_mode(Gtk.WrapMode.NONE if title == 'Exact wording' else Gtk.WrapMode.WORD_CHAR)
             control.get_buffer().connect('changed', lambda *_: callback())
             scroll = Gtk.ScrolledWindow()
             scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -152,7 +152,14 @@ class Toolkit(object):
                 control.resize_handle = self.resize_handle(box, scroll, 40, 600, self.window.region_prompt_resized, 'Drag to resize the region prompt')
         else:
             control = Gtk.Entry()
-            control.connect('changed', lambda *_: callback())
+            if kind == 'pair':
+                control.set_width_chars(6)
+                control.set_tooltip_text(title + '; comma-separated')
+                control.connect('activate', lambda *_: callback())
+                control.connect('focus-out-event', lambda *_: callback() or False)
+                parent.sizes.add_widget(control)
+            else:
+                control.connect('changed', lambda *_: callback())
             box.pack_start(control, False, False, 0)
             if kind == 'palette':
                 swatches = self.row(box)
@@ -262,12 +269,19 @@ class Toolkit(object):
         events = Gtk.EventBox()
         events.set_size_request(180, self.window.layout_height)
         surface = Gtk.Layout()
+        surface.get_style_context().add_class(Gtk.STYLE_CLASS_BACKGROUND)
+        surface.connect('draw', lambda widget, cr: Gtk.render_background(widget.get_style_context(), cr, 0, 0, widget.get_allocated_width(), widget.get_allocated_height()) or False)
         surface.put(image, 0, 0)
         events.add(surface)
         events.set_above_child(True)
         events.set_can_focus(True)
-        events.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.POINTER_MOTION_MASK)
+        events.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.SCROLL_MASK)
         def pointer(widget, event, action):
+            if editor.panning or (action != 'move' and event.button == 2):
+                if action == 'press': widget.grab_add()
+                editor.pan_pointer(action, event.x, event.y)
+                if action == 'release': widget.grab_remove()
+                return True
             if action != 'move' and event.button != 1:
                 return False
             if action == 'press':
@@ -280,6 +294,11 @@ class Toolkit(object):
         events.connect('button-press-event', pointer, 'press')
         events.connect('button-release-event', pointer, 'release')
         events.connect('motion-notify-event', pointer, 'move')
+        def wheel(widget, event):
+            steps = 1 if event.direction == Gdk.ScrollDirection.UP else -1 if event.direction == Gdk.ScrollDirection.DOWN else -event.get_scroll_deltas()[2]
+            editor.zoom_at(event.x, event.y, steps)
+            return True
+        events.connect('scroll-event', wheel)
         def draw(*_):
             w, h = events.get_allocated_width(), events.get_allocated_height()
             if w > 10 and h > 10:

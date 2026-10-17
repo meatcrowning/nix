@@ -88,7 +88,8 @@ def run(parent):
     assert e.list.region_scroll.get_size_request()[1] < 80
     assert e.model.tool == 'select' and e.side.get_visible()
     e.buttons['Lock'].clicked()
-    assert e.model.chosen()[0]['locked']
+    assert not e.model.selected and e.model.doc['items'][0]['locked']
+    e.selection_changed([e.model.doc['items'][0]['id']])
     e.buttons['Lock'].clicked()
     assert not e.model.chosen()[0]['locked']
     e.buttons['Hide'].clicked()
@@ -142,10 +143,12 @@ def run(parent):
     u.set(e.fields['item.tags'], 'title, lettering')
     u.set(e.fields['enabled'], True)
     u.set(e.units, 'pixels')
-    u.set(e.fields['box.x'], 128)
+    u.set(e.fields['box.position'], '128, 256')
+    e.fields['box.position'][1].emit('activate')
     assert e.model.doc['items'][0]['box'][0] == .125
     e.buttons['Lock'].clicked()
-    assert not e.fields['box.x'][2].get_sensitive()
+    assert not e.fields['box.position'][2].get_sensitive()
+    e.selection_changed([e.model.doc['items'][0]['id']])
     e.set_reference('/home/test/out/fixture.png')
     e.refresh()
     assert e.reference, 'reference image must load in GTK 3.6'
@@ -168,6 +171,12 @@ def run(parent):
     assert accepted and accepted[-1]['enabled']
     compiled = M.compile(accepted[-1])
     assert 'HELLO' in compiled and 'reference' not in compiled
+    doc = M.valid(e.model.doc)
+    doc['summary']['caption'] = 'Reloaded scene'
+    e.load(doc)
+    e.selection_changed([e.model.doc['items'][0]['id']])
+    e.buttons['Delete'].clicked()
+    assert not e.model.doc['items']
     e.ui.close()
     parent.browse()
     print('PASS: GTK inline layout drawing, text, palettes, geometry locks, guides, underlay, copy and autosave')

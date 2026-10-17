@@ -166,6 +166,20 @@ def qt():
     editor = LayoutUI(ui, M.fresh(caption='A poster'), accepted.append)
     app.processEvents()
     editor.render(700, 500)
+    cursor = (233, 177)
+    ox, oy, w, h = editor.rect
+    location = ((cursor[0] - ox) / w, (cursor[1] - oy) / h)
+    for steps in (1, 2, -1, -.5):
+        editor.zoom_at(cursor[0], cursor[1], steps)
+        ox, oy, w, h = editor.rect
+        assert abs((cursor[0] - ox) / w - location[0]) < 1e-8
+        assert abs((cursor[1] - oy) / h - location[1]) < 1e-8
+    editor.pan_pointer('press', 10, 10)
+    before_pan = editor.rect
+    editor.pan_pointer('release', 35, 45)
+    assert editor.rect[:2] == (before_pan[0] + 25, before_pan[1] + 35)
+    editor.zoom, editor.pan = 1, [0, 0]
+    editor.render(700, 500)
     ox, oy, w, h = editor.rect
     editor.arm_add()
     editor.pointer('press', ox - 10, oy + h * .2)
@@ -192,7 +206,7 @@ def qt():
     assert editor.model.doc['items'][0]['text'] == 'Hello\n世界'
     assert editor.model.doc['items'][0]['palette'] == ['#ff0000','#00ff00']
     editor.units.edit('pixels')
-    editor.fields['box.x'].edit(128)
+    editor.fields['box.position'].edit('128, 102.4')
     assert editor.model.doc['items'][0]['box'][0] == .125
     editor.key('Right')
     assert editor.model.doc['items'][0]['box'][0] == .125 + 1/1024
@@ -207,6 +221,26 @@ def qt():
         assert editor.reference
         assert b'data:image/png;base64,' in editor.render(700,600)
         app.processEvents()
+    restored = copy.deepcopy(editor.model.doc)
+    restored['summary']['caption'] = 'Reloaded scene'
+    editor.load(restored)
+    editor.model.select(editor.model.doc['items'][0]['id'])
+    editor.buttons['Lock'].activate()
+    assert not editor.model.selected
+    editor.model.press(.4, .2); editor.model.release()
+    assert not editor.model.selected
+    editor.model.press(0, 0); editor.model.motion(1, 1); editor.model.release()
+    assert not editor.model.selected
+    editor.selection_changed([editor.model.doc['items'][0]['id']])
+    assert editor.model.selected
+    editor.buttons['Delete'].activate()
+    assert not editor.model.doc['items']
+    editor.model.undo(); editor.refresh()
+    editor.selection_changed([editor.model.doc['items'][0]['id']])
+    editor.buttons['Duplicate'].activate()
+    assert len(editor.model.doc['items']) == 2
+    editor.model.undo(); editor.refresh()
+    editor.selection_changed([editor.model.doc['items'][0]['id']])
     # Clipboard methods are replaced: never touch the host clipboard in a test.
     copied = []
     ui.copy = copied.append

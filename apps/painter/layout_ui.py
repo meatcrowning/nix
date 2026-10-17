@@ -2,6 +2,7 @@
 """Toolkit-independent layout editor actions and native form construction."""
 from __future__ import division, unicode_literals
 import copy
+import math
 import moss_layout as M
 
 
@@ -13,6 +14,10 @@ class LayoutUI(object):
         self.reference = ''
         self.reference_path = None
         self.rect = (0, 0, 1, 1)
+        self.viewport = (100, 100)
+        self.zoom = 1.0
+        self.pan = [0.0, 0.0]
+        self.panning = None
         u = self.ui
         root = u.root
         self.last_doc = copy.deepcopy(self.model.doc)
@@ -27,7 +32,11 @@ class LayoutUI(object):
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
         self.buttons['Hide'] = u.button(tools, 'Hide', lambda: self.command(self.toggle_hidden))
         u.spacer(tools)
-        for title, fn in [('Lock', self.toggle_lock), ('Delete', self.model.delete), ('Duplicate', self.model.duplicate)]:
+        self.fields['box.position'] = u.field(tools, 'Position (X, Y)', 'pair', None, lambda: self.geometry_pair('position'))
+        self.fields['box.size'] = u.field(tools, 'Size (W, H)', 'pair', None, lambda: self.geometry_pair('size'))
+        self.units = u.field(tools, '', 'combo', ['percent', 'pixels'], self.units_changed)
+        u.spacer(tools)
+        for title, fn in [('Lock', self.toggle_lock), ('Delete', lambda: self.model.delete()), ('Duplicate', lambda: self.model.duplicate())]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
         self.canvas = u.canvas(root, self)
         self.side = u.column(root)
@@ -52,9 +61,6 @@ class LayoutUI(object):
         self.add(region, 'item.text', 'Exact wording', 'text')
         self.add(region, 'item.tags', 'Region tags (comma-separated)')
         self.add(region, 'item.palette', 'Region palette', 'palette')
-        self.units = u.field(region, 'Coordinates', 'combo', ['percent', 'pixels'], self.units_changed)
-        for key, title in [('x', 'Left'), ('y', 'Top'), ('w', 'Width'), ('h', 'Height')]:
-            self.fields['box.' + key] = u.field(region, title, 'number', (0, 16384, .1), lambda k=key: self.geometry_changed(k))
         for key, title, choices in M.TYPE_FIELDS:
             self.add(region, 'type.' + key, title, 'combo' if choices else 'palette' if key == 'color' else 'entry', choices)
         u.label(region, 'Typography and surfaces are descriptive instructions. Installed fonts are not sent to MOSS.')
@@ -94,6 +100,8 @@ class LayoutUI(object):
             self.model.checkpoint()
             for row in rows:
                 row['locked'] = locked
+            if locked:
+                self.model.selected = []
 
     def type_changed(self):
         if self.syncing:
@@ -130,7 +138,9 @@ class LayoutUI(object):
     def load(self, doc):
         if self.model.drag or doc == self.model.doc:
             return
+        selected = list(self.model.selected)
         self.model = M.Editor(doc)
+        self.model.selected = [row['id'] for row in self.model.doc['items'] if row['id'] in selected]
         self.last_doc = copy.deepcopy(doc)
         self.refresh()
 
@@ -184,21 +194,24 @@ class LayoutUI(object):
         except (ValueError, TypeError) as exc:
             self.ui.set_label(self.status, str(exc))
 
-    def geometry_changed(self, key):
+    def geometry_pair(self, part):
         row = self.row()
         if self.syncing or not row or row.get('locked'):
             return
-        axis = ['x', 'y', 'w', 'h'].index(key)
-        scale = 100 if self.model.units == 'percent' else self.model.doc['width' if axis % 2 == 0 else 'height']
-        box = list(row['box'])
-        box[axis] = self.ui.get(self.fields['box.' + key]) / scale
-        if axis < 2:
-            box[axis] = min(box[axis], 1 - box[axis + 2])
-        else:
-            box[axis] = max(.001, min(box[axis], 1 - box[axis - 2]))
-        self.model.checkpoint()
-        row['box'] = box
-        self.refresh()
+        try:
+            values = [float(v.strip()) for v in self.ui.get(self.fields['box.' + part]).split(',')]
+            if len(values) != 2 or any((math.isnan(v) or math.isinf(v)) for v in values):
+                raise ValueError('Enter two numbers separated by a comma.')
+            offset = 0 if part == 'position' else 2
+            box = list(row['box'])
+            for axis, value in enumerate(values):
+                scale = 100 if self.model.units == 'percent' else self.model.doc['width' if axis == 0 else 'height']
+                box[offset + axis] = max(0 if offset == 0 else .001, min(value / scale, 1 - box[axis + 2 if offset == 0 else axis]))
+            self.model.checkpoint()
+            row['box'] = box
+            self.refresh()
+        except ValueError as exc:
+            self.ui.set_label(self.status, str(exc))
 
     def units_changed(self):
         if not self.syncing:
@@ -236,9 +249,10 @@ class LayoutUI(object):
         self.ui.set(self.tool, next(iter(kinds)) if len(kinds) == 1 else self.new_kind if not chosen else '')
         for key, field in self.fields.items():
             if key.startswith('box.'):
-                index = ['x', 'y', 'w', 'h'].index(key[4:])
-                scale = 100 if self.model.units == 'percent' else self.model.doc['width' if index % 2 == 0 else 'height']
-                value = self.row()['box'][index] * scale if self.row() else 0
+                offset = 0 if key == 'box.position' else 2
+                values = [(self.row()['box'][offset + axis] if self.row() else 0) *
+                          (100 if self.model.units == 'percent' else self.model.doc['width' if axis == 0 else 'height']) for axis in (0, 1)]
+                value = ', '.join('%g' % v for v in values)
             else:
                 value = self.get_value(key)
                 if key in ('grid_step', 'margin', 'opacity'):
@@ -280,8 +294,33 @@ class LayoutUI(object):
         self.ui.redraw(self.canvas)
 
     def render(self, w, h):
-        data, self.rect = M.svg(self.model, max(100, w), max(100, h), self.reference)
+        self.viewport = (max(100, w), max(100, h))
+        data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan)
         return data
+
+    def zoom_at(self, x, y, steps):
+        if self.model.drag or self.panning:
+            return
+        ox, oy, w, h = self.rect
+        zoom = max(.25, min(16, self.zoom * 1.2 ** max(-10, min(10, steps))))
+        factor = zoom / self.zoom
+        nw, nh = w * factor, h * factor
+        self.pan = [x - (x - ox) * factor - (self.viewport[0] - nw) / 2,
+                    y - (y - oy) * factor - (self.viewport[1] - nh) / 2]
+        self.zoom = zoom
+        self.rect = M.view_rect(self.model.doc, self.viewport[0], self.viewport[1], self.zoom, self.pan)
+        self.paint()
+
+    def pan_pointer(self, action, x, y):
+        if action == 'press':
+            self.panning = (x, y, list(self.pan))
+        if self.panning:
+            sx, sy, origin = self.panning
+            self.pan = [origin[0] + x - sx, origin[1] + y - sy]
+            self.rect = M.view_rect(self.model.doc, self.viewport[0], self.viewport[1], self.zoom, self.pan)
+            self.paint()
+        if action == 'release':
+            self.panning = None
 
     def pointer(self, action, x, y, shift=False):
         ox, oy, w, h = self.rect
@@ -314,7 +353,7 @@ class LayoutUI(object):
             actions = {'z': lambda: self.model.undo(shift), 'y': lambda: self.model.undo(True),
                        'c': self.copy, 'v': self.paste, 'd': self.model.duplicate,
                        'g': lambda: self.model.group(shift),
-                       'a': lambda: setattr(self.model, 'selected', [r['id'] for r in self.model.doc['items']])}
+                       'a': lambda: setattr(self.model, 'selected', [r['id'] for r in self.model.doc['items'] if not r.get('locked')])}
         if name in actions:
             self.command(actions[name])
             return True

@@ -206,6 +206,7 @@ Item {
             property int canvasHeight: Math.max(140, Math.min(1200, Prefs.get("layout.canvasHeight") || 300))
             implicitWidth: 240
             implicitHeight: canvasHeight + 12
+            Rectangle { width: parent.width; height: canvasBox.canvasHeight; color: Theme.bg }
             LayoutCanvas {
                 objectName: "mossLayoutCanvas"
                 width: parent.width
@@ -252,8 +253,8 @@ Item {
     Component {
         id: fieldComponent
         ColumnLayout {
-            implicitWidth: node.spec.kind === "combo" ? (node.spec.title ? 140 : 90) : 200
-            Label { text: node.spec.title; visible: node.spec.kind !== "check" && node.spec.title !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            implicitWidth: node.spec.kind === "pair" ? 78 : node.spec.kind === "combo" ? (node.spec.title ? 140 : 90) : 200
+            Label { text: node.spec.title; visible: node.spec.kind !== "check" && node.spec.kind !== "pair" && node.spec.title !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Loader {
                 Layout.fillWidth: true
                 sourceComponent: {
@@ -262,6 +263,7 @@ Item {
                     case "check": return checkField
                     case "number": return numberField
                     case "text": return textField
+                    case "pair": return pairField
                     default: return entryField
                     }
                 }
@@ -289,6 +291,16 @@ Item {
                 property string replace: ""
                 onAccepted: node.spec.colour(selectedColor.toString(), replace)
             }
+        }
+    }
+    Component {
+        id: pairField
+        TextField {
+            text: node.spec.value || ""
+            Accessible.name: node.spec.title
+            ToolTip.visible: hovered
+            ToolTip.text: node.spec.title + "; comma-separated"
+            onEditingFinished: node.spec.edit(text)
         }
     }
     Component {
@@ -327,16 +339,17 @@ Item {
                 id: textViewport
                 width: parent.width
                 height: textBox.promptHeight
-                contentWidth: width
+                contentWidth: node.spec.title === "Exact wording" ? Math.max(width, textEdit.contentWidth + textEdit.leftPadding + textEdit.rightPadding) : width
                 contentHeight: textEdit.implicitHeight
                 clip: true
                 ScrollBar.vertical: VScroll { }
+                ScrollBar.horizontal: ScrollBar { policy: node.spec.title === "Exact wording" ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
                 TextArea {
                     id: textEdit
                     objectName: "layoutField_" + node.spec.title
                     width: parent.width
                     text: node.spec.value || ""
-                    wrapMode: TextEdit.Wrap
+                    wrapMode: node.spec.title === "Exact wording" ? TextEdit.NoWrap : TextEdit.Wrap
                     persistentSelection: true
                     onTextChanged: if (text !== node.spec.value) node.spec.edit(text)
                 }

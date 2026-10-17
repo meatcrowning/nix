@@ -169,7 +169,7 @@ class LayoutCanvas(QQuickPaintedItem):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bridge = None
-        self.setAcceptedMouseButtons(Qt.LeftButton)
+        self.setAcceptedMouseButtons(Qt.LeftButton | Qt.MiddleButton)
         self.setAntialiasing(True)
 
     def set_bridge(self, bridge):
@@ -189,15 +189,34 @@ class LayoutCanvas(QQuickPaintedItem):
 
     def mousePressEvent(self, event):
         self.forceActiveFocus()
+        if event.button() == Qt.MiddleButton:
+            self._bridge.editor.pan_pointer('press', event.position().x(), event.position().y())
+            event.accept()
+            return
         self._bridge.editor.pointer('press', event.position().x(), event.position().y(), bool(event.modifiers() & Qt.ShiftModifier))
         event.accept()
 
     def mouseMoveEvent(self, event):
+        if self._bridge.editor.panning:
+            self._bridge.editor.pan_pointer('move', event.position().x(), event.position().y())
+            event.accept()
+            return
         self._bridge.editor.pointer('move', event.position().x(), event.position().y())
         event.accept()
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self._bridge.editor.pan_pointer('release', event.position().x(), event.position().y())
+            event.accept()
+            return
         self._bridge.editor.pointer('release', event.position().x(), event.position().y())
+        event.accept()
+
+    def wheelEvent(self, event):
+        from kinetic import DETENT, ANGLE_PER_PIXEL, is_wheel_detent
+        px, angle = event.pixelDelta(), event.angleDelta()
+        steps = angle.y() / DETENT if is_wheel_detent(px, angle) else (px.y() if not px.isNull() else angle.y() / ANGLE_PER_PIXEL) / 40
+        self._bridge.editor.zoom_at(event.position().x(), event.position().y(), steps)
         event.accept()
 
     def keyPressEvent(self, event):
