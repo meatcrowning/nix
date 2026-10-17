@@ -147,12 +147,51 @@ Item {
     }
     Component {
         id: canvasComponent
-        LayoutCanvas {
-            objectName: "mossLayoutCanvas"
+        Item {
+            id: canvasBox
+            property int canvasHeight: 300
             implicitWidth: 240
-            implicitHeight: 300
-            bridge: node.bridge
-            HoverHandler { cursorShape: node.bridge.toolkitObject.drawing ? Qt.CrossCursor : Qt.ArrowCursor }
+            implicitHeight: canvasHeight + 12
+            LayoutCanvas {
+                objectName: "mossLayoutCanvas"
+                width: parent.width
+                height: canvasBox.canvasHeight
+                bridge: node.bridge
+                HoverHandler { cursorShape: node.bridge.toolkitObject.drawing ? Qt.CrossCursor : Qt.ArrowCursor }
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: 10
+                color: resizeGrip.pressed || resizeGrip.containsMouse ? Theme.accent : "transparent"
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 3
+                    Repeater {
+                        model: 3
+                        Rectangle { width: 3; height: 1; color: resizeGrip.pressed || resizeGrip.containsMouse ? Theme.bg : Theme.dim }
+                    }
+                }
+                MouseArea {
+                    id: resizeGrip
+                    objectName: "layoutResizeHandle"
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeVerCursor
+                    preventStealing: true
+                    property real startY: 0
+                    property int startHeight: 0
+                    onPressed: mouse => {
+                        startY = mapToItem(null, mouse.x, mouse.y).y
+                        startHeight = canvasBox.canvasHeight
+                    }
+                    onPositionChanged: mouse => {
+                        if (pressed)
+                            canvasBox.canvasHeight = Math.max(140, Math.min(1200,
+                                Math.round(startHeight + mapToItem(null, mouse.x, mouse.y).y - startY)))
+                    }
+                }
+            }
         }
     }
     Component {

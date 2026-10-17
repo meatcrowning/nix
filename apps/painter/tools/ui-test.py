@@ -5312,6 +5312,12 @@ def test_moss(win, ctl, tmp):
             ancestor.setProperty('contentY', ancestor.property('contentY') + point.y() - 12)
             spin(100)
         check(model + " keeps layout below prompts", canvas.mapToItem(editor, QPointF(0, 0)).y() > 150)
+        handle = next(item for item in walk(editor) if item.objectName() == "layoutResizeHandle")
+        old_height = canvas.height()
+        drag(win, handle, handle.width() / 2, 5, handle.width() / 2, -55)
+        check(model + " handle resizes canvas", canvas.height() == old_height - 60)
+        drag(win, handle, handle.width() / 2, 5, handle.width() / 2, 65)
+        check(model + " handle expands canvas", canvas.height() == old_height)
         click(win, add)
         check(model + " Add arms drawing", ctl.layoutEditor.editor.model.tool == "object")
         ox, oy, cw, ch = ctl.layoutEditor.editor.rect

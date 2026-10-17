@@ -46,6 +46,21 @@ def run(parent):
     assert all(any(f.control is parent.controls[key] for f in parent.spelling.fields.values()) for key in ('positive', 'negative', 'system_prompt'))
     while Gtk.events_pending(): Gtk.main_iteration()
     assert e.side.get_allocation().y >= e.canvas.get_allocation().y + e.canvas.get_allocated_height()
+    original_height = e.canvas.get_allocated_height()
+    for signal, kind, y in [('button-press-event', Gdk.EventType.BUTTON_PRESS, 100),
+                            ('motion-notify-event', Gdk.EventType.MOTION_NOTIFY, 180),
+                            ('button-release-event', Gdk.EventType.BUTTON_RELEASE, 180)]:
+        event = Gdk.Event.new(kind)
+        if kind == Gdk.EventType.MOTION_NOTIFY:
+            event.motion.y_root = y
+        else:
+            event.button.button = 1
+            event.button.y_root = y
+        e.canvas.resize_handle.emit(signal, event)
+    assert e.canvas.get_size_request()[1] == original_height + 80
+    assert not e.canvas.resize_handle.has_grab()
+    e.canvas.set_size_request(180, original_height)
+    while Gtk.events_pending(): Gtk.main_iteration()
     parent.params_scroll.get_vadjustment().set_value(parent.layout_box.get_allocation().y)
     u.set(e.tool, 'text')
     e.add_button.clicked()

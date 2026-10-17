@@ -239,7 +239,35 @@ class Toolkit(object):
                 loader.close()
                 image.set_from_pixbuf(loader.get_pixbuf())
         events.connect('size-allocate', draw)
-        parent.pack_start(events, True, True, 0)
+        parent.pack_start(events, False, False, 0)
+        handle = Gtk.EventBox()
+        handle.set_tooltip_text('Drag to resize the layout')
+        grip = Gtk.Label(label='⋯')
+        grip.set_size_request(-1, 10)
+        handle.add(grip)
+        parent.pack_start(handle, False, False, 0)
+        handle.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK |
+                          Gdk.EventMask.POINTER_MOTION_MASK)
+        handle.connect('realize', lambda widget: widget.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.SB_V_DOUBLE_ARROW)))
+        drag = []
+        def resize(widget, event, action):
+            if action != 'move' and event.button != 1:
+                return False
+            if action == 'press':
+                drag[:] = [event.y_root, events.get_allocated_height()]
+                widget.grab_add()
+            if not drag:
+                return False
+            height = max(140, min(1200, int(drag[1] + event.y_root - drag[0])))
+            events.set_size_request(180, height)
+            if action == 'release':
+                drag[:] = []
+                widget.grab_remove()
+            return True
+        handle.connect('button-press-event', resize, 'press')
+        handle.connect('motion-notify-event', resize, 'move')
+        handle.connect('button-release-event', resize, 'release')
+        events.resize_handle = handle
         events.repaint = draw
         return events
 
