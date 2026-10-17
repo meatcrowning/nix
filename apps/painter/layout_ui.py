@@ -22,6 +22,7 @@ class LayoutUI(object):
         self.tool = u.field(tools, 'New region', 'combo', ['object', 'character', 'text'], lambda: None)
         u.set(self.tool, 'object')
         u.button(tools, 'Details', self.toggle_details)
+        self.buttons['Clear all'] = u.button(tools, 'Clear all', self.clear)
         for title, fn in [('Undo', lambda: self.model.undo()), ('Redo', lambda: self.model.undo(True))]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
         menu = u.menu(tools, 'Edit')
@@ -87,6 +88,11 @@ class LayoutUI(object):
         self.model.tool = self.ui.get(self.tool) or 'object'
         self.ui.set_label(self.instructions, 'Drag on the layout to draw a %s. Drawing returns to selection afterward.' % self.model.tool)
         self.ui.drawing_cursor(self.canvas, True)
+
+    def clear(self):
+        self.command(self.model.clear)
+        self.ui.drawing_cursor(self.canvas, False)
+        self.ui.set_label(self.instructions, 'Click Add, then drag on the layout to draw a region.')
 
     def toggle_details(self):
         self.details = not self.details
@@ -225,7 +231,9 @@ class LayoutUI(object):
     def paint(self):
         for title, button in self.buttons.items():
             enabled = bool(self.model.undo_stack) if title == 'Undo' else bool(self.model.redo_stack) if title == 'Redo' else True if title == 'Paste' else bool(self.model.selected)
-            if title == 'Group':
+            if title == 'Clear all':
+                enabled = bool(self.model.doc['items'])
+            elif title == 'Group':
                 enabled = len(self.model.selected) > 1
             elif title == 'Ungroup':
                 enabled = any(r.get('group') for r in self.model.chosen())

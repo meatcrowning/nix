@@ -188,6 +188,16 @@ class Editor(object):
         self.doc['items'] = [i for i in self.doc['items'] if i['id'] not in self.selected]
         self.selected = []
 
+    def clear(self):
+        if not self.doc['items']:
+            return
+        self.checkpoint()
+        self.doc['items'] = []
+        self.doc['enabled'] = False
+        self.selected = []
+        self.drag = None
+        self.tool = 'select'
+
     def copy(self):
         return json.dumps(dict(painter_layout_regions=1, items=self.chosen()), ensure_ascii=False)
 

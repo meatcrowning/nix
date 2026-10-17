@@ -184,6 +184,20 @@ def qt():
     editor.copy(); editor.paste()
     assert len(editor.model.doc['items']) == 2
     editor.publish(); assert accepted and accepted[-1]['enabled']
+    editor.model.selected = []
+    editor.model.doc['items'][0]['locked'] = True
+    before_clear = copy.deepcopy(editor.model.doc)
+    editor.paint()
+    assert editor.buttons['Clear all']._enabled
+    editor.buttons['Clear all'].activate()
+    assert not accepted[-1]['items'] and not accepted[-1]['enabled']
+    assert accepted[-1]['summary'] == before_clear['summary']
+    assert accepted[-1]['reference'] == before_clear['reference']
+    assert not editor.buttons['Clear all']._enabled
+    editor.key('z', True)
+    assert editor.model.doc == before_clear
+    editor.key('z', True, True)
+    assert not editor.model.doc['items']
     print('PASS: native Qt layout form, palette, multiline text, pixels, underlay and autosave')
 
 
