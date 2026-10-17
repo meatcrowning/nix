@@ -8,7 +8,6 @@ from __future__ import division, unicode_literals
 import copy
 import json
 import math
-import textwrap
 import uuid
 from xml.sax.saxutils import escape
 
@@ -413,7 +412,14 @@ def svg(editor, vw, vh, reference=''):
         colour = '#d36d18' if selected else '#345c88'
         s.append('<g opacity="%s"><rect x="%f" y="%f" width="%f" height="%f" fill="%s" fill-opacity=".07" stroke="%s" stroke-width="%s"/>' % ('1' if item.get('enabled', True) else '.3', x, y, bw, bh, colour, colour, 2 if selected else 1))
         title = '%d %s%s' % (n + 1, item['label'], ' [locked]' if item.get('locked') else '')
-        s.append('<text x="%f" y="%f" fill="%s" font-size="11">%s</text>' % (x + 3, y + 13, colour, escape(title)))
+        caption = ' '.join(item.get('caption', '').split())
+        if caption:
+            title += ' — ' + caption
+        columns = max(1, int((bw - 6) / 6))
+        if len(title) > columns:
+            title = title[:max(0, columns - 1)] + '…'
+        s.append('<defs><clipPath id="label%d"><rect x="%f" y="%f" width="%f" height="%f"/></clipPath></defs>' % (n, x, y, bw, bh))
+        s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="%s" font-size="11">%s</text>' % (n, x + 3, y + 13, colour, escape(title)))
         if item['label'] == 'text':
             style = item.get('typography', {})
             lines = item.get('text', '').split('\n')
@@ -426,24 +432,6 @@ def svg(editor, vw, vh, reference=''):
             if not (len(color) == 7 and color.startswith('#') and all(c in '0123456789abcdefABCDEF' for c in color[1:])): color = '#222222'
             for j, line in enumerate(lines):
                 s.append('<text x="%f" y="%f" fill="%s" font-family="%s" font-weight="%s" font-size="%f" text-anchor="%s">%s</text>' % (tx, y + 18 + fs * (j + 1), color, family, 'bold' if style.get('weight') in ('bold', 'heavy') else 'normal', fs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
-        caption = item.get('caption', '').strip()
-        if caption and bw > 12 and bh > 30:
-            # Keep the description inside its own region, below any text preview.
-            columns = max(1, int((bw - 8) / 6))
-            lines = []
-            for paragraph in caption.splitlines():
-                lines.extend(textwrap.wrap(paragraph, columns) or [''])
-            room = bh / 2 if item['label'] == 'text' and item.get('text') else bh - 20
-            count = max(1, min(6, int(room / 14)))
-            if len(lines) > count:
-                lines = lines[:count]
-                lines[-1] = lines[-1][:max(0, columns - 1)] + '…'
-            cy = y + bh - len(lines) * 14 - 3
-            s.append('<defs><clipPath id="caption%d"><rect x="%f" y="%f" width="%f" height="%f"/></clipPath></defs><g clip-path="url(#caption%d)">' % (n, x, y, bw, bh, n))
-            s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="white" fill-opacity=".85"/>' % (x + 1, cy, bw - 2, len(lines) * 14 + 2))
-            for j, line in enumerate(lines):
-                s.append('<text x="%f" y="%f" fill="#222" font-family="sans-serif" font-size="11">%s</text>' % (x + 4, cy + 11 + j * 14, escape(line)))
-            s.append('</g>')
         s.append('</g>')
         if selected and not item.get('locked'):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:

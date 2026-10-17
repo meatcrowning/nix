@@ -129,8 +129,8 @@ def core():
     preview = M.Editor(M.fresh())
     preview.add('character', [.1, .1, .8, .8])['caption'] = 'Red coat & blue scarf <bright>'
     svg = M.svg(preview, 700, 700)[0].decode('utf-8')
-    assert 'Red coat &amp; blue scarf &lt;bright&gt;' in svg
-    assert 'clip-path="url(#caption0)"' in svg
+    assert '1 character — Red coat &amp; blue scarf &lt;bright&gt;' in svg
+    assert 'clip-path="url(#label0)"' in svg
     preview.chosen()[0]['caption'] = 'long description ' * 100
     assert '…' in M.svg(preview, 700, 700)[0].decode('utf-8')
     print('PASS: layout compiler, rescaling, geometry, locks, groups, undo and both MOSS graphs')
