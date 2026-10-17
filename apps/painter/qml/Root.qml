@@ -455,11 +455,14 @@ Item {
             var g = root.clone(root.gen)
             g.moss_layout = document
             g.positive = document.summary.caption
-            var a = document.width, b = document.height
-            while (b) { var t = a % b; a = b; b = t }
-            g.aspectW = document.width / a
-            g.aspectH = document.height / a
-            g.megapixels = document.width * document.height / 1000000
+            // Preserve the requested ratio/budget through ordinary region edits.
+            if (document.width !== g.width || document.height !== g.height) {
+                var a = document.width, b = document.height
+                while (b) { var t = a % b; a = b; b = t }
+                g.aspectW = document.width / a
+                g.aspectH = document.height / a
+                g.megapixels = document.width * document.height / 1000000
+            }
             root.gen = g
             root.recomputeDims()
         }

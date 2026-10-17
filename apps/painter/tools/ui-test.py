@@ -5390,6 +5390,17 @@ def test_moss(win, ctl, tmp):
             spellcheck._ENGINE = checker
             spell_object.availableChanged.emit()
         import moss_layout
+        APP.set('aspectW', 16)
+        APP.set('aspectH', 9)
+        APP.set('megapixels', 1.0)
+        APP.recomputeDims()
+        spin(30)
+        before_layout = prop(APP, 'gen')
+        same_size = moss_layout.fresh(before_layout['width'], before_layout['height'], 'Region edit')
+        ctl.layoutEdited.emit(model, same_size)
+        after_layout = prop(APP, 'gen')
+        check(model + ' region edits preserve requested ratio and budget',
+              (after_layout['aspectW'], after_layout['aspectH'], after_layout['megapixels']) == (16, 9, 1.0))
         document = moss_layout.fresh(1280, 720, "A poster")
         layout_editor = moss_layout.Editor(document)
         layout_editor.add("text")["caption"] = "A large headline"

@@ -21,6 +21,25 @@ def run(parent):
     assert e.add_button.get_tooltip_text() == 'Add region'
     assert not e.list.region_box.get_visible()
     u = e.ui
+    saved_values, saved_settings = parent.values(), parent.state['settings']
+    saved_doc, saved_loading = parent.layout_doc, parent.loading
+    parent.loading = True
+    try:
+        parent.state['settings'] = dict(saved_settings, width=1328, height=752)
+        for key, value in [('aspectW', 16), ('aspectH', 9), ('megapixels', 1.0)]:
+            parent.controls[key].set_value(value)
+        parent.layout_changed(M.fresh(1328, 752, 'Edited region'))
+        values = parent.values()
+        assert (values['aspectW'], values['aspectH'], values['megapixels']) == (16, 9, 1.0)
+        parent.layout_changed(M.fresh(1600, 1000, 'Resized canvas'))
+        values = parent.values()
+        assert (values['aspectW'], values['aspectH'], values['megapixels']) == (8, 5, 1.6)
+    finally:
+        parent.state['settings'], parent.layout_doc = saved_settings, saved_doc
+        for key in ('aspectW', 'aspectH', 'megapixels'):
+            parent.controls[key].set_value(saved_values[key])
+        parent.controls['positive'].get_buffer().set_text(saved_values['positive'])
+        parent.loading = saved_loading
     from spelling_gtk import Spelling, text
     requests = []
     checker = Spelling(requests.append)

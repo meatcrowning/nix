@@ -824,12 +824,16 @@ class Window(Gtk.Window):
         was_loading = self.loading
         self.loading = True
         self.controls['positive'].get_buffer().set_text(result['summary']['caption'])
-        a, b = result['width'], result['height']
-        while b:
-            a, b = b, a % b
-        self.controls['aspectW'].set_value(result['width'] // a)
-        self.controls['aspectH'].set_value(result['height'] // a)
-        self.controls['megapixels'].set_value(result['width'] * result['height'] / 1000000.0)
+        settings = self.state['settings']
+        # Region edits must not replace the requested ratio/budget with the
+        # model's rounded pixel dimensions. Only an explicit canvas resize does.
+        if (result['width'], result['height']) != (settings['width'], settings['height']):
+            a, b = result['width'], result['height']
+            while b:
+                a, b = b, a % b
+            self.controls['aspectW'].set_value(result['width'] // a)
+            self.controls['aspectH'].set_value(result['height'] // a)
+            self.controls['megapixels'].set_value(result['width'] * result['height'] / 1000000.0)
         self.loading = was_loading
         self.changed()
 
