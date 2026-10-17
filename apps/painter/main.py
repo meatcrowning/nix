@@ -670,6 +670,7 @@ class Painter(QObject):
     modeChanged = Signal()
     previewChanged = Signal()
     toast = Signal(str, bool)          # message, isError
+    jobCompleted = Signal(str)        # native frontend applies its focus policy
     logChanged = Signal()
 
     def __init__(self, parent=None):
@@ -2159,7 +2160,7 @@ class Painter(QObject):
             self.previewChanged.emit()
             self.busyChanged.emit()
         took = f" in {job.duration:.1f}s" if job.duration else ""
-        self.toast.emit(f"done{took}", False)
+        self.jobCompleted.emit(f"done{took}")
         self.statusChanged.emit()
         # A job with no images at all reaches zero here rather than in a
         # download callback, so the last word on the batch is asked for twice.
@@ -2349,7 +2350,6 @@ class Painter(QObject):
                 detail = (out.splitlines() or [f"exit {rc}"])[-1]
                 self.toast.emit(f"could not copy it: {detail}", True)
                 return
-            self.toast.emit("image copied", False)
 
         self._run_async([sys.executable, str(CLIPFILE), "--image-only", src], done)
 
@@ -2634,14 +2634,11 @@ class Painter(QObject):
         offers both, forks a holder that outlives painter exactly as wl-copy's
         did, and its exit code means the selection is ours.
         """
-        name = Path(path).name
-
         def done(rc, out):
             if rc != 0:
                 self.toast.emit(f"could not copy it: {out.splitlines()[-1] if out else rc}",
                                 True)
                 return
-            self.toast.emit(f"{name} copied — paste it as a file", False)
 
         self._run_async([sys.executable, str(CLIPFILE), str(path)], done)
 

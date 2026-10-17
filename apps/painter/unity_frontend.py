@@ -644,7 +644,7 @@ class Window(Gtk.Window):
         self.update_gallery(state)
         self.receive_media(state['media'])
         for message in state['messages']:
-            self.message(message['text'], message['error'])
+            self.message(message['text'], message['error'], message.get('completion', False))
         return False
 
     def receive_media(self, media):
@@ -823,15 +823,20 @@ class Window(Gtk.Window):
         self.info.hide()
         self.send('generate', save=True)
 
-    def message(self, text, error=False):
+    def message(self, text, error=False, completion=False):
+        if completion and self.is_active():
+            return
         if not error:
-            Gio.bus_get(Gio.BusType.SESSION, None, self.notification_bus, text)
+            Gio.bus_get(Gio.BusType.SESSION, None, self.notification_bus, (text, completion))
             return
         self.show_message(text, error)
 
-    def notification_bus(self, source, result, text):
+    def notification_bus(self, source, result, message):
+        text, completion = message
         try:
             bus = Gio.bus_get_finish(result)
+            if completion and self.is_active():
+                return
             bus.call('org.freedesktop.Notifications', '/org/freedesktop/Notifications',
                      'org.freedesktop.Notifications', 'Notify',
                      GLib.Variant('(susssasa{sv}i)',
@@ -957,7 +962,6 @@ class Window(Gtk.Window):
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             clipboard.set_image(pixbuf)
             clipboard.store()
-            self.message('Image copied', False)
             return False
 
         worker = threading.Thread(target=load)

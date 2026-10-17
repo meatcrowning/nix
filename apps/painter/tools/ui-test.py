@@ -5036,8 +5036,13 @@ def test_preview_zoom(win, ctl, tmp):
     check("history still offers copy image", "Copy Image" in [i.get("label") for i in items])
     items = view.commonItems(0, shot, True, {}).toVariant()
     check("history video does not offer image copy", "Copy Image" not in [i.get("label") for i in items])
+    copy_messages = []
+    def copy_message(text, error): copy_messages.append((text, error))
+    ctl.toast.connect(copy_message)
     ctl.copyImage(shot)
     spin(120)
+    ctl.toast.disconnect(copy_message)
+    check("successful image copy is silent", not copy_messages, copy_messages)
     copied = [a for a in RAN if any(os.path.basename(x) == "clipfile.py" for x in a)]
     check("copy image asks clipfile for image MIME only",
           copied and copied[-1][-2:] == ["--image-only", shot], copied)
@@ -5414,9 +5419,12 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea", "moss"):
+                "pairing", "source", "tags", "tab", "krea", "moss", "notifications"):
         print("== %s ==" % only)
-        if only == "moss":
+        if only == "notifications":
+            test_done_toast(win, ctl, tmp)
+            test_preview_zoom(win, ctl, tmp)
+        elif only == "moss":
             test_moss(win, ctl, tmp)
         elif only == "krea":
             test_krea(win, ctl, tmp)

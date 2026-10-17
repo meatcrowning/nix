@@ -97,6 +97,7 @@ class Engine:
         ctl.preview = SimpleNamespace(image=QImage())
         ctl.gallery.liveReplaced.connect(self.live_replaced)
         ctl.toast.connect(lambda text, error: self.messages.append(dict(text=text, error=error)))
+        ctl.jobCompleted.connect(lambda text: self.messages.append(dict(text=text, error=False, completion=True)))
         ctl.modelChanged.connect(self.model_changed)
         ctl.selectModelByName(prefs.get('model') or '')
         ctl.restoreMode(prefs.get('mode') or '')

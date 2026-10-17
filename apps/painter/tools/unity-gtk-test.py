@@ -76,6 +76,12 @@ def test():
             return True
         if step[0] == 0:
             assert notifications == ['Generation completed'], notifications
+            window.original_active = window.is_active
+            window.is_active = lambda: True
+            window.message('Focused completion', completion=True)
+            window.is_active = lambda: False
+            window.message('Focus returned before dispatch', completion=True)
+            window.is_active = lambda: True
             assert not window.info.get_visible()
             assert len(window.state['models']) == 2
             assert window.selectors.get_orientation() == Gtk.Orientation.HORIZONTAL
@@ -138,6 +144,9 @@ def test():
             window.controls['seed'].set_text('1234')
             window.generate()
         elif step[0] == 1:
+            assert notifications == ['Generation completed'], notifications
+            window.is_active = lambda: False
+            window.message('Background completion', completion=True)
             assert window.state['settings']['positive'] == 'a native GTK prompt'
             assert window.state['settings']['aspectW'] == 16
             assert window.state['settings']['aspectH'] == 9
@@ -148,6 +157,8 @@ def test():
             assert window.pages.get_current_page() == 1
             window.restore()
         elif step[0] == 2:
+            assert notifications == ['Generation completed', 'Background completion'], notifications
+            window.is_active = window.original_active
             assert window.values()['positive'] == 'restored prompt'
             assert window.values()['seed'] == 42
             assert window.values()['aspectW'] == 5
@@ -196,6 +207,7 @@ def test():
             select('clip.mp4')
         elif step[0] == 4:
             copied_pixels(80, 60)
+            assert notifications == ['Generation completed', 'Background completion'], notifications
             assert window.viewer.video
             assert window.picture.get_pixbuf() is not None
             assert window.viewer.natural_size == [96, 64]
