@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import "../../qmlcommon"
 
 Panel {
@@ -130,7 +131,7 @@ Panel {
             root.set("randomSeed", random)
             root.set("reuseSeed", false)
         }
-        Row {
+        RowLayout {
             width: parent.width
             spacing: 4
             Button {
@@ -165,12 +166,14 @@ Panel {
                     } else parent.parent.seedMode(index === 1)
                 }
             }
-        }
-        Field {
-            width: parent.width
-            label: "Seed number"
+            PixelText {
+                text: "Seed number"
+                Layout.alignment: Qt.AlignVCenter
+            }
             SeedInput {
-                width: parent.width
+                Layout.fillWidth: true
+                Layout.minimumWidth: 40
+                Layout.preferredWidth: 100
                 enabled: !root.gen.randomSeed && !root.gen.reuseSeed
                 value: root.gen.reuseSeed && App.lastSeed >= 0 ? App.lastSeed : root.gen.seed
                 onEdited: value => root.set("seed", value)

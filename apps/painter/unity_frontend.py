@@ -257,7 +257,15 @@ class Window(Gtk.Window):
         self.rows['seedPolicy'] = (seed_actions,)
         self.grid.attach(seed_actions, 0, self.grid_row, 2, 1)
         self.grid_row += 1
-        self.entry('seed', 'Seed number')
+        seed_label = label('Seed number')
+        seed_label.set_alignment(0, .5)
+        seed = Gtk.Entry()
+        seed.set_width_chars(6)
+        seed.connect('changed', self.changed)
+        seed_actions.pack_start(seed_label, False, False, 4)
+        seed_actions.pack_start(seed, True, True, 0)
+        self.controls['seed'] = seed
+        self.rows['seed'] = (seed_label, seed)
         aspect = Gtk.Box(spacing=2)
         for key in ('aspectW', 'aspectH'):
             if key == 'aspectH':
