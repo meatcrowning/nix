@@ -272,10 +272,6 @@ class Indicator(Gtk.Application):
         self.night = Gtk.CheckMenuItem("Night Light")
         self.night.connect("toggled", self.toggle_night)
         menu.append(self.night)
-        self.dynamic_focus = Gtk.CheckMenuItem("Dynamic Focus Color")
-        self.dynamic_focus.set_tooltip_text("Use the wallpaper color for focus and selection in Ambiance or Radiance")
-        self.dynamic_focus.connect("toggled", self.toggle_focus)
-        menu.append(self.dynamic_focus)
         menu.append(Gtk.SeparatorMenuItem())
         settings = Gtk.MenuItem(u"Display Settings\u2026")
         settings.connect("activate", lambda *_: subprocess.Popen([sys.executable, os.path.abspath(__file__), "settings"]))
@@ -292,7 +288,6 @@ class Indicator(Gtk.Application):
         for level, item in self.levels:
             item.set_active(level == self.state["brightness"])
         self.night.set_active(self.state["night"])
-        self.dynamic_focus.set_active(self.state["dynamicFocus"])
         self.menu_updating = False
         self.indicator.set_icon("unity-display-night" if self.state["night"] else "unity-display-day")
 
@@ -331,10 +326,6 @@ class Indicator(Gtk.Application):
             self.change(brightness=level)
         elif not self.menu_updating:
             self.show()
-
-    def toggle_focus(self, item):
-        if not self.menu_updating:
-            self.change(dynamicFocus=item.get_active())
 
     def toggle_night(self, item):
         if not self.menu_updating:
@@ -395,13 +386,6 @@ class Settings(Gtk.Application):
         row.pack_start(self.warmer, False, False, 0)
         grid.attach(row, 1, 2, 1, 1)
 
-        label("Dynamic Focus Color", 3)
-        self.dynamic_focus = Gtk.Switch()
-        self.dynamic_focus.set_halign(Gtk.Align.START)
-        self.dynamic_focus.set_tooltip_text("Use the wallpaper color for focus and selection in Ambiance or Radiance")
-        self.dynamic_focus.connect("notify::active", self.changed)
-        grid.attach(self.dynamic_focus, 1, 3, 1, 1)
-
         self.show()
         self.monitor = watch_state(self.reload)
         window.show_all()
@@ -410,7 +394,6 @@ class Settings(Gtk.Application):
         self.updating = True
         self.brightness.set_value(self.state["brightness"])
         self.night.set_active(self.state["night"])
-        self.dynamic_focus.set_active(self.state["dynamicFocus"])
         self.temperature.set_value(self.state["temperature"])
         for widget in (self.temperature, self.cooler, self.warmer):
             widget.set_sensitive(self.state["night"])
@@ -421,7 +404,7 @@ class Settings(Gtk.Application):
             return
         self.state = {"brightness": int(round(self.brightness.get_value())),
                       "night": self.night.get_active(),
-                      "dynamicFocus": self.dynamic_focus.get_active(),
+                      "dynamicFocus": load()["dynamicFocus"],
                       "temperature": int(round(self.temperature.get_value()))}
         for widget in (self.temperature, self.cooler, self.warmer):
             widget.set_sensitive(self.state["night"])
@@ -437,6 +420,13 @@ class Settings(Gtk.Application):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] in (["focus-get"], ["focus-on"], ["focus-off"]):
+        state = load()
+        if sys.argv[1] != "focus-get":
+            state["dynamicFocus"] = sys.argv[1] == "focus-on"
+            save(state)
+        print("true" if state["dynamicFocus"] else "false")
+        sys.exit(0)
     # The window class matches unity-display.desktop, so the launcher shows its icon.
     GLib.set_prgname("unity-display")
     # The D-Bus scroll filter calls back from another thread.

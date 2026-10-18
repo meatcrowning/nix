@@ -420,6 +420,9 @@ def runtime(arguments):
         "GDK_PIXBUF_MODULE_FILE": "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0/loaders.cache",
         "GTK_MODULES": "canberra-gtk-module", "CANBERRA_DRIVER": "pulse",
     })
+    if arguments[0] == "/usr/bin/gnome-control-center":
+        environment["LD_PRELOAD"] = CONFIG["appearanceFocus"]
+        environment["UNITY_FOCUS_SETTINGS"] = str(HERE / "display.py")
     if arguments[0] == "/usr/bin/compiz":
         environment["LD_PRELOAD"] = CONFIG["scrollGrab"]
     if arguments[0] == "/usr/bin/gnome-system-monitor":

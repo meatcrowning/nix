@@ -89,21 +89,46 @@ def fake_run(argv, **kwargs):
 image = Path.home() / 'blue.png'
 actions.perform('phone', [str(image)], config, fake_run)
 assert calls[-1][-4:] == ['--device', 'test-id', '--share', str(image)]
+setting('set', 'org.gnome.desktop.background', 'picture-options', 'none')
+subprocess.run([runtime, '/usr/bin/nautilus-actions-run', '--id=unity-wallpaper',
+                '--target=' + image.as_uri()], check=True)
+wait_for(lambda: setting('get', 'org.gnome.desktop.background', 'picture-options') == "'zoom'")
+wait_for(lambda: setting('get', 'org.gnome.desktop.background', 'picture-uri') == repr(image.as_uri()))
+# Preserve an explicitly selected fit mode when wallpaper was already enabled.
+setting('set', 'org.gnome.desktop.background', 'picture-options', 'scaled')
 actions.perform('wallpaper', [str(image)], config)
+assert setting('get', 'org.gnome.desktop.background', 'picture-options') == "'scaled'"
 assert setting('get', 'org.gnome.desktop.background', 'picture-uri') == repr(image.as_uri())
 print('PASS: Files actions installed, phone argv verified without sending, wallpaper updates')
 ui_probe = '''
-import sys
+import ctypes, sys
+from gi.repository import Gtk
 sys.path.insert(0, %r)
 import display
+builder = Gtk.Builder()
+builder.add_from_file('/usr/share/gnome-control-center/ui/background/background.ui')
+# GI resolves symbols on its library handle; the native panel uses ELF lookup.
+get_object = ctypes.CDLL(None).gtk_builder_get_object
+get_object.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+get_object.restype = ctypes.c_void_p
+assert get_object(hash(builder), 'background-panel')
+box = builder.get_object('background-panel')
+buttons = [w for w in box.get_children() if w.get_name() == 'unity-dynamic-focus-color']
+assert len(buttons) == 1
+button = buttons[0]
+assert not button.get_active()
+button.set_active(True)
+assert display.load()['dynamicFocus'] is True
+button.set_active(False)
+assert display.load()['dynamicFocus'] is False
+assert get_object(hash(builder), 'background-panel')
+assert len([w for w in box.get_children() if w.get_name() == 'unity-dynamic-focus-color']) == 1
 app = display.Settings()
 app.register(None)
 app.do_activate()
-assert not app.dynamic_focus.get_active()
-app.dynamic_focus.set_active(True)
-assert display.load()['dynamicFocus'] is True
-app.dynamic_focus.set_active(False)
-assert display.load()['dynamicFocus'] is False
-print('PASS: Display Settings toggle persists both states')
+assert not hasattr(app, 'dynamic_focus')
+print('PASS: native Appearance toggle persists both states; Display Settings has no duplicate')
 ''' % str(package / 'libexec/unity-quantal')
-subprocess.run([runtime, '/usr/bin/python2.7', '-c', ui_probe], check=True)
+subprocess.run([runtime, '/usr/bin/env', 'LD_PRELOAD=' + config['appearanceFocus'],
+                'UNITY_FOCUS_SETTINGS=' + str(package / 'libexec/unity-quantal/display.py'),
+                '/usr/bin/python2.7', '-c', ui_probe], check=True)

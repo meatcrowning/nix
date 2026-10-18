@@ -34,6 +34,12 @@ def perform(mode, paths, config, run=subprocess.run):
         if len(files) != 1:
             raise ValueError('Select one image to use as wallpaper.')
         runtime = HERE.parent.parent / 'bin/unity-quantal-runtime'
+        # Selecting an image must also turn a disabled wallpaper back on.
+        options = run([str(runtime), '/usr/bin/gsettings', 'get', 'org.gnome.desktop.background',
+                       'picture-options'], capture_output=True, text=True, check=True, timeout=15)
+        if options.stdout.strip() == "'none'":
+            run([str(runtime), '/usr/bin/gsettings', 'set', 'org.gnome.desktop.background',
+                 'picture-options', 'zoom'], check=True, timeout=15)
         run([str(runtime), '/usr/bin/gsettings', 'set', 'org.gnome.desktop.background',
              'picture-uri', files[0].as_uri()], check=True, timeout=15)
     elif mode == 'phone':

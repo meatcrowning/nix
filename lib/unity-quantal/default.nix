@@ -167,6 +167,15 @@ let
     mkdir -p "$out/lib"
     $CC -Wall -Wextra -Werror -shared -fPIC -O2 ${./scroll-grab.c} -lX11 -ldl -o "$out/lib/scroll-grab.so"
   '';
+  appearanceFocus = runCommand "unity-quantal-appearance-focus" {
+    nativeBuildInputs = [ stdenv.cc pkg-config ];
+    buildInputs = [ gtk3 ];
+    hardeningDisable = [ "bindnow" ];
+  } ''
+    mkdir -p "$out/lib"
+    $CC -Wall -Wextra -Werror -Wno-deprecated-declarations -shared -fPIC -O2 \
+      $(pkg-config --cflags gtk+-3.0) ${./appearance-focus.c} -ldl -o "$out/lib/appearance-focus.so"
+  '';
   monitorTheme = runCommand "unity-quantal-monitor-theme" {
     nativeBuildInputs = [ stdenv.cc pkg-config ];
     buildInputs = [ gtk3 ];
@@ -231,6 +240,7 @@ stdenvNoCC.mkDerivation {
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
       kdeconnect = "${kdePackages.kdeconnect-kde}/bin/kdeconnect-cli";
+      appearanceFocus = "${appearanceFocus}/lib/appearance-focus.so";
       nativeFocusThemes = "${nativeTheme}";
       focusPython = "${python3.withPackages (ps: [ ps.pillow ])}/bin/python3";
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers musicLibrary;
