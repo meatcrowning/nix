@@ -46,6 +46,9 @@ class HistoryGrid(Gtk.IconView):
         Gtk.IconView.__init__(self, model=model)
         self.sources = {}
         self.loaded_sources = {}
+        self.image_sizes = {}
+        self.empty_pixbuf = GObject.Value()
+        self.empty_pixbuf.init(GdkPixbuf.Pixbuf.__gtype__)
         self.thumb_cache = OrderedDict()
         self.thumb_pending = set()
         self.thumb_jobs = queue.Queue(maxsize=64)
@@ -80,8 +83,22 @@ class HistoryGrid(Gtk.IconView):
                 cell.set_property('height', self.create_pango_layout('Ag').get_pixel_size()[1] + 4)
         self.connect('size-allocate', self.resized)
         self.connect('destroy', self.destroyed)
-        # Evicting offscreen pixels must not change row heights or scroll position.
-        self.get_cells()[0].set_property('height', self.cell_width)
+        self.pixbuf_cell = next(c for c in self.get_cells() if isinstance(c, Gtk.CellRendererPixbuf))
+        self.set_cell_data_func(self.pixbuf_cell, self.image_cell, None)
+
+    def image_cell(self, layout, cell, model, tree_iter, *_):
+        # Retain geometry when pixels leave the cache, without reserving square
+        # slots for landscape images. Unknown previews use a compact placeholder.
+        identity = model.get_value(tree_iter, 2)
+        size = self.image_sizes.get(identity, (3, 2))
+        height = max(1, int(round(float(self.cell_width) * size[1] / max(size))))
+        cell.set_property('height', height)
+
+    def set_images(self, row, pixbuf):
+        # Quantal's GI override passes bare None as a null GValue pointer, which
+        # gtk_list_store_set_value rejects. A typed, empty GValue clears it.
+        self.get_model().set(row.iter, 0, self.thumbnail(pixbuf) if pixbuf is not None else self.empty_pixbuf,
+                             3, pixbuf if pixbuf is not None else self.empty_pixbuf)
 
     def thumb_worker(self):
         while True:
@@ -101,6 +118,8 @@ class HistoryGrid(Gtk.IconView):
         self.thumb_pending.discard((identity, source))
         if self.thumb_closed or self.sources.get(identity) != source:
             return False
+        if pixbuf is not None:
+            self.image_sizes[identity] = (pixbuf.get_width(), pixbuf.get_height())
         self.thumb_cache[source] = pixbuf
         while len(self.thumb_cache) > 64:
             self.thumb_cache.popitem(last=False)
@@ -120,7 +139,7 @@ class HistoryGrid(Gtk.IconView):
             source = self.sources.get(row[2], '')
             if n < first or n > last or not source:
                 if row[3] is not None:
-                    self.get_model().set(row.iter, 0, None, 3, None)
+                    self.set_images(row, None)
                 self.loaded_sources.pop(row[2], None)
                 continue
             if row[3] is not None and self.loaded_sources.get(row[2]) == source:
@@ -129,7 +148,9 @@ class HistoryGrid(Gtk.IconView):
                 pixbuf = self.thumb_cache.pop(source)
                 self.thumb_cache[source] = pixbuf
                 if row[3] != pixbuf:
-                    self.get_model().set(row.iter, 0, self.thumbnail(pixbuf), 3, pixbuf)
+                    if pixbuf is not None:
+                        self.image_sizes[row[2]] = (pixbuf.get_width(), pixbuf.get_height())
+                    self.set_images(row, pixbuf)
                     self.loaded_sources[row[2]] = source
             elif (row[2], source) not in self.thumb_pending and not self.thumb_jobs.full():
                 job = (row[2], source)
@@ -167,7 +188,6 @@ class HistoryGrid(Gtk.IconView):
         if cell_width != self.cell_width:
             self.cell_width = cell_width
             self.set_item_width(cell_width)
-            self.get_cells()[0].set_property('height', cell_width)
             self.name_cell.set_property('width', cell_width)
             for row in self.get_model():
                 if row[3] is not None:

@@ -217,3 +217,23 @@ assert E.userprefs.load()['layout.regionPromptHeight'] > 95
 ctl._scan_pool.waitForDone()
 ctl.gallery._thumb_pool.waitForDone()
 print('PASS: GTK socket, submission, restore, persistence, stale model and pipeline contracts')
+
+# Exercise real asynchronous page responses and cached-image decoding together.
+landscape = QImage(160, 90, QImage.Format_RGB32)
+landscape.fill(QColor('blue'))
+history = Path('/home/test/history')
+history.mkdir()
+for n in range(300):
+    landscape.save(str(history / ('history-%03d.png' % n)))
+ctl.gallery._all = [ctl.gallery._row_for(p) for p in sorted(history.glob('*.png'))]
+ctl.gallery._refilter()
+child = subprocess.Popen([os.environ['PACKAGE']+'/bin/unity-quantal-runtime', '/usr/bin/python',
+                          '/home/test/nix/apps/painter/tools/history-wire-test.py',
+                          '/run/user/1000/engine.sock'], env=child_env)
+QTimer.singleShot(18000, app.quit)
+app.exec()
+if child.poll() is None:
+    child.kill()
+    child.wait()
+assert child.returncode == 0, child.returncode
+ctl.gallery._thumb_pool.waitForDone()

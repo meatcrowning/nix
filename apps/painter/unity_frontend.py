@@ -1000,6 +1000,7 @@ class Window(Gtk.Window):
                     self.history_anchor = self.history_scroll.get_vadjustment().get_value()
                 self.tiles.clear()
                 self.gallery.loaded_sources = {}
+                self.gallery.image_sizes = {p: size for p, size in self.gallery.image_sizes.items() if p in self.gallery.sources}
                 for row in rows:
                     self.tiles.append([None, row['name'], row['path'], None])
             for n, row in enumerate(rows):
