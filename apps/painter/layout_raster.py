@@ -3,13 +3,14 @@
 The pixbuf SVG loader inherits fontconfig's LCD subpixel antialiasing, which
 leaves coloured fringes when the transparent result is composited by GTK.
 Old librsvg can override Cairo font options through fontconfig. Render the
-white lettering into an alpha-only mask so LCD colour channels cannot leak
-into the composited image; keep coloured guides and reference images intact.
+lettering into alpha-only masks so LCD colour channels cannot leak
+into the composited image. Apply the requested text colours after masking;
+keep coloured guides and reference images intact.
 """
 from copy import deepcopy
 from xml.etree import ElementTree as ET
 from ctypes import CDLL, CFUNCTYPE, c_void_p, c_char_p, c_int, c_uint, c_size_t, c_double, string_at
-from gi.repository import GdkPixbuf
+from gi.repository import GdkPixbuf, Gdk
 
 # Quantal librsvg resolves embedded image links by the conventional prefix.
 ET.register_namespace('', 'http://www.w3.org/2000/svg')
@@ -44,19 +45,25 @@ _png = _bind(_cairo, 'cairo_surface_write_to_png_stream', c_int, c_void_p, _Writ
 
 def _layers(svg):
     scene = ET.fromstring(svg)
-    lettering = deepcopy(scene)
-    def prune(node, text_only):
+    colours = sorted(set(node.get('fill', 'white') for node in scene.iter()
+                         if node.tag.rsplit('}', 1)[-1] == 'text'))
+    def prune(node, text_only, colour=None):
         for child in list(node):
             tag = child.tag.rsplit('}', 1)[-1]
             if tag == 'defs':
                 continue
-            if (text_only and tag not in ('g', 'text')) or (not text_only and tag == 'text'):
+            if ((text_only and tag not in ('g', 'text')) or
+                    (tag == 'text' and (not text_only or child.get('fill', 'white') != colour))):
                 node.remove(child)
             elif tag == 'g':
-                prune(child, text_only)
+                prune(child, text_only, colour)
+    lettering = []
+    for colour in colours:
+        layer = deepcopy(scene)
+        prune(layer, True, colour)
+        lettering.append((colour, ET.tostring(layer)))
     prune(scene, False)
-    prune(lettering, True)
-    return ET.tostring(scene), ET.tostring(lettering)
+    return ET.tostring(scene), lettering
 
 
 def _draw(svg, context):
@@ -73,8 +80,6 @@ def _draw(svg, context):
 def rasterize(svg, width, height):
     scene, lettering = _layers(svg)
     surface = _surface(0, width, height)  # CAIRO_FORMAT_ARGB32
-    mask = _surface(2, width, height)  # CAIRO_FORMAT_A8
-    text_context = _create(mask)
     context = _create(surface)
     options = _options()
     chunks = []
@@ -85,19 +90,27 @@ def rasterize(svg, width, height):
     try:
         _antialias(options, 2)  # CAIRO_ANTIALIAS_GRAY
         _set_options(context, options)
-        _set_options(text_context, options)
         _draw(scene, context)
-        _draw(lettering, text_context)
-        _source(context, 1, 1, 1, 1)
-        _mask(context, mask, 0, 0)
+        for colour, layer in lettering:
+            mask = _surface(2, width, height)  # CAIRO_FORMAT_A8
+            text_context = _create(mask)
+            try:
+                _set_options(text_context, options)
+                _draw(layer, text_context)
+                tint = Gdk.RGBA()
+                if not tint.parse(colour):
+                    raise ValueError('Invalid layout text colour')
+                _source(context, tint.red, tint.green, tint.blue, tint.alpha)
+                _mask(context, mask, 0, 0)
+            finally:
+                _destroy(text_context)
+                _destroy_surface(mask)
         if _png(surface, write, None):
             raise ValueError('Could not render layout SVG')
     finally:
         _destroy_options(options)
         _destroy(context)
         _destroy_surface(surface)
-        _destroy(text_context)
-        _destroy_surface(mask)
     loader = GdkPixbuf.PixbufLoader.new_with_type('png')
     loader.write(b''.join(chunks))
     loader.close()

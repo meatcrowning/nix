@@ -430,7 +430,8 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None):
         x, y, bw, bh = item['box']
         x, y, bw, bh = x * w, y * h, bw * w, bh * h
         selected = item['id'] in editor.selected
-        colour = '#ffb454' if selected else '#79bfff'
+        colour = '#ffb454' if selected else font.get('inactive', '#bbbbbb')
+        text_colour = 'white' if selected else font.get('inactive', '#bbbbbb')
         s.append('<g><rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="%s" stroke-width="%s" stroke-opacity="%s"/>' % (x, y, bw, bh, colour, 2 if selected else 1, '1' if item.get('enabled', True) else '.6'))
         title = '%d %s' % (n + 1, item['label'])
         label_offset = 14 if item.get('locked') else 3
@@ -442,7 +443,7 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None):
         labels = preview_lines(title, bw - label_offset - 3, fs)
         s.append('<defs><clipPath id="label%d"><rect x="%f" y="%f" width="%f" height="%f"/></clipPath></defs>' % (n, x, y, bw, bh))
         for j, line in enumerate(labels):
-            s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="white" %s>%s</text>' % (n, x + label_offset, y + fs + 2 + leading * j, font_attrs, escape(line)))
+            s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="%s" %s>%s</text>' % (n, x + label_offset, y + fs + 2 + leading * j, text_colour, font_attrs, escape(line)))
         if item['label'] == 'text':
             style = item.get('typography', {})
             label_height = leading * len(labels) + 5
@@ -450,7 +451,7 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None):
             align = style.get('align', 'left')
             tx = x + bw / 2 if align == 'center' else x + bw - 3 if align == 'right' else x + 3
             for j, line in enumerate(lines):
-                s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="white" %s text-anchor="%s">%s</text>' % (n, tx, y + label_height + fs + leading * j, font_attrs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
+                s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="%s" %s text-anchor="%s">%s</text>' % (n, tx, y + label_height + fs + leading * j, text_colour, font_attrs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
         s.append('</g>')
         if selected and not item.get('locked'):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:

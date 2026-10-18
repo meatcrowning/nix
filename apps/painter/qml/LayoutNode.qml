@@ -140,25 +140,12 @@ Item {
     }
     Component {
         id: tabsComponent
-        ColumnLayout {
-            TabBar {
-                id: tabs
-                Layout.fillWidth: true
-                Repeater {
-                    model: node.spec.nodes
-                    TabButton { required property QtObject modelData; text: modelData.title }
-                }
-            }
+        TabBar {
+            currentIndex: Number(node.spec.value)
+            onCurrentIndexChanged: if (currentIndex !== Number(node.spec.value)) node.spec.edit(currentIndex)
             Repeater {
                 model: node.spec.nodes
-                Loader {
-                    required property QtObject modelData
-                    required property int index
-                    visible: index === tabs.currentIndex
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: item ? item.implicitHeight : 0
-                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
-                }
+                TabButton { required property QtObject modelData; text: modelData.title }
             }
         }
     }
@@ -229,6 +216,7 @@ Item {
                 width: parent.width
                 height: canvasBox.canvasHeight
                 bridge: node.bridge
+                inactiveColor: Theme.dim
                 previewFont: (typeof DeskStyle !== "undefined" && DeskStyle
                               && typeof DeskStyle.editorFontForScale === "function")
                              ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)

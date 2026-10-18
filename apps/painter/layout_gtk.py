@@ -30,19 +30,6 @@ class CompactFields(Gtk.Bin):
             child.size_allocate(allocation)
 
 
-class InspectorPage(Gtk.Box):
-    """Only the current page contributes height to the outer sidebar scroll."""
-    def active(self):
-        tabs = self.get_parent()
-        return tabs is None or tabs.get_nth_page(tabs.get_current_page()) is self
-
-    def do_get_preferred_height(self):
-        return Gtk.Box.do_get_preferred_height(self) if self.active() else (0, 0)
-
-    def do_get_preferred_height_for_width(self, width):
-        return Gtk.Box.do_get_preferred_height_for_width(self, width) if self.active() else (0, 0)
-
-
 class Toolkit(object):
     def __init__(self, parent):
         self.window = parent.get_toplevel()
@@ -148,14 +135,24 @@ class Toolkit(object):
 
     def tabs(self, parent):
         tabs = Gtk.Notebook()
-        tabs.connect_after('switch-page', lambda *_: tabs.queue_resize())
+        tabs.pages = []
+        tabs.set_show_border(False)
+        tabs.connect_after('switch-page', lambda _tabs, _page, index: self.select_tab(tabs, index))
         parent.pack_start(tabs, False, False, 0)
         return tabs
 
+    def tab_body(self, tabs, parent):
+        tabs.body = parent
+
+    def select_tab(self, tabs, index):
+        for n, page in enumerate(tabs.pages):
+            page.set_visible(n == index)
+
     def tab(self, tabs, title):
-        box = InspectorPage(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_border_width(8)
-        tabs.append_page(box, Gtk.Label(label=title))
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        tabs.body.pack_start(box, False, False, 0)
+        tabs.pages.append(box)
+        tabs.append_page(Gtk.Box(), Gtk.Label(label=title))
         return box
 
     def field(self, parent, title, kind, options, callback):
@@ -352,7 +349,9 @@ class Toolkit(object):
                 size = desc.get_size() / float(Pango.SCALE)
                 if not desc.get_size_is_absolute(): size *= (dpi if dpi > 0 else 96) / 72.0
                 metrics = context.get_metrics(desc, context.get_language())
-                font = dict(family=desc.get_family(), size=size, weight=int(desc.get_weight()),
+                inactive = prompt.get_style_context().get_color(Gtk.StateFlags.BACKDROP)
+                inactive_colour = '#%02x%02x%02x' % tuple(int(round(v * 255)) for v in (inactive.red, inactive.green, inactive.blue))
+                font = dict(inactive=inactive_colour, family=desc.get_family(), size=size, weight=int(desc.get_weight()),
                             style='normal' if desc.get_style() == Pango.Style.NORMAL else 'italic',
                             height=(metrics.get_ascent() + metrics.get_descent()) / float(Pango.SCALE))
                 image.set_from_pixbuf(rasterize(editor.render(w, h, font), w, h))
@@ -421,6 +420,7 @@ def open_editor(parent, doc, accepted):
     toolkit = Toolkit(parent)
     editor = LayoutUI(toolkit, doc, accepted)
     toolkit.root.show_all()
+    toolkit.select_tab(editor.tabs, 0)
     editor.region_visibility()
     toolkit.root.editor = editor
     return editor

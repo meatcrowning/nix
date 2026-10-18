@@ -26,6 +26,10 @@ def run(parent):
     rgb = bytearray(colour_pix.get_pixels())
     offset = 20 * colour_pix.get_rowstride() + 195 * 4
     assert rgb[offset:offset+4] == bytearray([0x79, 0xbf, 0xff, 255]), 'text mask changed guide colours'
+    muted = rasterize(svg.replace(b'fill="white"', b'fill="#888888"'), 200, 40)
+    muted_pixels = bytearray(muted.get_pixels())
+    assert all(muted_pixels[i] == muted_pixels[i+1] == muted_pixels[i+2] for i in range(0, len(muted_pixels), 4)), 'fringes on inactive lettering'
+    assert any(muted_pixels[i+3] == 255 and muted_pixels[i] == 136 for i in range(0, len(muted_pixels), 4)), 'inactive text colour ignored'
     accepted = []
     initial_width = parent.get_allocated_width()
     before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
@@ -38,15 +42,18 @@ def run(parent):
     assert e.add_button.get_tooltip_text() == 'Add region'
     assert not e.list.region_box.get_visible()
     u = e.ui
-    assert e.list.get_ancestor(Gtk.Notebook) is e.fields['item.caption'][1].get_ancestor(Gtk.Notebook)
-    tabs = e.list.get_ancestor(Gtk.Notebook)
+    tabs = e.tabs
+    assert not e.fields['item.caption'][2].get_visible()
+    assert not e.fields['item.tags'][2].get_visible()
+    assert not e.fields['item.palette'][2].get_visible()
+    assert e.warning.get_visible()
     while Gtk.events_pending(): Gtk.main_iteration()
     tabs.set_current_page(1)
     while Gtk.events_pending(): Gtk.main_iteration()
-    scene_height = tabs.get_preferred_height()[1]
+    scene_height = e.side.get_preferred_height()[1]
     tabs.set_current_page(2)
     while Gtk.events_pending(): Gtk.main_iteration()
-    assert tabs.get_preferred_height()[1] != scene_height, 'inspector reserves height for inactive pages'
+    assert e.side.get_preferred_height()[1] != scene_height, 'inspector reserves height for inactive pages'
     tabs.set_current_page(0)
     saved_values, saved_settings = parent.values(), parent.state['settings']
     saved_doc, saved_loading = parent.layout_doc, parent.loading
@@ -194,7 +201,12 @@ def run(parent):
     assert e.model.chosen()[0]['label'] == 'text'
     u.set(e.fields['summary.meta'], 'poster, illustration')
     u.set(e.fields['summary.palette'], '#ffffff, #123456')
+    assert e.fields['item.caption'][2].get_visible()
     u.set(e.fields['item.caption'], 'Large heading')
+    parent.layout_box.show()
+    while Gtk.events_pending(): Gtk.main_iteration()
+    parent.layout_box.show()
+    parent.check_resize()
     prompt = e.fields['item.caption'][1]
     for signal, kind, y in [('button-press-event', Gdk.EventType.BUTTON_PRESS, 100),
                             ('motion-notify-event', Gdk.EventType.MOTION_NOTIFY, 180),
@@ -205,12 +217,12 @@ def run(parent):
             event.button.button = 1
             event.button.y_root = y
         prompt.resize_handle.emit(signal, event)
-    assert parent.region_prompt_height > 95
+    assert parent.region_prompt_height > 95, (parent.region_prompt_height, e.tabs.get_current_page(), [p.get_visible() for p in e.tabs.pages], prompt.get_allocated_height(), parent.layout_box.get_visible())
     u.set(e.fields['item.text'], 'HELLO')
     wording = e.fields['item.text'][1]
     parent.browse()
     parent.layout_box.show()
-    wording.get_ancestor(Gtk.Notebook).set_current_page(0)
+    e.tabs.set_current_page(0)
     wording.grab_focus()
     while Gtk.events_pending(): Gtk.main_iteration()
     # The fixture's non-MOSS settings poll hides this manually attached editor.

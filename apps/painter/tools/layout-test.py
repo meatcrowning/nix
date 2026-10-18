@@ -173,6 +173,10 @@ def core():
                and t.attrib['font-weight'] == '400' and 'stroke' not in t.attrib
                for t in rendered.findall('.//s:text', ns))
     assert not any('fill-opacity' in r.attrib for r in rendered.findall('.//s:rect', ns))
+    preview.selected = []
+    rendered = ET.fromstring(M.svg(preview, 700, 700, font=dict(
+        family='Ubuntu', size=14, height=18, weight=400, style='normal', inactive='#8a8a8a'))[0])
+    assert all(t.attrib['fill'] == '#8a8a8a' for t in rendered.findall('.//s:text', ns))
     print('PASS: layout compiler, rescaling, geometry, locks, groups, undo and both MOSS graphs')
 
 

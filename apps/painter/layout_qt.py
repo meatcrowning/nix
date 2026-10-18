@@ -97,8 +97,17 @@ class Toolkit(QObject):
     def button(self, parent, title, callback): return Node('button', title, parent, callback=callback)
     def menu(self, parent, title): return Node('menu', title, parent)
     def menu_item(self, menu, title, callback): return Node('button', title, menu, callback=callback)
-    def tabs(self, parent): return Node('tabs', parent=parent, expand=True)
-    def tab(self, tabs, title): return Node('page', title, tabs)
+    def tabs(self, parent):
+        tabs = Node('tabs', parent=parent)
+        tabs._value = 0
+        tabs.callback = lambda: [self.show_widget(page, n == tabs._value) for n, page in enumerate(tabs._nodes)]
+        return tabs
+    def tab_body(self, tabs, parent): tabs.body = parent
+    def tab(self, tabs, title):
+        page = Node('page', title, tabs.body)
+        page._visible = not tabs._nodes
+        tabs._nodes.append(page)
+        return page
     def field(self, parent, title, kind, options, callback):
         return Node(kind, title, parent, options=options, callback=callback)
     def get(self, field): return field._value
@@ -167,11 +176,13 @@ class Bridge(QObject):
 class LayoutCanvas(QQuickPaintedItem):
     bridgeChanged = Signal()
     previewFontChanged = Signal()
+    inactiveColorChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bridge = None
         self._preview_font = QFont()
+        self._inactive_color = QColor('#bbbbbb')
         self.setAcceptedMouseButtons(Qt.LeftButton | Qt.MiddleButton)
         self.setAntialiasing(True)
 
@@ -194,10 +205,18 @@ class LayoutCanvas(QQuickPaintedItem):
 
     previewFont = Property(QFont, lambda s: s._preview_font, set_preview_font, notify=previewFontChanged)
 
+    def set_inactive_color(self, colour):
+        if colour != self._inactive_color:
+            self._inactive_color = QColor(colour)
+            self.inactiveColorChanged.emit()
+            self.update()
+
+    inactiveColor = Property(QColor, lambda s: s._inactive_color, set_inactive_color, notify=inactiveColorChanged)
+
     def paint(self, painter):
         if self._bridge:
             f = self._preview_font
-            font = dict(family=f.family(), size=QFontInfo(f).pixelSize(), weight=int(f.weight()),
+            font = dict(inactive=self._inactive_color.name(), family=f.family(), size=QFontInfo(f).pixelSize(), weight=int(f.weight()),
                         style='italic' if f.italic() else 'normal', height=QFontMetricsF(f).height())
             QSvgRenderer(self._bridge.editor.render(int(self.width()), int(self.height()), font)).render(painter)
 

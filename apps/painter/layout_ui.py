@@ -39,9 +39,10 @@ class LayoutUI(object):
         u.spacer(tools)
         for title, fn in [('Lock', self.toggle_lock), ('Delete', lambda: self.model.delete()), ('Duplicate', lambda: self.model.duplicate())]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
+        tabs = self.tabs = u.tabs(root)
         self.canvas = u.canvas(root, self)
         self.side = u.column(root)
-        tabs = u.tabs(self.side)
+        u.tab_body(tabs, self.side)
         region = u.tab(tabs, 'Region')
         self.list = u.region_list(region, self.selection_changed)
         scene = u.tab(tabs, 'Scene')
@@ -238,6 +239,8 @@ class LayoutUI(object):
             region = key.startswith(('item.', 'type.', 'box.'))
             if region:
                 self.ui.sensitive(field, row is not None and not (key.startswith('box.') and row.get('locked')))
+            if key.startswith('item.'):
+                self.ui.visible(field, row is not None)
             if key.startswith('type.') or key == 'item.text':
                 self.ui.visible(field, bool(row and row['label'] == 'text'))
         self.ui.set_label(self.warning, M.text_warning(row, self.model.doc['width'], self.model.doc['height']) if row else 'Select one region to edit its fields.')
