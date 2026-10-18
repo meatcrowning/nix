@@ -42,7 +42,8 @@ for name, color in [('blue', '#3366cc'), ('green', '#22aa66'), ('gray', '#888888
     Image.new('RGB', (48, 48), color).save(str(Path.home() / (name + '.png')))
 '''], check=True)
 subprocess.run([config['focusPython'], '-c', """
-import importlib.util, sys
+import importlib.util, sys, tempfile
+from pathlib import Path
 spec = importlib.util.spec_from_file_location('focus_theme', sys.argv[1])
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 svg = '<svg><stop style="stop-color:#f90"/><path fill="url(#abc)" href="#abcdef" stroke="rgba(240,120,70,.5)"/></svg>'
@@ -50,6 +51,13 @@ result = m.stylesheet(svg, (50, 100, 200))
 assert 'url(#abc)' in result and 'href="#abcdef"' in result
 assert '#f90' not in result and 'rgba(240,120,70' not in result and ',.5)' in result
 assert m.recolor((255, 0, 0), (50, 100, 200)) == (255, 0, 0)
+with tempfile.TemporaryDirectory() as temp:
+    root = Path(temp)
+    for content in (b'', b'not a valid image', svg.encode()):
+        (root / 'mislabelled.png').write_bytes(content)
+        m.asset(root / 'mislabelled.png', root / 'output.png', (50, 100, 200))
+        assert (root / 'output.png').read_bytes() == (result.encode() if content == svg.encode() else content)
+
 """, str(package / 'libexec/unity-quantal/focus-theme.py')], check=True)
 setting('set', 'org.gnome.desktop.interface', 'icon-theme', 'ubuntu-mono-dark')
 setting('set', 'org.gnome.desktop.interface', 'gtk-theme', 'Ambiance-Dark')

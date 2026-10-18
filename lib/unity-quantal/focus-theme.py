@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import sys
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 HEX = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
 RGB = re.compile(r"rgba?\(\s*([\d.]+%?)\s*,\s*([\d.]+%?)\s*,\s*([\d.]+%?)(\s*,\s*[\d.]+)?\s*\)")
@@ -83,10 +83,20 @@ def asset(path, output, color):
     if path.suffix.lower() in ('.css', '.rc', '.ini', '.xml', '.svg', '.xpm') or path.name == 'gtkrc':
         output.write_text(stylesheet(path.read_text(), color))
     elif path.suffix.lower() == '.png':
-        with Image.open(path) as picture:
-            picture = picture.convert('RGBA')
-            picture.putdata([(*recolor(pixel[:3], color), pixel[3]) for pixel in picture.getdata()])
-            picture.save(output, format='PNG')
+        try:
+            with Image.open(path) as picture:
+                picture = picture.convert('RGBA')
+                picture.putdata([(*recolor(pixel[:3], color), pixel[3]) for pixel in picture.getdata()])
+                picture.save(output, format='PNG')
+        except (UnidentifiedImageError, OSError, ValueError):
+            # Exported application caches may contain empty files or SVG/XPM
+            # under a PNG suffix. Preserve unreadable entries without aborting
+            # the whole desktop palette; recolor textual images by content.
+            data = path.read_bytes()
+            if data.lstrip().startswith((b'<?xml', b'<svg', b'/* XPM')):
+                output.write_text(stylesheet(data.decode('utf-8'), color))
+            else:
+                output.write_bytes(data)
     else:
         output.write_bytes(path.read_bytes())
 
@@ -104,7 +114,7 @@ def build_icons(base, color, config, home):
     roots = icon_roots(config, home)
     exports = roots[1] / 'hicolor'
     revision = [(str(p.relative_to(exports)), p.stat().st_mtime_ns, p.stat().st_size)
-                for p in sorted(exports.rglob('*')) if p.is_file()] if exports.is_dir() else []
+                for p in sorted(exports.rglob('*')) if p.is_file() and p.suffix.lower() in ('.png', '.svg', '.xpm')] if exports.is_dir() else []
     key = hashlib.sha256(repr((str(config['runtime']), color, base, revision, 3)).encode()).hexdigest()[:16]
     names = {}
     def derive(theme):
