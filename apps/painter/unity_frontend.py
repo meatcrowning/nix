@@ -90,6 +90,7 @@ class Window(Gtk.Window):
         self.layout_height = 300
         self.region_list_height = 0
         self.region_prompt_height = 95
+        self.wording_height = 95
         self.frame_tick = ''
         self.rebuilding_gallery = False
         self.walk_pending = None
@@ -539,6 +540,10 @@ class Window(Gtk.Window):
             self.send('settings', sidebarWidth=max(200, self.sidebar_split.get_position()))
         return False
 
+    def wording_resized(self, height):
+        self.wording_height = height
+        self.send('settings', wordingHeight=height)
+
     def region_prompt_resized(self, height):
         self.region_prompt_height = height
         self.send('settings', regionPromptHeight=height)
@@ -658,6 +663,7 @@ class Window(Gtk.Window):
             self.layout_height = state['layoutHeight']
             self.region_list_height = state['regionListHeight']
             self.region_prompt_height = state['regionPromptHeight']
+            self.wording_height = state.get('wordingHeight', 95)
             for key, height in state['heights'].items():
                 self.text_boxes[key].set_height(height)
             self.heights_loaded = True

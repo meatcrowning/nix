@@ -61,9 +61,12 @@ class LayoutUI(object):
         u.label(scene, 'Layout is experimental placement guidance. The preview is a composition sketch, not a generated result.')
         self.add(region, 'item.caption', 'Prompt', 'text')
         self.add(region, 'item.text', 'Exact wording', 'text')
+        self.lettering_row = u.row(region)
+        for key, title, choices in M.TYPE_FIELDS[:3]:
+            self.add(self.lettering_row, 'type.' + key, title, 'combo', choices)
         self.add(region, 'item.tags', 'Tags (comma-separated)')
         self.add(region, 'item.palette', 'Palette', 'palette')
-        for key, title, choices in M.TYPE_FIELDS:
+        for key, title, choices in M.TYPE_FIELDS[3:]:
             self.add(region, 'type.' + key, title, 'combo' if choices else 'palette' if key == 'color' else 'entry', choices)
         self.warning = u.label(region, '')
         self.add(canvas, 'width', 'Output width', 'number', (16, 16384, 16), change=False)
@@ -235,6 +238,7 @@ class LayoutUI(object):
 
     def region_visibility(self):
         row = self.row()
+        self.ui.show_widget(self.lettering_row, bool(row and row['label'] == 'text'))
         for key, field in self.fields.items():
             region = key.startswith(('item.', 'type.', 'box.'))
             if region:

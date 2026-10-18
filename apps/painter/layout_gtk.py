@@ -185,11 +185,13 @@ class Toolkit(object):
             scroll = Gtk.ScrolledWindow()
             scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             scroll.set_shadow_type(Gtk.ShadowType.IN)
-            scroll.set_size_request(-1, self.window.region_prompt_height if title == 'Prompt' else 95)
+            scroll.set_size_request(-1, self.window.region_prompt_height if title == 'Prompt' else self.window.wording_height if title == 'Exact wording' else 95)
             scroll.add(control)
             box.pack_start(scroll, False, False, 0)
             if title == 'Prompt':
                 control.resize_handle = self.resize_handle(box, scroll, 40, 600, self.window.region_prompt_resized, 'Drag to resize the region prompt')
+            elif title == 'Exact wording':
+                control.resize_handle = self.resize_handle(box, scroll, 40, 600, self.window.wording_resized, 'Drag to resize the exact wording')
         else:
             control = Gtk.Entry()
             if kind == 'pair':

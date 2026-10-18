@@ -341,8 +341,9 @@ Item {
         id: textField
         Item {
             id: textBox
-            readonly property bool resizablePrompt: node.spec.title === "Prompt"
-            property int promptHeight: resizablePrompt ? Math.max(40, Math.min(600, Prefs.get("layout.regionPromptHeight") || 95)) : 95
+            readonly property bool resizablePrompt: node.spec.title === "Prompt" || node.spec.title === "Exact wording"
+            readonly property string heightKey: node.spec.title === "Exact wording" ? "layout.wordingHeight" : "layout.regionPromptHeight"
+            property int promptHeight: resizablePrompt ? Math.max(40, Math.min(600, Prefs.get(heightKey) || 95)) : 95
             implicitHeight: promptHeight + (resizablePrompt ? 10 : 0)
             KineticFlickable {
                 id: textViewport
@@ -373,7 +374,7 @@ Item {
                 Row { anchors.centerIn: parent; spacing: 3; Repeater { model: 3; Rectangle { width: 3; height: 1; color: Theme.dim } } }
                 MouseArea {
                     id: promptGrip
-                    objectName: "regionPromptResizeHandle"
+                    objectName: node.spec.title === "Exact wording" ? "wordingResizeHandle" : "regionPromptResizeHandle"
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.SizeVerCursor
@@ -384,7 +385,7 @@ Item {
                     onPositionChanged: mouse => {
                         if (pressed) textBox.promptHeight = Math.max(40, Math.min(600, Math.round(startHeight + mapToItem(null, mouse.x, mouse.y).y - startY)))
                     }
-                    onReleased: Prefs.set("layout.regionPromptHeight", textBox.promptHeight)
+                    onReleased: Prefs.set(textBox.heightKey, textBox.promptHeight)
                 }
             }
         }
