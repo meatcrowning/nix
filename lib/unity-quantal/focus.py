@@ -17,6 +17,16 @@ def base_theme(name):
     return match.group(1) if match else name
 
 
+def base_icons(name):
+    if name.startswith('Unity-Focus-Icons-'):
+        try:
+            with open(os.path.join(os.path.expanduser('~/.icons'), name, '.complete')) as stream:
+                return json.load(stream)['base']
+        except (IOError, ValueError, KeyError):
+            pass
+    return name
+
+
 class FocusColor(object):
     def __init__(self, enabled):
         self.enabled = enabled
@@ -25,6 +35,7 @@ class FocusColor(object):
         self.background = Gio.Settings.new('org.gnome.desktop.background')
         self.wm = Gio.Settings.new('org.gnome.desktop.wm.preferences')
         self.interface.connect('changed::gtk-theme', self.changed)
+        self.interface.connect('changed::icon-theme', self.changed)
         self.background.connect('changed', self.changed)
         self.file_monitor = None
         self.applying = False
@@ -42,9 +53,11 @@ class FocusColor(object):
         serial = self.serial
         current = self.interface.get_string('gtk-theme')
         base = base_theme(current)
+        current_icons = self.interface.get_string('icon-theme')
+        icons = base_icons(current_icons)
         if not self.enabled:
-            if current != base:
-                self.apply(base)
+            if current != base or current_icons != icons:
+                self.apply(base, icons)
             return
         if base not in ('Ambiance', 'Ambiance-Dark', 'Radiance'):
             return
@@ -61,32 +74,33 @@ class FocusColor(object):
             except GLib.Error:
                 pass
         if not path or not os.path.isfile(path):
-            self.apply(base)
+            self.apply(base, icons)
             return
 
         def generate():
             try:
                 with open(os.path.join(HERE, 'config.json')) as stream:
                     config = json.load(stream)
-                name = subprocess.check_output([config['focusPython'], os.path.join(HERE, 'focus-theme.py'),
-                                                base, path]).decode('utf-8').strip()
+                result = json.loads(subprocess.check_output([config['focusPython'], os.path.join(HERE, 'focus-theme.py'),
+                                                base, path, icons]).decode('utf-8'))
             except Exception as error:
                 print('Dynamic focus color: %s' % error)
-                name = base
-            GLib.idle_add(self.ready, serial, name)
+                result = {'theme': base, 'icons': icons}
+            GLib.idle_add(self.ready, serial, result)
         worker = threading.Thread(target=generate)
         worker.daemon = True
         worker.start()
 
-    def ready(self, serial, name):
+    def ready(self, serial, result):
         if serial == self.serial:
-            self.apply(name)
+            self.apply(result['theme'], result['icons'])
         return False
 
-    def apply(self, name):
+    def apply(self, name, icons):
         self.applying = True
         try:
             self.interface.set_string('gtk-theme', name)
+            self.interface.set_string('icon-theme', icons)
             # Keep custom window decoration choices; only follow our own base.
             if base_theme(self.wm.get_string('theme')) == base_theme(name):
                 self.wm.set_string('theme', name)

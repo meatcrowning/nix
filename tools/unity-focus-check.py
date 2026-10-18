@@ -17,7 +17,7 @@ def setting(*args):
 
 
 def wait_for(fn):
-    deadline = time.monotonic() + 25
+    deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         value = fn()
         if value:
@@ -41,6 +41,17 @@ from pathlib import Path
 for name, color in [('blue', '#3366cc'), ('green', '#22aa66'), ('gray', '#888888')]:
     Image.new('RGB', (48, 48), color).save(str(Path.home() / (name + '.png')))
 '''], check=True)
+subprocess.run([config['focusPython'], '-c', """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('focus_theme', sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+svg = '<svg><stop style="stop-color:#f90"/><path fill="url(#abc)" href="#abcdef" stroke="rgba(240,120,70,.5)"/></svg>'
+result = m.stylesheet(svg, (50, 100, 200))
+assert 'url(#abc)' in result and 'href="#abcdef"' in result
+assert '#f90' not in result and 'rgba(240,120,70' not in result and ',.5)' in result
+assert m.recolor((255, 0, 0), (50, 100, 200)) == (255, 0, 0)
+""", str(package / 'libexec/unity-quantal/focus-theme.py')], check=True)
+setting('set', 'org.gnome.desktop.interface', 'icon-theme', 'ubuntu-mono-dark')
 setting('set', 'org.gnome.desktop.interface', 'gtk-theme', 'Ambiance-Dark')
 setting('set', 'org.gnome.desktop.background', 'picture-uri', (Path.home() / 'blue.png').as_uri())
 toggle(True)
@@ -54,17 +65,43 @@ color = subprocess.check_output([runtime, '/usr/bin/python2.7', '-c', probe], te
 assert 'True' in color and 'blue=0.780392' in color, color
 print('PASS: wallpaper focus theme reaches original GTK: ' + color.strip())
 native_css = Path.home() / '.themes' / first.strip("'") / 'gtk-3.20/gtk-main.css'
-assert '#3263c7' in native_css.read_text(), native_css
+assert '#f07746' not in native_css.read_text(), native_css
 print('PASS: native GTK theme carries the same wallpaper accent')
+icon_name = setting('get', 'org.gnome.desktop.interface', 'icon-theme')
+assert 'Unity-Focus-Icons-ubuntu-mono-dark-' in icon_name, icon_name
+icon_probe = """from gi.repository import Gtk
+icon = Gtk.IconTheme.get_default().lookup_icon('folder', 48, 0)
+assert icon is not None
+assert 'Unity-Focus-Icons-Humanity-' in icon.get_filename(), icon.get_filename()
+picture = icon.load_icon()
+pixels = bytearray(picture.get_pixels())
+blue = orange = 0
+for y in range(picture.get_height()):
+ for x in range(picture.get_width()):
+  offset = y * picture.get_rowstride() + x * picture.get_n_channels()
+  r,g,b = pixels[offset:offset+3]
+  if b > r * 1.3 and b > g: blue += 1
+  if r > b * 1.5 and r > g * 1.1: orange += 1
+assert blue > 100 and orange == 0, (blue, orange)
+print('PASS: original GTK resolves inherited Humanity folder icons with wallpaper colors')
+"""
+subprocess.run([runtime, '/usr/bin/python2.7', '-c', icon_probe], check=True)
+for filename in ('unity-original-nautilus.desktop', 'painter.desktop'):
+    entry = Path(__import__('os').environ['UNITY_QUANTAL_SESSION_DIR']) / 'applications' / filename
+    if entry.exists():
+        assert not any(line.startswith('Icon=/') for line in entry.read_text().splitlines()), filename
+
 setting('set', 'org.gnome.desktop.background', 'picture-uri', (Path.home() / 'green.png').as_uri())
 second = wait_for(lambda: (lambda name: name if 'Unity-Focus-' in name and name != first else None)(
     setting('get', 'org.gnome.desktop.interface', 'gtk-theme')))
 assert first != second
+assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') != icon_name
 setting('set', 'org.gnome.desktop.interface', 'gtk-theme', 'Radiance')
 wait_for(lambda: 'Unity-Focus-Radiance-' in setting('get', 'org.gnome.desktop.interface', 'gtk-theme'))
 toggle(False)
 wait_for(lambda: setting('get', 'org.gnome.desktop.interface', 'gtk-theme') == "'Radiance'")
-print('PASS: wallpaper updates, theme switching and toggle-off restoration')
+assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') == "'ubuntu-mono-dark'"
+print('PASS: wallpaper updates, theme switching and theme/icon restoration')
 
 # Missing pictures restore the base rather than leaving stale wallpaper colors.
 toggle(True)

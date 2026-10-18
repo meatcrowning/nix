@@ -153,7 +153,7 @@ def host_icons(directory, state, config):
                     shutil.copyfile(source, target)
             except (OSError, subprocess.SubprocessError):
                 continue
-        entry["Icon"] = str(target)
+        entry["Icon"] = stem
         with desktop.open("w") as stream:
             data.write(stream, space_around_delimiters=False)
 

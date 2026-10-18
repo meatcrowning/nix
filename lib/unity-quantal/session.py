@@ -184,12 +184,7 @@ def prepare(directory, environment):
                 if section != "Desktop Entry" and "Exec" in parser[section]:
                     parser[section]["Exec"] = "/usr/local/bin/unity-host-launch --desktop unity-original-gnome-screenshot.desktop -- " + RUNTIME + " /usr/bin/" + parser[section]["Exec"]
         entry["X-Unity-Original"] = "true"
-        # The live shell may still have the previous read-only runtime mounted.
-        # Absolute store paths let newly added original icons appear immediately.
-        icons = list((ROOT / "usr/share/icons").rglob(entry.get("Icon", name) + ".png"))
-        if icons:
-            icons.sort(key=lambda p: (0 if "48x48" in p.parts or "48" in p.parts else 1, str(p)))
-            entry["Icon"] = str(icons[0])
+        # Icon names follow the selected icon theme, including wallpaper accents.
         entry["StartupWMClass"] = {"gnome-terminal": "Gnome-terminal", "nautilus": "Nautilus",
                                    "nact": "Nautilus-actions-config-tool",
                                    "gnome-tweak-tool": "Gnome-tweak-tool"}.get(name, name)

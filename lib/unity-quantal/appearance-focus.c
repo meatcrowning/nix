@@ -64,7 +64,7 @@ GObject *gtk_builder_get_object(GtkBuilder *builder, const gchar *name)
     g_object_set_data(object, "unity-focus-installed", GINT_TO_POINTER(1));
     GtkWidget *button = gtk_check_button_new_with_label("Dynamic Focus Color");
     gtk_widget_set_name(button, "unity-dynamic-focus-color");
-    gtk_widget_set_tooltip_text(button, "Use the wallpaper color for focus and selection in Ambiance or Radiance");
+    gtk_widget_set_tooltip_text(button, "Use the wallpaper color for orange highlights, controls and icons");
     gtk_widget_set_margin_left(button, 12);
     gtk_widget_set_margin_bottom(button, 8);
     reload(GTK_TOGGLE_BUTTON(button));
