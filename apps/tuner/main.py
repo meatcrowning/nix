@@ -27,6 +27,7 @@ import audio  # noqa: E402
 import dsp  # noqa: E402
 import gqrxfiles  # noqa: E402
 import radio  # noqa: E402
+import online  # noqa: E402
 import rtl  # noqa: E402
 from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView  # noqa: E402
 from rdsview import RdsDisplay  # noqa: E402
@@ -95,6 +96,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.s = load_settings(settings_path)
         self.rx = self.s["receiver"]
         self.bookmarks = gqrxfiles.Bookmarks()
+        self.online = online.Client(online.load_sources(Path(settings_path).with_name("online.json")))
         self.updating = False
         self.save_pending = None
         self.radio = radio.Radio(self.rx, self._spectrum_cb, self._status_cb, self._error_cb, self._stopped_cb)
@@ -288,9 +290,9 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.dial_stack.add_named(self.dial, "frequency")
         self.dial_stack.add_named(self.rds_display, "rds")
         row.pack_start(self.dial_stack, True, True, 0)
-        self.rds_button = Gtk.ToggleButton(label="RDS", relief=Gtk.ReliefStyle.NONE)
+        self.rds_button = Gtk.ToggleButton(label="Text", relief=Gtk.ReliefStyle.NONE)
         self.rds_button.set_valign(Gtk.Align.CENTER)
-        self.rds_button.set_tooltip_text("Switch between frequency and RDS station text")
+        self.rds_button.set_tooltip_text("Switch between frequency and station text")
         self.rds_button.set_active(self.s["rds_display"])
         self.rds_button.connect("toggled", self._toggle_rds)
         row.pack_start(self.rds_button, False, False, 0)
@@ -844,7 +846,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     def _sync_hd_controls(self):
         enabled = self.s["hd"]
-        self.rds_button.set_label("Text" if enabled else "RDS")
+        self.rds_button.set_label("Text")
         self.rds_button.set_tooltip_text("Switch between frequency and station text")
         self.receiver_page.set_sensitive(not enabled)
         self.receiver_page.set_tooltip_text("Analog receiver settings; HD uses its own decoder" if enabled else None)
@@ -910,6 +912,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     def _refresh_rds(self):
         if self.s["hd"]:
+            self.online.poll(None, "")
             self._refresh_hd()
             return
         heading = "%.3f MHz  ·  RDS" % (self.s["frequency"] / 1e6)
@@ -936,6 +939,22 @@ class TunerWindow(Gtk.ApplicationWindow):
             detail += "\nPI: " + data["pi"]
         if data.get("error"):
             detail += "\n" + data["error"]
+        fresh = self.rds_seen and time.monotonic() - self.rds_seen <= 10
+        name = online.bookmark_name(self.bookmarks.items, self.s["frequency"])
+        if (self.radio.running and self.rx["mode"] in dsp.WFM_MODES and name
+                and not (fresh and data.get("radiotext"))):
+            key = (self.radio.metadata_generation, self.s["frequency"], name)
+            text, status = self.online.poll(key, name)
+            origin = "Online" if text else "Bookmark"
+            heading = "%.3f MHz  ·  %s  ·  %s" % (self.s["frequency"] / 1e6, origin, name)
+            if fresh and data.get("ps"):
+                heading += "  ·  RDS: " + data["ps"]
+            message = text or name
+            detail += "\n" + heading + "\n" + status
+            if text:
+                detail += "\n" + text
+        else:
+            self.online.poll(None, "")
         self.rds_display.set_message(heading, message, detail)
 
     def _select_bookmark(self, freq):
@@ -1257,6 +1276,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         return False
 
     def _quit(self, *args):
+        self.online.close()
         self.hd_restart = False
         self.radio.stop()
         if self.radio.thread:

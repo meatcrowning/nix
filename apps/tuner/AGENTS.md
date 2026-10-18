@@ -11,6 +11,7 @@ The dongle and package are top-only
 |---|---|
 | dsp.py | demodulators, filters, AGC, squelch, noise blankers; numpy/scipy only |
 | rds.py | bounded asynchronous Redsea MPX pipe and station metadata; no device access |
+| online.py | bounded background station-feed requests; local bookmark associations |
 | rdsview.py | scrolling fourteen-segment RDS display and its map/unmap timer |
 | hd.py | nrsc5 pipe API, HD metadata and streaming 44.1→48 kHz conversion; no device access |
 | hdreceiver.py | HD capture session and bounded burst-audio output worker |
@@ -28,8 +29,10 @@ The dongle hands out only one reader: gqrx and tuner cannot run together.
 RDS uses the pre-audio 240 kHz FM multiplex in both WFM modes, independently
 of mute/squelch. The wrapper supplies `TUNER_REDSEA`; the subprocess never opens
 the dongle. Retuning, mode changes, and receive sessions invalidate decoder
-results by generation. Do not persist received station text or infer identity
-from a bookmark. The Hz/RDS toggle is persistent; unavailable, waiting, and
+results by generation. Do not persist received station text. Confirmed named
+FM bookmarks may supply fallback identity, explicitly labeled Bookmark rather
+than received RDS.
+The Hz/Text toggle is persistent; unavailable, waiting, and
 lost-signal states are explicit. The marquee advances whole characters through
 fixed segment cells; GTK's animation setting governs it. Metadata resets must
 never discard the audio IQ queue; RDS conversion stays in its worker.
@@ -43,8 +46,23 @@ old station metadata/audio. Audio is resampled with continuous history to the
 existing 48 kHz playback/UDP/WAV contract. No automatic analog fallback or
 received metadata persistence.
 
+Online text uses `online.json` beside the selected settings file, keyed by the
+exact confirmed FM bookmark name. Keep personal station associations local.
+Each value has an HTTPS `url` and `kind`: `json` (default), `icy`, or `spinitron`.
+JSON accepts dot-separated `artist` and `title` paths, defaulting to
+`nowPlaying.artistName` and `nowPlaying.songTitle`. Spinitron uses its public
+`now-playing-v2` widget with a numeric `_spinitron` callback and `num=1`; its
+latest entry is labeled Last logged, not assumed to be playing now.
+Only one worker runs, polling every 30 seconds while receiving analog WFM
+without fresh RadioText. Failures clear song text; retunes, stop, and HD changes
+invalidate replies. Online text is labeled separately and may differ from FM.
+Missing feeds retain the confirmed bookmark name. Reload source mappings by
+reopening Tuner; no credentials or new dependencies are required.
+
 ## Verification
 
+- `python3 tools/online-test.py` checks mocked feeds, response limits, late replies,
+  failures, polling, and the actual display method without GTK or device access.
 - `tools/hd-test.py` checks the real nrsc5 pipe, metadata/channel separation,
   continuous resampling, and a paced fake-dongle session with a memory sink.
   Set `TUNER_NRSC5` to the wrapper library; optional `--sample PATH` accepts
