@@ -202,9 +202,15 @@ Item {
     // The old checkbox UI stored its policy beside a positive seed, which can
     // otherwise make the visible box disagree with what will be queued. Turn
     // that legacy state into the new explicit representation: -1 for random,
-    // or the actual last seed as a fixed number. No hidden seed mode remains.
+    // or the actual last seed as a fixed number. MOSS exposes reuse explicitly.
     function materializeSeedPolicy() {
         var g = clone(gen)
+        if (App.layoutSupport && g.reuseSeed) {
+            g.randomSeed = false
+            if (App.lastSeed >= 0) g.seed = App.lastSeed
+            gen = g
+            return
+        }
         if (g.reuseSeed && App.lastSeed >= 0) {
             g.seed = App.lastSeed
             g.randomSeed = false

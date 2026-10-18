@@ -40,11 +40,11 @@ class LayoutUI(object):
         for title, fn in [('Lock', self.toggle_lock), ('Delete', lambda: self.model.delete()), ('Duplicate', lambda: self.model.duplicate())]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
         tabs = self.tabs = u.tabs(root)
-        self.canvas = u.canvas(root, self)
         self.side = u.column(root)
         u.tab_body(tabs, self.side)
         region = u.tab(tabs, 'Region')
         self.list = u.region_list(region, self.selection_changed)
+        self.canvas = u.canvas(region, self)
         scene = u.tab(tabs, 'Scene')
         canvas = u.tab(tabs, 'Canvas')
         menu = u.menu(canvas, 'Edit')

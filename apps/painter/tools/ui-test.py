@@ -5294,6 +5294,11 @@ def test_moss(win, ctl, tmp):
         check(model + " is a manual text-to-image choice", ctl.mode == "" and
               not any((ctl.isEdit, ctl.isVideo, ctl.encoderControls, ctl.referenceImages,
                        ctl.supportsPatches, ctl.supportsLoras)))
+        APP.set("reuseSeed", True)
+        APP.set("randomSeed", False)
+        APP.metaObject().invokeMethod(APP, "materializeSeedPolicy")
+        check(model + " retains explicit reuse policy", prop(APP, "gen")["reuseSeed"])
+        APP.set("reuseSeed", False)
         editor = find(win.contentItem(), "PromptEditor")
         mp = next(item for item in walk(editor) if item.property('trimZeros') is True)
         check(model + ' MP trims padding without losing precision',
@@ -5332,7 +5337,7 @@ def test_moss(win, ctl, tmp):
             tab_spec.edit(page_index)
             spin(30)
             check(model + " switches inspector page " + str(page_index),
-                  [page.property('shown') for page in tab_spec.property('nodes')] == [n == page_index for n in range(3)] and canvas.isVisible())
+                  [page.property('shown') for page in tab_spec.property('nodes')] == [n == page_index for n in range(3)] and canvas.isVisible() == (page_index == 0))
         # The canvas is now in the scrollable prompt panel.
         ancestor = canvas.parentItem()
         while ancestor is not None and ancestor.property('contentY') is None:

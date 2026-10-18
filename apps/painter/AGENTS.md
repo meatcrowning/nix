@@ -83,8 +83,9 @@ share `prompt.posH`/`prompt.negH` with QML; GTK's system editor uses
 means fit the rows). Region prompt height uses `layout.regionPromptHeight`.
 Unity's sidebar width uses `unity.sidebarWidth`. Save
 handle sizes on release. Browse and View share one image
-widget and selection. Still zoom renders only the visible region; transient
-sampler/video frames cross the socket as bounded images. Clip decoding stays
+widget and selection. Still zoom renders a viewport-bounded crop with a
+surrounding pan margin; transient sampler/video frames cross the socket as
+bounded images. Clip decoding stays
 in the modern engine, with no audio output attached; clear the media source
 on selection changes and window close. Keep frame polling separate from
 gallery/settings snapshots.
@@ -172,7 +173,8 @@ owns normalized geometry and compilation to centered pixel coordinates;
 `layout_gtk.py` and `layout_qt.py`. Only `registry.build` compiles conditioning,
 using the actual output dimensions and current positive prompt as scene caption.
 Keep reference underlays, groups, locks and guides out of model-facing JSON.
-Layouts sit beneath the prompt boxes, with the inspector always below the canvas.
+Layouts sit beneath the prompt boxes. The Region tab contains its list, canvas,
+then fields; Scene and Canvas tabs contain only their settings.
 GTK embeds `layout_gtk.py`; Qt Quick renders the `layout_qt.py` descriptor tree
 through `LayoutNode.qml`.
 Add arms one box-drawing gesture, then returns to selection. The toolbar type

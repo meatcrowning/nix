@@ -50,9 +50,11 @@ def run(parent):
     while Gtk.events_pending(): Gtk.main_iteration()
     tabs.set_current_page(1)
     while Gtk.events_pending(): Gtk.main_iteration()
+    assert not e.canvas.is_drawable(), 'region canvas visible on Scene tab'
     scene_height = e.side.get_preferred_height()[1]
     tabs.set_current_page(2)
     while Gtk.events_pending(): Gtk.main_iteration()
+    assert not e.canvas.is_drawable(), 'region canvas visible on Canvas tab'
     assert e.side.get_preferred_height()[1] != scene_height, 'inspector reserves height for inactive pages'
     tabs.set_current_page(0)
     saved_values, saved_settings = parent.values(), parent.state['settings']
@@ -108,7 +110,9 @@ def run(parent):
         control.destroy()
     assert all(any(f.control is parent.controls[key] for f in parent.spelling.fields.values()) for key in ('positive', 'negative', 'system_prompt'))
     while Gtk.events_pending(): Gtk.main_iteration()
-    assert e.side.get_allocation().y >= e.canvas.get_allocation().y + e.canvas.get_allocated_height()
+    assert e.canvas.get_parent() is tabs.pages[0]
+    children = tabs.pages[0].get_children()
+    assert children.index(e.list.region_box) < children.index(e.canvas)
     original_height = e.canvas.get_allocated_height()
     for signal, kind, y in [('button-press-event', Gdk.EventType.BUTTON_PRESS, 100),
                             ('motion-notify-event', Gdk.EventType.MOTION_NOTIFY, 180),

@@ -189,6 +189,8 @@ class ImageView(Gtk.Box):
         self.zoom_idle = None
         self.image_origin = (0, 0)
         self.visible_origin = (0, 0)
+        self.crop_key = None
+        self.crop_bounds = (0, 0, 0, 0)
         self.picture = Gtk.Image()
         self.events = Gtk.EventBox()
         self.events.add(self.picture)
@@ -318,8 +320,8 @@ class ImageView(Gtk.Box):
         vw, vh = max(1, self.canvas.get_allocated_width()), max(1, self.canvas.get_allocated_height())
         self.scale = self.zoom or min(float(vw) / w, float(vh) / h)
         width, height = max(1, int(w * self.scale)), max(1, int(h * self.scale))
-        # The layout has the full virtual image size. Only the visible region
-        # gets a bitmap, so zooming a large output never allocates zoom^2 pixels.
+        # Keep a bounded overscan crop: native scrolling can expose its margin
+        # immediately, without rescaling or waiting for a new child allocation.
         self.canvas.set_size(max(vw, width), max(vh, height))
         x, y = max(0, (vw - width) // 2), max(0, (vh - height) // 2)
         self.image_origin = (x, y)
@@ -336,20 +338,33 @@ class ImageView(Gtk.Box):
         sy = int(self.scroll.get_vadjustment().get_value())
         left, top = max(x, sx), max(y, sy)
         right, bottom = min(x + width, sx + vw), min(y + height, sy + vh)
-        rw, rh = max(1, right - left), max(1, bottom - top)
-        pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, rw, rh)
-        pixbuf.fill(0)
-        self.original.scale(pixbuf, 0, 0, rw, rh, x - left, y - top,
-                            self.scale, self.scale, GdkPixbuf.InterpType.BILINEAR)
-        if self.before is not None:
-            cut = min(rw, max(0, x + int(width * self.compare.get_value() / 100) - left))
-            if cut:
-                self.before.scale(pixbuf, 0, 0, cut, rh, x - left, y - top,
-                                  float(width) / self.before.get_width(),
-                                  float(height) / self.before.get_height(), GdkPixbuf.InterpType.BILINEAR)
-        self.visible_origin = (left, top)
-        self.canvas.move(self.events, left, top)
-        self.picture.set_from_pixbuf(pixbuf)
+        key = (self.original, self.before, self.scale, x, y, width, height,
+               vw, vh, self.compare.get_value())
+        cl, ct, cr, cb = self.crop_bounds
+        # Refresh before reaching the cached edge, while the old crop still
+        # covers the viewport during GTK's asynchronous child allocation.
+        covered = (max(x, left - vw // 4) >= cl and max(y, top - vh // 4) >= ct
+                   and min(x + width, right + vw // 4) <= cr
+                   and min(y + height, bottom + vh // 4) <= cb)
+        if key != self.crop_key or not covered:
+            left, top = max(x, left - vw), max(y, top - vh)
+            right, bottom = min(x + width, right + vw), min(y + height, bottom + vh)
+            rw, rh = max(1, right - left), max(1, bottom - top)
+            pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, rw, rh)
+            pixbuf.fill(0)
+            self.original.scale(pixbuf, 0, 0, rw, rh, x - left, y - top,
+                                self.scale, self.scale, GdkPixbuf.InterpType.BILINEAR)
+            if self.before is not None:
+                cut = min(rw, max(0, x + int(width * self.compare.get_value() / 100) - left))
+                if cut:
+                    self.before.scale(pixbuf, 0, 0, cut, rh, x - left, y - top,
+                                      float(width) / self.before.get_width(),
+                                      float(height) / self.before.get_height(), GdkPixbuf.InterpType.BILINEAR)
+            self.crop_key = key
+            self.crop_bounds = (left, top, right, bottom)
+            self.visible_origin = (left, top)
+            self.canvas.move(self.events, left, top)
+            self.picture.set_from_pixbuf(pixbuf)
         nw, nh = self.natural_size or (w, h)
         self.info.set_text('%d × %d  ·  %d%%%s' % (nw, nh, round(self.scale * w / nw * 100),
                            '  ·  %.1fs  ·  Click to play / pause' % (self.duration / 1000.0) if self.video else ''))

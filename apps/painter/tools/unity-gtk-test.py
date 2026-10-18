@@ -150,6 +150,8 @@ def test():
             assert window.values()['randomSeed']
             window.new_fixed_seed()
             assert not window.values()['randomSeed'] and 0 <= window.values()['seed'] < 2**53
+            window.controls['seedPolicy'].set_active_id('Reuse last')
+            assert window.values()['reuseSeed'] and not window.values()['randomSeed']
             window.controls['seedPolicy'].set_active_id('Fixed')
             window.controls['seed'].set_text('1234')
             window.generate()
@@ -287,13 +289,14 @@ def test():
         elif step[0] == 13:
             view = window.viewer
             assert view.scale == 16
-            assert view.picture.get_pixbuf().get_width() <= view.scroll.get_allocated_width()
+            assert view.picture.get_pixbuf().get_width() <= 3 * view.scroll.get_allocated_width()
             class Event:
                 button = 1
                 x_root = 400
                 y_root = 300
             event = Event()
             view.render()  # Finish the previous zoom/scroll before counting pan work.
+            crop = view.picture.get_pixbuf()
             original_render = view.render
             renders = []
             def counted_render():
@@ -314,7 +317,11 @@ def test():
             assert view.scroll.get_vadjustment().get_value() == 42
             while Gtk.events_pending(): Gtk.main_iteration()
             assert len(renders) == 1, ('pan should coalesce both axes and pending motion', len(renders))
-            assert view.visible_origin == (63, 42)
+            assert view.picture.get_pixbuf() == crop, 'small pan rescaled cached pixels'
+            left, top, right, bottom = view.crop_bounds
+            assert left <= 63 and top <= 42
+            assert right >= min(view.original.get_width() * view.scale, 63 + view.canvas.get_allocated_width())
+            assert bottom >= min(view.original.get_height() * view.scale, 42 + view.canvas.get_allocated_height())
             view.render = original_render
             window.browse()
             view.set_zoom(0)

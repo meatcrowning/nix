@@ -239,10 +239,12 @@ class Window(Gtk.Window):
         randomize.set_image(Gtk.Image.new_from_icon_name('media-playlist-shuffle', Gtk.IconSize.MENU))
         randomize.set_tooltip_text('Randomize seed for each generation')
         randomize.connect('clicked', self.randomize_seed)
-        fixed = Gtk.Button(label='New fixed seed')
+        fixed = Gtk.Button()
+        fixed.set_image(Gtk.Image.new_from_icon_name('document-new', Gtk.IconSize.MENU))
+        fixed.set_tooltip_text('New fixed seed')
         fixed.connect('clicked', self.new_fixed_seed)
         policy = Gtk.ComboBoxText()
-        for value in ('Fixed', 'Random'): policy.append(value, value)
+        for value in ('Fixed', 'Random', 'Reuse last'): policy.append(value, value)
         policy.connect('changed', self.seed_policy_changed)
         self.controls['seedPolicy'] = policy
         for widget in (randomize, fixed, policy): seed_actions.pack_start(widget, False, False, 0)
@@ -702,7 +704,7 @@ class Window(Gtk.Window):
         self.layout_doc = values.get('moss_layout') or {}
         for key, control in self.controls.items():
             if key == 'seedPolicy':
-                control.set_active_id('Random' if values.get('randomSeed') else 'Fixed')
+                control.set_active_id('Reuse last' if values.get('reuseSeed') else 'Random' if values.get('randomSeed') else 'Fixed')
                 continue
             value = values.get('ms', {}).get(key[3:]) if key.startswith('ms.') else values.get(key)
             if key == 'seed' and values.get('reuseSeed') and self.state.get('lastSeed', -1) >= 0:

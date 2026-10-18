@@ -143,16 +143,27 @@ Panel {
                 onClicked: parent.parent.seedMode(true)
             }
             Button {
-                text: "New fixed seed"
+                icon.name: "document-new"
+                display: AbstractButton.IconOnly
+                implicitWidth: implicitHeight
+                Accessible.name: "New fixed seed"
+                ToolTip.visible: hovered
+                ToolTip.text: "New fixed seed"
                 onClicked: {
                     root.set("seed", App.freshSeed())
                     parent.parent.seedMode(false)
                 }
             }
             ComboBox {
-                model: ["Fixed", "Random"]
-                currentIndex: root.gen.randomSeed ? 1 : 0
-                onActivated: index => parent.parent.seedMode(index === 1)
+                model: ["Fixed", "Random", "Reuse last"]
+                currentIndex: root.gen.reuseSeed ? 2 : root.gen.randomSeed ? 1 : 0
+                onActivated: index => {
+                    if (index === 2) {
+                        root.set("randomSeed", false)
+                        root.set("reuseSeed", true)
+                        if (App.lastSeed >= 0) root.set("seed", App.lastSeed)
+                    } else parent.parent.seedMode(index === 1)
+                }
             }
         }
         Field {
@@ -160,8 +171,8 @@ Panel {
             label: "Seed number"
             SeedInput {
                 width: parent.width
-                enabled: !root.gen.randomSeed
-                value: root.gen.seed
+                enabled: !root.gen.randomSeed && !root.gen.reuseSeed
+                value: root.gen.reuseSeed && App.lastSeed >= 0 ? App.lastSeed : root.gen.seed
                 onEdited: value => root.set("seed", value)
             }
         }
