@@ -2,6 +2,7 @@
 """GTK 3.6 / Python 2.7 widgets for Painter's Unity face."""
 from __future__ import unicode_literals
 import threading
+from collections import OrderedDict
 try:
     import Queue as queue
 except ImportError:
@@ -43,6 +44,15 @@ class HistoryGrid(Gtk.IconView):
     """Fit whole thumbnail columns to the viewport with small, uniform gaps."""
     def __init__(self, model):
         Gtk.IconView.__init__(self, model=model)
+        self.sources = {}
+        self.loaded_sources = {}
+        self.thumb_cache = OrderedDict()
+        self.thumb_pending = set()
+        self.thumb_jobs = queue.Queue(maxsize=64)
+        self.thumb_closed = False
+        worker = threading.Thread(target=self.thumb_worker)
+        worker.daemon = True
+        worker.start()
         self.cell_width = 150
         self.pending_fit = None
         self.fitted_width = 0
@@ -70,6 +80,61 @@ class HistoryGrid(Gtk.IconView):
                 cell.set_property('height', self.create_pango_layout('Ag').get_pixel_size()[1] + 4)
         self.connect('size-allocate', self.resized)
         self.connect('destroy', self.destroyed)
+        # Evicting offscreen pixels must not change row heights or scroll position.
+        self.get_cells()[0].set_property('height', self.cell_width)
+
+    def thumb_worker(self):
+        while True:
+            job = self.thumb_jobs.get()
+            if job is None:
+                return
+            identity, source = job
+            pixbuf = None
+            if not self.thumb_closed and self.sources.get(identity) == source:
+                try:
+                    pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(source, 300, 300, True)
+                except GLib.GError:
+                    pass
+            GLib.idle_add(self.thumb_ready, identity, source, pixbuf)
+
+    def thumb_ready(self, identity, source, pixbuf):
+        self.thumb_pending.discard((identity, source))
+        if self.thumb_closed or self.sources.get(identity) != source:
+            return False
+        self.thumb_cache[source] = pixbuf
+        while len(self.thumb_cache) > 64:
+            self.thumb_cache.popitem(last=False)
+        self.load_visible()
+        return False
+
+    def load_visible(self):
+        if self.thumb_closed or not self.sources:
+            return
+        visible = self.get_visible_range()
+        if not visible or visible[0] is None:
+            first, last = 0, 11
+        else:
+            first, last = visible[0].get_indices()[0], visible[1].get_indices()[0]
+        first, last = max(0, first - 6), last + 6
+        for n, row in enumerate(self.get_model()):
+            source = self.sources.get(row[2], '')
+            if n < first or n > last or not source:
+                if row[3] is not None:
+                    self.get_model().set(row.iter, 0, None, 3, None)
+                self.loaded_sources.pop(row[2], None)
+                continue
+            if row[3] is not None and self.loaded_sources.get(row[2]) == source:
+                continue
+            if source in self.thumb_cache:
+                pixbuf = self.thumb_cache.pop(source)
+                self.thumb_cache[source] = pixbuf
+                if row[3] != pixbuf:
+                    self.get_model().set(row.iter, 0, self.thumbnail(pixbuf), 3, pixbuf)
+                    self.loaded_sources[row[2]] = source
+            elif (row[2], source) not in self.thumb_pending and not self.thumb_jobs.full():
+                job = (row[2], source)
+                self.thumb_pending.add(job)
+                self.thumb_jobs.put_nowait(job)
 
     def focus_width(self):
         value = GObject.Value()
@@ -102,6 +167,7 @@ class HistoryGrid(Gtk.IconView):
         if cell_width != self.cell_width:
             self.cell_width = cell_width
             self.set_item_width(cell_width)
+            self.get_cells()[0].set_property('height', cell_width)
             self.name_cell.set_property('width', cell_width)
             for row in self.get_model():
                 if row[3] is not None:
@@ -109,6 +175,11 @@ class HistoryGrid(Gtk.IconView):
         return False
 
     def destroyed(self, *_):
+        self.thumb_closed = True
+        while not self.thumb_jobs.empty():
+            try: self.thumb_jobs.get_nowait()
+            except queue.Empty: break
+        self.thumb_jobs.put_nowait(None)
         if self.pending_fit is not None:
             GLib.source_remove(self.pending_fit)
             self.pending_fit = None

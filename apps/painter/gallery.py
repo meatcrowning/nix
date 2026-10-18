@@ -95,6 +95,68 @@ class _ThumbJob(QRunnable):
         self.sig.done.emit(self.path, out)
 
 
+def _history_rows(roots, limit=0):
+    found = []
+    seen = set()
+    for root in roots:
+        try:
+            paths = list(root.glob("*.png"))
+            for suffix in VIDEO_SUFFIXES:
+                paths += list(root.glob(f"video/*{suffix}"))
+        except OSError:
+            # A peer root that is not mounted — the tunnel is down, or the
+            # sshfs went away mid-session — must not cost the local scan.
+            continue
+        for p in paths:
+            key = Gallery._dedup_key(p)
+            if is_muted_copy(p) or key in seen:
+                continue
+            try:
+                st = p.stat()
+                mtime = st.st_mtime
+            except OSError:
+                continue   # deleted between the glob and the stat
+            seen.add(key)
+            found.append((mtime, p, st.st_size))
+    # Keep metadata for all outputs; each frontend requests only visible previews.
+    ordered = sorted(found, key=lambda t: t[0], reverse=True)
+    files = [(p, (m, sz)) for m, p, sz in (ordered[:limit] if limit else ordered)]
+    return [_history_row(p, st) for p, st in files]
+
+
+def _history_row(path, st):
+    p = Path(path)
+    ck = "" if st is None else f"{int(st[0])}-{int(st[1])}"
+    video = p.suffix.lower() in VIDEO_SUFFIXES
+    dest = CACHE / "thumbs" / f"{p.stem}-{ck}.jpg"
+    thumb = ""
+    if ck and not video:
+        try:
+            if dest.exists(): thumb = QUrl.fromLocalFile(str(dest)).toString()
+        except OSError:
+            pass
+    return dict(path=str(p), url=QUrl.fromLocalFile(str(p)).toString(), name=p.name,
+                is_video=video, poster="", key=p.name, ck=ck, thumb=thumb)
+
+
+class _HistorySignals(QObject):
+    done = Signal(int, object, bool)
+
+
+class _HistoryScan(QRunnable):
+    def __init__(self, serial):
+        super().__init__()
+        self.serial = serial
+        self.sig = _HistorySignals()
+
+    def run(self):
+        # Publish local history without waiting for an unavailable peer mount.
+        local = _history_rows([OUT_DIR])
+        self.sig.done.emit(self.serial, local, not PEER_OUTS)
+        if PEER_OUTS:
+            self.sig.done.emit(self.serial, _history_rows([OUT_DIR, *PEER_OUTS]), True)
+
+
 class Gallery(QAbstractListModel):
     PathRole = Qt.UserRole + 1
     UrlRole = Qt.UserRole + 2
@@ -144,6 +206,11 @@ class Gallery(QAbstractListModel):
         # path -> the mtime-size stamp its cache entries are named with, so
         # nothing on the scroll path ever stats a network mount.
         self._ck = {}
+        self._history_pool = QThreadPool(self)
+        self._history_pool.setMaxThreadCount(1)
+        self._history_job = None
+        self._scan_serial = 0
+        self._scan_added = {}
 
     def roleNames(self):
         return {self.PathRole: b"path", self.UrlRole: b"url", self.NameRole: b"name",
@@ -240,24 +307,15 @@ class Gallery(QAbstractListModel):
         scroll path. `load_existing` stats every file exactly once anyway.
         """
         p = Path(path)
-        is_video = p.suffix.lower() in VIDEO_SUFFIXES
         if st is None:
             try:
                 s = os.stat(p)
                 st = (s.st_mtime, s.st_size)
             except OSError:
                 st = None
-        return {"path": str(p), "url": QUrl.fromLocalFile(str(p)).toString(),
-                "name": p.name, "is_video": is_video, "poster": "",
-                "key": self._dedup_key(p),
-                # What makes a cache entry this file and not a later one of the
-                # same name. "" when the file could not be statted, which means
-                # nothing is cached for it rather than something wrong.
-                "ck": self._note_ck(p, st),
-                # Already cached from an earlier session? Then the row knows its
-                # picture before any delegate exists, which is the whole point:
-                # no first pass over the history that decodes originals.
-                "thumb": self._cached_thumb(p, is_video)}
+        row = _history_row(p, st)
+        self._ck[row['path']] = row['ck']
+        return row
 
     def cache_stamp(self, path):
         """The mtime-size stamp this row was scanned with, or "" if unknown.
@@ -267,17 +325,6 @@ class Gallery(QAbstractListModel):
         round trips on the GUI thread, and that is a visible freeze.
         """
         return self._ck.get(str(path), "")
-
-    def _cached_thumb(self, path, is_video):
-        if is_video:
-            return ""
-        dest = self._thumb_path(path)
-        try:
-            if dest is not None and dest.exists():
-                return QUrl.fromLocalFile(str(dest)).toString()
-        except OSError:
-            pass
-        return ""
 
     def _note_ck(self, path, st):
         ck = "" if st is None else f"{int(st[0])}-{int(st[1])}"
@@ -305,6 +352,8 @@ class Gallery(QAbstractListModel):
         # the copy with the parameters written into it.
         self._drop_key(self._dedup_key(path))
         row = self._row_for(path)
+        if self._history_job is not None:
+            self._scan_added[row['key']] = row
         # UNDER THE JOB'S OWN ROW, which is then dropped — so the new output is
         # already in the model when anything hears that the job ended.
         #
@@ -333,55 +382,37 @@ class Gallery(QAbstractListModel):
             self._want_thumb(row)
 
     def load_existing(self, limit=0):
-        # Videos land in a subdirectory of their own, because that is where
-        # SaveVideo's filename_prefix puts them — a gallery that only globbed
-        # *.png here would show nothing at all for a video model.
-        #
-        # THE LOCAL ROOT IS SCANNED FIRST, and that ordering is load-bearing
-        # rather than tidiness: a still book generated carries painter's
-        # parameters only in the copy book wrote, so "inject" reads the local
-        # one and would find nothing at all in top's.
-        found = []
-        seen = set()
-        for root in [OUT_DIR, *PEER_OUTS]:
-            try:
-                paths = list(root.glob("*.png"))
-                for suffix in VIDEO_SUFFIXES:
-                    paths += list(root.glob(f"video/*{suffix}"))
-            except OSError:
-                # A peer root that is not mounted — the tunnel is down, or the
-                # sshfs went away mid-session — must not cost the local scan.
-                continue
-            for p in paths:
-                key = self._dedup_key(p)
-                if is_muted_copy(p) or key in seen:
-                    continue
-                try:
-                    st = p.stat()
-                    mtime = st.st_mtime
-                except OSError:
-                    continue   # deleted between the glob and the stat
-                seen.add(key)
-                found.append((mtime, p, st.st_size))
-        # ALL OF THEM, newest first. This was capped at 60 — a number from when
-        # the grid was a strip — so the history simply stopped partway with
-        # nothing saying so. The view is a GridView and only builds the
-        # delegates it can see, so the cost of the rest is one small dict each;
-        # `limit` survives for a caller that wants a slice.
-        ordered = sorted(found, key=lambda t: t[0], reverse=True)
-        files = [(p, (m, sz)) for m, p, sz in (ordered[:limit] if limit else ordered)]
-        self._all = [self._row_for(p, st) for p, st in files]
-        # A rescan rebuilds the history from the directory; a job in flight is
-        # not in the directory, and it must not vanish because something asked
-        # for a rescan while it was sampling.
+        self._scan_serial += 1
+        self._install_history(_history_rows([OUT_DIR, *PEER_OUTS], limit))
+
+    def load_background(self):
+        if self._history_job is not None:
+            return
+        self._scan_serial += 1
+        self._scan_added = {}
+        job = self._history_job = _HistoryScan(self._scan_serial)
+        job.sig.done.connect(self._history_ready)
+        self._history_pool.start(job)
+
+    @Slot(int, object, bool)
+    def _history_ready(self, serial, rows, final):
+        if final:
+            self._history_job = None
+        if serial == self._scan_serial:
+            self._install_history(rows, self._scan_added)
+        if final:
+            self._scan_added = {}
+
+    def _install_history(self, rows, added=None):
+        old = {r['path']: r for r in self._all if not r.get('live')}
+        added = added or {}
+        self._all = list(reversed(list(added.values()))) + [old[r['path']] if r['path'] in old
+                     and old[r['path']]['ck'] == r['ck'] else r
+                     for r in rows if r['key'] not in added]
+        self._ck.update({r['path']: r['ck'] for r in self._all})
         if self._live is not None:
             self._all.insert(0, self._live)
         self._refilter()
-        # Delegates request only the rows Qt actually realises. Starting 24
-        # still decodes plus 24 video extractions here made a newly shown
-        # window spend about 27 CPU-seconds preparing off-screen history before
-        # it felt usable. The view's cacheBuffer already realises a few rows
-        # beyond the viewport, so those requests are the right warm-up set.
 
     # -- poster frames -----------------------------------------------------
 

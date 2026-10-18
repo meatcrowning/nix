@@ -16,7 +16,7 @@ read-only state before using them.
 | Area | Owner | Focused harnesses under `tools/` |
 | --- | --- | --- |
 | Window/actions/settings | `qml/Root.qml`, `main.py` | `ui-test.py` |
-| Gallery, filtering, thumbnails | `gallery.py` | `ui-test.py`, `gallery-bench.py` |
+| Gallery, filtering, thumbnails | `gallery.py` | `ui-test.py` (`PAINTER_UI_ONLY=gallery`), `gallery-bench.py` |
 | Model identification/pairing | `fingerprint.py`, `registry.py`, `families/` | family-specific tests |
 | Graph construction | `graph.py`, `registry.py`, `graphs/` | family-specific tests, `validate-graphs.py` |
 | Saved generation settings | `userprefs.py` | `prefs-test.py` |
@@ -88,7 +88,10 @@ surrounding pan margin; transient sampler/video frames cross the socket as
 bounded images. Clip decoding stays
 in the modern engine, with no audio output attached; clear the media source
 on selection changes and window close. Keep frame polling separate from
-gallery/settings snapshots.
+gallery/settings snapshots. Unity history scrolls through a maximum 180-row
+window, requesting previews near the visible rows; the GTK decoder queue and
+image cache each cap at 64 entries. Keep paging independent of the selected
+preview and preserve scroll position when replacing the window.
 
 Use real GTK widgets, Ambiance, server decorations and the original appmenu
 exporter. `lib/unity-quantal/assemble.py` owns that runtime dependency. Verify with
@@ -105,6 +108,9 @@ an isolated fixture image. Never run its inner Python scripts on the host.
 and QML indexes refer to filtered rows. Filter all words against cached filename
 and prompt metadata. Peer outputs merge with local outputs without duplicate
 rows; prefer the local copy. An unavailable peer cannot block local discovery.
+Startup scans run on a worker and publish local history before waiting for
+peers; merge outputs that complete during the scan and retain the live
+generation row.
 
 Tiles use cached JPEGs, not full outputs. Still thumbnails have a bounded LIFO
 worker queue; video posters are requested after delegate dwell. Use scan-time

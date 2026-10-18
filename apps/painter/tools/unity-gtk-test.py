@@ -185,6 +185,8 @@ def test():
                 assert grid.get_item_row(Gtk.TreePath.new_from_string(str(columns - 1))) == 0, ('history row wastes a column', width, columns, grid.get_item_width())
                 assert grid.get_item_row(Gtk.TreePath.new_from_string(str(columns))) == 1
             fixture.destroy()
+            from importlib import import_module
+            import_module("history-gtk-test").run()
             select('fixture.png')
             window.view()
             assert window.pages.get_current_page() == 1

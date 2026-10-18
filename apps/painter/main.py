@@ -40,7 +40,9 @@ from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QInputMethodEvent, QWindow
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickImageProvider
-import layout_qt
+# The GTK frontend never loads the Quick layout editor or its SVG renderer.
+if 'unity' not in os.environ.get('DESK_SESSION', os.environ.get('XDG_CURRENT_DESKTOP', '')).lower().split(':'):
+    import layout_qt
 
 HERE = Path(__file__).resolve().parent
 QML = HERE / "qml"
@@ -778,7 +780,10 @@ class Painter(QObject):
         self.gallery.posterReady.connect(self._on_poster)
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
-        self.gallery.load_existing()
+        if self._sync_scan:
+            self.gallery.load_existing()
+        else:
+            QTimer.singleShot(0, self.gallery.load_background)
 
         self._procs = []                  # live QProcesses, so none is GC'd mid-run
         self._want_model = ""             # a remembered selection, until the rows land
@@ -2886,6 +2891,7 @@ def main():
     # kirigami and fails to load where there is none), `org.kde.desktop` under
     # Plasma — which is not an imitation of the KDE style but a renderer THROUGH
     # it, so a Button here is drawn by Oxygen's own code. pylib/kdeshell.py.
+    import layout_qt  # register PainterLayout before loading the Qt scene
     kdeshell.pin_controls_style()
 
     # A QApplication under Plasma, the QGuiApplication we have always used

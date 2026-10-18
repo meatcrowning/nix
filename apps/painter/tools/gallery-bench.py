@@ -18,6 +18,7 @@ import statistics
 import sys
 import tempfile
 import time
+import threading
 from pathlib import Path
 
 
@@ -83,6 +84,53 @@ def main() -> int:
             print(f"{size:6d} local  {gallery.rowCount():6d} rows  "
                   f"median {statistics.median(samples):8.2f} ms  "
                   f"min {min(samples):8.2f} ms")
+
+        background = ScanGallery()
+        started = time.perf_counter()
+        background.load_background()
+        dispatch_ms = (time.perf_counter() - started) * 1000
+        turns = 0
+        deadline = time.monotonic() + 30
+        while background._history_job is not None and time.monotonic() < deadline:
+            qt.processEvents()
+            turns += 1
+            time.sleep(.001)
+        assert background._history_job is None, "background scan timed out"
+        assert background.rowCount() == gallery.rowCount()
+        print(f"background dispatch {dispatch_ms:.2f} ms; {turns} event-loop turns during scan")
+
+        # A slow peer must not delay local results or lose a newly completed job.
+        gate = threading.Event()
+        scan = app._history_rows
+        def delayed(roots, limit=0):
+            if len(roots) > 1:
+                assert gate.wait(10), "peer test gate timed out"
+            return scan(roots, limit)
+        app._history_rows = delayed
+        pending = ScanGallery()
+        try:
+            pending.load_background()
+            deadline = time.monotonic() + 10
+            while not pending.rowCount() and time.monotonic() < deadline:
+                qt.processEvents()
+                time.sleep(.001)
+            assert pending.rowCount() == sizes[-1], "local results waited for peer"
+            pending.begin_live("fixture")
+            populate(local, 1, 90000)
+            added = next(local.glob('*90000*'))
+            pending.add(str(added), job="other")
+            gate.set()
+            while pending._history_job is not None and time.monotonic() < deadline:
+                qt.processEvents()
+                time.sleep(.001)
+            assert pending._history_job is None
+            assert pending._all[0].get('live')
+            assert sum(r['path'] == str(added) for r in pending._all) == 1
+            print("PASS: local history precedes slow peer; live/new output survives scan")
+        finally:
+            gate.set()
+            pending._history_pool.waitForDone()
+            app._history_rows = scan
 
         if args.profile:
             gallery = ScanGallery()

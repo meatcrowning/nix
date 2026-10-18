@@ -5452,9 +5452,13 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea", "moss", "notifications"):
+                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery"):
         print("== %s ==" % only)
-        if only == "notifications":
+        if only == "gallery":
+            test_thumb_cache(win, ctl, tmp)
+            test_filter(win, ctl, tmp)
+            test_live_row(win, ctl, tmp)
+        elif only == "notifications":
             test_done_toast(win, ctl, tmp)
             test_preview_zoom(win, ctl, tmp)
         elif only == "moss":

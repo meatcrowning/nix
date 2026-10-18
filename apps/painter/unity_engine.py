@@ -430,11 +430,14 @@ class Engine:
         c = self.ctl
         c.gallery.setFilter(request.get('filter', ''))
         offset = max(0, int(request.get('offset', 0)))
+        limit = max(1, min(180, int(request.get('limit', 60))))
+        first = max(0, min(limit, int(request.get('thumbFirst', 0))))
+        last = min(limit, max(first, int(request.get('thumbLast', 12))))
         gallery = []
-        for row in c.gallery._rows[offset:offset + 60]:
-            if not row.get('live'):
+        for index, row in enumerate(c.gallery._rows[offset:offset + limit]):
+            if first <= index < last and not row.get('live'):
                 c.gallery.requestThumb(row['path'])
-            if row['is_video']:
+            if first <= index < last and row['is_video']:
                 c.gallery.requestPoster(row['path'])
             gallery.append({k: row.get(k, False if k in ('live', 'grab') else '')
                             for k in ('path', 'name', 'is_video', 'thumb', 'poster', 'live', 'grab')})
@@ -452,7 +455,8 @@ class Engine:
                     queue=c.queue, elapsed=c.elapsed, rate=c.rate, messages=messages,
                     wildcards=c.wildcardNames,
                     samplers=c.samplers, schedulers=c.schedulers, curves=c.curves, outsideWindows=c.outsideWindows,
-                    gallery=gallery, total=c.gallery.count, offset=offset,
+                    gallery=gallery, total=c.gallery.count, offset=offset, limit=limit,
+                    galleryQuery=request.get('filter', ''),
                     choices=c.choices._rows, loras=c.lorasSnapshot(),
                     input=c.inputImage, last=c.lastImage, references=c.editExtraImages,
                     lastSeed=c.lastSeed)

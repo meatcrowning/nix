@@ -75,10 +75,16 @@ class Window(Gtk.Window):
         self.state = {}
         self.revision = None
         self.offset = 0
+        self.history_limit = 60
+        self.history_pending = False
+        self.history_anchor = None
         self.controls = {}
         self.rows = {}
         self.gallery_key = None
         self.selection = ''
+        self.selection_row = {}
+        self.history_demand = None
+        self.history_fetch_timer = None
         self.text_boxes = {}
         self.heights_loaded = False
         self.layout_height = 300
@@ -382,7 +388,9 @@ class Window(Gtk.Window):
         self.browse_pane.connect_after('accept-position', self.preview_resized)
         self.preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.browse_pane.pack1(self.preview_box, False, False)
-        self.browse_pane.pack2(scroll(self.gallery), True, False)
+        self.history_scroll = scroll(self.gallery)
+        self.browse_pane.pack2(self.history_scroll, True, False)
+        self.history_scroll.get_vadjustment().connect('value-changed', self.history_scrolled)
         self.pages.append_page(self.browse_pane, Gtk.Label(label='Browse'))
         self.full_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.pages.append_page(self.full_box, Gtk.Label(label='View'))
@@ -393,14 +401,8 @@ class Window(Gtk.Window):
         self.preview_box.pack_start(self.viewer, True, True, 0)
         nav = Gtk.Box(spacing=6)
         self.gallery_nav = nav
-        self.previous = Gtk.Button.new_from_stock(Gtk.STOCK_GO_BACK)
-        self.previous.connect('clicked', lambda *_: self.change_page(-60))
-        self.next = Gtk.Button.new_from_stock(Gtk.STOCK_GO_FORWARD)
-        self.next.connect('clicked', lambda *_: self.change_page(60))
         self.tally = label('Loading outputs…')
-        nav.pack_start(self.previous, False, False, 0)
         nav.pack_start(self.tally, True, True, 0)
-        nav.pack_end(self.next, False, False, 0)
         right.pack_start(nav, False, False, 0)
         bottom = Gtk.Box(spacing=12)
         bottom.set_border_width(6)
@@ -486,7 +488,12 @@ class Window(Gtk.Window):
     def send(self, op, save=False, **extra):
         if not self.connected:
             return
-        request = dict(op=op, offset=self.offset, filter=self.search.get_text(), frameTick=self.frame_tick)
+        request = dict(op=op, offset=self.offset, limit=self.history_limit,
+                       filter=self.search.get_text(), frameTick=self.frame_tick)
+        visible = self.gallery.get_visible_range()
+        if visible and visible[0] is not None:
+            request.update(thumbFirst=max(0, visible[0].get_indices()[0] - 6),
+                           thumbLast=visible[1].get_indices()[0] + 7)
         if save and self.state.get('model'):
             try:
                 request.update(settings=self.values(), model=self.state['model'])
@@ -585,6 +592,10 @@ class Window(Gtk.Window):
             self.receive_media(state['media'])
             return False
         old = self.state
+        if (state.get('offset', 0) != self.offset or
+                state.get('galleryQuery', '') != self.search.get_text()):
+            for key in ('gallery', 'offset', 'total', 'limit', 'galleryQuery'):
+                if key in old: state[key] = old[key]
         self.state = state
         self.loading = True
         if old.get('models') != state['models']:
@@ -655,7 +666,9 @@ class Window(Gtk.Window):
         self.source_info.set_text('\n'.join([p for p in [state['input'], state['last']] + state['references'] if p]))
         if op == 'generate':
             self.grabbed_live = False
-        self.update_gallery(state)
+        if (state['offset'] == self.offset and state.get('limit', 60) == self.history_limit
+                and state.get('galleryQuery', '') == self.search.get_text()):
+            self.update_gallery(state)
         self.receive_media(state['media'])
         for message in state['messages']:
             self.message(message['text'], message['error'], message.get('completion', False))
@@ -898,16 +911,73 @@ class Window(Gtk.Window):
 
     def search_changed(self, *_):
         self.offset = 0
+        self.history_limit = 60
+        self.history_anchor = None
+        self.gallery_key = None
+        self.history_pending = True
+        self.history_scroll.get_vadjustment().set_value(0)
         self.send('poll')
 
     def change_page(self, delta):
         self.offset = max(0, self.offset + delta)
+        self.history_pending = True
         self.send('poll')
+
+    def history_scrolled(self, *_):
+        self.gallery.load_visible()
+        if self.history_fetch_timer is None:
+            self.history_fetch_timer = GLib.timeout_add(80, self.request_visible_history)
+        if self.history_pending or self.rebuilding_gallery or not self.state:
+            return
+        adjustment = self.history_scroll.get_vadjustment()
+        value, page, upper = adjustment.get_value(), adjustment.get_page_size(), adjustment.get_upper()
+        if page <= 0 or upper <= page:
+            return
+        count = len(self.tiles)
+        columns = max(1, self.gallery.get_item_column(Gtk.TreePath.new_from_string(str(count - 1))) + 1) if count else 1
+        # Derive columns from the first row, rather than an incomplete final row.
+        for n in range(count):
+            if self.gallery.get_item_row(Gtk.TreePath.new_from_string(str(n))) > 0:
+                columns = n
+                break
+        step = max(columns, (60 // columns) * columns)
+        previous = self.offset
+        if value + page >= upper - min(180, page / 2) and self.offset + count < self.state.get('total', 0):
+            if self.history_limit + step <= 180:
+                self.history_limit += step
+            else:
+                self.offset += step
+        elif value < min(100, page / 4) and self.offset > 0:
+            self.offset = max(0, self.offset - step)
+        else:
+            return
+        row_height = upper / max(1, (count + columns - 1) // columns)
+        self.history_anchor = max(0, value - (self.offset - previous) / float(columns) * row_height)
+        self.history_pending = True
+        self.send('poll')
+
+    def request_visible_history(self):
+        self.history_fetch_timer = None
+        visible = self.gallery.get_visible_range()
+        demand = (self.offset, self.history_limit, tuple(str(p) for p in visible) if visible else ())
+        if demand != self.history_demand and not self.history_pending:
+            self.history_demand = demand
+            self.send('poll')
+        return False
+
+    def history_settled(self):
+        if self.history_anchor is not None:
+            self.history_scroll.get_vadjustment().set_value(self.history_anchor)
+            self.history_anchor = None
+        self.history_pending = False
+        self.gallery.load_visible()
+        self.request_visible_history()
+        return False
 
     def update_gallery(self, state):
         rows = state['gallery']
         selected = self.selection
-        if selected == 'live://generating' and not any(r['live'] for r in rows):
+        if selected == 'live://generating' and state['replacement'] and not any(r['live'] for r in rows):
             selected = state['replacement']
         live = next((r for r in rows if r['live']), None)
         if live and live['grab'] and not self.grabbed_live:
@@ -920,32 +990,33 @@ class Window(Gtk.Window):
             if self.walk_pending is not None and rows:
                 selected = rows[self.walk_pending]['path']
                 self.walk_pending = None
-            if not any(r['path'] == selected for r in rows):
+            if not selected or self.gallery_key is None:
                 selected = rows[0]['path'] if rows else ''
             self.rebuilding_gallery = True
-            self.tiles.clear()
-            for row in rows:
-                pixbuf = None
-                path = local_path(row['poster'] if row['is_video'] else row['thumb'])
-                if path:
-                    try:
-                        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 300, 300, True)
-                    except GLib.GError:
-                        pass
-                tree_iter = self.tiles.append([self.gallery.thumbnail(pixbuf), row['name'], row['path'], pixbuf])
+            self.gallery.sources = {row['path']: local_path(row['poster'] if row['is_video'] else row['thumb']) for row in rows}
+            paths = [row[2] for row in self.tiles]
+            if paths != [row['path'] for row in rows]:
+                if self.history_anchor is None:
+                    self.history_anchor = self.history_scroll.get_vadjustment().get_value()
+                self.tiles.clear()
+                self.gallery.loaded_sources = {}
+                for row in rows:
+                    self.tiles.append([None, row['name'], row['path'], None])
+            for n, row in enumerate(rows):
                 if row['path'] == selected:
-                    self.gallery.select_path(self.tiles.get_path(tree_iter))
+                    self.gallery.select_path(Gtk.TreePath.new_from_string(str(n)))
             self.rebuilding_gallery = False
             self.gallery_key = key
-            self.selected()
+            if self.gallery.get_selected_items():
+                self.selected()
+        if state['offset'] == self.offset:
+            GLib.timeout_add(30, self.history_settled)
         self.tally.set_text('%d–%d of %d' % (state['offset'] + 1 if rows else 0,
                                             state['offset'] + len(rows), state['total']))
-        self.previous.set_sensitive(state['offset'] > 0)
-        self.next.set_sensitive(state['offset'] + 60 < state['total'])
 
     def copyable_image(self, path):
-        return any(row['path'] == path and not row['live'] and not row['is_video']
-                   for row in self.state.get('gallery', []))
+        return any(row.get('path') == path and not row.get('live') and not row.get('is_video')
+                   for row in self.state.get('gallery', []) + [self.selection_row])
 
     def make_image_menu(self, path):
         if not self.copyable_image(path):
@@ -1015,7 +1086,7 @@ class Window(Gtk.Window):
         if path != self.selection:
             self.selection = path
             self.frame_tick = ''
-            row = next((r for r in self.state['gallery'] if r['path'] == path), {})
+            row = self.selection_row = next((r for r in self.state['gallery'] if r['path'] == path), {})
             self.viewer.path = None
             self.viewer.load('' if row.get('live') or row.get('is_video') else path,
                              video=bool(row.get('is_video') and not row.get('live')))
@@ -1051,7 +1122,7 @@ class Window(Gtk.Window):
             self.change_page(-60)
         elif target >= len(rows) and self.offset + len(rows) < self.state.get('total', 0):
             self.walk_pending = 0
-            self.change_page(60)
+            self.change_page(len(rows))
 
     def zoom_by(self, multiplier):
         self.viewer.zoom_by(multiplier)

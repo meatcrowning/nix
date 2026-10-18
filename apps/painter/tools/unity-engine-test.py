@@ -22,6 +22,7 @@ sys.path.insert(0, '/source/apps/pylib')
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QGuiApplication, QImage, QColor
 import main as P
+assert "layout_qt" not in sys.modules, "GTK startup imported the Quick layout editor"
 import unity_engine as E
 # Entry routing must choose the GTK engine before constructing a Qt window.
 os.environ['PATH'] = os.environ['PACKAGE'] + '/bin:' + os.environ['PATH']
@@ -55,6 +56,21 @@ engine = E.Engine(ctl, P.Prefs())
 assert len(engine.snapshot({})['models']) == 2
 json.dumps(engine.snapshot({}))  # no QObject/registry entries on the wire
 assert engine.snapshot({})['rate'] == ctl.rate
+saved_rows = ctl.gallery._rows
+thumb_requests, poster_requests = [], []
+thumb_method, poster_method = ctl.gallery.requestThumb, ctl.gallery.requestPoster
+try:
+    ctl.gallery._rows = [dict(path='/fake/%d.png' % n, name=str(n), is_video=False)
+                         for n in range(5000)]
+    ctl.gallery.requestThumb = thumb_requests.append
+    ctl.gallery.requestPoster = poster_requests.append
+    page = engine.snapshot(dict(offset=100, limit=10000, thumbFirst=8, thumbLast=16))
+    assert len(page['gallery']) == 180 and page['total'] == 5000
+    assert thumb_requests == ['/fake/%d.png' % n for n in range(108, 116)]
+    assert not poster_requests
+finally:
+    ctl.gallery._rows = saved_rows
+    ctl.gallery.requestThumb, ctl.gallery.requestPoster = thumb_method, poster_method
 import spellcheck
 real_checker = spellcheck._ENGINE
 class FixtureSpelling:
