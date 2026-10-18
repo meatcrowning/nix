@@ -346,7 +346,8 @@ def runtime(arguments):
         # Use the parent's mount namespace, not bubblewrap's implementation
         # mounts. Keep mtab out of the runtime consumed by other FHS packages.
         command += ["--ro-bind", "/", "/run/unity-monitor-host",
-                    "--ro-bind", f"/proc/{os.getpid()}/mounts", "/run/unity-monitor-mtab"]
+                    "--ro-bind", f"/proc/{os.getpid()}/mounts", "/run/unity-monitor-mtab",
+                    "--ro-bind", str(integration.monitor_release(directory)), "/etc/lsb-release"]
     # Mount the parent, not today's individual disks, so later hotplug mounts
     # remain visible too. Nautilus must be able to edit files on these volumes.
     for path in ["/run/media", "/media", "/mnt"]:
@@ -405,7 +406,8 @@ def runtime(arguments):
     if arguments[0] == "/usr/bin/compiz":
         environment["LD_PRELOAD"] = CONFIG["scrollGrab"]
     if arguments[0] == "/usr/bin/gnome-system-monitor":
-        environment["LD_PRELOAD"] = CONFIG["monitorFilesystems"]
+        environment["LD_PRELOAD"] = CONFIG["monitorFilesystems"] + ":" + CONFIG["monitorTheme"]
+        environment["UNITY_MONITOR_LOGO"] = CONFIG["monitorLogo"]
     if arguments[0] == "/usr/lib/gvfs/gvfs-udisks2-volume-monitor":
         environment["LD_PRELOAD"] = CONFIG["volumeCompat"]
     if arguments[0] == "/usr/lib/bamf/bamfdaemon":

@@ -9,7 +9,7 @@
 , pavucontrol, system-config-printer
 , cinnamon-desktop
 , xpra, zenity, closureInfo, writeText
-, wrapGAppsHook3, gobject-introspection, gtk3, vte
+, wrapGAppsHook3, gobject-introspection, gtk3, vte, pkg-config, nixos-icons
 , libseccomp, gnutar, gzip, bzip2, xz, unzip, zip
 , gdk-pixbuf, ffmpegthumbnailer, ffmpeg-headless, writeShellScript
 # The music library the original Rhythmbox reads, read-only, in its sandbox.
@@ -166,6 +166,20 @@ let
     mkdir -p "$out/lib"
     $CC -Wall -Wextra -Werror -shared -fPIC -O2 ${./scroll-grab.c} -lX11 -ldl -o "$out/lib/scroll-grab.so"
   '';
+  monitorTheme = runCommand "unity-quantal-monitor-theme" {
+    nativeBuildInputs = [ stdenv.cc pkg-config ];
+    buildInputs = [ gtk3 ];
+    # lsb_release inherits the preload but does not load GTK.
+    hardeningDisable = [ "bindnow" ];
+  } ''
+    mkdir -p "$out/lib"
+    # Headers only: GTK/Cairo must resolve from the Quantal process.
+    $CC -Wall -Wextra -Werror -Wno-deprecated-declarations -shared -fPIC -O2 \
+      $(pkg-config --cflags gtk+-3.0) ${./monitor-theme.c} -ldl -o "$out/lib/monitor-theme.so"
+    mkdir -p "$out/bin"
+    $CC -Wall -Wextra -Werror -Wno-deprecated-declarations -O1 -fno-inline -fno-optimize-sibling-calls -rdynamic \
+      ${./monitor-theme-test.c} $(pkg-config --cflags --libs gtk+-3.0) -lm -o "$out/bin/monitor-theme-test"
+  '';
   monitorFilesystems = runCommand "unity-quantal-monitor-filesystems" {
     nativeBuildInputs = [ stdenv.cc ];
   } ''
@@ -221,6 +235,8 @@ stdenvNoCC.mkDerivation {
       scrollGrab = "${scrollGrab}/lib/scroll-grab.so";
       volumeCompat = "${volumeCompat}/lib/volume-compat.so";
       monitorFilesystems = "${monitorFilesystems}/lib/monitor-filesystems.so";
+      monitorTheme = "${monitorTheme}/lib/monitor-theme.so";
+      monitorLogo = "${nixos-icons}/share/icons/hicolor/72x72/apps/nix-snowflake.png";
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
       mediaSchemas = "${mediaSchemas}";
       isolatedClosure = "${isolatedClosure}/store-paths";

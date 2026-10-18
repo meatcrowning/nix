@@ -12,6 +12,25 @@ import subprocess
 import xml.etree.ElementTree as ET
 
 
+def monitor_release(directory, os_release=Path("/etc/os-release")):
+    """Supply lsb_release with host identity, not the compatibility image's."""
+    system = {}
+    for line in os_release.read_text().splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            parsed = shlex.split(value)
+            system[key] = parsed[0] if parsed else ""
+    values = {
+        "DISTRIB_ID": system.get("NAME", "Linux"),
+        "DISTRIB_RELEASE": system.get("BUILD_ID", system.get("VERSION_ID", "")),
+        "DISTRIB_CODENAME": system.get("VERSION_CODENAME", ""),
+        "DISTRIB_DESCRIPTION": system.get("PRETTY_NAME", "Linux"),
+    }
+    path = directory / "monitor-lsb-release"
+    path.write_text("".join(key + "=" + shlex.quote(value) + "\n" for key, value in values.items()))
+    return path
+
+
 def parser(path):
     result = configparser.ConfigParser(interpolation=None, strict=False)
     result.optionxform = str

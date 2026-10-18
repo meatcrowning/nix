@@ -33,6 +33,7 @@ printf 'users:x:%s:unity-test\n' "$(id -g)" > "$run/group"
 printf 'passwd: files\ngroup: files\nhosts: files dns\n' > "$run/nsswitch.conf"
 printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$run/machine-id"
 printf 'nameserver 127.0.0.1\n' > "$run/resolv.conf"
+printf 'NAME=NixOS\nPRETTY_NAME="NixOS 99.01 (Test)"\nVERSION_ID=99.01\nBUILD_ID=99.01.test\nVERSION_CODENAME=test\n' > "$run/os-release"
 mkdir -p "$run/profile/bin"
 printf '#!%s/bin/bash\necho native-command-found\n' "$test_tools" > "$run/profile/bin/unity-host-cli"
 cat > "$run/home/host-shell" <<'SHELL'
@@ -150,7 +151,7 @@ if [ "$UNITY_TEST_MONITOR_ONLY" = 1 ]; then
   entry="$session_dir/applications/unity-original-gnome-system-monitor.desktop"
   test -f "$entry"
   grep -q 'StartupWMClass=gnome-system-monitor' "$entry"
-  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gnome-system-monitor.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-system-monitor
+  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gnome-system-monitor.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-system-monitor --show-system-tab
   for _ in {1..100}; do
     window=$(xdotool search --onlyvisible --class '^gnome-system-monitor$' | head -n1 || true)
     [ -n "$window" ] && break
@@ -169,6 +170,11 @@ if [ "$UNITY_TEST_MONITOR_ONLY" = 1 ]; then
   "$TEST_PYTHON" -c 'import sys; assert open("/proc/mounts").read() == open(sys.argv[1]).read()' "/proc/$monitor_pid/root/run/unity-monitor-mtab"
   test "$(stat -f -c '%t:%b:%S' /)" = "$(stat -f -c '%t:%b:%S' /proc/$monitor_pid/root/run/unity-monitor-host)"
   grep -q monitor-filesystems.so "/proc/$monitor_pid/maps"
+  grep -q monitor-theme.so "/proc/$monitor_pid/maps"
+  grep -q 'DISTRIB_ID=NixOS' "/proc/$monitor_pid/root/etc/lsb-release"
+  grep -q 'DISTRIB_RELEASE=99.01.test' "/proc/$monitor_pid/root/etc/lsb-release"
+  theme=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["monitorTheme"])')
+  LD_PRELOAD="$theme" "$(dirname "$theme")/../bin/monitor-theme-test"
   bwrap --die-with-parent --ro-bind / / --tmpfs /run --ro-bind / /run/unity-monitor-host --ro-bind "/proc/$$/mounts" /run/unity-monitor-mtab -- "$TEST_PYTHON" - <<'PY'
 import ctypes, json, os
 config = json.load(open(os.environ['UNITY_PACKAGE'] + '/libexec/unity-quantal/config.json'))
@@ -191,10 +197,11 @@ for path in ['/', '/nix', '/home/unity-test']:
     assert tuple(result[:3]) == (host.f_bsize, host.f_frsize, host.f_blocks), path
 print('PASS: libgtop filesystem adapter reports host capacity')
 PY
-  for tab in 1 2 3 4; do
-    xdotool windowactivate --sync "$window" key "alt+$tab"
-    kill -0 "$monitor_pid"
-  done
+  import -silent -window "$window" /work/monitor-system.png
+  xdotool windowactivate --sync "$window" key ctrl+Page_Down ctrl+Page_Down
+  sleep .5
+  import -silent -window "$window" /work/monitor-resources.png
+  kill -0 "$monitor_pid"
   echo 'PASS: original System Monitor launches, matches its Dash entry, and shares host telemetry namespaces'
   exit 0
 fi
@@ -786,6 +793,7 @@ fi
   --ro-bind "$run/nsswitch.conf" /etc/nsswitch.conf \
   --ro-bind "$run/machine-id" /etc/machine-id \
   --ro-bind "$run/resolv.conf" /etc/resolv.conf \
+  --ro-bind "$run/os-release" /etc/os-release \
   --ro-bind "$run/profile" /etc/profiles/per-user/unity-test \
   --ro-bind /run/opengl-driver /run/opengl-driver \
   --ro-bind "$repo/tools/lib/session-guard.sh" /guard.sh \
