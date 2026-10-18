@@ -169,11 +169,12 @@ Panel {
             width: parent.width
             spacing: 4
             PixelText { text: "Aspect"; anchors.verticalCenter: parent.verticalCenter }
-            Spin { width: 48; value: root.gen.aspectW; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectW", Math.round(v)); root.recomputeDims() } }
+            Spin { width: 34; value: root.gen.aspectW; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectW", Math.round(v)); root.recomputeDims() } }
             PixelText { text: ":"; anchors.verticalCenter: parent.verticalCenter }
-            Spin { width: 48; value: root.gen.aspectH; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectH", Math.round(v)); root.recomputeDims() } }
+            Spin { width: 34; value: root.gen.aspectH; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectH", Math.round(v)); root.recomputeDims() } }
             PixelText { text: "MP"; anchors.verticalCenter: parent.verticalCenter }
-            Spin { width: 95; value: root.gen.megapixels; from: .05; to: 16; step: .1; decimals: 6; trimZeros: true; onEdited: v => { root.set("megapixels", v); root.recomputeDims() } }
+            Spin { width: 64; value: root.gen.megapixels; from: .05; to: 16; step: .1; decimals: 6; trimZeros: true; onEdited: v => { root.set("megapixels", v); root.recomputeDims() } }
+            PixelText { text: root.gen.width + " × " + root.gen.height; anchors.verticalCenter: parent.verticalCenter }
         }
     }
     Loader {

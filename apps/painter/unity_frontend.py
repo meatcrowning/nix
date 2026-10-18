@@ -26,7 +26,7 @@ if not os.path.exists('/usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules/im-ibus
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, GObject, Gio, Pango
-from unity_widgets import ResizableText, ImageView
+from unity_widgets import ResizableText, ImageView, CompactSpin
 
 
 def local_path(uri):
@@ -254,34 +254,37 @@ class Window(Gtk.Window):
         for key in ('aspectW', 'aspectH'):
             if key == 'aspectH':
                 aspect.pack_start(label(':'), False, False, 0)
-            control = Gtk.SpinButton.new_with_range(1, 999, 1)
-            control.set_width_chars(3)
+            control = CompactSpin(adjustment=Gtk.Adjustment(1, 1, 999, 1, 10, 0), climb_rate=1, digits=0)
+            control.set_width_chars(2)
             control.connect('value-changed', self.changed)
             self.controls[key] = control
-            aspect.pack_start(control, True, True, 0)
+            aspect.pack_start(control, False, False, 0)
         dimensions_row = Gtk.Box(spacing=4)
         self.aspect_label = label('Aspect')
         dimensions_row.pack_start(self.aspect_label, False, False, 0)
-        dimensions_row.pack_start(aspect, True, True, 0)
+        dimensions_row.pack_start(aspect, False, False, 0)
         self.grid.attach(dimensions_row, 0, self.grid_row, 2, 1)
         self.grid_row += 1
         self.rows['aspectW'] = self.rows['aspectH'] = (self.aspect_label, aspect)
         self.number('megapixels', 'MP', .1, 8, .1, 1)
         mp_label, mp = self.rows['megapixels']
         def format_mp(control):
-            control.set_text(('%.*f' % (int(control.get_digits()), control.get_value())).rstrip('0').rstrip('.'))
+            text = ('%.*f' % (int(control.get_digits()), control.get_value())).rstrip('0').rstrip('.')
+            control.set_text(text)
+            control.set_width_chars(max(3, len(text)))
             return True
         mp.connect('output', format_mp)
         mp_label.set_tooltip_text('Megapixels')
         self.grid.remove(mp_label)
         self.grid.remove(mp)
         dimensions_row.pack_start(mp_label, False, False, 0)
-        dimensions_row.pack_start(mp, True, True, 0)
-        mp.set_width_chars(5)
+        dimensions_row.pack_start(mp, False, False, 0)
+        mp.set_hexpand(False)
+        mp.set_width_chars(3)
         self.grid_row -= 1
         self.dimensions = label('')
-        self.grid.attach(self.dimensions, 0, self.grid_row, 2, 1)
-        self.grid_row += 1
+        self.dimensions.set_ellipsize(Pango.EllipsizeMode.END)
+        dimensions_row.pack_start(self.dimensions, False, False, 0)
         self.grid = Gtk.Grid()
         self.grid.set_row_spacing(6)
         self.grid.set_column_spacing(10)
@@ -433,7 +436,8 @@ class Window(Gtk.Window):
         self.rows[key] = (text, control)
 
     def number(self, key, title, low, high, step, digits=0):
-        control = Gtk.SpinButton.new_with_range(low, high, step)
+        control = (CompactSpin(adjustment=Gtk.Adjustment(low, low, high, step, step * 10, 0), climb_rate=step, digits=digits)
+                   if key == 'megapixels' else Gtk.SpinButton.new_with_range(low, high, step))
         control.set_digits(digits)
         control.connect('value-changed', self.changed)
         self.add_row(key, title, control)
@@ -630,7 +634,8 @@ class Window(Gtk.Window):
                 self.text_boxes[key].set_height(height)
             self.heights_loaded = True
         g = state['settings']
-        self.dimensions.set_text('%d × %d pixels  ·  /%d' % (g['width'], g['height'], state['multiple']))
+        self.dimensions.set_text('%d × %d' % (g['width'], g['height']))
+        self.dimensions.set_tooltip_text(self.dimensions.get_text())
         self.loading = False
         self.visibility()
         self.update_actions()

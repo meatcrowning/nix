@@ -9,6 +9,17 @@ except ImportError:
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
 
+class CompactSpin(Gtk.SpinButton):
+    """Size the entry for its visible value, retaining native stepper space."""
+    def do_get_preferred_width(self):
+        entry = Gtk.Entry.do_get_preferred_width(self)
+        height = Gtk.SpinButton.do_get_preferred_height(self)[0]
+        return tuple(width + 2 * height for width in entry)
+
+    def do_get_preferred_width_for_height(self, height):
+        return self.do_get_preferred_width()
+
+
 class ResizableText(Gtk.Box):
     def __init__(self, height, saved):
         Gtk.Box.__init__(self, orientation=Gtk.Orientation.VERTICAL)
