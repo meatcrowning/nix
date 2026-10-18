@@ -6,7 +6,7 @@ try:
     import Queue as queue
 except ImportError:
     import queue
-from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Pango, GObject
 
 
 class CompactSpin(Gtk.SpinButton):
@@ -18,6 +18,100 @@ class CompactSpin(Gtk.SpinButton):
 
     def do_get_preferred_width_for_height(self, height):
         return self.do_get_preferred_width()
+
+
+class PreviewDivider(Gtk.Paned):
+    def __init__(self):
+        Gtk.Paned.__init__(self, orientation=Gtk.Orientation.VERTICAL)
+        self.set_name('painter-preview-divider')
+        css = Gtk.CssProvider()
+        css.load_from_data(b'#painter-preview-divider { -GtkPaned-handle-size: 10; }')
+        self.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.connect_after('draw', self.draw_grip)
+
+    def draw_grip(self, widget, cr):
+        colour = self.get_style_context().get_color(Gtk.StateFlags.NORMAL)
+        cr.set_source_rgba(colour.red, colour.green, colour.blue, .8)
+        x, y = self.get_allocated_width() / 2, self.get_position() + 4
+        for offset in (-6, 0, 6):
+            cr.rectangle(x + offset - 1, y, 3, 2)
+        cr.fill()
+        return False
+
+
+class HistoryGrid(Gtk.IconView):
+    """Fit whole thumbnail columns to the viewport with small, uniform gaps."""
+    def __init__(self, model):
+        Gtk.IconView.__init__(self, model=model)
+        self.cell_width = 150
+        self.pending_fit = None
+        self.fitted_width = 0
+        self.set_pixbuf_column(0)
+        # GTK 3.6's built-in text column forces labels to twice the icon width.
+        # An explicit renderer keeps filenames within their thumbnail column.
+        self.name_cell = Gtk.CellRendererText()
+        self.name_cell.set_property('width', self.cell_width)
+        self.name_cell.set_property('xalign', .5)
+        self.pack_start(self.name_cell, False)
+        self.add_attribute(self.name_cell, 'text', 1)
+        self.set_item_width(self.cell_width)
+        self.set_margin(4)
+        self.set_item_padding(3)
+        self.set_column_spacing(4)
+        self.set_row_spacing(4)
+        self.set_spacing(3)
+        for cell in self.get_cells():
+            cell.set_property('xpad', 0)
+            cell.set_property('ypad', 0)
+            if isinstance(cell, Gtk.CellRendererText):
+                cell.set_property('ellipsize', Pango.EllipsizeMode.END)
+                cell.set_property('wrap-width', -1)
+                cell.set_property('single-paragraph-mode', True)
+                cell.set_property('height', self.create_pango_layout('Ag').get_pixel_size()[1] + 4)
+        self.connect('size-allocate', self.resized)
+        self.connect('destroy', self.destroyed)
+
+    def focus_width(self):
+        value = GObject.Value()
+        value.init(GObject.TYPE_INT)
+        self.style_get_property('focus-line-width', value)
+        return value.get_int()
+
+    def thumbnail(self, original):
+        if original is None:
+            return None
+        scale = float(self.cell_width) / max(original.get_width(), original.get_height())
+        return original.scale_simple(max(1, int(round(original.get_width() * scale))),
+                                     max(1, int(round(original.get_height() * scale))),
+                                     GdkPixbuf.InterpType.BILINEAR)
+
+    def resized(self, widget, allocation):
+        if allocation.width != self.fitted_width and self.pending_fit is None:
+            self.pending_fit = GLib.idle_add(self.fit)
+
+    def fit(self):
+        self.pending_fit = None
+        width = self.get_allocated_width()
+        self.fitted_width = width
+        available = max(1, width - 2 * self.get_margin())
+        # GtkCellArea adds focus-line-width on both sides of each renderer.
+        padding = 2 * (self.get_item_padding() + self.focus_width())
+        gap = self.get_column_spacing()
+        columns = max(1, (available + gap) // (150 + padding + gap))
+        cell_width = max(32, (available - (columns - 1) * gap) // columns - padding)
+        if cell_width != self.cell_width:
+            self.cell_width = cell_width
+            self.set_item_width(cell_width)
+            self.name_cell.set_property('width', cell_width)
+            for row in self.get_model():
+                if row[3] is not None:
+                    row[0] = self.thumbnail(row[3])
+        return False
+
+    def destroyed(self, *_):
+        if self.pending_fit is not None:
+            GLib.source_remove(self.pending_fit)
+            self.pending_fit = None
 
 
 class ResizableText(Gtk.Box):

@@ -26,7 +26,7 @@ if not os.path.exists('/usr/lib/x86_64-linux-gnu/gtk-3.0/3.0.0/immodules/im-ibus
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, GObject, Gio, Pango
-from unity_widgets import ResizableText, ImageView, CompactSpin
+from unity_widgets import ResizableText, ImageView, CompactSpin, PreviewDivider, HistoryGrid
 
 
 def local_path(uri):
@@ -368,16 +368,13 @@ class Window(Gtk.Window):
         self.pages.set_show_tabs(False)
         self.pages.set_show_border(False)
         right.pack_start(self.pages, True, True, 0)
-        self.tiles = Gtk.ListStore(GdkPixbuf.Pixbuf, str, str)
-        self.gallery = Gtk.IconView.new_with_model(self.tiles)
-        self.gallery.set_pixbuf_column(0)
-        self.gallery.set_text_column(1)
-        self.gallery.set_item_width(150)
+        self.tiles = Gtk.ListStore(GdkPixbuf.Pixbuf, str, str, GdkPixbuf.Pixbuf)
+        self.gallery = HistoryGrid(self.tiles)
         self.gallery.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.gallery.connect('selection-changed', self.selected)
         self.gallery.connect('item-activated', lambda *_: self.view())
         self.gallery.connect('button-press-event', self.gallery_menu)
-        self.browse_pane = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        self.browse_pane = PreviewDivider()
         self.browse_pane.set_position(300)
         self.browse_pane.connect_after('button-release-event', self.preview_resized)
         self.browse_pane.connect_after('accept-position', self.preview_resized)
@@ -930,10 +927,10 @@ class Window(Gtk.Window):
                 path = local_path(row['poster'] if row['is_video'] else row['thumb'])
                 if path:
                     try:
-                        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 140, 140, True)
+                        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 300, 300, True)
                     except GLib.GError:
                         pass
-                tree_iter = self.tiles.append([pixbuf, row['name'], row['path']])
+                tree_iter = self.tiles.append([self.gallery.thumbnail(pixbuf), row['name'], row['path'], pixbuf])
                 if row['path'] == selected:
                     self.gallery.select_path(self.tiles.get_path(tree_iter))
             self.rebuilding_gallery = False

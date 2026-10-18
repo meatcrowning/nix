@@ -162,6 +162,27 @@ def test():
             assert window.state['settings']['aspectH'] == 9
             assert window.state['settings']['megapixels'] == .8
             assert len(window.tiles) == 3
+            from unity_widgets import HistoryGrid
+            from gi.repository import GdkPixbuf
+            model = Gtk.ListStore(GdkPixbuf.Pixbuf, str, str, GdkPixbuf.Pixbuf)
+            original = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 140, 100)
+            original.fill(0xff0000ff)
+            for n in range(12): model.append([original, 'a long generated output filename %d.png' % n, str(n), original])
+            fixture = Gtk.OffscreenWindow()
+            fixture.set_default_size(640, 400)
+            grid = HistoryGrid(model)
+            viewport = Gtk.ScrolledWindow()
+            viewport.add(grid)
+            fixture.add(viewport)
+            fixture.show_all()
+            for width in (640, 800, 480):
+                fixture.resize(width, 400)
+                while Gtk.events_pending(): Gtk.main_iteration()
+                available = grid.get_allocated_width() - 2 * grid.get_margin()
+                columns = max(1, (available + grid.get_column_spacing()) // (150 + 2 * (grid.get_item_padding() + grid.focus_width()) + grid.get_column_spacing()))
+                assert grid.get_item_row(Gtk.TreePath.new_from_string(str(columns - 1))) == 0, ('history row wastes a column', width, columns, grid.get_item_width())
+                assert grid.get_item_row(Gtk.TreePath.new_from_string(str(columns))) == 1
+            fixture.destroy()
             select('fixture.png')
             window.view()
             assert window.pages.get_current_page() == 1
