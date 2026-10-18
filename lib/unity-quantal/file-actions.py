@@ -1,0 +1,61 @@
+"""Native handlers for the original Files application's context menu."""
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+HERE = Path(__file__).resolve().parent
+
+
+def install(data_home, package, python):
+    directory = Path(data_home) / 'unity-quantal-session/file-manager/actions'
+    directory.mkdir(parents=True, exist_ok=True)
+    command = '/usr/local/bin/unity-host-launch -- ' + python + ' ' + str(package / 'libexec/unity-quantal/file-actions.py')
+    for key, label, mode, mime, count, icon in [
+        ('phone', 'Send to Galaxy Phone', 'phone', '*;!inode/directory;', '>0', 'phone'),
+        ('wallpaper', 'Set as Wallpaper', 'wallpaper', 'image/*;', '=1', 'preferences-desktop-wallpaper'),
+    ]:
+        text = ('[Desktop Entry]\nType=Action\nName=' + label + '\nIcon=' + icon +
+                '\nProfiles=default;\nTargetLocation=false\nTargetToolbar=false\n'
+                '\n[X-Action-Profile default]\nName=Default\nSchemes=file;\n'
+                'MimeTypes=' + mime + '\nSelectionCount=' + count +
+                '\nCapabilities=Readable;\nExec=' + command + ' ' + mode + ' %F\n')
+        path = directory / ('unity-' + key + '.desktop')
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(text)
+        temporary.replace(path)
+
+
+def perform(mode, paths, config, run=subprocess.run):
+    files = [Path(path).resolve(strict=True) for path in paths]
+    if not files or any(not path.is_file() for path in files):
+        raise ValueError('Select regular files to use this action.')
+    if mode == 'wallpaper':
+        if len(files) != 1:
+            raise ValueError('Select one image to use as wallpaper.')
+        runtime = HERE.parent.parent / 'bin/unity-quantal-runtime'
+        run([str(runtime), '/usr/bin/gsettings', 'set', 'org.gnome.desktop.background',
+             'picture-uri', files[0].as_uri()], check=True, timeout=15)
+    elif mode == 'phone':
+        result = run([config['kdeconnect'], '--list-available', '--id-name-only'],
+                     capture_output=True, text=True, check=True, timeout=10)
+        devices = [line.split(' ', 1) for line in result.stdout.splitlines() if ' ' in line]
+        devices = [(identifier, name) for identifier, name in devices if 'galaxy' in name.lower()]
+        if not devices:
+            raise ValueError('Your Galaxy phone is not connected. Open KDE Connect on the phone and try again.')
+        if len(devices) != 1:
+            raise ValueError('More than one Galaxy phone is connected. Choose a device in KDE Connect.')
+        for path in files:
+            run([config['kdeconnect'], '--device', devices[0][0], '--share', str(path)],
+                check=True, timeout=30)
+    else:
+        raise ValueError('Unknown file action.')
+
+
+if __name__ == '__main__':
+    config = json.loads((HERE / 'config.json').read_text())
+    try:
+        perform(sys.argv[1], sys.argv[2:], config)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        subprocess.run([config['zenity'], '--error', '--title=Files', '--text=' + str(error)])
+        sys.exit(1)

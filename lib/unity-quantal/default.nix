@@ -6,7 +6,7 @@
 , networkmanagerapplet, xdg-terminal-exec, xdg-utils, coreutils, bash, glib
 , symlinkJoin, findutils, gnugrep, gnused, xorg-server, xprop, xwininfo, xdpyinfo, xdotool
 , xmessage, xrdb, tab-window-manager, weston, xwayland, mesa-demos, xinput, xrandr, setxkbmap, librsvg, imagemagick
-, pavucontrol, system-config-printer
+, pavucontrol, system-config-printer, kdePackages
 , cinnamon-desktop
 , xpra, zenity, closureInfo, writeText
 , wrapGAppsHook3, gobject-introspection, gtk3, vte, pkg-config, nixos-icons
@@ -46,10 +46,11 @@ let
   nativeTheme = runCommand "unity-quantal-native-theme" {
     nativeBuildInputs = [ (python3.withPackages (ps: [ ps.pillow ])) libarchive ];
   } ''
-    bsdtar -xOf ${nativeThemeDeb} data.tar.xz | bsdtar -xf - ./usr/share/themes/Ambiance
+    bsdtar -xOf ${nativeThemeDeb} data.tar.xz | bsdtar -xf - ./usr/share/themes/Ambiance ./usr/share/themes/Radiance
     rm -r usr/share/themes/Ambiance/{gtk-2.0,metacity-1,unity}
     mkdir -p "$out/share/themes"
     python ${./dark-theme.py} usr/share/themes/Ambiance "$out/share/themes/Ambiance-Dark" --native
+    cp -r usr/share/themes/Ambiance usr/share/themes/Radiance "$out/share/themes/"
   '';
   # The runtime's Ubuntu fonts, for the session font that XSETTINGS names.
   fonts = runCommand "unity-quantal-fonts" { } ''
@@ -218,7 +219,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      mirror.py notifications.py sounds.py media.py indicators.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
+      focus.py focus-theme.py file-actions.py mirror.py notifications.py sounds.py media.py indicators.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     mkdir -p "$out/lib/gtk-3.0/modules"
     ln -s ${libcanberra-gtk3}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so \
@@ -229,6 +230,9 @@ stdenvNoCC.mkDerivation {
     ln -s ${nativeTheme}/share/themes "$out/share/themes"
     cat > "$out/libexec/unity-quantal/config.json" <<EOF
     ${builtins.toJSON {
+      kdeconnect = "${kdePackages.kdeconnect-kde}/bin/kdeconnect-cli";
+      nativeFocusThemes = "${nativeTheme}";
+      focusPython = "${python3.withPackages (ps: [ ps.pillow ])}/bin/python3";
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers musicLibrary;
       panel = "${panel}/bin/unity-panel-service";
       viewer = "${viewer}/bin/unity-image-viewer";

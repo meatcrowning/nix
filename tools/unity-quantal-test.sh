@@ -62,6 +62,7 @@ cp "$repo/tools/unity-tweaks-check.py" "$run/tweaks-check.py"
 cp "$repo/tools/unity-input-check.py" "$run/input-check.py"
 cp "$repo/tools/unity-sounds-check.py" "$run/sounds-check.py"
 cp "$repo/tools/unity-indicators-check.py" "$run/indicators-check.py"
+cp "$repo/tools/unity-focus-check.py" "$run/focus-check.py"
 cp "$repo/tools/unity-now-playing-check.py" "$run/now-playing-check.py"
 if [ "${UNITY_TEST_INDICATORS_ONLY:-0}" = 1 ]; then
   cat > "$run/profile/bin/nvidia-smi" <<EOF
@@ -147,6 +148,10 @@ for _ in {1..60}; do
   sleep 0.1
 done
 gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsSessionRunning | grep true
+if [ "$UNITY_TEST_FOCUS_ONLY" = 1 ]; then
+  "$TEST_PYTHON" /work/focus-check.py "$UNITY_PACKAGE"
+  exit 0
+fi
 if [ "$UNITY_TEST_SCREENSHOT_ONLY" = 1 ]; then
   if [ "$UNITY_BASE_PACKAGE" != "$UNITY_PACKAGE" ]; then
     XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11 "$UNITY_PACKAGE/bin/unity-quantal-refresh"
@@ -566,7 +571,7 @@ xrandr --verbose > /work/xrandr-night.txt
 if grep -q 'Gamma:' /work/xrandr-night.txt; then ! grep 'Gamma: *1.0:1.0:1.0' /work/xrandr-night.txt; fi
 "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-control-center unity-host-display >/work/display-panel.log 2>&1 &
 for _ in {1..150}; do
-  display_panel=$(window_id '"Brightness & Night Light"')
+  display_panel=$(window_id '"Display Settings"')
   [ -n "$display_panel" ] && break
   sleep 0.1
 done
@@ -881,6 +886,7 @@ fi
   --setenv UNITY_PACKAGE "$package" --setenv TEST_PYTHON "$python" --setenv UNITY_TEST_TOOLS "$test_tools" \
   --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
   --setenv UNITY_TEST_VIVALDI "$(readlink -f "$(command -v vivaldi || true)")" \
+  --setenv UNITY_TEST_FOCUS_ONLY "${UNITY_TEST_FOCUS_ONLY:-0}" \
   --setenv UNITY_TEST_INPUT_ONLY "${UNITY_TEST_INPUT_ONLY:-0}" \
   --setenv UNITY_TEST_MONITOR_ONLY "${UNITY_TEST_MONITOR_ONLY:-0}" \
   --setenv UNITY_TEST_SCREENSHOT_ONLY "${UNITY_TEST_SCREENSHOT_ONLY:-0}" \

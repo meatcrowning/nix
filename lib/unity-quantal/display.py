@@ -22,7 +22,7 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
                      "unity-quantal", "display.json")
-DEFAULTS = {"brightness": 100, "night": False, "temperature": 4000}
+DEFAULTS = {"brightness": 100, "night": False, "temperature": 4000, "dynamicFocus": False}
 MIN_BRIGHTNESS, STEP = 10, 5
 COOLEST, WARMEST = 6000, 3000
 
@@ -34,6 +34,7 @@ def load():
             data = json.load(stream)
         state["brightness"] = int(data.get("brightness", state["brightness"]))
         state["night"] = bool(data.get("night", state["night"]))
+        state["dynamicFocus"] = data.get("dynamicFocus") is True
         state["temperature"] = int(data.get("temperature", state["temperature"]))
     except (IOError, OSError, ValueError, TypeError, AttributeError):
         pass
@@ -246,6 +247,8 @@ class Indicator(Gtk.Application):
         # A mode change or hotplug resets the CRTC ramps.
         Gdk.Screen.get_default().connect("monitors-changed", lambda *_: self.screen.apply(self.state))
         self.monitor = watch_state(self.reload)
+        from focus import FocusColor
+        self.focus = FocusColor(self.state["dynamicFocus"])
 
         self.indicator = AppIndicator3.Indicator.new_with_path(
             "unity-quantal-display", "unity-display-day",
@@ -269,6 +272,10 @@ class Indicator(Gtk.Application):
         self.night = Gtk.CheckMenuItem("Night Light")
         self.night.connect("toggled", self.toggle_night)
         menu.append(self.night)
+        self.dynamic_focus = Gtk.CheckMenuItem("Dynamic Focus Color")
+        self.dynamic_focus.set_tooltip_text("Use the wallpaper color for focus and selection in Ambiance or Radiance")
+        self.dynamic_focus.connect("toggled", self.toggle_focus)
+        menu.append(self.dynamic_focus)
         menu.append(Gtk.SeparatorMenuItem())
         settings = Gtk.MenuItem(u"Display Settings\u2026")
         settings.connect("activate", lambda *_: subprocess.Popen([sys.executable, os.path.abspath(__file__), "settings"]))
@@ -285,6 +292,7 @@ class Indicator(Gtk.Application):
         for level, item in self.levels:
             item.set_active(level == self.state["brightness"])
         self.night.set_active(self.state["night"])
+        self.dynamic_focus.set_active(self.state["dynamicFocus"])
         self.menu_updating = False
         self.indicator.set_icon("unity-display-night" if self.state["night"] else "unity-display-day")
 
@@ -292,6 +300,7 @@ class Indicator(Gtk.Application):
         self.state.update(values)
         self.state["brightness"] = max(MIN_BRIGHTNESS, min(100, self.state["brightness"]))
         self.screen.apply(self.state)
+        self.focus.set_enabled(self.state["dynamicFocus"])
         save(self.state)
         self.show()
 
@@ -300,6 +309,7 @@ class Indicator(Gtk.Application):
         if state != self.state:
             self.state = state
             self.screen.apply(state)
+            self.focus.set_enabled(state["dynamicFocus"])
             self.show()
 
     def step(self, delta):
@@ -322,6 +332,10 @@ class Indicator(Gtk.Application):
         elif not self.menu_updating:
             self.show()
 
+    def toggle_focus(self, item):
+        if not self.menu_updating:
+            self.change(dynamicFocus=item.get_active())
+
     def toggle_night(self, item):
         if not self.menu_updating:
             self.change(night=item.get_active())
@@ -340,7 +354,7 @@ class Settings(Gtk.Application):
         self.state = load()
         self.screen = Screen()
         self.updating = False
-        window = self.window = Gtk.ApplicationWindow(application=self, title="Brightness & Night Light")
+        window = self.window = Gtk.ApplicationWindow(application=self, title="Display Settings")
         window.set_icon_name("preferences-desktop-display")
         window.set_resizable(False)
         window.set_border_width(12)
@@ -381,6 +395,13 @@ class Settings(Gtk.Application):
         row.pack_start(self.warmer, False, False, 0)
         grid.attach(row, 1, 2, 1, 1)
 
+        label("Dynamic Focus Color", 3)
+        self.dynamic_focus = Gtk.Switch()
+        self.dynamic_focus.set_halign(Gtk.Align.START)
+        self.dynamic_focus.set_tooltip_text("Use the wallpaper color for focus and selection in Ambiance or Radiance")
+        self.dynamic_focus.connect("notify::active", self.changed)
+        grid.attach(self.dynamic_focus, 1, 3, 1, 1)
+
         self.show()
         self.monitor = watch_state(self.reload)
         window.show_all()
@@ -389,6 +410,7 @@ class Settings(Gtk.Application):
         self.updating = True
         self.brightness.set_value(self.state["brightness"])
         self.night.set_active(self.state["night"])
+        self.dynamic_focus.set_active(self.state["dynamicFocus"])
         self.temperature.set_value(self.state["temperature"])
         for widget in (self.temperature, self.cooler, self.warmer):
             widget.set_sensitive(self.state["night"])
@@ -399,6 +421,7 @@ class Settings(Gtk.Application):
             return
         self.state = {"brightness": int(round(self.brightness.get_value())),
                       "night": self.night.get_active(),
+                      "dynamicFocus": self.dynamic_focus.get_active(),
                       "temperature": int(round(self.temperature.get_value()))}
         for widget in (self.temperature, self.cooler, self.warmer):
             widget.set_sensitive(self.state["night"])

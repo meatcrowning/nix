@@ -205,12 +205,19 @@ def prepare(directory, environment):
         )
 
     (directory / "applications/unity-display.desktop").write_text(
-        "[Desktop Entry]\nType=Application\nName=Brightness & Night Light\nIcon=preferences-desktop-display\n"
+        "[Desktop Entry]\nType=Application\nName=Display Settings\nIcon=preferences-desktop-display\n"
         "Categories=Settings;HardwareSettings;X-GNOME-Settings-Panel;\n"
         "X-GNOME-Settings-Panel=unity-host-display\nX-Unity-Original=true\n"
         "OnlyShowIn=Unity;\nExec=/usr/local/bin/unity-host-launch --desktop unity-display.desktop -- "
         + DISPLAY_COMMAND + " settings\n"
     )
+
+    # Nautilus-Actions monitors its data directory, including in open windows.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("file_actions", HERE / "file-actions.py")
+    file_actions = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(file_actions)
+    file_actions.install(data_home, PACKAGE, CONFIG["python"])
 
     integration.host_icons(directory, state, CONFIG)
     isolated.install_defaults(state)
