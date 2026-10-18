@@ -209,6 +209,7 @@ def test():
             assert window.viewer.scale > 1.0, ('fit size', window.viewer.scale, window.viewer.scroll.get_allocated_width(), window.viewer.scroll.get_allocated_height())
             scale = window.viewer.scale
             window.zoom_by(1.25)
+            while Gtk.events_pending(): Gtk.main_iteration()
             assert abs(window.viewer.scale - scale * 1.25) < .001
             window.fit_image()
             assert window.viewer.zoom == 0
@@ -222,6 +223,7 @@ def test():
             window.image_menu.popdown()
             item.activate()
             window.viewer.set_zoom(1)
+            while Gtk.events_pending(): Gtk.main_iteration()
             assert window.picture.get_pixbuf().get_width() == 80
             window.browse()
             assert window.viewer.get_parent() == window.preview_box
@@ -306,10 +308,14 @@ def test():
             view.render()  # Finish the previous zoom/scroll before counting pan work.
             crop = view.picture.get_pixbuf()
             original_render = view.render
-            renders = []
+            renders, scaled = [], []
             def counted_render():
                 renders.append(True)
-                return original_render()
+                previous = view.picture.get_pixbuf()
+                result = original_render()
+                if view.picture.get_pixbuf() != previous:
+                    scaled.append(view.picture.get_pixbuf())
+                return result
             view.render = counted_render
             view.press(view.events, event)
             for _ in range(10):
@@ -330,6 +336,24 @@ def test():
             assert left <= 63 and top <= 42
             assert right >= min(view.original.get_width() * view.scale, 63 + view.canvas.get_allocated_width())
             assert bottom >= min(view.original.get_height() * view.scale, 42 + view.canvas.get_allocated_height())
+            view.render = original_render
+            # A wheel burst must paint only its final scale and preserve the
+            # source point under the cursor before GTK has allocated anything.
+            renders[:] = []
+            scaled[:] = []
+            view.render = counted_render
+            cx, cy = 210.0, 145.0
+            source = ((cx + view.scroll.get_hadjustment().get_value() - view.image_origin[0]) / view.scale,
+                      (cy + view.scroll.get_vadjustment().get_value() - view.image_origin[1]) / view.scale)
+            for factor in (.8, .8, 1.25):
+                view.zoom_by(factor, (cx, cy))
+            assert not renders, 'wheel burst rescaled intermediate zoom levels'
+            while Gtk.events_pending(): Gtk.main_iteration()
+            assert len(scaled) == 1, ('wheel burst rescaled more than once', len(scaled))
+            assert abs(view.scale - 12.8) < .001
+            for axis, adjustment in enumerate((view.scroll.get_hadjustment(), view.scroll.get_vadjustment())):
+                actual = view.image_origin[axis] + source[axis] * view.scale - adjustment.get_value()
+                assert abs(actual - (cx, cy)[axis]) <= 1, ('burst cursor drift', actual)
             view.render = original_render
             window.browse()
             view.set_zoom(0)

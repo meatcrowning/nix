@@ -393,7 +393,7 @@ class ImageView(Gtk.Box):
         self.viewport_size = size
         if self.render_timer:
             GLib.source_remove(self.render_timer)
-        self.render_timer = GLib.timeout_add(60, self.render)
+        self.render_timer = GLib.idle_add(self.render, priority=GLib.PRIORITY_HIGH_IDLE)
 
     def scrolled(self, *args):
         # Both axes change during a drag. Drain input first, then scale only
@@ -475,20 +475,22 @@ class ImageView(Gtk.Box):
                 (cy + self.scroll.get_vadjustment().get_value() - self.image_origin[1]) / self.scale,
                 cx, cy)
         self.zoom = max(.05, min(16, value)) if value else 0.0
-        self.render()
+        # Wheel events arrive in bursts. Keep the last requested transform and
+        # paint once after input drains, instead of scaling an overscan bitmap
+        # for every notch. The anchor survives scrollbar allocation changes.
+        self.scrolled()
         if self.zoom_idle is not None:
             GLib.source_remove(self.zoom_idle)
-        self.zoom_idle = GLib.idle_add(self.finish_zoom, priority=GLib.PRIORITY_LOW)
+        self.zoom_idle = GLib.idle_add(self.finish_zoom)
 
     def finish_zoom(self):
-        # GTK updates adjustment bounds and scrollbar allocations asynchronously.
+        # Higher-priority GTK allocation and render idles have now settled.
         self.zoom_idle = None
-        self.render()
         self.zoom_anchor = None
         return False
 
     def zoom_by(self, factor, cursor=None):
-        self.set_zoom(self.scale * factor, cursor)
+        self.set_zoom((self.zoom or self.scale) * factor, cursor)
 
     def wheel(self, widget, event):
         # Events are local to the cropped bitmap, not the full image or viewport.
