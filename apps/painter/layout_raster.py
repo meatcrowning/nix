@@ -9,7 +9,9 @@ keep coloured guides and reference images intact.
 """
 from copy import deepcopy
 from xml.etree import ElementTree as ET
-from ctypes import CDLL, CFUNCTYPE, c_void_p, c_char_p, c_int, c_uint, c_size_t, c_double, string_at
+from ctypes import CDLL, c_void_p, c_char_p, c_int, c_size_t, c_double, string_at
+from io import BytesIO
+import cairo
 from gi.repository import GdkPixbuf, Gdk
 
 # Quantal librsvg resolves embedded image links by the conventional prefix.
@@ -39,8 +41,9 @@ _source = _bind(_cairo, 'cairo_set_source_rgba', None, c_void_p, c_double, c_dou
 _mask = _bind(_cairo, 'cairo_mask_surface', None, c_void_p, c_void_p, c_double, c_double)
 _render = _bind(_rsvg, 'rsvg_handle_render_cairo', c_int, c_void_p, c_void_p)
 _unref = _bind(_gobject, 'g_object_unref', None, c_void_p)
-_Write = CFUNCTYPE(c_int, c_void_p, c_void_p, c_uint)
-_png = _bind(_cairo, 'cairo_surface_write_to_png_stream', c_int, c_void_p, _Write, c_void_p)
+_flush = _bind(_cairo, 'cairo_surface_flush', None, c_void_p)
+_stride = _bind(_cairo, 'cairo_image_surface_get_stride', c_int, c_void_p)
+_data = _bind(_cairo, 'cairo_image_surface_get_data', c_void_p, c_void_p)
 
 
 def _layers(svg):
@@ -77,16 +80,11 @@ def _draw(svg, context):
         _unref(handle)
 
 
-def rasterize(svg, width, height):
+def render_surface(svg, width, height):
     scene, lettering = _layers(svg)
     surface = _surface(0, width, height)  # CAIRO_FORMAT_ARGB32
     context = _create(surface)
     options = _options()
-    chunks = []
-    @_Write
-    def write(_closure, data, length):
-        chunks.append(string_at(data, length))
-        return 0
     try:
         _antialias(options, 2)  # CAIRO_ANTIALIAS_GRAY
         _set_options(context, options)
@@ -105,13 +103,22 @@ def rasterize(svg, width, height):
             finally:
                 _destroy(text_context)
                 _destroy_surface(mask)
-        if _png(surface, write, None):
-            raise ValueError('Could not render layout SVG')
+        _flush(surface)
+        stride = _stride(surface)
+        # Pycairo retains the writable buffer; no PNG encode/decode on redraw.
+        pixels = bytearray(string_at(_data(surface), stride * height))
+        return cairo.ImageSurface.create_for_data(pixels, cairo.FORMAT_ARGB32, width, height, stride)
     finally:
         _destroy_options(options)
         _destroy(context)
         _destroy_surface(surface)
+
+
+def rasterize(svg, width, height):
+    """Pixbuf adapter for pixel checks; the live canvas paints the surface directly."""
+    png = BytesIO()
+    render_surface(svg, width, height).write_to_png(png)
     loader = GdkPixbuf.PixbufLoader.new_with_type('png')
-    loader.write(b''.join(chunks))
+    loader.write(png.getvalue())
     loader.close()
     return loader.get_pixbuf()

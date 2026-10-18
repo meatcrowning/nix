@@ -321,7 +321,7 @@ class LayoutUI(object):
             sx, sy, origin = self.panning
             self.pan = [origin[0] + x - sx, origin[1] + y - sy]
             self.rect = M.view_rect(self.model.doc, self.viewport[0], self.viewport[1], self.zoom, self.pan)
-            self.paint()
+            self.ui.redraw(self.canvas)
         if action == 'release':
             self.panning = None
 
@@ -342,7 +342,7 @@ class LayoutUI(object):
             self.model.release()
             self.ui.drawing_cursor(self.canvas, False)
         if action == 'move':
-            self.paint()
+            self.ui.redraw(self.canvas)
         else:
             self.refresh()
 

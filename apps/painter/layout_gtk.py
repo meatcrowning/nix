@@ -2,9 +2,9 @@
 """Native Quantal GTK adapter for the shared MOSS composition editor."""
 from __future__ import unicode_literals
 import base64
-from gi.repository import Gtk, Gdk, GdkPixbuf, Pango
+from gi.repository import Gtk, Gdk, GdkPixbuf, Pango, GLib
 from layout_ui import LayoutUI
-from layout_raster import rasterize
+from layout_raster import render_surface
 
 
 class CompactFields(Gtk.Bin):
@@ -304,8 +304,14 @@ class Toolkit(object):
         view.region_box.set_visible(bool(rows))
 
     def canvas(self, parent, editor):
-        image = Gtk.Image()
-        image.set_alignment(0, 0)
+        image = Gtk.DrawingArea()
+        image.frame = None
+        def paint_frame(widget, cr):
+            if widget.frame is not None:
+                cr.set_source_surface(widget.frame, 0, 0)
+                cr.paint()
+            return False
+        image.connect('draw', paint_frame)
         events = Gtk.EventBox()
         events.set_size_request(180, self.window.layout_height)
         surface = Gtk.Layout()
@@ -339,7 +345,9 @@ class Toolkit(object):
             editor.zoom_at(event.x, event.y, steps)
             return True
         events.connect('scroll-event', wheel)
-        def draw(*_):
+        pending = [None]
+        def draw():
+            pending[0] = None
             w, h = events.get_allocated_width(), events.get_allocated_height()
             if w > 10 and h > 10:
                 prompt = self.window.controls['positive']
@@ -354,11 +362,22 @@ class Toolkit(object):
                 font = dict(inactive=inactive_colour, family=desc.get_family(), size=size, weight=int(desc.get_weight()),
                             style='normal' if desc.get_style() == Pango.Style.NORMAL else 'italic',
                             height=(metrics.get_ascent() + metrics.get_descent()) / float(Pango.SCALE))
-                image.set_from_pixbuf(rasterize(editor.render(w, h, font), w, h))
-        events.connect('size-allocate', draw)
+                image.frame = render_surface(editor.render(w, h, font), w, h)
+                image.set_size_request(w, h)
+                image.queue_draw()
+            return False
+        def queue_draw(*_):
+            if pending[0] is None:
+                pending[0] = GLib.idle_add(draw, priority=GLib.PRIORITY_HIGH_IDLE)
+        def cancel_draw(*_):
+            if pending[0] is not None:
+                GLib.source_remove(pending[0])
+                pending[0] = None
+        events.connect('size-allocate', queue_draw)
+        events.connect('destroy', cancel_draw)
         parent.pack_start(events, False, False, 0)
         events.resize_handle = self.resize_handle(parent, events, 140, 1200, self.window.layout_resized, 'Drag to resize the layout')
-        events.repaint = draw
+        events.repaint = queue_draw
         return events
 
     def resize_handle(self, parent, target, minimum, maximum, saved, tooltip):

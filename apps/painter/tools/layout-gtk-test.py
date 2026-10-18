@@ -156,6 +156,29 @@ def run(parent):
     assert not e.model.chosen()[0]['enabled']
     e.buttons['Hide'].clicked()
     assert e.model.chosen()[0]['enabled']
+    while Gtk.events_pending(): Gtk.main_iteration()
+    ox, oy, w, h = e.rect
+    box = e.model.chosen()[0]['box']
+    x, y = ox + (box[0] + box[2] / 2) * w, oy + (box[1] + box[3] / 2) * h
+    e.pointer('press', x, y)
+    while Gtk.events_pending(): Gtk.main_iteration()
+    renders, render = [], e.render
+    def counted(*args):
+        renders.append(list(e.model.chosen()[0]['box']))
+        return render(*args)
+    e.render = counted
+    before_save = len(accepted)
+    try:
+        for n in range(1, 21): e.pointer('move', x + w * n / 200.0, y)
+        assert not renders, 'drag rendered synchronously for each motion'
+        assert len(accepted) == before_save, 'drag saved intermediate positions'
+        e.pointer('release', x + w * .1, y)
+        while Gtk.events_pending(): Gtk.main_iteration()
+        assert len(renders) == 1, ('motion burst was not coalesced', len(renders))
+        assert renders[0] == e.model.chosen()[0]['box'], 'final drag position was not rendered'
+        assert len(accepted) == before_save + 1, 'final drag position was not saved'
+    finally:
+        e.render = render
     assert 'item.locked' not in e.fields and 'item.enabled' not in e.fields
     for signal, kind, y in [('button-press-event', Gdk.EventType.BUTTON_PRESS, 100),
                             ('motion-notify-event', Gdk.EventType.MOTION_NOTIFY, 180),

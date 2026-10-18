@@ -431,7 +431,7 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None):
         x, y, bw, bh = x * w, y * h, bw * w, bh * h
         selected = item['id'] in editor.selected
         colour = '#ffb454' if selected else font.get('inactive', '#bbbbbb')
-        text_colour = 'white' if selected else font.get('inactive', '#bbbbbb')
+        text_colour = colour
         s.append('<g><rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="%s" stroke-width="%s" stroke-opacity="%s"/>' % (x, y, bw, bh, colour, 2 if selected else 1, '1' if item.get('enabled', True) else '.6'))
         title = '%d %s' % (n + 1, item['label'])
         label_offset = 14 if item.get('locked') else 3

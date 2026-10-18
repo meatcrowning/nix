@@ -154,7 +154,7 @@ def core():
     rendered = ET.fromstring(M.svg(preview, 700, 700)[0])
     ns = {'s': 'http://www.w3.org/2000/svg'}
     labels = rendered.findall('.//s:text', ns)
-    assert len(labels) > 1 and all(t.attrib['fill'] == 'white' for t in labels)
+    assert len(labels) > 1 and all(t.attrib['fill'] == '#ffb454' for t in labels)
     assert '…' not in ''.join(t.text or '' for t in labels)
     assert rendered.find('s:g/s:rect', ns).attrib['fill'] == 'none'
     row = preview.add('text', [.1, .1, .3, .8])
@@ -165,7 +165,7 @@ def core():
     rendered = ET.fromstring(M.svg(preview, 700, 700)[0])
     wording = [t for t in rendered.findall('.//s:text', ns) if 'text-anchor' in t.attrib]
     assert len(wording) > 2
-    assert all(t.attrib['fill'] == 'white' and 'clip-path' in t.attrib for t in wording)
+    assert all(t.attrib['fill'] == '#ffb454' and 'clip-path' in t.attrib for t in wording)
     assert preview.doc == before, 'visual wrapping must not change generation wording or colours'
     rendered = ET.fromstring(M.svg(preview, 700, 700, font=dict(
         family='Ubuntu', size=14, height=18, weight=400, style='normal'))[0])
