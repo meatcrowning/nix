@@ -50,7 +50,7 @@ SERVICES = {
     "org.unity_quantal.NotificationIndicator": [stable_command("unity-quantal-notifications")],
 }
 ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller", "nact",
-                 "gnome-tweak-tool", "rhythmbox"]
+                 "gnome-tweak-tool", "gnome-system-monitor", "rhythmbox"]
 
 
 def desktop_parser(path):
@@ -325,12 +325,17 @@ def runtime(arguments):
     for path in [cache, data, Path(state["config_home"]) / "dconf"]:
         path.mkdir(parents=True, exist_ok=True)
     command = [CONFIG["bwrap"], "--die-with-parent", "--tmpfs", "/"]
-    # The original terminal must give its native shell ordinary network access.
-    if arguments[0] != "/usr/bin/gnome-terminal":
+    # Terminal shells need host networking; System Monitor needs the host's
+    # network namespace to graph real interfaces alongside host /proc data.
+    if arguments[0] not in ("/usr/bin/gnome-terminal", "/usr/bin/gnome-system-monitor"):
         command += ["--unshare-net"]
     for name in ["bin", "sbin", "usr", "lib", "lib64", "etc", "var"]:
         if (ROOT / name).exists():
             command += ["--ro-bind", str(ROOT / name), "/" + name]
+    if arguments[0] == "/usr/bin/gnome-system-monitor":
+        # libgtop reads mtab; list host mounts rather than the compatibility
+        # runtime's implementation mounts (and expose hotplugged disks below).
+        command += ["--ro-bind", f"/proc/{os.getpid()}/mounts", "/etc/mtab"]
     command += ["--ro-bind", CONFIG["legacyGtkModule"],
                 "/usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libcanberra-gtk3-module.so"]
     command += ["--ro-bind", CONFIG["panel"], "/usr/lib/unity/unity-panel-service"]
@@ -341,6 +346,8 @@ def runtime(arguments):
                 "--ro-bind", "/tmp/.X11-unix", "/tmp/.X11-unix",
                 "--ro-bind", str(directory / "applications"), "/usr/share/applications",
                 "--ro-bind", str(directory / "bridge-bin"), "/usr/local/bin"]
+    if arguments[0] == "/usr/bin/gnome-system-monitor":
+        command += ["--ro-bind", "/", "/run/unity-monitor-host"]
     # Mount the parent, not today's individual disks, so later hotplug mounts
     # remain visible too. Nautilus must be able to edit files on these volumes.
     for path in ["/run/media", "/media", "/mnt"]:
@@ -398,6 +405,8 @@ def runtime(arguments):
     })
     if arguments[0] == "/usr/bin/compiz":
         environment["LD_PRELOAD"] = CONFIG["scrollGrab"]
+    if arguments[0] == "/usr/bin/gnome-system-monitor":
+        environment["LD_PRELOAD"] = CONFIG["monitorFilesystems"]
     if arguments[0] == "/usr/lib/gvfs/gvfs-udisks2-volume-monitor":
         environment["LD_PRELOAD"] = CONFIG["volumeCompat"]
     if arguments[0] == "/usr/lib/bamf/bamfdaemon":

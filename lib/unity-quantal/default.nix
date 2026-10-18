@@ -166,6 +166,13 @@ let
     mkdir -p "$out/lib"
     $CC -Wall -Wextra -Werror -shared -fPIC -O2 ${./scroll-grab.c} -lX11 -ldl -o "$out/lib/scroll-grab.so"
   '';
+  monitorFilesystems = runCommand "unity-quantal-monitor-filesystems" {
+    nativeBuildInputs = [ stdenv.cc ];
+  } ''
+    mkdir -p "$out/lib"
+    $CC -Wall -Wextra -Werror -shared -fPIC -O2 ${./monitor-filesystems.c} -ldl \
+      -o "$out/lib/monitor-filesystems.so"
+  '';
   volumeCompat = runCommand "unity-quantal-volume-compat" {
     nativeBuildInputs = [ stdenv.cc ];
   } ''
@@ -213,6 +220,7 @@ stdenvNoCC.mkDerivation {
       viewer = "${viewer}/bin/unity-image-viewer";
       scrollGrab = "${scrollGrab}/lib/scroll-grab.so";
       volumeCompat = "${volumeCompat}/lib/volume-compat.so";
+      monitorFilesystems = "${monitorFilesystems}/lib/monitor-filesystems.so";
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
       mediaSchemas = "${mediaSchemas}";
       isolatedClosure = "${isolatedClosure}/store-paths";

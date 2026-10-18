@@ -146,6 +146,47 @@ for _ in {1..60}; do
   sleep 0.1
 done
 gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsSessionRunning | grep true
+if [ "$UNITY_TEST_MONITOR_ONLY" = 1 ]; then
+  entry="$session_dir/applications/unity-original-gnome-system-monitor.desktop"
+  test -f "$entry"
+  grep -q 'StartupWMClass=gnome-system-monitor' "$entry"
+  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gnome-system-monitor.desktop -- "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gnome-system-monitor
+  for _ in {1..100}; do
+    window=$(xdotool search --onlyvisible --class '^gnome-system-monitor$' | head -n1 || true)
+    [ -n "$window" ] && break
+    sleep .1
+  done
+  test -n "$window"
+  xprop -id "$window" WM_CLASS | grep gnome-system-monitor
+  application=$(gdbus call --session --dest org.ayatana.bamf --object-path /org/ayatana/bamf/matcher --method org.ayatana.bamf.matcher.ApplicationForXid "$window" | cut -d "'" -f 2)
+  gdbus call --session --dest org.ayatana.bamf --object-path "$application" --method org.ayatana.bamf.application.DesktopFile | grep "'/usr/share/applications/unity-original-gnome-system-monitor.desktop'"
+  monitor_pid=$(xdotool getwindowpid "$window")
+  # The outer harness has private PID/network namespaces. The monitor must
+  # share those, just as it shares the host's namespaces in the real session.
+  test "$(readlink /proc/$monitor_pid/ns/net)" = "$(readlink /proc/$$/ns/net)"
+  test "$(readlink /proc/$monitor_pid/ns/pid)" = "$(readlink /proc/$$/ns/pid)"
+  test -d "/proc/$monitor_pid/root/proc/$$"
+  "$TEST_PYTHON" -c 'import sys; assert open("/proc/mounts").read() == open(sys.argv[1]).read()' "/proc/$monitor_pid/root/etc/mtab"
+  test "$(stat -f -c '%t:%b:%S' /)" = "$(stat -f -c '%t:%b:%S' /proc/$monitor_pid/root/run/unity-monitor-host)"
+  grep -q monitor-filesystems.so "/proc/$monitor_pid/maps"
+  bwrap --die-with-parent --ro-bind / / --tmpfs /run --ro-bind / /run/unity-monitor-host -- "$TEST_PYTHON" - <<'PY'
+import ctypes, json, os
+config = json.load(open(os.environ['UNITY_PACKAGE'] + '/libexec/unity-quantal/config.json'))
+shim = ctypes.CDLL(config['monitorFilesystems'], use_errno=True)
+for path in ['/', '/nix', '/home/unity-test']:
+    result = (ctypes.c_ulong * 32)()
+    assert shim.statvfs(path.encode(), ctypes.byref(result)) == 0, ctypes.get_errno()
+    host = os.statvfs(path)
+    assert tuple(result[:3]) == (host.f_bsize, host.f_frsize, host.f_blocks), path
+print('PASS: libgtop filesystem adapter reports host capacity')
+PY
+  for tab in 1 2 3 4; do
+    xdotool windowactivate --sync "$window" key "alt+$tab"
+    kill -0 "$monitor_pid"
+  done
+  echo 'PASS: original System Monitor launches, matches its Dash entry, and shares host telemetry namespaces'
+  exit 0
+fi
 if [ "$UNITY_TEST_NOW_PLAYING_ONLY" = 1 ]; then
   bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
   "$bridge_python" /work/now-playing-check.py
@@ -747,6 +788,7 @@ fi
   --setenv UNITY_BASE_PACKAGE "${UNITY_BASE_PACKAGE:-$package}" \
   --setenv UNITY_TEST_VIVALDI "$(readlink -f "$(command -v vivaldi || true)")" \
   --setenv UNITY_TEST_INPUT_ONLY "${UNITY_TEST_INPUT_ONLY:-0}" \
+  --setenv UNITY_TEST_MONITOR_ONLY "${UNITY_TEST_MONITOR_ONLY:-0}" \
   --setenv UNITY_TEST_MATCHING_ONLY "${UNITY_TEST_MATCHING_ONLY:-0}" \
   --setenv UNITY_TEST_NOW_PLAYING_ONLY "${UNITY_TEST_NOW_PLAYING_ONLY:-0}" \
   --setenv UNITY_TEST_INDICATORS_ONLY "${UNITY_TEST_INDICATORS_ONLY:-0}" \
