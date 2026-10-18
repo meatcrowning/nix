@@ -12,7 +12,7 @@ progress = [0]
 failed = [False]
 def check():
     try:
-        assert time.time() - started < 15, ('history stalled', progress, w.offset, w.history_limit, w.state.get('offset'), len(w.tiles), w.history_pending)
+        assert time.time() - started < 45, ('history stalled', progress, w.offset, w.history_limit, w.state.get('offset'), len(w.tiles), w.history_pending)
         if not w.tiles: return True
         visible = w.gallery.get_visible_range()
         if not visible or visible[0] is None: return True

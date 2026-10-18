@@ -301,6 +301,12 @@ class Window(Gtk.Window):
         self.dimensions = label('')
         self.dimensions.set_ellipsize(Pango.EllipsizeMode.END)
         dimensions_row.pack_start(self.dimensions, False, False, 0)
+        self.sampling = Gtk.Expander(label='Sampling settings')
+        self.sampling.set_expanded(True)
+        self.sampling.connect('notify::expanded', self.sampling_toggled)
+        params.pack_start(self.sampling, False, False, 0)
+        params = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.sampling.add(params)
         self.grid = Gtk.Grid()
         self.grid.set_row_spacing(6)
         self.grid.set_column_spacing(10)
@@ -391,7 +397,7 @@ class Window(Gtk.Window):
         self.gallery.connect('item-activated', lambda *_: self.view())
         self.gallery.connect('button-press-event', self.gallery_menu)
         self.browse_pane = PreviewDivider()
-        self.browse_pane.set_position(300)
+        self.browse_pane.set_position(400)
         self.browse_pane.connect_after('button-release-event', self.preview_resized)
         self.browse_pane.connect_after('accept-position', self.preview_resized)
         self.preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -407,11 +413,7 @@ class Window(Gtk.Window):
         self.viewer.events.connect('button-press-event', self.preview_menu)
         self.picture = self.viewer.picture
         self.preview_box.pack_start(self.viewer, True, True, 0)
-        nav = Gtk.Box(spacing=6)
-        self.gallery_nav = nav
-        self.tally = label('Loading outputs…')
-        nav.pack_start(self.tally, True, True, 0)
-        right.pack_start(nav, False, False, 0)
+        self.history_tally = 'Loading outputs…'
         bottom = Gtk.Box(spacing=12)
         bottom.set_border_width(6)
         self.status = label('Connecting to Painter…')
@@ -567,9 +569,16 @@ class Window(Gtk.Window):
         self.layout_height = height
         self.send('settings', layoutHeight=height)
 
+    def update_status(self):
+        self.status.set_text('%s   |   %s' % (self.status_text, self.history_tally))
+
+    def sampling_toggled(self, *_):
+        if not self.loading:
+            self.send('settings', samplingExpanded=self.sampling.get_expanded())
+
     def preview_resized(self, *_):
         if self.heights_loaded and self.pages.get_current_page() == 0:
-            self.send('settings', previewHeight=self.browse_pane.get_position())
+            self.send('settings', previewWidth=self.browse_pane.get_position())
         return False
 
     def poll(self):
@@ -643,7 +652,8 @@ class Window(Gtk.Window):
             self.revision = state['revision']
             self.apply_settings(state['settings'])
         if not self.heights_loaded:
-            self.browse_pane.set_position(state['previewHeight'])
+            self.sampling.set_expanded(state.get('samplingExpanded', True))
+            self.browse_pane.set_position(state['previewWidth'])
             self.sidebar_split.set_position(state['sidebarWidth'])
             self.layout_height = state['layoutHeight']
             self.region_list_height = state['regionListHeight']
@@ -663,7 +673,8 @@ class Window(Gtk.Window):
         if state['busy']:
             seconds = max(0, int(state.get('elapsed', 0)))
             status = '%d:%02d   |   %s' % (seconds // 60, seconds % 60, status)
-        self.status.set_text(status)
+        self.status_text = status
+        self.update_status()
         self.progress.set_fraction(max(0, min(1, state['progress'])))
         progress = '%d%%' % (state['progress'] * 100)
         rate = state.get('rate', 0)
@@ -876,8 +887,6 @@ class Window(Gtk.Window):
                 box.set_child_packing(self.viewer, True, True, 0, Gtk.PackType.START)
             self.viewer.resized()
         self.search.set_visible(number == 0)
-        if hasattr(self, 'gallery_nav'):
-            self.gallery_nav.set_visible(number == 0)
 
     def generate(self):
         self.info.hide()
@@ -1020,8 +1029,9 @@ class Window(Gtk.Window):
                 self.selected()
         if state['offset'] == self.offset:
             GLib.timeout_add(30, self.history_settled)
-        self.tally.set_text('%d–%d of %d' % (state['offset'] + 1 if rows else 0,
-                                            state['offset'] + len(rows), state['total']))
+        self.history_tally = '%d–%d of %d' % (state['offset'] + 1 if rows else 0,
+                                            state['offset'] + len(rows), state['total'])
+        self.update_status()
 
     def copyable_image(self, path):
         return any(row.get('path') == path and not row.get('live') and not row.get('is_video')

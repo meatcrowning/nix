@@ -14,6 +14,7 @@ def run():
         request_visible_history = Window.request_visible_history.im_func
         history_settled = Window.history_settled.im_func
         update_gallery = Window.update_gallery.im_func
+        update_status = Window.update_status.im_func
         def selected(self):
             self.selection = self.tiles[self.gallery.get_selected_items()[0]][2]
         def send(self, op):
@@ -35,7 +36,8 @@ def run():
     h.history_scroll = Gtk.ScrolledWindow()
     h.history_scroll.add(h.gallery)
     h.history_scroll.get_vadjustment().connect('value-changed', h.history_scrolled)
-    h.tally = Gtk.Label()
+    h.status = Gtk.Label()
+    h.status_text = 'Ready'
     fixture = Gtk.OffscreenWindow()
     fixture.set_default_size(640, 400)
     fixture.add(h.history_scroll)

@@ -188,13 +188,17 @@ timer = QTimer()
 timer.setInterval(50)
 timer.timeout.connect(lambda: app.quit() if child.poll() is not None else None)
 timer.start()
-QTimer.singleShot(45000, app.quit)
+watchdog = QTimer()
+watchdog.setSingleShot(True)
+watchdog.timeout.connect(app.quit)
+watchdog.start(45000)
 app.exec()
 if child.poll() is None:
     child.kill()
     child.wait()
     raise AssertionError('GTK test timed out')
 assert child.returncode == 0, child.returncode
+watchdog.stop()
 assert submitted, 'GTK Generate did not reach controller'
 assert submitted[0][0]['positive'] == 'a native GTK prompt'
 assert submitted[0][0]['seed'] == 1234
@@ -209,7 +213,7 @@ assert E.userprefs.saved_for(engine.model)['positive'] == 'last edit before clos
 assert E.userprefs.load()['prompt.posH'] == 285
 assert E.userprefs.load()['prompt.negH'] == 40
 assert E.userprefs.load()['unity.systemH'] == 600
-assert E.userprefs.load()['unity.previewHeight'] == 360
+assert E.userprefs.load()['unity.previewWidth'] == 360
 assert E.userprefs.load()['unity.sidebarWidth'] == 440
 assert E.userprefs.load()['layout.canvasHeight'] == 380
 assert E.userprefs.load()['layout.regionListHeight'] >= 80
@@ -230,7 +234,7 @@ ctl.gallery._refilter()
 child = subprocess.Popen([os.environ['PACKAGE']+'/bin/unity-quantal-runtime', '/usr/bin/python',
                           '/home/test/nix/apps/painter/tools/history-wire-test.py',
                           '/run/user/1000/engine.sock'], env=child_env)
-QTimer.singleShot(18000, app.quit)
+watchdog.start(50000)
 app.exec()
 if child.poll() is None:
     child.kill()

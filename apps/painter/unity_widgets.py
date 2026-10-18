@@ -23,7 +23,7 @@ class CompactSpin(Gtk.SpinButton):
 
 class PreviewDivider(Gtk.Paned):
     def __init__(self):
-        Gtk.Paned.__init__(self, orientation=Gtk.Orientation.VERTICAL)
+        Gtk.Paned.__init__(self, orientation=Gtk.Orientation.HORIZONTAL)
         self.set_name('painter-preview-divider')
         css = Gtk.CssProvider()
         css.load_from_data(b'#painter-preview-divider { -GtkPaned-handle-size: 10; }')
@@ -33,9 +33,9 @@ class PreviewDivider(Gtk.Paned):
     def draw_grip(self, widget, cr):
         colour = self.get_style_context().get_color(Gtk.StateFlags.NORMAL)
         cr.set_source_rgba(colour.red, colour.green, colour.blue, .8)
-        x, y = self.get_allocated_width() / 2, self.get_position() + 4
+        x, y = self.get_position() + 4, self.get_allocated_height() / 2
         for offset in (-6, 0, 6):
-            cr.rectangle(x + offset - 1, y, 3, 2)
+            cr.rectangle(x, y + offset - 1, 2, 3)
         cr.fill()
         return False
 
@@ -305,6 +305,7 @@ class ImageView(Gtk.Box):
         bar = Gtk.Box(spacing=6)
         self.info = Gtk.Label(label='Select an output')
         self.info.set_alignment(0, .5)
+        self.info.set_ellipsize(Pango.EllipsizeMode.END)
         bar.pack_start(self.info, True, True, 0)
         for title, callback in [('−', lambda: self.zoom_by(1 / 1.25)),
                                 ('+', lambda: self.zoom_by(1.25)),

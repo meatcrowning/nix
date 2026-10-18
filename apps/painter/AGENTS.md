@@ -83,9 +83,10 @@ share `prompt.posH`/`prompt.negH` with QML; GTK's system editor uses
 means fit the rows). Region prompt height uses `layout.regionPromptHeight`.
 Unity's sidebar width uses `unity.sidebarWidth`. Save
 handle sizes on release. Browse and View share one image
-widget and selection. Still zoom renders a viewport-bounded crop with a
-surrounding pan margin; transient sampler/video frames cross the socket as
-bounded images. Clip decoding stays
+widget and selection. Unity places history to the right of the preview, with
+the divider position saved as `unity.previewWidth`. Still zoom renders a
+viewport-bounded crop with a surrounding pan margin; transient sampler/video
+frames cross the socket as bounded images. Clip decoding stays
 in the modern engine, with no audio output attached; clear the media source
 on selection changes and window close. Keep frame polling separate from
 gallery/settings snapshots. Unity history scrolls through a maximum 180-row

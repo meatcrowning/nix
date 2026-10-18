@@ -79,8 +79,9 @@ class Engine:
         self.messages = collections.deque(maxlen=30)
         self.revision = 0
         self._restored = False
-        height = prefs.get('unity.previewHeight')
-        self.preview_height = max(0, min(10000, int(300 if height is None else height)))
+        self.sampling_expanded = prefs.get('unity.samplingExpanded') is not False
+        width = prefs.get('unity.previewWidth')
+        self.preview_width = max(0, min(10000, int(400 if width is None else width)))
         self.sidebar_width = max(200, min(10000, int(prefs.get('unity.sidebarWidth') or 380)))
         self.layout_height = max(140, min(1200, int(prefs.get('layout.canvasHeight') or 300)))
         self.region_prompt_height = max(40, min(600, int(prefs.get('layout.regionPromptHeight') or 95)))
@@ -147,7 +148,8 @@ class Engine:
                        editExtra=json.dumps(self.ctl.editExtraImages), lastSeed=self.ctl.lastSeed,
                        loras=json.dumps(self.ctl.lorasSnapshot()))
         doc.update({pref: self.heights[key] for key, pref in HEIGHT_KEYS.items()})
-        doc['unity.previewHeight'] = self.preview_height
+        doc['unity.samplingExpanded'] = self.sampling_expanded
+        doc['unity.previewWidth'] = self.preview_width
         doc['unity.sidebarWidth'] = self.sidebar_width
         doc['layout.canvasHeight'] = self.layout_height
         doc['layout.regionListHeight'] = self.region_list_height
@@ -169,11 +171,14 @@ class Engine:
                     raise ValueError('Invalid ' + key)
                 setattr(self, attr, value)
                 self.save()
-        if 'previewHeight' in request:
-            height = request['previewHeight']
-            if type(height) is not int or not 0 <= height <= 10000:
-                raise ValueError('Invalid preview height')
-            self.preview_height = height
+        if 'samplingExpanded' in request:
+            self.sampling_expanded = bool(request['samplingExpanded'])
+            self.save()
+        if 'previewWidth' in request:
+            width = request['previewWidth']
+            if type(width) is not int or not 0 <= width <= 10000:
+                raise ValueError('Invalid preview width')
+            self.preview_width = width
             self.save()
         if 'heights' in request:
             for key, value in request['heights'].items():
@@ -446,7 +451,8 @@ class Engine:
         return dict(model=self.model, models=[{k: v for k, v in row.items() if k != 'entry'}
                                               for row in c.models._rows], modes=c.modes(), mode=c.mode,
                     settings=self.settings, revision=self.revision, heights=self.heights, multiple=self.multiple,
-                    previewHeight=self.preview_height, sidebarWidth=self.sidebar_width,
+                    previewWidth=self.preview_width, sidebarWidth=self.sidebar_width,
+                    samplingExpanded=self.sampling_expanded,
                     layoutHeight=self.layout_height, regionListHeight=self.region_list_height,
                     regionPromptHeight=self.region_prompt_height,
                     media=self.media(request), replacement=self.replacement,

@@ -106,8 +106,14 @@ def test():
             assert window.model_info.get_visible() == bool(selected_model.get('problem'))
             window.sidebar_split.set_position(440)
             window.sidebar_split.emit('accept-position')
+            assert window.browse_pane.get_orientation() == Gtk.Orientation.HORIZONTAL
             window.browse_pane.set_position(360)
             window.browse_pane.emit('button-release-event', Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE))
+            assert window.history_tally in window.status.get_text().decode('utf-8')
+            assert window.sampling.get_expanded()
+            window.sampling.set_expanded(False)
+            assert not window.sampling.get_expanded()
+            assert window.controls['steps'].get_parent() == window.sampling.get_child().get_children()[0]
             assert window.get_title() == 'Painter'
             assert window.actions['generate'][0].get_sensitive()
             # Plain text-to-image families such as MOSS expose no advanced UI.
@@ -329,10 +335,12 @@ def test():
             view.set_zoom(0)
         elif step[0] == 14:
             view = window.viewer
-            # Fit is letterboxed here; only the height can scroll after zoom.
-            cx = view.canvas.get_allocated_width() / 2.0
-            cy = view.canvas.get_allocated_height() * .4
-            zoom_point[0] = (cx, cy, (cy - view.image_origin[1]) / view.scale)
+            # Exercise the axis that fills the viewport in either pane layout.
+            vw, vh = view.canvas.get_allocated_width(), view.canvas.get_allocated_height()
+            axis = 0 if float(vw) / view.original.get_width() < float(vh) / view.original.get_height() else 1
+            cx, cy = vw * (.4 if axis == 0 else .5), vh * (.4 if axis == 1 else .5)
+            target = (cx, cy)[axis]
+            zoom_point[0] = (cx, cy, axis, (target - view.image_origin[axis]) / view.scale)
             event = Gdk.Event.new(Gdk.EventType.SCROLL)
             event.scroll.direction = Gdk.ScrollDirection.UP
             event.scroll.x = cx - view.visible_origin[0]
@@ -340,10 +348,11 @@ def test():
             view.events.emit('scroll-event', event)
         elif step[0] == 15:
             view = window.viewer
-            cx, cy, iy = zoom_point[0]
-            actual = view.image_origin[1] + iy * view.scale - view.scroll.get_vadjustment().get_value()
-            assert abs(actual - cy) <= 1, ('fit-to-zoom cursor drift', actual, cy)
-            assert view.scroll.get_vadjustment().get_upper() > view.scroll.get_vadjustment().get_page_size()
+            cx, cy, axis, source = zoom_point[0]
+            adjustment = (view.scroll.get_hadjustment(), view.scroll.get_vadjustment())[axis]
+            actual = view.image_origin[axis] + source * view.scale - adjustment.get_value()
+            assert abs(actual - (cx, cy)[axis]) <= 1, ('fit-to-zoom cursor drift', actual, (cx, cy)[axis])
+            assert adjustment.get_upper() > adjustment.get_page_size()
             event = Gdk.Event.new(Gdk.EventType.SCROLL)
             event.scroll.direction = Gdk.ScrollDirection.DOWN
             event.scroll.x = cx + view.scroll.get_hadjustment().get_value() - view.visible_origin[0]
@@ -354,16 +363,17 @@ def test():
             for rate, expected in [(2.5, '2.50 it/s'), (.25, '4.00 s/it'), (0, '')]:
                 state = dict(original, busy=True, progress=.42, elapsed=125, rate=rate)
                 window.receive('poll', dict(ok=True, state=state))
-                assert window.status.get_text().startswith('2:05   |')
+                assert window.status.get_text().decode('utf-8').startswith('2:05   |')
                 assert window.progress.get_text() == '42%' + ('   |   ' + expected if expected else '')
             window.receive('poll', dict(ok=True, state=original))
             assert window.progress.get_text() == ''
             import runpy
             runpy.run_path('/home/test/nix/apps/painter/tools/layout-gtk-test.py', init_globals={'parent': window})
             view = window.viewer
-            cx, cy, iy = zoom_point[0]
-            actual = view.image_origin[1] + iy * view.scale - view.scroll.get_vadjustment().get_value()
-            assert abs(actual - cy) <= 1, ('zoom-to-fit cursor drift', actual, cy)
+            cx, cy, axis, source = zoom_point[0]
+            adjustment = (view.scroll.get_hadjustment(), view.scroll.get_vadjustment())[axis]
+            actual = view.image_origin[axis] + source * view.scale - adjustment.get_value()
+            assert abs(actual - (cx, cy)[axis]) <= 1, ('zoom-to-fit cursor drift', actual, (cx, cy)[axis])
             window.view()
             old = window.selection
             index = next(i for i, row in enumerate(window.tiles) if row[2] == old)
@@ -394,8 +404,11 @@ if not failed[0]:
             assert window.text_boxes['negative'].height == 40
             assert window.text_boxes['system_prompt'].height == 600
             assert window.values()['positive'] == 'last edit before closing'
-            assert window.browse_pane.get_position() == 360, (window.browse_pane.get_position(), window.state['previewHeight'])
-            assert window.state['previewHeight'] == 360
+            assert window.browse_pane.get_position() == 360, window.browse_pane.get_position()
+            assert window.state['previewWidth'] == 360
+            assert not window.sampling.get_expanded()
+            window.sampling.set_expanded(True)
+            assert window.sampling.get_expanded()
             assert window.sidebar_split.get_position() == 440, (window.sidebar_split.get_position(), window.placement_grid.get_preferred_width(), [(key, window.controls[key].get_preferred_width()) for key in ('seed', 'aspectW', 'aspectH', 'megapixels')])
             assert window.state['sidebarWidth'] == 440
             assert window.layout_height == 380
