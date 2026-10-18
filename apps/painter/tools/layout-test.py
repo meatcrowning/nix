@@ -70,6 +70,28 @@ def core():
     assert abs(other.snap(.299, 0, .01) - .3) < 1e-8
     other.doc['snap'] = False
     assert other.snap(.299, 0, .01) == .299
+    # Clicking near a snap guide, including a resize handle, must not edit.
+    clicks = M.Editor(M.fresh())
+    clicks.add('object', [.103, .203, .2, .2])
+    for start in ((.2, .3), (.103, .203)):
+        for jitter in (0, .002):
+            before = copy.deepcopy(clicks.doc)
+            history = copy.deepcopy((clicks.undo_stack, clicks.redo_stack))
+            clicks.press(*start)
+            clicks.motion(start[0] + jitter, start[1] + jitter)
+            clicks.release()
+            assert clicks.doc == before, 'selection click snapped region geometry'
+            assert (clicks.undo_stack, clicks.redo_stack) == history
+    before = copy.deepcopy(clicks.doc)
+    clicks.press(.2, .3)
+    clicks.motion(.23, .33)
+    clicks.motion(.201, .301)  # Once dragging, returning near the start still moves.
+    assert clicks.doc != before
+    clicks.release()
+    clicks.undo()
+    assert clicks.doc == before
+    clicks.undo(True)
+    assert clicks.doc != before
     selection = M.Editor(M.fresh())
     selection.doc['snap'] = False
     selection.add('object', [.1, .1, .15, .15])

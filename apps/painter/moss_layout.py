@@ -283,8 +283,10 @@ class Editor(object):
         target = min(self.guides(axis), key=lambda x: abs(x - value))
         return target if abs(target - value) < threshold else value
 
-    def press(self, x, y, toggle=False, threshold=.01):
+    def press(self, x, y, toggle=False, threshold=.01, drag_threshold=(.004, .004)):
         self.marquee = None
+        self.drag_started = False
+        self.drag_threshold = drag_threshold
         if self.tool != 'select':
             self.add(self.tool, [x, y, .001, .001])
             self.drag = ('draw', x, y, copy.deepcopy(self.doc['items']))
@@ -296,7 +298,6 @@ class Editor(object):
             bx, by, bw, bh = row['box']
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:
                 if abs(x - bx - hx * bw) < threshold and abs(y - by - hy * bh) < threshold:
-                    self.checkpoint()
                     self.drag = ('resize', x, y, copy.deepcopy(self.doc['items']), row['id'], hx, hy)
                     return
         hit = next((r for r in reversed(self.doc['items']) if not r.get('locked') and r['box'][0] <= x <= r['box'][0] + r['box'][2]
@@ -304,7 +305,6 @@ class Editor(object):
         if hit:
             if toggle or hit['id'] not in self.selected or (hit.get('group') and any(r.get('group') == hit['group'] and r['id'] not in self.selected for r in self.doc['items'])):
                 self.select(hit['id'], toggle, include_locked=False)
-            self.checkpoint()
             self.drag = ('move', x, y, copy.deepcopy(self.doc['items']))
         else:
             if not toggle:
@@ -315,6 +315,14 @@ class Editor(object):
         if not self.drag:
             return
         mode, sx, sy, original = self.drag[:4]
+        if mode in ('move', 'resize') and not self.drag_started:
+            # A release is also delivered as motion. Do not snap geometry (or
+            # consume undo/redo history) until this is an intentional drag.
+            tx, ty = self.drag_threshold
+            if abs(x - sx) <= tx and abs(y - sy) <= ty:
+                return
+            self.checkpoint()
+            self.drag_started = True
         self.doc['items'] = copy.deepcopy(original)
         if mode != 'draw':
             x, y = max(0, min(1, x)), max(0, min(1, y))

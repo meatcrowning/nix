@@ -164,6 +164,17 @@ def run(parent):
     ox, oy, w, h = e.rect
     box = e.model.chosen()[0]['box']
     x, y = ox + (box[0] + box[2] / 2) * w, oy + (box[1] + box[3] / 2) * h
+    original_box = list(box)
+    before_click = len(accepted)
+    undo_count = len(e.model.undo_stack)
+    for jitter in (0, 2):
+        e.pointer('press', x, y)
+        e.pointer('move', x + jitter, y + jitter)
+        e.pointer('release', x + jitter, y + jitter)
+        while Gtk.events_pending(): Gtk.main_iteration()
+        assert e.model.chosen()[0]['box'] == original_box, 'click moved the region'
+        assert len(accepted) == before_click, 'click saved a geometry change'
+        assert len(e.model.undo_stack) == undo_count, 'click consumed an undo step'
     e.pointer('press', x, y)
     while Gtk.events_pending(): Gtk.main_iteration()
     renders, render = [], e.render

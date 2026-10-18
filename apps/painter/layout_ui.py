@@ -330,7 +330,7 @@ class LayoutUI(object):
         x, y = (x - ox) / w, (y - oy) / h
         if action == 'press':
             drawing = self.model.tool != 'select'
-            self.model.press(x, y, shift, 7 / min(w, h))
+            self.model.press(x, y, shift, 7 / min(w, h), (4 / w, 4 / h))
             if drawing:
                 self.model.doc['enabled'] = True
         elif action == 'move':
