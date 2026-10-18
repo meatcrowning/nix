@@ -9,6 +9,18 @@ from layout_gtk import open_editor
 
 
 def run(parent):
+    # Force LCD antialiasing through fontconfig in the harness. A white glyph
+    # on transparency must still have equal RGB channels after rasterization.
+    settings = Gtk.Settings.get_default()
+    settings.set_property('gtk-xft-antialias', 1)
+    settings.set_property('gtk-xft-rgba', 'rgb')
+    while Gtk.events_pending(): Gtk.main_iteration()
+    from layout_raster import rasterize
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40"><g transform="translate(1.3,2.4)"><defs><clipPath id="label"><rect width="200" height="40"/></clipPath></defs><text clip-path="url(#label)" x="3" y="25" fill="white" font-family="Ubuntu" font-size="14">White region text</text></g></svg>'
+    pix = rasterize(svg, 200, 40)
+    pixels = bytearray(pix.get_pixels())
+    assert any(pixels[3::4]), 'text was not rendered'
+    assert all(pixels[i] == pixels[i+1] == pixels[i+2] for i in range(0, len(pixels), 4)), 'coloured fringes on white text'
     accepted = []
     initial_width = parent.get_allocated_width()
     before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
@@ -22,6 +34,15 @@ def run(parent):
     assert not e.list.region_box.get_visible()
     u = e.ui
     assert e.list.get_ancestor(Gtk.Notebook) is e.fields['item.caption'][1].get_ancestor(Gtk.Notebook)
+    tabs = e.list.get_ancestor(Gtk.Notebook)
+    while Gtk.events_pending(): Gtk.main_iteration()
+    tabs.set_current_page(1)
+    while Gtk.events_pending(): Gtk.main_iteration()
+    scene_height = tabs.get_preferred_height()[1]
+    tabs.set_current_page(2)
+    while Gtk.events_pending(): Gtk.main_iteration()
+    assert tabs.get_preferred_height()[1] != scene_height, 'inspector reserves height for inactive pages'
+    tabs.set_current_page(0)
     saved_values, saved_settings = parent.values(), parent.state['settings']
     saved_doc, saved_loading = parent.layout_doc, parent.loading
     parent.loading = True

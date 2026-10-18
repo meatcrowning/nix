@@ -4,6 +4,7 @@ from __future__ import unicode_literals
 import base64
 from gi.repository import Gtk, Gdk, GdkPixbuf, Pango
 from layout_ui import LayoutUI
+from layout_raster import rasterize
 
 
 class CompactFields(Gtk.Bin):
@@ -27,6 +28,19 @@ class CompactFields(Gtk.Bin):
         child.set_child_visible(fits)
         if fits:
             child.size_allocate(allocation)
+
+
+class InspectorPage(Gtk.Box):
+    """Only the current page contributes height to the outer sidebar scroll."""
+    def active(self):
+        tabs = self.get_parent()
+        return tabs is None or tabs.get_nth_page(tabs.get_current_page()) is self
+
+    def do_get_preferred_height(self):
+        return Gtk.Box.do_get_preferred_height(self) if self.active() else (0, 0)
+
+    def do_get_preferred_height_for_width(self, width):
+        return Gtk.Box.do_get_preferred_height_for_width(self, width) if self.active() else (0, 0)
 
 
 class Toolkit(object):
@@ -106,6 +120,7 @@ class Toolkit(object):
 
     def set_label(self, label, text):
         label.set_text(text)
+        label.set_visible(bool(text))
 
     def button(self, parent, title, callback):
         icons = {'Add': Gtk.STOCK_ADD, 'Undo': Gtk.STOCK_UNDO, 'Redo': Gtk.STOCK_REDO,
@@ -133,17 +148,14 @@ class Toolkit(object):
 
     def tabs(self, parent):
         tabs = Gtk.Notebook()
-        tabs.set_size_request(-1, 420)
-        parent.pack_start(tabs, True, True, 0)
+        tabs.connect_after('switch-page', lambda *_: tabs.queue_resize())
+        parent.pack_start(tabs, False, False, 0)
         return tabs
 
     def tab(self, tabs, title):
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box = InspectorPage(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.set_border_width(8)
-        scroll.add_with_viewport(box)
-        tabs.append_page(scroll, Gtk.Label(label=title))
+        tabs.append_page(box, Gtk.Label(label=title))
         return box
 
     def field(self, parent, title, kind, options, callback):
@@ -176,10 +188,10 @@ class Toolkit(object):
             scroll = Gtk.ScrolledWindow()
             scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
             scroll.set_shadow_type(Gtk.ShadowType.IN)
-            scroll.set_size_request(-1, self.window.region_prompt_height if title == 'Region prompt' else 95)
+            scroll.set_size_request(-1, self.window.region_prompt_height if title == 'Prompt' else 95)
             scroll.add(control)
             box.pack_start(scroll, False, False, 0)
-            if title == 'Region prompt':
+            if title == 'Prompt':
                 control.resize_handle = self.resize_handle(box, scroll, 40, 600, self.window.region_prompt_resized, 'Drag to resize the region prompt')
         else:
             control = Gtk.Entry()
@@ -343,10 +355,7 @@ class Toolkit(object):
                 font = dict(family=desc.get_family(), size=size, weight=int(desc.get_weight()),
                             style='normal' if desc.get_style() == Pango.Style.NORMAL else 'italic',
                             height=(metrics.get_ascent() + metrics.get_descent()) / float(Pango.SCALE))
-                loader = GdkPixbuf.PixbufLoader.new_with_type('svg')
-                loader.write(editor.render(w, h, font))
-                loader.close()
-                image.set_from_pixbuf(loader.get_pixbuf())
+                image.set_from_pixbuf(rasterize(editor.render(w, h, font), w, h))
         events.connect('size-allocate', draw)
         parent.pack_start(events, False, False, 0)
         events.resize_handle = self.resize_handle(parent, events, 140, 1200, self.window.layout_resized, 'Drag to resize the layout')

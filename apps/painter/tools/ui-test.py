@@ -5326,7 +5326,7 @@ def test_moss(win, ctl, tmp):
         check(model + " restores coordinates when wide", fields.isVisible())
         coordinates.setWidth(saved_width)
         inspector_tabs = next(item for item in walk(editor) if item.property('spec') is not None and item.property('spec').property('kind') == 'tabs')
-        check(model + " always shows details below canvas", inspector_tabs.height() >= 400 and inspector_tabs.mapToItem(editor, QPointF(0, 0)).y() >= canvas.mapToItem(editor, QPointF(0, canvas.height())).y())
+        check(model + " always shows details below canvas", inspector_tabs.height() > 0 and inspector_tabs.mapToItem(editor, QPointF(0, 0)).y() >= canvas.mapToItem(editor, QPointF(0, canvas.height())).y())
         # The canvas is now in the scrollable prompt panel.
         ancestor = canvas.parentItem()
         while ancestor is not None and ancestor.property('contentY') is None:

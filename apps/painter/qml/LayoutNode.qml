@@ -12,7 +12,7 @@ Item {
     visible: spec.shown
     enabled: spec.enabled
     implicitWidth: content.item ? content.item.implicitWidth : 0
-    implicitHeight: !visible ? 0 : spec.kind === "tabs" ? 440 : content.item ? content.item.implicitHeight : 0
+    implicitHeight: !visible ? 0 : content.item ? content.item.implicitHeight : 0
     Loader {
         id: content
         anchors.fill: parent
@@ -141,7 +141,6 @@ Item {
     Component {
         id: tabsComponent
         ColumnLayout {
-            implicitHeight: 400
             TabBar {
                 id: tabs
                 Layout.fillWidth: true
@@ -150,30 +149,20 @@ Item {
                     TabButton { required property QtObject modelData; text: modelData.title }
                 }
             }
-            StackLayout {
-                currentIndex: tabs.currentIndex
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Repeater {
-                    model: node.spec.nodes
-                    KineticFlickable {
-                        id: scroller
-                        required property QtObject modelData
-                        contentWidth: width
-                        contentHeight: page.height
-                        clip: true
-                        ScrollBar.vertical: VScroll { }
-                        Loader {
-                            id: page
-                            width: scroller.width - 12
-                            height: item ? item.implicitHeight : 0
-                            Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: scroller.modelData, bridge: node.bridge})
-                        }
-                    }
+            Repeater {
+                model: node.spec.nodes
+                Loader {
+                    required property QtObject modelData
+                    required property int index
+                    visible: index === tabs.currentIndex
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: item ? item.implicitHeight : 0
+                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
                 }
             }
         }
     }
+
     Component {
         id: listComponent
         Item {
@@ -364,7 +353,7 @@ Item {
         id: textField
         Item {
             id: textBox
-            readonly property bool resizablePrompt: node.spec.title === "Region prompt"
+            readonly property bool resizablePrompt: node.spec.title === "Prompt"
             property int promptHeight: resizablePrompt ? Math.max(40, Math.min(600, Prefs.get("layout.regionPromptHeight") || 95)) : 95
             implicitHeight: promptHeight + (resizablePrompt ? 10 : 0)
             KineticFlickable {
