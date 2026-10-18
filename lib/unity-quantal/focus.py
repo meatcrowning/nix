@@ -37,6 +37,7 @@ class FocusColor(object):
         self.interface.connect('changed::gtk-theme', self.changed)
         self.interface.connect('changed::icon-theme', self.changed)
         self.background.connect('changed', self.changed)
+        self.wm.connect('changed::theme', self.changed)
         self.file_monitor = None
         self.applying = False
         self.changed()
@@ -101,8 +102,10 @@ class FocusColor(object):
         try:
             self.interface.set_string('gtk-theme', name)
             self.interface.set_string('icon-theme', icons)
-            # Keep custom window decoration choices; only follow our own base.
-            if base_theme(self.wm.get_string('theme')) == base_theme(name):
+            # Appearance can leave Ambiance decorations with Ambiance Dark
+            # widgets. All shipped variants should follow the accent; retain
+            # unrelated custom decoration themes.
+            if base_theme(self.wm.get_string('theme')) in ('Ambiance', 'Ambiance-Dark', 'Radiance'):
                 self.wm.set_string('theme', name)
         finally:
             self.applying = False

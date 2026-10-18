@@ -63,10 +63,13 @@ with tempfile.TemporaryDirectory() as temp:
 """, str(package / 'libexec/unity-quantal/focus-theme.py')], check=True)
 setting('set', 'org.gnome.desktop.interface', 'icon-theme', 'ubuntu-mono-dark')
 setting('set', 'org.gnome.desktop.interface', 'gtk-theme', 'Ambiance-Dark')
+setting('set', 'org.gnome.desktop.wm.preferences', 'theme', 'Ambiance')
 setting('set', 'org.gnome.desktop.background', 'picture-uri', (Path.home() / 'blue.png').as_uri())
 toggle(True)
 first = wait_for(lambda: (lambda name: name if 'Unity-Focus-Ambiance-Dark-' in name else None)(
     setting('get', 'org.gnome.desktop.interface', 'gtk-theme')))
+wait_for(lambda: setting('get', 'org.gnome.desktop.wm.preferences', 'theme') == first)
+print('PASS: Ambiance decorations follow the Ambiance Dark wallpaper accent')
 probe = '''from gi.repository import Gtk
 w=Gtk.Button()
 print(w.get_style_context().lookup_color('selected_bg_color'))
@@ -105,6 +108,7 @@ setting('set', 'org.gnome.desktop.background', 'picture-uri', (Path.home() / 'gr
 second = wait_for(lambda: (lambda name: name if 'Unity-Focus-' in name and name != first else None)(
     setting('get', 'org.gnome.desktop.interface', 'gtk-theme')))
 assert first != second
+wait_for(lambda: setting('get', 'org.gnome.desktop.wm.preferences', 'theme') == second)
 assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') != icon_name
 # Exercise both PNG loader boundaries in one original-GTK process, including
 # theme changes and disabling. No shell UI or input is needed.
@@ -148,6 +152,7 @@ wait_for(lambda: 'Unity-Focus-Radiance-' in setting('get', 'org.gnome.desktop.in
 toggle(False)
 wait_for(lambda: setting('get', 'org.gnome.desktop.interface', 'gtk-theme') == "'Radiance'")
 assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') == "'ubuntu-mono-dark'"
+wait_for(lambda: setting('get', 'org.gnome.desktop.wm.preferences', 'theme') == "'Radiance'")
 print('PASS: wallpaper updates, theme switching and theme/icon restoration')
 
 # Missing pictures restore the base rather than leaving stale wallpaper colors.
