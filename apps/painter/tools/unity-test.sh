@@ -53,7 +53,9 @@ sys.path.insert(0, os.environ['PACKAGE']+'/libexec/unity-quantal')
 import session
 session.prepare(Path(os.environ['UNITY_QUANTAL_SESSION_DIR']), os.environ)
 Path('/etc/fonts').mkdir()
-Path('/etc/fonts/fonts.conf').write_text('<fontconfig><dir>' + str(session.ROOT / 'usr/share/fonts') + '</dir><cachedir>/home/test/.cache/fontconfig</cachedir><match target="font"><edit name="rgba" mode="assign"><const>rgb</const></edit></match></fontconfig>')
+Path('/etc/fonts/fonts.conf').write_text('<fontconfig><dir>' + str(session.ROOT / 'usr/share/fonts') + '</dir><cachedir>/home/test/.cache/fontconfig</cachedir></fontconfig>')
+# The nested historical runtime replaces /etc; its font settings must live in HOME.
+Path('/home/test/.fonts.conf').write_text('<fontconfig><match target="pattern"><edit name="rgba" mode="assign"><const>bgr</const></edit><edit name="antialias" mode="assign"><bool>true</bool></edit></match></fontconfig>')
 PY
 "$QTENV" python3 /source/apps/painter/tools/unity-engine-test.py
 
