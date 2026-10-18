@@ -147,6 +147,81 @@ for _ in {1..60}; do
   sleep 0.1
 done
 gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsSessionRunning | grep true
+if [ "$UNITY_TEST_SCREENSHOT_ONLY" = 1 ]; then
+  if [ "$UNITY_BASE_PACKAGE" != "$UNITY_PACKAGE" ]; then
+    XDG_CURRENT_DESKTOP=Unity XDG_SESSION_TYPE=x11 "$UNITY_PACKAGE/bin/unity-quantal-refresh"
+  fi
+  entry="$session_dir/applications/unity-original-gnome-screenshot.desktop"
+  test -f "$entry"
+  grep '^Exec=' "$entry" | while IFS= read -r command; do
+    [[ "$command" == *'unity-host-launch --desktop unity-original-gnome-screenshot.desktop -- '*'/usr/bin/gnome-screenshot'* ]]
+  done
+  shot="$UNITY_PACKAGE/bin/unity-quantal-screenshot"
+  mkdir -p "$HOME/Captures"
+  xmessage -title screenshot-target -geometry 320x160+80+80 -buttons OK test >/work/screenshot-target.log 2>&1 &
+  for _ in {1..100}; do
+    window=$(xdotool search --onlyvisible --name '^screenshot-target$' | head -n1 || true)
+    [ -n "$window" ] && break
+    sleep .1
+  done
+  test -n "$window"
+  xdotool windowactivate --sync "$window"
+  "$shot" --file="$HOME/Captures/full.png"
+  test "$(identify -format '%wx%h' "$HOME/Captures/full.png")" = 1920x1080
+  xdotool windowactivate --sync "$window"
+  sleep .5
+  "$shot" --window --remove-border --border-effect=none --file="$HOME/Captures/window.png"
+  test "$(identify -format '%wx%h' "$HOME/Captures/window.png")" = 320x160
+  "$shot" --area --file="$HOME/Captures/area.png" >/work/screenshot-area.log 2>&1 &
+  area_pid=$!
+  sleep 1
+  xdotool mousemove 100 100 mousedown 1 mousemove 260 180 mouseup 1
+  wait "$area_pid"
+  test "$(identify -format '%wx%h' "$HOME/Captures/area.png")" = 160x80
+  for key in Print alt+Print; do
+    dest="$HOME/Captures/$key"
+    mkdir -p "$dest"
+    "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/gsettings set org.gnome.gnome-screenshot auto-save-directory "'file://$dest'"
+    xdotool windowactivate --sync "$window"
+    sleep .5
+    xdotool key "$key"
+    # Ubuntu's patch presents Save Screenshot even for the direct hotkeys.
+    for _ in {1..100}; do
+      dialog=$(xdotool search --onlyvisible --class '^gnome-screenshot$' | head -n1 || true)
+      [ -n "$dialog" ] && break
+      sleep .1
+    done
+    test -n "$dialog"
+    xdotool windowactivate --sync "$dialog" key alt+s
+    for _ in {1..100}; do
+      xdotool search --onlyvisible --class '^gnome-screenshot$' >/dev/null || break
+      sleep .1
+    done
+    dimensions=
+    for _ in {1..100}; do
+      saved=$(find "$dest" -name '*.png' -print -quit)
+      if [ -n "$saved" ] && dimensions=$(identify -format '%w %h' "$saved" 2>/dev/null); then break; fi
+      sleep .1
+    done
+    test -n "$dimensions"
+    read -r width height <<< "$dimensions"
+    if [ "$key" = Print ]; then
+      test "$width $height" = '1920 1080'
+    else
+      test "$width" -lt 1920
+      test "$height" -lt 1080
+    fi
+  done
+  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/local/bin/unity-host-launch --desktop unity-original-gnome-screenshot.desktop -- "$shot" --interactive
+  for _ in {1..100}; do
+    dialog=$(xdotool search --onlyvisible --class '^gnome-screenshot$' | head -n1 || true)
+    [ -n "$dialog" ] && break
+    sleep .1
+  done
+  test -n "$dialog"
+  echo 'PASS: original Screenshot launcher, full/window/area PNGs, Print and Alt+Print'
+  exit 0
+fi
 if [ "$UNITY_TEST_MONITOR_ONLY" = 1 ]; then
   entry="$session_dir/applications/unity-original-gnome-system-monitor.desktop"
   test -f "$entry"
@@ -808,6 +883,7 @@ fi
   --setenv UNITY_TEST_VIVALDI "$(readlink -f "$(command -v vivaldi || true)")" \
   --setenv UNITY_TEST_INPUT_ONLY "${UNITY_TEST_INPUT_ONLY:-0}" \
   --setenv UNITY_TEST_MONITOR_ONLY "${UNITY_TEST_MONITOR_ONLY:-0}" \
+  --setenv UNITY_TEST_SCREENSHOT_ONLY "${UNITY_TEST_SCREENSHOT_ONLY:-0}" \
   --setenv UNITY_TEST_MATCHING_ONLY "${UNITY_TEST_MATCHING_ONLY:-0}" \
   --setenv UNITY_TEST_NOW_PLAYING_ONLY "${UNITY_TEST_NOW_PLAYING_ONLY:-0}" \
   --setenv UNITY_TEST_INDICATORS_ONLY "${UNITY_TEST_INDICATORS_ONLY:-0}" \

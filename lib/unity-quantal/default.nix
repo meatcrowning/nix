@@ -316,6 +316,11 @@ stdenvNoCC.mkDerivation {
     exec ${terminalApp}/bin/unity-terminal "\$@"
     EOF
     chmod +x "$out/bin/unity-quantal-terminal"
+    cat > "$out/bin/unity-quantal-screenshot" <<EOF
+    #!${bash}/bin/bash
+    exec $out/bin/unity-quantal-runtime /usr/bin/gnome-screenshot "\$@"
+    EOF
+    chmod +x "$out/bin/unity-quantal-screenshot"
     # Ctrl+Alt+T runs the media-keys daemon's gnome-terminal. Only that daemon
     # sees this shim, so other desktops keep their own terminals.
     mkdir -p "$out/libexec/unity-quantal/terminal-shim"

@@ -50,7 +50,7 @@ SERVICES = {
     "org.unity_quantal.NotificationIndicator": [stable_command("unity-quantal-notifications")],
 }
 ORIGINAL_APPS = ["nautilus", "gedit", "gnome-terminal", "gcalctool", "eog", "file-roller", "nact",
-                 "gnome-tweak-tool", "gnome-system-monitor", "rhythmbox"]
+                 "gnome-tweak-tool", "gnome-system-monitor", "gnome-screenshot", "rhythmbox"]
 
 
 def desktop_parser(path):
@@ -179,6 +179,10 @@ def prepare(directory, environment):
             for section in parser.sections():
                 if section != "Desktop Entry" and "Exec" in parser[section]:
                     parser[section]["Exec"] = entry["Exec"]
+        if name == "gnome-screenshot":
+            for section in parser.sections():
+                if section != "Desktop Entry" and "Exec" in parser[section]:
+                    parser[section]["Exec"] = "/usr/local/bin/unity-host-launch --desktop unity-original-gnome-screenshot.desktop -- " + RUNTIME + " /usr/bin/" + parser[section]["Exec"]
         entry["X-Unity-Original"] = "true"
         # The live shell may still have the previous read-only runtime mounted.
         # Absolute store paths let newly added original icons appear immediately.
@@ -231,6 +235,12 @@ def prepare(directory, environment):
     viewer.write_text("#!/bin/sh\nexec /usr/local/bin/unity-host-launch -- "
                       + shlex.quote(str(PACKAGE / "bin/unity-quantal-viewer")) + ' "$@"\n')
     viewer.chmod(0o755)
+    # Compiz's cached Print/Alt+Print commands use PATH. This live-mounted
+    # bridge also works while the shell still has the previous Ubuntu root.
+    screenshot = directory / "bridge-bin/gnome-screenshot"
+    screenshot.write_text("#!/bin/sh\nexec /usr/local/bin/unity-host-launch --desktop unity-original-gnome-screenshot.desktop -- "
+                          + shlex.quote(stable_command("unity-quantal-screenshot")) + ' "$@"\n')
+    screenshot.chmod(0o755)
 
     for file in (ROOT / "usr/share/dbus-1/services").glob("*.service"):
         parser = desktop_parser(file)
