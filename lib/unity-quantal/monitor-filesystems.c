@@ -4,8 +4,20 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
+#include <mntent.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/statvfs.h>
+
+FILE *setmntent(const char *path, const char *mode)
+{
+    FILE *(*original)(const char *, const char *) = dlsym(RTLD_NEXT, "setmntent");
+    if (!original) {
+        errno = ENOSYS;
+        return NULL;
+    }
+    return original(strcmp(path, "/etc/mtab") == 0 ? "/run/unity-monitor-mtab" : path, mode);
+}
 
 int statvfs(const char *path, struct statvfs *buf)
 {

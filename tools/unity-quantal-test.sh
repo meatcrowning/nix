@@ -166,13 +166,24 @@ if [ "$UNITY_TEST_MONITOR_ONLY" = 1 ]; then
   test "$(readlink /proc/$monitor_pid/ns/net)" = "$(readlink /proc/$$/ns/net)"
   test "$(readlink /proc/$monitor_pid/ns/pid)" = "$(readlink /proc/$$/ns/pid)"
   test -d "/proc/$monitor_pid/root/proc/$$"
-  "$TEST_PYTHON" -c 'import sys; assert open("/proc/mounts").read() == open(sys.argv[1]).read()' "/proc/$monitor_pid/root/etc/mtab"
+  "$TEST_PYTHON" -c 'import sys; assert open("/proc/mounts").read() == open(sys.argv[1]).read()' "/proc/$monitor_pid/root/run/unity-monitor-mtab"
   test "$(stat -f -c '%t:%b:%S' /)" = "$(stat -f -c '%t:%b:%S' /proc/$monitor_pid/root/run/unity-monitor-host)"
   grep -q monitor-filesystems.so "/proc/$monitor_pid/maps"
-  bwrap --die-with-parent --ro-bind / / --tmpfs /run --ro-bind / /run/unity-monitor-host -- "$TEST_PYTHON" - <<'PY'
+  bwrap --die-with-parent --ro-bind / / --tmpfs /run --ro-bind / /run/unity-monitor-host --ro-bind "/proc/$$/mounts" /run/unity-monitor-mtab -- "$TEST_PYTHON" - <<'PY'
 import ctypes, json, os
 config = json.load(open(os.environ['UNITY_PACKAGE'] + '/libexec/unity-quantal/config.json'))
 shim = ctypes.CDLL(config['monitorFilesystems'], use_errno=True)
+shim.setmntent.restype = ctypes.c_void_p
+stream = shim.setmntent(b'/etc/mtab', b'r')
+assert stream, ctypes.get_errno()
+libc = ctypes.CDLL(None)
+line = ctypes.create_string_buffer(4096)
+libc.fgets.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+libc.fgets.restype = ctypes.c_void_p
+assert libc.fgets(line, len(line), stream)
+assert line.value == open('/run/unity-monitor-mtab', 'rb').readline()
+libc.endmntent.argtypes = [ctypes.c_void_p]
+libc.endmntent(stream)
 for path in ['/', '/nix', '/home/unity-test']:
     result = (ctypes.c_ulong * 32)()
     assert shim.statvfs(path.encode(), ctypes.byref(result)) == 0, ctypes.get_errno()

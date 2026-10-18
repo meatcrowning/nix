@@ -332,10 +332,6 @@ def runtime(arguments):
     for name in ["bin", "sbin", "usr", "lib", "lib64", "etc", "var"]:
         if (ROOT / name).exists():
             command += ["--ro-bind", str(ROOT / name), "/" + name]
-    if arguments[0] == "/usr/bin/gnome-system-monitor":
-        # libgtop reads mtab; list host mounts rather than the compatibility
-        # runtime's implementation mounts (and expose hotplugged disks below).
-        command += ["--ro-bind", f"/proc/{os.getpid()}/mounts", "/etc/mtab"]
     command += ["--ro-bind", CONFIG["legacyGtkModule"],
                 "/usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libcanberra-gtk3-module.so"]
     command += ["--ro-bind", CONFIG["panel"], "/usr/lib/unity/unity-panel-service"]
@@ -347,7 +343,10 @@ def runtime(arguments):
                 "--ro-bind", str(directory / "applications"), "/usr/share/applications",
                 "--ro-bind", str(directory / "bridge-bin"), "/usr/local/bin"]
     if arguments[0] == "/usr/bin/gnome-system-monitor":
-        command += ["--ro-bind", "/", "/run/unity-monitor-host"]
+        # Use the parent's mount namespace, not bubblewrap's implementation
+        # mounts. Keep mtab out of the runtime consumed by other FHS packages.
+        command += ["--ro-bind", "/", "/run/unity-monitor-host",
+                    "--ro-bind", f"/proc/{os.getpid()}/mounts", "/run/unity-monitor-mtab"]
     # Mount the parent, not today's individual disks, so later hotplug mounts
     # remain visible too. Nautilus must be able to edit files on these volumes.
     for path in ["/run/media", "/media", "/mnt"]:
