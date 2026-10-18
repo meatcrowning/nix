@@ -44,16 +44,19 @@ def accent(path):
 
 
 @lru_cache(maxsize=131072)
-def recolor(rgb, target):
+def recolor(rgb, target, vivaldi=False):
     h, s, v = colorsys.rgb_to_hsv(*(c / 255. for c in rgb))
     # Include pale highlights and brown shadows in orange icon gradients.
-    if not (.02 <= h <= .14 and s > .15 and v > .05):
+    if not ((.02 <= h <= .14 or (vivaldi and (h < .08 or h > .94))) and s > .15 and v > .05):
         return rgb
     th, ts, tv = colorsys.rgb_to_hsv(*(c / 255. for c in target))
-    return tuple(round(c * 255) for c in colorsys.hsv_to_rgb(th, min(1, ts * s / .71), min(1, tv * v / .94)))
+    # The exported Vivaldi artwork has a pale red face; normalize its saturation
+    # separately so it reaches the same accent as the orange Humanity artwork.
+    saturation = .34 if vivaldi else .71
+    return tuple(round(c * 255) for c in colorsys.hsv_to_rgb(th, min(1, ts * s / saturation), min(1, tv * v / .94)))
 
 
-def stylesheet(text, color):
+def stylesheet(text, color, vivaldi=False):
     def replace(match):
         # SVG gradient references can have all-hex IDs; they are not colors.
         if re.search(r"(?:url\(\s*['\"]?|href=['\"])$", match.string[max(0, match.start() - 20):match.start()]):
@@ -62,31 +65,31 @@ def stylesheet(text, color):
         if len(digits) == 3:
             digits = ''.join(c * 2 for c in digits)
         rgb = tuple(int(digits[i:i + 2], 16) for i in (0, 2, 4))
-        return '#%02x%02x%02x' % recolor(rgb, color) + digits[6:]
+        return '#%02x%02x%02x' % recolor(rgb, color, vivaldi) + digits[6:]
     def replace_rgb(match):
         rgb = tuple(round(float(c[:-1]) * 2.55) if c.endswith('%') else round(float(c))
                     for c in match.groups()[:3])
-        result = recolor(rgb, color)
+        result = recolor(rgb, color, vivaldi)
         return ('rgba' if match[4] else 'rgb') + '(' + ','.join(map(str, result)) + (match[4] or '') + ')'
     text = RGB.sub(replace_rgb, HEX.sub(replace, text))
     for name, rgb in [('darkorange', (255, 140, 0)), ('orange', (255, 165, 0)),
                       ('orangered', (255, 69, 0)), ('coral', (255, 127, 80))]:
         text = re.sub(r'(?<=:)\s*' + name + r'(?=[;"\s}])',
-                      '#%02x%02x%02x' % recolor(rgb, color), text, flags=re.I)
+                      '#%02x%02x%02x' % recolor(rgb, color, vivaldi), text, flags=re.I)
         text = re.sub(r'(?<==")' + name + r'(?=")',
-                      '#%02x%02x%02x' % recolor(rgb, color), text, flags=re.I)
+                      '#%02x%02x%02x' % recolor(rgb, color, vivaldi), text, flags=re.I)
     return text
 
 
-def asset(path, output, color):
+def asset(path, output, color, vivaldi=False):
     output.parent.mkdir(parents=True, exist_ok=True)
     if path.suffix.lower() in ('.css', '.rc', '.ini', '.xml', '.svg', '.xpm') or path.name == 'gtkrc':
-        output.write_text(stylesheet(path.read_text(), color))
+        output.write_text(stylesheet(path.read_text(), color, vivaldi))
     elif path.suffix.lower() == '.png':
         try:
             with Image.open(path) as picture:
                 picture = picture.convert('RGBA')
-                picture.putdata([(*recolor(pixel[:3], color), pixel[3]) for pixel in picture.getdata()])
+                picture.putdata([(*recolor(pixel[:3], color, vivaldi), pixel[3]) for pixel in picture.getdata()])
                 picture.save(output, format='PNG')
         except (UnidentifiedImageError, OSError, ValueError):
             # Exported application caches may contain empty files or SVG/XPM
@@ -94,7 +97,7 @@ def asset(path, output, color):
             # the whole desktop palette; recolor textual images by content.
             data = path.read_bytes()
             if data.lstrip().startswith((b'<?xml', b'<svg', b'/* XPM')):
-                output.write_text(stylesheet(data.decode('utf-8'), color))
+                output.write_text(stylesheet(data.decode('utf-8'), color, vivaldi))
             else:
                 output.write_bytes(data)
     else:
@@ -115,7 +118,7 @@ def build_icons(base, color, config, home):
     exports = roots[1] / 'hicolor'
     revision = [(str(p.relative_to(exports)), p.stat().st_mtime_ns, p.stat().st_size)
                 for p in sorted(exports.rglob('*')) if p.is_file() and p.suffix.lower() in ('.png', '.svg', '.xpm')] if exports.is_dir() else []
-    key = hashlib.sha256(repr((str(config['runtime']), color, base, revision, 3)).encode()).hexdigest()[:16]
+    key = hashlib.sha256(repr((str(config['runtime']), color, base, revision, 4)).encode()).hexdigest()[:16]
     names = {}
     def derive(theme):
         if theme in names:
@@ -159,7 +162,7 @@ def build_icons(base, color, config, home):
                     if origin in resolved and not output.exists():
                         output.symlink_to(os.path.relpath(resolved[origin], output.parent))
                     else:
-                        asset(path, output, color)
+                        asset(path, output, color, path.stem.lower() in ('vivaldi', 'vivaldi-stable', 'vivaldi-snapshot'))
                         resolved[origin] = output
         with (destination / 'index.theme').open('w') as stream:
             index.write(stream, space_around_delimiters=False)
@@ -174,7 +177,7 @@ def build(base, wallpaper, config, home):
     source = Path(config['runtime']) / 'usr/share/themes' / base
     native = Path(config['nativeFocusThemes']) / 'share/themes' / base
     color = accent(wallpaper)
-    key = hashlib.sha256(repr((str(source), str(native), color, 3)).encode()).hexdigest()[:16]
+    key = hashlib.sha256(repr((str(source), str(native), color, 4)).encode()).hexdigest()[:16]
     name = 'Unity-Focus-' + base + '-' + key
     destination = Path(home) / '.themes' / name
     if (destination / '.complete').exists():
@@ -189,6 +192,11 @@ def build(base, wallpaper, config, home):
                 output = destination / path.relative_to(root)
                 output.parent.mkdir(parents=True, exist_ok=True)
                 asset(path, output, color)
+    # Unity bypasses GTK themes for its Dash buttons and switcher outline.
+    shell = Path(config['runtime']) / 'usr/share/unity/6'
+    for path in shell.glob('*.png'):
+        if path.name.startswith('close_dash') or path.name == 'switcher_round_rect.png':
+            asset(path, destination / 'unity-shell' / path.name, color)
     (destination / '.complete').write_text('#%02x%02x%02x' % color)
     return name
 

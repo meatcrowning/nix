@@ -51,6 +51,8 @@ result = m.stylesheet(svg, (50, 100, 200))
 assert 'url(#abc)' in result and 'href="#abcdef"' in result
 assert '#f90' not in result and 'rgba(240,120,70' not in result and ',.5)' in result
 assert m.recolor((255, 0, 0), (50, 100, 200)) == (255, 0, 0)
+assert m.recolor((239, 57, 57), (50, 100, 200), True)[2] > 190
+assert m.recolor((255, 255, 255), (50, 100, 200), True) == (255, 255, 255)
 with tempfile.TemporaryDirectory() as temp:
     root = Path(temp)
     for content in (b'', b'not a valid image', svg.encode()):
@@ -104,6 +106,43 @@ second = wait_for(lambda: (lambda name: name if 'Unity-Focus-' in name and name 
     setting('get', 'org.gnome.desktop.interface', 'gtk-theme')))
 assert first != second
 assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') != icon_name
+# Exercise both PNG loader boundaries in one original-GTK process, including
+# theme changes and disabling. No shell UI or input is needed.
+shell_probe = r"""
+import ctypes, os, sys
+from gi.repository import Gtk, GdkPixbuf
+api = ctypes.CDLL(None)
+api.fread.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]
+api.fread.restype = ctypes.c_size_t
+api.fclose.argtypes = [ctypes.c_void_p]
+settings = Gtk.Settings.get_default()
+for theme in sys.argv[1:]:
+ settings.set_property('gtk-theme-name', theme)
+ for name in ['close_dash.png', 'close_dash_prelight.png', 'close_dash_pressed.png',
+              'close_dash_disabled.png', 'switcher_round_rect.png']:
+  path = '/usr/share/unity/6/' + name
+  expected = (os.path.expanduser('~/.themes/') + theme + '/unity-shell/' + name
+              if theme.startswith('Unity-Focus-') else path)
+  content = open(expected, 'rb').read()
+  for symbol in ['fopen', 'fopen64']:
+   load = getattr(api, symbol)
+   load.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+   load.restype = ctypes.c_void_p
+   stream = load(path, 'rb')
+   assert stream
+   buffer = ctypes.create_string_buffer(len(content) + 1)
+   size = api.fread(buffer, 1, len(buffer), stream)
+   api.fclose(stream)
+   assert buffer.raw[:size] == content, (theme, name, symbol)
+  actual = GdkPixbuf.Pixbuf.new_from_file(path)
+  wanted = GdkPixbuf.Pixbuf.new_from_file(expected)
+  assert actual.get_pixels() == wanted.get_pixels(), (theme, name, 'pixbuf')
+print('PASS: shell PNG loaders follow accent changes and restore original artwork')
+"""
+subprocess.run([runtime, '/usr/bin/env', 'LD_PRELOAD=' + config['shellFocus'],
+                '/usr/bin/python2.7', '-c', shell_probe,
+                first.strip("'"), second.strip("'"), 'Ambiance-Dark'], check=True)
+
 setting('set', 'org.gnome.desktop.interface', 'gtk-theme', 'Radiance')
 wait_for(lambda: 'Unity-Focus-Radiance-' in setting('get', 'org.gnome.desktop.interface', 'gtk-theme'))
 toggle(False)

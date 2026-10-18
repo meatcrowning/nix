@@ -419,7 +419,7 @@ def runtime(arguments):
         environment["LD_PRELOAD"] = CONFIG["appearanceFocus"]
         environment["UNITY_FOCUS_SETTINGS"] = str(HERE / "display.py")
     if arguments[0] == "/usr/bin/compiz":
-        environment["LD_PRELOAD"] = CONFIG["scrollGrab"]
+        environment["LD_PRELOAD"] = CONFIG["scrollGrab"] + ":" + CONFIG["shellFocus"]
     if arguments[0] == "/usr/bin/gnome-system-monitor":
         environment["LD_PRELOAD"] = CONFIG["monitorFilesystems"] + ":" + CONFIG["monitorTheme"]
         environment["UNITY_MONITOR_LOGO"] = CONFIG["monitorLogo"]
