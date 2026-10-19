@@ -188,6 +188,10 @@ through `LayoutNode.qml`.
 Add arms one box-drawing gesture, then returns to selection. The toolbar type
 selector changes selected regions, or the next added type when none are selected.
 Drag on empty canvas to box-select; moving a selection keeps its spacing.
+Locks prevent canvas selection. Explicit list selection permits geometry edits
+without unlocking. Locked preview layers are grey and clipped beneath unlocked
+regions; keep occlusion in compositor clips so moving a foreground region does
+not rerasterize the locked background.
 Draft edits persist immediately, including incomplete regions; generation validates required captions.
 Region tags use the inline count and Auto controls; the region prompt has a
 token limit, Write and prompt-only Undo. Prompt output is capped in llama, with

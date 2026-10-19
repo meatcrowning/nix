@@ -2,7 +2,7 @@
 import base64
 import math
 from PySide6.QtCore import QObject, Property, Signal, Slot, Qt, QBuffer, QIODevice, QByteArray, QUrl, QRectF, QPointF
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QFont, QFontInfo, QFontMetricsF, QPainter
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QFont, QFontInfo, QFontMetricsF, QPainter, QPainterPath
 from PySide6.QtQuick import QQuickPaintedItem
 from PySide6.QtQml import qmlRegisterType
 from PySide6.QtSvg import QSvgRenderer
@@ -254,6 +254,13 @@ class LayoutCanvas(QQuickPaintedItem):
                 painter.save()
                 if clip:
                     painter.setClipRect(QRectF(*editor.rect))
+                    if isinstance(clip, dict):
+                        for hole in clip['holes']:
+                            path = QPainterPath()
+                            path.setFillRule(Qt.OddEvenFill)
+                            path.addRect(QRectF(*editor.rect))
+                            path.addRect(QRectF(*hole))
+                            painter.setClipPath(path, Qt.IntersectClip)
                 painter.drawImage(QPointF(x, y), self._layers.get(svg, w, h))
                 painter.restore()
 

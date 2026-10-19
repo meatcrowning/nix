@@ -73,6 +73,19 @@ def run(parent):
         full.append((time.time() - start) * 1000)
     print('Layout 24-region drag: retained median %.2fms p95 %.2fms; full SVG median %.2fms' %
           (sorted(samples)[30], sorted(samples)[57], sorted(full)[5]))
+    stacked = M.Editor(M.fresh())
+    stacked.doc.update(grid=False, guides='none')
+    stacked.add('object', [.2, .2, .3, .3])
+    stacked.add('object', [.35, .35, .25, .25])
+    stacked.add('object', [.1, .1, .8, .8]).update(locked=True, palette=['blue'])
+    stacked.selected = []
+    data, rect = M.svg(stacked, 500, 500, palette_colours={'blue': '#0000ff'})
+    pix = rasterize(data, 500, 500)
+    pixels = bytearray(pix.get_pixels())
+    ox, oy, w, h = rect
+    for x, y in ((.28, .3), (.42, .43)):
+        offset = int(oy+y*h) * pix.get_rowstride() + int(ox+x*w) * 4
+        assert pixels[offset+3] == 0, 'locked content leaked through unlocked regions'
     accepted = []
     initial_width = parent.get_allocated_width()
     before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
@@ -198,6 +211,12 @@ def run(parent):
     e.buttons['Lock'].clicked()
     assert not e.model.selected and e.model.doc['items'][0]['locked']
     e.selection_changed([e.model.doc['items'][0]['id']])
+    assert e.fields['box.position'][2].get_sensitive() and e.fields['box.size'][2].get_sensitive()
+    before_locked_move = list(e.row()['box'])
+    e.key('Down')
+    assert e.row()['box'] != before_locked_move and e.row()['locked']
+    e.key('z', True)
+    assert e.row()['box'] == before_locked_move
     e.buttons['Lock'].clicked()
     assert not e.model.chosen()[0]['locked']
     e.buttons['Hide'].clicked()

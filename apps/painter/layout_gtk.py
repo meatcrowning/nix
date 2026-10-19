@@ -2,6 +2,7 @@
 """Native Quantal GTK adapter for the shared MOSS composition editor."""
 from __future__ import unicode_literals
 import base64
+import cairo
 from gi.repository import Gtk, Gdk, GdkPixbuf, Pango, GLib
 from layout_ui import LayoutUI
 from layout_raster import render_surface
@@ -338,6 +339,12 @@ class Toolkit(object):
                 if clip:
                     cr.rectangle(*editor.rect)
                     cr.clip()
+                    if isinstance(clip, dict):
+                        cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+                        for hole in clip['holes']:
+                            cr.rectangle(*editor.rect)
+                            cr.rectangle(*hole)
+                            cr.clip()
                 cr.set_source_surface(frame, x, y)
                 cr.paint()
                 cr.restore()

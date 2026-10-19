@@ -147,6 +147,7 @@ class Editor(object):
     def __init__(self, doc):
         self.doc = valid(doc)
         self.selected = []
+        self.list_selected = set()
         self.undo_stack, self.redo_stack = [], []
         self.drag = None
         self.tool = 'select'
@@ -167,6 +168,9 @@ class Editor(object):
 
     def chosen(self):
         return [i for i in self.doc['items'] if i['id'] in self.selected]
+
+    def editable(self, row):
+        return not row.get('locked') or (row['id'] in self.selected and row['id'] in self.list_selected)
 
     def select(self, identity, toggle=False, include_locked=True):
         row = next((r for r in self.doc['items'] if r['id'] == identity), None)
@@ -231,7 +235,7 @@ class Editor(object):
             row['group'] = group
 
     def move(self, dx, dy):
-        rows = [r for r in self.chosen() if not r.get('locked')]
+        rows = [r for r in self.chosen() if self.editable(r)]
         if not rows:
             return
         dx = max(-min(r['box'][0] for r in rows), min(dx, 1 - max(r['box'][0] + r['box'][2] for r in rows)))
@@ -241,7 +245,7 @@ class Editor(object):
             r['box'][1] += dy
 
     def align(self, action):
-        rows = [r for r in self.chosen() if not r.get('locked')]
+        rows = [r for r in self.chosen() if self.editable(r)]
         if not rows:
             return
         self.checkpoint()
@@ -293,18 +297,20 @@ class Editor(object):
             return
         # Handles take priority over overlapping regions.
         for row in reversed(self.chosen()):
-            if row.get('locked'):
+            if not self.editable(row):
                 continue
             bx, by, bw, bh = row['box']
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:
                 if abs(x - bx - hx * bw) < threshold and abs(y - by - hy * bh) < threshold:
                     self.drag = ('resize', x, y, copy.deepcopy(self.doc['items']), row['id'], hx, hy)
                     return
-        hit = next((r for r in reversed(self.doc['items']) if not r.get('locked') and r['box'][0] <= x <= r['box'][0] + r['box'][2]
+        candidates = [r for r in reversed(self.chosen()) if r.get('locked') and self.editable(r)]
+        candidates += [r for r in reversed(self.doc['items']) if not r.get('locked')]
+        hit = next((r for r in candidates if self.editable(r) and r['box'][0] <= x <= r['box'][0] + r['box'][2]
                     and r['box'][1] <= y <= r['box'][1] + r['box'][3]), None)
         if hit:
             if toggle or hit['id'] not in self.selected or (hit.get('group') and any(r.get('group') == hit['group'] and r['id'] not in self.selected for r in self.doc['items'])):
-                self.select(hit['id'], toggle, include_locked=False)
+                self.select(hit['id'], toggle, include_locked=bool(hit.get('locked') and self.editable(hit)))
             self.drag = ('move', x, y, copy.deepcopy(self.doc['items']))
         else:
             if not toggle:
@@ -328,7 +334,7 @@ class Editor(object):
         if mode != 'draw':
             x, y = max(0, min(1, x)), max(0, min(1, y))
         if mode == 'move':
-            rows = [r for r in self.chosen() if not r.get('locked')]
+            rows = [r for r in self.chosen() if self.editable(r)]
             if not rows:
                 return
             dx, dy = x - sx, y - sy
@@ -447,16 +453,31 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_col
     parts = []
     if layers:
         parts.append((''.join(s) + '</g></g></svg>', vw, vh, 0, 0, False))
-    for n, item in enumerate(d['items']):
+    # Keep document/list numbering intact; only the visual stacking changes.
+    ordered = sorted(enumerate(d['items']), key=lambda pair: not pair[1].get('locked', False))
+    for n, item in ordered:
         x, y, bw, bh = item['box']
         x, y, bw, bh = x * w, y * h, bw * w, bh * h
+        holes = [(r['box'][0] * w, r['box'][1] * h, r['box'][2] * w, r['box'][3] * h)
+                 for r in d['items'] if not r.get('locked') and item.get('locked')]
+        if not layers:
+            for j, (hx, hy, hw, hh) in enumerate(holes):
+                s.append('<defs><clipPath id="occlude%d_%d"><path fill-rule="evenodd" clip-rule="evenodd" d="M %f %f h %f v %f h %f Z M %f %f h %f v %f h %f Z"/></clipPath></defs><g clip-path="url(#occlude%d_%d)">' %
+                         (n, j, x - 4, y - 4, bw + 8, bh + 8, -bw - 8, hx, hy, hw, hh, -hw, n, j))
         if layers:
             px, py = ox + x - 4, oy + y - 4
-            rw, rh = int(math.ceil(bw + 8)), int(math.ceil(bh + 8))
-            s = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">' % (rw, rh)]
+            # Crop oversized/offscreen layers before allocating textures. This
+            # also keeps compositor clipping active at every zoom level.
+            cx, cy = max(0, -px), max(0, -py)
+            rw = int(math.ceil(min(bw + 8, vw - px) - cx))
+            rh = int(math.ceil(min(bh + 8, vh - py) - cy))
+            if rw <= 0 or rh <= 0:
+                continue
+            px, py = px + cx, py + cy
+            s = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="%f %f %d %d">' % (rw, rh, cx, cy, rw, rh)]
             x = y = 4
         selected = item['id'] in editor.selected
-        colour = '#ffb454' if selected else font.get('inactive', '#bbbbbb')
+        colour = ('#a0a0a0' if selected else '#808080') if item.get('locked') else '#ffb454' if selected else font.get('inactive', '#bbbbbb')
         text_colour = colour
         s.append('<g>')
         s.extend(palette_bands(item.get('palette', []), palette_colours, x, y, bw, bh,
@@ -482,11 +503,14 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_col
             for j, line in enumerate(lines):
                 s.append('<text clip-path="url(#label%d)" x="%f" y="%f" fill="%s" %s text-anchor="%s">%s</text>' % (n, tx, y + label_height + fs + leading * j, text_colour, font_attrs, {'center': 'middle', 'right': 'end'}.get(align, 'start'), escape(line)))
         s.append('</g>')
-        if selected and not item.get('locked'):
+        if selected and editor.editable(item):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:
                 s.append('<rect x="%f" y="%f" width="6" height="6" fill="white" stroke="%s"/>' % (x + hx * bw - 3, y + hy * bh - 3, colour))
         if layers:
-            parts.append((''.join(s) + '</svg>', rw, rh, px, py, True))
+            clip = {'holes': [(ox + hx, oy + hy, hw, hh) for hx, hy, hw, hh in holes]} if item.get('locked') else True
+            parts.append((''.join(s) + '</svg>', rw, rh, px, py, clip))
+        else:
+            s.extend('</g>' for _ in holes)
     if layers:
         s = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d"><g transform="translate(%f,%f)"><g>' % (vw, vh, ox, oy)]
     if editor.marquee:

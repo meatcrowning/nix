@@ -217,7 +217,9 @@ class LayoutUI(object):
         if self.model.drag or doc == self.model.doc:
             return
         selected = list(self.model.selected)
+        list_selected = set(self.model.list_selected)
         self.model = M.Editor(doc)
+        self.model.list_selected = list_selected
         self.model.selected = [row['id'] for row in self.model.doc['items'] if row['id'] in selected]
         self.last_doc = copy.deepcopy(doc)
         self.refresh()
@@ -274,7 +276,7 @@ class LayoutUI(object):
 
     def geometry_pair(self, part):
         row = self.row()
-        if self.syncing or not row or row.get('locked'):
+        if self.syncing or not row or not self.model.editable(row):
             return
         try:
             values = [float(v.strip()) for v in self.ui.get(self.fields['box.' + part]).split(',')]
@@ -300,6 +302,7 @@ class LayoutUI(object):
         if self.syncing:
             return
         self.model.selected = ids
+        self.model.list_selected = set(ids)
         self.refresh()
 
     def refresh_list(self):
@@ -323,7 +326,7 @@ class LayoutUI(object):
         for key, field in self.fields.items():
             region = key.startswith(('item.', 'type.', 'box.'))
             if region:
-                self.ui.sensitive(field, row is not None and not (key.startswith('box.') and row.get('locked')))
+                self.ui.sensitive(field, row is not None and not (key.startswith('box.') and not self.model.editable(row)))
             if key.startswith('item.'):
                 self.ui.visible(field, key in ('item.caption', 'item.tags', 'item.palette') or row is not None)
             if key.startswith('type.') or key == 'item.text':
@@ -386,12 +389,6 @@ class LayoutUI(object):
         palettes = [self.model.doc.get('summary', {})] + self.model.doc['items']
         colours = {value: self.ui.preview_colour(value)
                    for item in palettes for value in item.get('palette', [])}
-        if layers:
-            rect = M.view_rect(self.model.doc, w, h, self.zoom, self.pan)
-            if any((r['box'][2] * rect[2] + 8) * (r['box'][3] * rect[3] + 8) > 4 * w * h
-                   for r in self.model.doc['items']):
-                # Very large zoomed regions must not allocate enormous textures.
-                return [(self.render(w, h, font), w, h, 0, 0, False)]
         data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan, font, colours, layers=layers)
         return data
 

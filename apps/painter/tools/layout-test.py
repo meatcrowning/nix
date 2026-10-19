@@ -340,6 +340,75 @@ def qt():
     editor.publish(); assert accepted and accepted[-1]['enabled']
     editor.model.selected = []
     editor.model.doc['items'][0]['locked'] = True
+    locked = editor.model.doc['items'][0]
+    editor.model.doc['snap'] = False
+    editor.selection_changed([locked['id']])
+    assert editor.fields['box.position'].enabled and editor.fields['box.size'].enabled
+    original_box = list(locked['box'])
+    editor.units.edit('pixels')
+    width, height = editor.model.doc['width'], editor.model.doc['height']
+    editor.fields['box.position'].edit('100, 100')
+    assert locked['box'][:2] == [100 / width, 100 / height]
+    editor.key('Right')
+    assert abs(locked['box'][0] - 101 / width) < 1e-8 and locked['locked']
+    editor.model.undo(); editor.model.undo(); editor.refresh()
+    assert editor.row()['box'] == original_box
+    editor.model.doc['items'] = [editor.row()]
+    row = editor.row()
+    row['box'] = [.1, .1, .6, .6]
+    editor.model.press(.3, .3)
+    editor.model.motion(.35, .35)
+    editor.model.release()
+    assert abs(row['box'][0] - .15) < 1e-8 and row['locked']
+    editor.model.press(.75, .75)
+    editor.model.motion(.85, .85)
+    editor.model.release()
+    assert abs(row['box'][2] - .7) < 1e-8
+    editor.selection_changed([])
+    editor.model.press(.3, .3)
+    assert editor.model.drag[0] == 'marquee', 'canvas selected a locked region'
+    editor.model.release()
+
+    # The retained Qt canvas must hide locked content
+    # under transparent unlocked boxes, including overlapping occluders.
+    from layout_qt import Bridge, LayoutCanvas
+    b = Bridge()
+    e = b.editor.model
+    e.doc['guides'] = 'none'
+    e.doc['grid'] = False
+    e.add('object', [.2, .2, .3, .3])
+    e.add('object', [.35, .35, .25, .25])
+    backdrop = e.add('object', [.1, .1, .8, .8])
+    backdrop.update(locked=True, palette=['blue'])
+    e.selected = []
+    b.editor.refresh()
+    canvas = LayoutCanvas()
+    canvas.set_bridge(b)
+    canvas.setWidth(500); canvas.setHeight(500)
+    for scale in (1, 2):
+        image = G.QImage(500 * scale, 500 * scale, G.QImage.Format_ARGB32_Premultiplied)
+        image.setDevicePixelRatio(scale)
+        image.fill(G.QColor('transparent'))
+        painter = G.QPainter(image)
+        canvas.paint(painter)
+        painter.end()
+        ox, oy, w, h = b.editor.rect
+        for x, y in ((.28, .3), (.42, .43)):
+            assert image.pixelColor(int((ox+x*w)*scale), int((oy+y*h)*scale)).alpha() == 0, ('locked region leaked through', scale)
+        assert image.pixelColor(int((ox+.7*w)*scale), int((oy+.7*h)*scale)).alpha() > 0
+    misses = canvas._layers.misses
+    e.doc['items'][0]['box'][0] += .02
+    painter = G.QPainter(image)
+    canvas.paint(painter)
+    painter.end()
+    assert canvas._layers.misses == misses, 'occlusion invalidated cached background pixels'
+    b.editor.zoom = 16
+    for _, pw, ph, _, _, _ in b.editor.render(500, 500, layers=True):
+        assert pw <= 500 and ph <= 500, 'zoom allocated oversized layer'
+    b.editor.zoom = 1
+    svg = b.editor.render(500, 500)
+    assert b'#808080' in svg
+    assert svg.index(b'3 object') < svg.index(b'1 object'), 'locked region painted over unlocked region'
     before_clear = copy.deepcopy(editor.model.doc)
     editor.paint()
     assert editor.buttons['Clear all']._enabled
