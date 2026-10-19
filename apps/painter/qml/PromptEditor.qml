@@ -74,6 +74,8 @@ Panel {
         }
     }
 
+    PromptWriter { scope: "positive" }
+
     PromptBox {
         id: positive
         width: parent.width
@@ -105,6 +107,10 @@ Panel {
     // height reappearing the moment it is shown again. The blank this used to
     // leave under the prompt — and the panel that would then only ever GROW —
     // is the story in `Panel.qml`.
+    PromptWriter {
+        scope: "negative"
+        visible: !App.isVideo && (!App.isEdit || App.editSampling)
+    }
     PromptBox {
         id: negative
         width: parent.width

@@ -662,6 +662,17 @@ class Painter(QObject):
     layoutEdited = Signal(str, "QVariantMap")
     editStateChanged = Signal()
     statusChanged = Signal()
+    promptWritten = Signal(str, 'QVariant')
+
+    @Slot(str, 'QVariant')
+    def writePrompt(self, identity, request):
+        from tagger import Tagger
+        if not hasattr(self, '_prompt_writer'):
+            self._prompt_writer = Tagger(self)
+        if hasattr(request, 'toVariant'):
+            request = request.toVariant()
+        self._prompt_writer.start(request, lambda result: self.promptWritten.emit(identity, result))
+
     modelChanged = Signal()
     busyChanged = Signal()
     optionsChanged = Signal()

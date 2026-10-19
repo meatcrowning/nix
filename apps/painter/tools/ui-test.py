@@ -5377,6 +5377,21 @@ def test_moss(win, ctl, tmp):
             win.grabWindow().save(os.environ["PAINTER_LAYOUT_SHOT"])
         import spellcheck
         from PySide6.QtCore import QMetaObject, Q_ARG, Qt
+        class FixtureWriter:
+            def start(self, request, callback):
+                self.request, self.callback = request, callback
+        fixture_writer = FixtureWriter()
+        ctl._prompt_writer = fixture_writer
+        for scope in ('positive', 'negative'):
+            writer = next(item for item in walk(win.contentItem()) if item.objectName() == scope + 'PromptWriter')
+            before = prop(APP, 'gen')[scope]
+            QMetaObject.invokeMethod(writer, 'write', Qt.DirectConnection)
+            check(scope + ' writer sends scope', fixture_writer.request['scope'] == scope)
+            fixture_writer.callback(dict(prompt='Generated scene.' if scope == 'positive' else 'blur, artifacts'))
+            check(scope + ' writer replaces text', prop(APP, 'gen')[scope] != before)
+            QMetaObject.invokeMethod(writer, 'undo', Qt.DirectConnection)
+            check(scope + ' writer undo restores text', prop(APP, 'gen')[scope] == before)
+        del ctl._prompt_writer
         checker = spellcheck._ENGINE
         class FixtureSpelling:
             available = True

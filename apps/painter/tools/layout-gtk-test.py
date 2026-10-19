@@ -9,6 +9,33 @@ from layout_gtk import open_editor
 
 
 def run(parent):
+    saved_generate = parent.generate_tags
+    requests = []
+    parent.generate_tags = lambda request, callback: requests.append((request, callback))
+    original = dict((k, parent.prompt_text(k)) for k in ('positive', 'negative'))
+    try:
+        for key in ('positive', 'negative'):
+            parent.prompt_writers[key]['limit'].set_value(64)
+            parent.write_prompt(key)
+            request, reply = requests.pop()
+            assert request['scope'] == key and request['tokens'] == 64
+            reply(dict(prompt='A generated prompt.' if key == 'positive' else 'blur, artifacts'))
+            assert parent.prompt_writers[key]['undo'].get_sensitive()
+            parent.undo_written_prompt(key)
+            assert parent.prompt_text(key) == original[key]
+        parent.write_prompt('positive')
+        request, reply = requests.pop()
+        parent.controls['positive'].get_buffer().set_text('Manual edit.')
+        reply(dict(prompt='Stale output.'))
+        assert parent.prompt_text('positive') == 'Manual edit.'
+        parent.write_prompt('negative')
+        request, reply = requests.pop()
+        reply(dict(error='Fixture worker failure'))
+        assert not parent.prompt_writers['negative']['busy']
+    finally:
+        parent.generate_tags = saved_generate
+        for key, value in original.items():
+            parent.controls[key].get_buffer().set_text(value)
     # Force LCD antialiasing through fontconfig in the harness. A white glyph
     # on transparency must still have equal RGB channels after rasterization.
     settings = Gtk.Settings.get_default()

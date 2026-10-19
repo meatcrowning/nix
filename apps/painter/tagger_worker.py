@@ -38,8 +38,9 @@ class Tags:
 
 
 class Prompt:
-    def __init__(self):
+    def __init__(self, negative=False):
         self.text = ''
+        self.negative = negative
 
     def feed(self, text):
         self.text += text
@@ -52,6 +53,10 @@ class Prompt:
             text = text[1:-1].strip()
         if not text or any(marker in text for marker in ('<think', '</think', '<|')):
             raise ValueError('The model did not return a usable prompt. Try again.')
+        if not complete and self.negative:
+            if ',' not in text:
+                raise ValueError('No complete exclusion fit the token limit. Increase it and try again.')
+            return text.rsplit(',', 1)[0].strip(' ,')
         if not complete:
             # A hard token cap may split a word. Keep only complete sentences.
             ends = list(re.finditer(r'[.!?](?:["”’]?(?=\s|$))', text))
@@ -75,6 +80,9 @@ def child_limits():
 
 def generate(request, binary=None, model=None, timeout=90):
     prose = request.get('task', 'tags') == 'prompt'
+    scope = request.get('scope', 'region')
+    if scope not in ('region', 'positive', 'negative'):
+        raise ValueError('Unknown prompt scope.')
     tokens = int(request.get('tokens', 128))
     if prose and not 16 <= tokens <= 512:
         raise ValueError('Choose between 16 and 512 output tokens.')
@@ -83,7 +91,7 @@ def generate(request, binary=None, model=None, timeout=90):
         raise ValueError('Choose between 1 and 32 tags.')
     caption = str(request.get('caption', '')).strip()[:2000]
     if not caption and not (prose and (request.get('scene') or request.get('tags'))):
-        raise ValueError('Write a region prompt first.')
+        raise ValueError('Write a prompt or scene idea first.')
     binary = binary or os.environ.get('PAINTER_TAG_LLAMA', '')
     model = model or os.environ.get('PAINTER_TAG_MODEL', '')
     if not Path(binary).is_file() or not Path(model).is_file():
@@ -108,6 +116,25 @@ def generate(request, binary=None, model=None, timeout=90):
                        tags=[str(v)[:100] for v in request.get('tags', [])[:16]],
                        palette=[str(v)[:50] for v in request.get('palette', [])[:12]],
                        wording=str(request.get('wording', ''))[:300])
+    if prose and scope != 'region':
+        context = dict(existing_prompt=caption, positive_prompt=str(request.get('scene', ''))[:2000])
+        if scope == 'positive':
+            system = ('Polish or expand the image prompt into a cohesive visual description. '
+                      'Preserve subjects, counts, relationships, medium, style, colors and exact quoted lettering. '
+                      'Use concrete composition and lighting details. Do not add unwanted text or change intent. '
+                      'Return only the prompt in complete sentences, without headings, explanations or markup. '
+                      'Finish within about %d words.' % max(6, tokens // 2))
+        else:
+            system = ('Write a concise comma-separated negative image prompt listing unwanted visual artifacts. '
+                      'Use the positive prompt to choose relevant failures and preserve existing exclusions. '
+                      'Do not describe the desired scene, use negated sentences, or suppress intended style, '
+                      'grain, anatomy or lettering. Do not add content exclusions such as nsfw unless requested. '
+                      'Return only the exclusion list, without headings, explanation or markup. '
+                      'Finish within about %d words.' % max(6, tokens // 2))
+        if request.get('moss'):
+            system += (' MOSS accepts natural-language descriptions and tags. Use plain descriptive language; '
+                       'avoid SD weighting syntax, quality-booster padding, settings and command flags. '
+                       'Keep exact visible wording quoted verbatim. Do not emit layout JSON.')
     context = json.dumps(context, ensure_ascii=False)
     # The pinned LFM GGUF uses ChatML. Supplying the completed empty thinking
     # block starts directly in its final answer instead of spending the budget
@@ -119,7 +146,7 @@ def generate(request, binary=None, model=None, timeout=90):
             '--color', 'off', '--no-escape', '-p', prompt]
     proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, preexec_fn=child_limits)
-    parser = Prompt() if prose else Tags(count)
+    parser = Prompt(negative=scope == 'negative') if prose else Tags(count)
     decoder = codecs.getincrementaldecoder('utf-8')('replace')
     deadline = time.monotonic() + timeout
     seen = 0

@@ -52,6 +52,10 @@ with tempfile.TemporaryDirectory() as tmp:
         raise AssertionError('accepted a truncated tag')
     fake("import sys\nassert sys.argv[sys.argv.index('-n') + 1] == '48'\nprint('A fox rests in snow. An unfinished tail', flush=True)\n")
     assert generate(dict(task='prompt', tokens=48, caption='fox'), str(binary), str(model)) == 'A fox rests in snow.'
+    fake("import sys\nprompt = sys.argv[sys.argv.index('-p') + 1]\nassert 'MOSS accepts' in prompt and 'negative image prompt' in prompt\nprint('blurred eyes, duplicated limbs, partial', flush=True)\n")
+    assert generate(dict(task='prompt', scope='negative', tokens=48, caption='', scene='A fox.', moss=True), str(binary), str(model)) == 'blurred eyes, duplicated limbs'
+    fake("import sys\nprompt = sys.argv[sys.argv.index('-p') + 1]\nassert 'cohesive visual description' in prompt and 'one region' not in prompt\nprint('A fox rests in snow.[end of text]', flush=True)\n")
+    assert generate(dict(task='prompt', scope='positive', tokens=48, caption='fox'), str(binary), str(model)) == 'A fox rests in snow.'
     fake('time.sleep(20)\n')
     start = time.monotonic()
     try:

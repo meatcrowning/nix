@@ -219,9 +219,23 @@ class Window(Gtk.Window):
         wildcard_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         wildcard_scroll.add_with_viewport(self.wildcard_buttons)
         params.pack_start(wildcard_scroll, False, False, 0)
+        self.prompt_writers = {}
         for key, title, height in [('positive', 'Prompt', 120), ('negative', 'Negative prompt', 65)]:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            box.pack_start(label(title), False, False, 0)
+            header = Gtk.Box(spacing=4)
+            header.pack_start(label(title), False, False, 0)
+            limit = CompactSpin(adjustment=Gtk.Adjustment(128, 16, 512, 16, 64, 0), climb_rate=16, digits=0)
+            limit.set_width_chars(3)
+            limit.get_accessible().set_name('Token limit')
+            limit.set_tooltip_text('Maximum output tokens')
+            write, undo = Gtk.Button(label='Write'), Gtk.Button(label='Undo')
+            undo.set_sensitive(False)
+            for widget in (limit, write, undo):
+                header.pack_start(widget, False, False, 0)
+            self.prompt_writers[key] = dict(limit=limit, write=write, undo=undo, history=None, busy=False)
+            write.connect('clicked', lambda _, k=key: self.write_prompt(k))
+            undo.connect('clicked', lambda _, k=key: self.undo_written_prompt(k))
+            box.pack_start(header, False, False, 0)
             editor = self.text_box(key, height)
             text = editor.text
             box.pack_start(editor, False, False, 0)
@@ -520,6 +534,8 @@ class Window(Gtk.Window):
         return True
 
     def changed(self, *_):
+        if hasattr(self, 'prompt_writers') and not self.loading:
+            self.refresh_prompt_undo()
         if self.loading:
             return
         self.visibility()
@@ -621,6 +637,55 @@ class Window(Gtk.Window):
         elif self.viewer.video or (self.selection == 'live://generating' and self.poll_count % 4 == 0):
             self.send('frame')
         return True
+
+    def prompt_text(self, key):
+        buf = self.controls[key].get_buffer()
+        return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+
+    def prompt_snapshot(self):
+        return (self.state.get('model'), self.prompt_text('positive'), self.prompt_text('negative'))
+
+    def write_prompt(self, key):
+        writer = self.prompt_writers[key]
+        if writer['busy']:
+            return
+        snapshot = self.prompt_snapshot()
+        values = dict(positive=snapshot[1], negative=snapshot[2])
+        writer['busy'] = True
+        writer['write'].set_sensitive(False)
+        writer['undo'].set_sensitive(False)
+        self.status.set_text('Writing prompt…')
+        def finished(result):
+            writer['busy'] = False
+            if self.closing:
+                return
+            writer['write'].set_sensitive(True)
+            if self.prompt_snapshot() != snapshot:
+                self.status.set_text('Result discarded because the prompt or model changed.')
+            elif result.get('error'):
+                self.message(result['error'], True)
+            elif result.get('prompt'):
+                writer['history'] = (snapshot[0], values[key], result['prompt'])
+                self.controls[key].get_buffer().set_text(result['prompt'])
+                self.status.set_text('Prompt written.')
+            self.refresh_prompt_undo()
+        self.generate_tags(dict(task='prompt', scope=key, caption=values[key],
+                                scene=values['positive'], tokens=writer['limit'].get_value_as_int(),
+                                moss=bool(self.state.get('flags', {}).get('layoutSupport'))), finished)
+
+    def refresh_prompt_undo(self):
+        for key, writer in self.prompt_writers.items():
+            entry = writer['history']
+            writer['undo'].set_sensitive(bool(not writer['busy'] and entry and
+                entry[0] == self.state.get('model') and self.prompt_text(key) == entry[2]))
+
+    def undo_written_prompt(self, key):
+        writer = self.prompt_writers[key]
+        entry = writer['history']
+        if not writer['busy'] and entry and entry[0] == self.state.get('model') and self.prompt_text(key) == entry[2]:
+            writer['history'] = None
+            self.controls[key].get_buffer().set_text(entry[1])
+            self.refresh_prompt_undo()
 
     def generate_tags(self, request, callback):
         if getattr(self, 'tag_callback', None):
@@ -866,6 +931,7 @@ class Window(Gtk.Window):
         self.advanced.set_visible(bool(patches or flags.get('encoderControls') or loras))
 
     def update_actions(self):
+        self.refresh_prompt_undo()
         for key, widgets in self.actions.items():
             enabled = self.connected
             if key == 'generate':

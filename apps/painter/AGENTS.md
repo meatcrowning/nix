@@ -194,9 +194,11 @@ before any drag or resize can begin. Locked preview layers are grey and clipped
 beneath unlocked regions; keep occlusion in compositor clips so moving a foreground region does
 not rerasterize the locked background.
 Draft edits persist immediately, including incomplete regions; generation validates required captions.
-Region tags use the inline count and Auto controls; the region prompt has a
-token limit, Write and prompt-only Undo. Prompt output is capped in llama, with
-any incomplete trailing sentence removed. Undo restores only the last generated
+Region tags use the inline count and Auto controls. Region, positive and negative
+prompts have a token limit, Write and prompt-only Undo. Positive and negative
+writers use separate instructions; MOSS adds concise prompting guidance rather
+than loading the entire user guide. Prompt output is capped in llama, with
+any incomplete trailing sentence (or negative-list item) removed. Undo restores only the last generated
 prompt when its text is still unchanged; it must not roll back other fields.
 `tagger.py` runs a bounded
 `tagger_worker.py` subprocess with the CPU-only llama/model paths supplied by
