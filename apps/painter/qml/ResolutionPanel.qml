@@ -25,7 +25,7 @@ Panel {
     badge: fromImage ? "from the image" : (root.gen.width + "x" + root.gen.height)
 
     Field {
-        label: "Aspect"
+        label: "AR"
         // The inner Column skips invisible children, so this leaves no gap.
         visible: !panel.fromImage
         hint: "Any two whole numbers - 3:2, 5:3, 21:9. The pixel size comes from this and MP."

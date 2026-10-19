@@ -219,21 +219,8 @@ class Toolkit(object):
             else:
                 control.connect('changed', lambda *_: callback())
             box.pack_start(control, inline, inline, 0)
-            if kind in ('palette', 'inline_palette'):
-                swatches = None if inline else self.row(box)
-                picker = Gtk.ColorButton()
-                picker.set_title(title)
-                def picked(*_):
-                    c = picker.get_rgba()
-                    value = '#%02x%02x%02x' % (int(round(c.red * 255)), int(round(c.green * 255)), int(round(c.blue * 255)))
-                    old = control.get_text().strip()
-                    control.set_text(value if title == 'Text colour' or not old else old + ', ' + value)
-                picker.connect('color-set', picked)
-                chooser = box if inline else self.row(box)
-                if not inline:
-                    self.label(chooser, 'Choose colour' if title == 'Text colour' else 'Add colour')
-                chooser.pack_start(picker, False, False, 0)
-                picker.set_tooltip_text('Choose a colour to add; edit the list above to remove colours.')
+            if kind == 'palette':
+                swatches = self.row(box)
         if kind in ('text', 'entry', 'palette') and title not in ('Vertical guides (%; comma-separated)', 'Horizontal guides (%; comma-separated)'):
             spelling = getattr(self.window, 'spelling', None)
             if spelling: spelling.attach(control)

@@ -43,9 +43,10 @@ def run(parent):
     assert not e.list.region_box.get_visible()
     u = e.ui
     tabs = e.tabs
-    assert not e.fields['item.caption'][2].get_visible()
-    assert not e.fields['item.tags'][2].get_visible()
-    assert not e.fields['item.palette'][2].get_visible()
+    for key in ('item.caption', 'item.tags', 'item.palette'):
+        assert e.fields[key][2].get_visible()
+        assert not e.fields[key][2].get_sensitive()
+        assert not u.get(e.fields[key])
     assert e.warning.get_visible()
     while Gtk.events_pending(): Gtk.main_iteration()
     tabs.set_current_page(1)

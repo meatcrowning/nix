@@ -182,7 +182,7 @@ Panel {
         Row {
             width: parent.width
             spacing: 4
-            PixelText { text: "Aspect"; anchors.verticalCenter: parent.verticalCenter }
+            PixelText { text: "AR"; anchors.verticalCenter: parent.verticalCenter }
             Spin { width: 34; value: root.gen.aspectW; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectW", Math.round(v)); root.recomputeDims() } }
             PixelText { text: ":"; anchors.verticalCenter: parent.verticalCenter }
             Spin { width: 34; value: root.gen.aspectH; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectH", Math.round(v)); root.recomputeDims() } }

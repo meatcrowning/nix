@@ -279,7 +279,7 @@ class Window(Gtk.Window):
             self.controls[key] = control
             aspect.pack_start(control, False, False, 0)
         dimensions_row = Gtk.Box(spacing=4)
-        self.aspect_label = label('Aspect')
+        self.aspect_label = label('AR')
         dimensions_row.pack_start(self.aspect_label, False, False, 0)
         dimensions_row.pack_start(aspect, False, False, 0)
         self.grid.attach(dimensions_row, 0, self.grid_row, 2, 1)

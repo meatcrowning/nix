@@ -271,7 +271,6 @@ Item {
                     case "combo": return comboField
                     case "check": return checkField
                     case "iconcheck": return iconCheckField
-                    case "inline_palette": return inlinePaletteField
                     case "number": return numberField
                     case "text": return textField
                     case "pair": return pairField
@@ -291,11 +290,6 @@ Item {
                         onClicked: { colourPicker.replace = modelData; colourPicker.selectedColor = modelData; colourPicker.open() }
                     }
                 }
-            }
-            Button {
-                visible: node.spec.kind === "palette"
-                text: "Choose colour…"
-                onClicked: { colourPicker.replace = ""; colourPicker.open() }
             }
             ColorDialog {
                 id: colourPicker
@@ -334,24 +328,6 @@ Item {
             ToolTip.visible: hovered
             ToolTip.text: node.spec.title
             onToggled: node.spec.edit(checked)
-        }
-    }
-    Component {
-        id: inlinePaletteField
-        RowLayout {
-            Loader { sourceComponent: entryField; Layout.fillWidth: true }
-            Button {
-                icon.name: "color-picker"
-                display: AbstractButton.IconOnly
-                Accessible.name: "Add scene colour"
-                ToolTip.visible: hovered
-                ToolTip.text: "Add scene colour"
-                onClicked: sceneColour.open()
-            }
-            ColorDialog {
-                id: sceneColour
-                onAccepted: node.spec.colour(selectedColor.toString(), "")
-            }
         }
     }
     Component { id: checkField; CheckBox { text: node.spec.title; checked: node.spec.value === true; onToggled: node.spec.edit(checked) } }
