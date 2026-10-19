@@ -40,6 +40,12 @@ class Toolkit(object):
     def show_widget(self, widget, visible):
         widget.set_visible(visible)
 
+    def preview_colour(self, value):
+        colour = Gdk.RGBA()
+        if colour.parse(value):
+            return '#%02x%02x%02x' % tuple(int(round(c * 255)) for c in (colour.red, colour.green, colour.blue))
+        return None
+
     def drawing_cursor(self, widget, drawing):
         if widget.get_window():
             widget.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.CROSSHAIR if drawing else Gdk.CursorType.LEFT_PTR))

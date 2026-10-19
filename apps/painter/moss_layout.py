@@ -407,7 +407,7 @@ def preview_lines(text, width, font_size):
             for line in (textwrap.wrap(paragraph, columns) or [''])]
 
 
-def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None):
+def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_colours=None):
     """Portable rough composition preview; not a prediction of generated pixels."""
     d = editor.doc
     font = font or dict(family='sans-serif', size=11, height=13, weight=400, style='normal')
@@ -440,7 +440,14 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None):
         selected = item['id'] in editor.selected
         colour = '#ffb454' if selected else font.get('inactive', '#bbbbbb')
         text_colour = colour
-        s.append('<g><rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="%s" stroke-width="%s" stroke-opacity="%s"/>' % (x, y, bw, bh, colour, 2 if selected else 1, '1' if item.get('enabled', True) else '.6'))
+        s.append('<g>')
+        palette = [(palette_colours or {}).get(value) for value in item.get('palette', [])]
+        palette = [value for value in palette if value]
+        for band, value in enumerate(palette):
+            s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="%s" fill-opacity="%s"/>' % (
+                x + bw * band / len(palette), y, bw / len(palette), bh,
+                escape(value, {'"': '&quot;'}), '.18' if item.get('enabled', True) else '.08'))
+        s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="%s" stroke-width="%s" stroke-opacity="%s"/>' % (x, y, bw, bh, colour, 2 if selected else 1, '1' if item.get('enabled', True) else '.6'))
         title = '%d %s' % (n + 1, item['label'])
         label_offset = 14 if item.get('locked') else 3
         if item.get('locked'):

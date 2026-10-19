@@ -302,7 +302,9 @@ class LayoutUI(object):
 
     def render(self, w, h, font=None):
         self.viewport = (max(100, w), max(100, h))
-        data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan, font)
+        colours = {value: self.ui.preview_colour(value)
+                   for item in self.model.doc['items'] for value in item.get('palette', [])}
+        data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan, font, colours)
         return data
 
     def zoom_at(self, x, y, steps):

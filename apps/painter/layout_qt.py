@@ -79,6 +79,10 @@ class Toolkit(QObject):
         node._visible = visible
         node.changed.emit()
 
+    def preview_colour(self, value):
+        colour = QColor(value)
+        return colour.name() if colour.isValid() else None
+
     def drawing_cursor(self, _canvas, drawing):
         self._drawing = drawing
         self.cursorChanged.emit()
