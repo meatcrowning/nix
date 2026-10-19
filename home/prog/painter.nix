@@ -9,6 +9,11 @@
 # service never starts at boot and keeps warm weights between launches. Python
 # and QML edits need only an app relaunch; packaging changes need a rebuild.
 let
+  tagLlama = pkgs.llama-cpp.override { cudaSupport = false; };
+  tagModel = pkgs.fetchurl {
+    url = "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/e7caca5d835a3901a8e0d63e94009429bafafdfc/LFM2.5-2.6B-QAD-Q4_0.gguf";
+    sha256 = "a247afd6414918eac8e520a9e6137dc271235461ecbe1180462221d5b8d40b03";
+  };
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   # The side-effect-free way to borrow painter's Qt environment — the harnesses
@@ -47,6 +52,8 @@ let
       # that did not open. Live source, so it is fixable on book with no
       # home-manager rebuild.
       pkgs.writeShellScriptBin "painter" ''
+        export PAINTER_TAG_LLAMA=${tagLlama}/bin/llama-completion
+        export PAINTER_TAG_MODEL=${tagModel}
         exec /home/lam/nix/apps/painter/tools/comfy-tunnel.sh -- \
              /usr/bin/python3 /home/lam/nix/apps/painter/main.py "$@"
       ''
@@ -87,6 +94,8 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/painter \
             --add-flags /home/lam/nix/apps/painter/main.py \
+            --set PAINTER_TAG_LLAMA ${tagLlama}/bin/llama-completion \
+            --set PAINTER_TAG_MODEL ${tagModel} \
             --prefix PATH : ${lib.makeBinPath [ pkgs.ffmpeg pkgs.libnotify ]} \
             --prefix XDG_DATA_DIRS : ${lib.concatStringsSep ":" [
               "${pkgs.kdePackages.oxygen-icons}/share"

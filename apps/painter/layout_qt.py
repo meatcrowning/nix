@@ -1,12 +1,14 @@
 """Qt Quick adapter for the shared inline layout editor; no secondary window."""
 import base64
-from PySide6.QtCore import QObject, Property, Signal, Slot, Qt, QBuffer, QIODevice, QByteArray, QUrl
-from PySide6.QtGui import QColor, QGuiApplication, QImage, QFont, QFontInfo, QFontMetricsF
+import math
+from PySide6.QtCore import QObject, Property, Signal, Slot, Qt, QBuffer, QIODevice, QByteArray, QUrl, QRectF, QPointF
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QFont, QFontInfo, QFontMetricsF, QPainter
 from PySide6.QtQuick import QQuickPaintedItem
 from PySide6.QtQml import qmlRegisterType
 from PySide6.QtSvg import QSvgRenderer
 import moss_layout as M
 from layout_ui import LayoutUI
+from layout_cache import LayerCache
 
 
 class Node(QObject):
@@ -69,6 +71,16 @@ class Toolkit(QObject):
         super().__init__()
         self.root = Node('column', parent=self)
         self._drawing = False
+        self.model_name = ''
+        self.tagger = None
+
+    def tag_context(self): return self.model_name
+
+    def generate_tags(self, request, callback):
+        from tagger import Tagger
+        if self.tagger is None:
+            self.tagger = Tagger(self)
+        self.tagger.start(request, callback)
 
     def enable_widget(self, node, enabled):
         if node._enabled != enabled:
@@ -166,6 +178,7 @@ class Bridge(QObject):
         doc = M.resize(document, width, height) if document else M.fresh(width, height)
         doc['summary']['caption'] = caption
         self.model_name = model
+        self.toolkit.model_name = model
         self.editor.load(doc)
 
     @Slot(str)
@@ -185,6 +198,16 @@ class LayoutCanvas(QQuickPaintedItem):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bridge = None
+        self._layer_scale = 1
+        def raster(svg, w, h):
+            image = QImage(math.ceil(w * self._layer_scale), math.ceil(h * self._layer_scale), QImage.Format_ARGB32_Premultiplied)
+            image.setDevicePixelRatio(self._layer_scale)
+            image.fill(Qt.transparent)
+            painter = QPainter(image)
+            QSvgRenderer(svg).render(painter, QRectF(0, 0, w, h))
+            painter.end()
+            return image
+        self._layers = LayerCache(raster)
         self._preview_font = QFont()
         self._inactive_color = QColor('#bbbbbb')
         self.setAcceptedMouseButtons(Qt.LeftButton | Qt.MiddleButton)
@@ -222,7 +245,17 @@ class LayoutCanvas(QQuickPaintedItem):
             f = self._preview_font
             font = dict(inactive=self._inactive_color.name(), family=f.family(), size=QFontInfo(f).pixelSize(), weight=int(f.weight()),
                         style='italic' if f.italic() else 'normal', height=QFontMetricsF(f).height())
-            QSvgRenderer(self._bridge.editor.render(int(self.width()), int(self.height()), font)).render(painter)
+            editor = self._bridge.editor
+            scale = painter.device().devicePixelRatioF()
+            if scale != self._layer_scale:
+                self._layer_scale = scale
+                self._layers = LayerCache(self._layers.render, scale=scale)
+            for svg, w, h, x, y, clip in editor.render(int(self.width()), int(self.height()), font, layers=True):
+                painter.save()
+                if clip:
+                    painter.setClipRect(QRectF(*editor.rect))
+                painter.drawImage(QPointF(x, y), self._layers.get(svg, w, h))
+                painter.restore()
 
     def mousePressEvent(self, event):
         self.forceActiveFocus()

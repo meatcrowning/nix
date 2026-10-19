@@ -30,6 +30,49 @@ def run(parent):
     muted_pixels = bytearray(muted.get_pixels())
     assert all(muted_pixels[i] == muted_pixels[i+1] == muted_pixels[i+2] for i in range(0, len(muted_pixels), 4)), 'fringes on inactive lettering'
     assert any(muted_pixels[i+3] == 255 and muted_pixels[i] == 136 for i in range(0, len(muted_pixels), 4)), 'inactive text colour ignored'
+    # Moving a region must reuse lettering/background rasterization. Benchmark
+    # inside the private GTK runtime, including composition into the target.
+    import time
+    import cairo
+    from layout_cache import LayerCache
+    from layout_raster import render_surface
+    perf = M.Editor(M.fresh())
+    perf.doc['snap'] = False
+    for n in range(24):
+        row = perf.add('text', [.03 + (n % 6) * .15, .03 + (n // 6) * .22, .13, .19])
+        row.update(caption='Wrapped region label', text='A few words of lettering')
+    perf.selected = [perf.doc['items'][0]['id']]
+    cache = LayerCache(render_surface)
+    def frame():
+        parts, rect = M.svg(perf, 700, 500, layers=True)
+        target = cairo.ImageSurface(cairo.FORMAT_ARGB32, 700, 500)
+        cr = cairo.Context(target)
+        for data, w, h, x, y, clip in parts:
+            cr.save()
+            if clip:
+                cr.rectangle(*rect)
+                cr.clip()
+            cr.set_source_surface(cache.get(data, w, h), x, y)
+            cr.paint()
+            cr.restore()
+        return target
+    frame()
+    misses = cache.misses
+    samples = []
+    for n in range(60):
+        perf.doc['items'][0]['box'][0] = .03 + n * .001
+        start = time.time()
+        frame()
+        samples.append((time.time() - start) * 1000)
+    assert cache.misses == misses, 'moving region rerasterized retained layers'
+    assert cache.bytes <= cache.limit
+    full = []
+    for n in range(10):
+        start = time.time()
+        render_surface(M.svg(perf, 700, 500)[0], 700, 500)
+        full.append((time.time() - start) * 1000)
+    print('Layout 24-region drag: retained median %.2fms p95 %.2fms; full SVG median %.2fms' %
+          (sorted(samples)[30], sorted(samples)[57], sorted(full)[5]))
     accepted = []
     initial_width = parent.get_allocated_width()
     before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
@@ -179,9 +222,9 @@ def run(parent):
     e.pointer('press', x, y)
     while Gtk.events_pending(): Gtk.main_iteration()
     renders, render = [], e.render
-    def counted(*args):
+    def counted(*args, **kwargs):
         renders.append(list(e.model.chosen()[0]['box']))
-        return render(*args)
+        return render(*args, **kwargs)
     e.render = counted
     before_save = len(accepted)
     try:
@@ -195,6 +238,16 @@ def run(parent):
         assert len(accepted) == before_save + 1, 'final drag position was not saved'
     finally:
         e.render = render
+    u.set(e.fields['item.caption'], 'A fox in the snowy forest')
+    u.set(e.tag_count, 3)
+    e.tag_auto.clicked()
+    assert e.tag_busy and not e.tag_auto.get_sensitive()
+    deadline = time.time() + 5
+    while e.tag_busy and time.time() < deadline:
+        while Gtk.events_pending(): Gtk.main_iteration()
+        time.sleep(.01)
+    assert e.row()['tags'] == ['snow', 'fox', 'forest'], (e.row(), e.status.get_text())
+    assert not e.tag_busy and e.tag_auto.get_sensitive()
     assert 'item.locked' not in e.fields and 'item.enabled' not in e.fields
     for signal, kind, y in [('button-press-event', Gdk.EventType.BUTTON_PRESS, 100),
                             ('motion-notify-event', Gdk.EventType.MOTION_NOTIFY, 180),

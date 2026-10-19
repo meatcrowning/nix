@@ -5,6 +5,7 @@ import base64
 from gi.repository import Gtk, Gdk, GdkPixbuf, Pango, GLib
 from layout_ui import LayoutUI
 from layout_raster import render_surface
+from layout_cache import LayerCache
 
 
 class CompactFields(Gtk.Bin):
@@ -33,9 +34,17 @@ class CompactFields(Gtk.Bin):
 class Toolkit(object):
     def __init__(self, parent):
         self.window = parent.get_toplevel()
+        self.alive = True
         self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.root.connect('destroy', lambda *_: setattr(self, 'alive', False))
         self.root.set_border_width(0)
         parent.pack_start(self.root, True, True, 0)
+
+    def tag_context(self):
+        return self.window.state.get('model', '') if self.alive else None
+
+    def generate_tags(self, request, callback):
+        self.window.generate_tags(request, callback)
 
     def show_widget(self, widget, visible):
         widget.set_visible(visible)
@@ -135,6 +144,8 @@ class Toolkit(object):
             button.get_accessible().set_name(tooltip)
         if hasattr(parent, 'sizes'):
             parent.sizes.add_widget(button)
+        if title == 'Auto':
+            button.set_tooltip_text('Generate tags from the region prompt')
         button.connect('clicked', lambda *_: callback() if not getattr(button, 'syncing', False) else None)
         parent.pack_start(button, False, False, 0)
         return button
@@ -184,9 +195,13 @@ class Toolkit(object):
                 control.get_accessible().set_name(title)
             control.connect('toggled', lambda *_: callback())
             box.pack_start(control, False, False, 0)
-        elif kind == 'number':
+        elif kind in ('number', 'count'):
             control = Gtk.SpinButton.new_with_range(*options)
             control.set_digits(2 if options[2] < 1 else 0)
+            if kind == 'count':
+                control.set_width_chars(2)
+                control.set_tooltip_text('Number of tags to generate')
+                control.get_accessible().set_name('Tag count')
             control.connect('value-changed', lambda *_: callback())
             box.pack_start(control, False, False, 0)
         elif kind == 'text':
@@ -251,7 +266,7 @@ class Toolkit(object):
     def get(self, field):
         kind, control = field[:2]
         if kind in ('check', 'iconcheck'): return control.get_active()
-        if kind == 'number': return control.get_value()
+        if kind in ('number', 'count'): return control.get_value()
         if kind == 'combo': return (control.get_active_id() or '').replace('_empty', '')
         if kind == 'text':
             b = control.get_buffer()
@@ -263,7 +278,7 @@ class Toolkit(object):
     def set(self, field, value):
         kind, control = field[:2]
         if kind in ('check', 'iconcheck'): control.set_active(bool(value))
-        elif kind == 'number': control.set_value(float(value or 0))
+        elif kind in ('number', 'count'): control.set_value(float(value or 0))
         elif kind == 'combo':
             if not control.set_active_id(value or '_empty'): control.set_active(-1)
         elif kind == 'text': control.get_buffer().set_text(value or '')
@@ -311,11 +326,17 @@ class Toolkit(object):
 
     def canvas(self, parent, editor):
         image = Gtk.DrawingArea()
-        image.frame = None
+        image.frames = []
+        image.cache = LayerCache(render_surface)
         def paint_frame(widget, cr):
-            if widget.frame is not None:
-                cr.set_source_surface(widget.frame, 0, 0)
+            for frame, x, y, clip in widget.frames:
+                cr.save()
+                if clip:
+                    cr.rectangle(*editor.rect)
+                    cr.clip()
+                cr.set_source_surface(frame, x, y)
                 cr.paint()
+                cr.restore()
             return False
         image.connect('draw', paint_frame)
         events = Gtk.EventBox()
@@ -328,7 +349,22 @@ class Toolkit(object):
         events.set_above_child(True)
         events.set_can_focus(True)
         events.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.SCROLL_MASK)
+        motion = [None]
+        def apply_motion():
+            if motion[0] is not None:
+                x, y, shift = motion[0]
+                motion[0] = None
+                if editor.panning:
+                    editor.pan_pointer('move', x, y)
+                else:
+                    editor.pointer('move', x, y, shift)
         def pointer(widget, event, action):
+            if action == 'move':
+                if editor.panning or editor.model.drag:
+                    motion[0] = (event.x, event.y, bool(event.state & Gdk.ModifierType.SHIFT_MASK))
+                    queue_draw()
+                return True
+            motion[0] = None
             if editor.panning or (action != 'move' and event.button == 2):
                 if action == 'press': widget.grab_add()
                 editor.pan_pointer(action, event.x, event.y)
@@ -353,6 +389,7 @@ class Toolkit(object):
         events.connect('scroll-event', wheel)
         pending = [None]
         def draw():
+            apply_motion()
             pending[0] = None
             w, h = events.get_allocated_width(), events.get_allocated_height()
             if w > 10 and h > 10:
@@ -368,8 +405,10 @@ class Toolkit(object):
                 font = dict(inactive=inactive_colour, family=desc.get_family(), size=size, weight=int(desc.get_weight()),
                             style='normal' if desc.get_style() == Pango.Style.NORMAL else 'italic',
                             height=(metrics.get_ascent() + metrics.get_descent()) / float(Pango.SCALE))
-                image.frame = render_surface(editor.render(w, h, font), w, h)
-                image.set_size_request(w, h)
+                image.frames = [(image.cache.get(svg, pw, ph), px, py, clip)
+                                for svg, pw, ph, px, py, clip in editor.render(w, h, font, layers=True)]
+                if image.get_size_request() != (w, h):
+                    image.set_size_request(w, h)
                 image.queue_draw()
             return False
         def queue_draw(*_):

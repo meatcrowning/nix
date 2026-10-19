@@ -18,6 +18,7 @@ class LayoutUI(object):
         self.zoom = 1.0
         self.pan = [0.0, 0.0]
         self.panning = None
+        self.tag_busy = False
         u = self.ui
         root = u.root
         self.last_doc = copy.deepcopy(self.model.doc)
@@ -65,7 +66,12 @@ class LayoutUI(object):
         self.lettering_row = u.row(region)
         for key, title, choices in M.TYPE_FIELDS[:3]:
             self.add(self.lettering_row, 'type.' + key, title, 'combo', choices)
-        self.add(region, 'item.tags', 'Tags (comma-separated)')
+        self.tag_header = u.row(region)
+        u.label(self.tag_header, 'Tags')
+        self.tag_count = u.field(self.tag_header, '', 'count', (1, 32, 1), lambda: None)
+        u.set(self.tag_count, 6)
+        self.tag_auto = u.button(self.tag_header, 'Auto', self.auto_tags)
+        self.add(region, 'item.tags', '')
         self.add(region, 'item.palette', 'Palette', 'palette')
         for key, title, choices in M.TYPE_FIELDS[3:]:
             self.add(region, 'type.' + key, title, 'combo' if choices else 'palette' if key == 'color' else 'entry', choices)
@@ -89,6 +95,43 @@ class LayoutUI(object):
         u.label(canvas, 'Reference is a tracing aid only; it is not sent as image conditioning.')
         self.status = u.label(root, '')
         self.refresh()
+
+    def auto_tags(self):
+        row = self.row()
+        if self.tag_busy or not row:
+            return
+        if not row.get('caption', '').strip():
+            self.ui.set_label(self.status, 'Write a region prompt first.')
+            return
+        snapshot = copy.deepcopy(row)
+        scene = self.model.doc['summary'].get('caption', '')
+        context = self.ui.tag_context()
+        self.tag_busy = True
+        self.region_visibility()
+        self.ui.set_label(self.status, 'Generating tags…')
+        def finished(result):
+            self.tag_busy = False
+            if self.ui.tag_context() is None:
+                return
+            self.region_visibility()
+            if self.ui.tag_context() != context:
+                self.ui.set_label(self.status, '')
+                return
+            current = self.row()
+            # Never replace edits made while inference was running, including
+            # switching models/regions, changing the prompt, or manual tags.
+            if current != snapshot or self.model.doc['summary'].get('caption', '') != scene:
+                self.ui.set_label(self.status, 'Tags discarded because the region changed.')
+                return
+            if result.get('error'):
+                self.ui.set_label(self.status, result['error'])
+                return
+            self.model.checkpoint()
+            current['tags'] = result['tags']
+            self.refresh()
+            self.ui.set_label(self.status, '')
+        self.ui.generate_tags(dict(count=int(self.ui.get(self.tag_count)),
+                                   caption=row['caption'], scene=scene, kind=row['label']), finished)
 
     def toggle_hidden(self):
         rows = self.model.chosen()
@@ -239,6 +282,9 @@ class LayoutUI(object):
 
     def region_visibility(self):
         row = self.row()
+        self.ui.enable_widget(self.tag_header, row is not None)
+        self.ui.enable_widget(self.tag_auto, row is not None and not self.tag_busy)
+        self.ui.sensitive(self.tag_count, row is not None and not self.tag_busy)
         self.ui.show_widget(self.lettering_row, bool(row and row['label'] == 'text'))
         for key, field in self.fields.items():
             region = key.startswith(('item.', 'type.', 'box.'))
@@ -301,12 +347,18 @@ class LayoutUI(object):
         self.ui.set_label(self.reference_label, path or 'No reference underlay')
         self.ui.redraw(self.canvas)
 
-    def render(self, w, h, font=None):
+    def render(self, w, h, font=None, layers=False):
         self.viewport = (max(100, w), max(100, h))
         palettes = [self.model.doc.get('summary', {})] + self.model.doc['items']
         colours = {value: self.ui.preview_colour(value)
                    for item in palettes for value in item.get('palette', [])}
-        data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan, font, colours)
+        if layers:
+            rect = M.view_rect(self.model.doc, w, h, self.zoom, self.pan)
+            if any((r['box'][2] * rect[2] + 8) * (r['box'][3] * rect[3] + 8) > 4 * w * h
+                   for r in self.model.doc['items']):
+                # Very large zoomed regions must not allocate enormous textures.
+                return [(self.render(w, h, font), w, h, 0, 0, False)]
+        data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan, font, colours, layers=layers)
         return data
 
     def zoom_at(self, x, y, steps):

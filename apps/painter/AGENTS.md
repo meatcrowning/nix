@@ -189,6 +189,15 @@ Add arms one box-drawing gesture, then returns to selection. The toolbar type
 selector changes selected regions, or the next added type when none are selected.
 Drag on empty canvas to box-select; moving a selection keeps its spacing.
 Draft edits persist immediately, including incomplete regions; generation validates required captions.
+Region tags use the inline count and Auto controls. `tagger.py` runs a bounded
+`tagger_worker.py` subprocess with the CPU-only llama/model paths supplied by
+`home/prog/painter.nix` on both hosts. Stop after N complete unique tags; retain
+manual edits if the region/model changes during inference. The CPU worker has
+its own single-job lock, RAM check and resource/deadline limits; it must not
+acquire or release GPU backend leases. It exits after each request.
+The canvas caches independently positioned raster layers with a bounded byte
+budget; pointer motion must not rebuild text or reference images for a move.
+Use `tools/tagger-test.py` offscreen for streaming/cancellation and worker tests.
 Verify geometry/compiler and Qt controls with `tools/layout-test.py --qt`
 offscreen; `tools/unity-test.sh` includes the native GTK layout checks.
 

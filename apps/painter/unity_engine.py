@@ -301,6 +301,11 @@ class Engine:
     def dispatch(self, request):
         c = self.ctl
         op = request.get('op')
+        if op in ('tag_start', 'tag_poll'):
+            from tagger import Tagger
+            if not hasattr(self, 'tagger'):
+                self.tagger = Tagger(c)
+            return self.tagger.start(request.get('request', {})) if op == 'tag_start' else self.tagger.result
         if op in ('spell', 'spell_learn'):
             from spellcheck import SpellCheck
             spell = SpellCheck()

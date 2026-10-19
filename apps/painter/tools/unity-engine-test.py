@@ -192,6 +192,14 @@ watchdog = QTimer()
 watchdog.setSingleShot(True)
 watchdog.timeout.connect(app.quit)
 watchdog.start(45000)
+# The GTK tag control traverses the actual socket and asynchronous worker,
+# with a tiny fake completion process and scratch model instead of inference.
+fake_tags = Path('/home/test/fake-tags')
+fake_tags.write_text('#!' + sys.executable + '\nprint("snow, fox, forest,", flush=True)\n')
+fake_tags.chmod(0o700)
+fake_model = Path('/home/test/tag-model')
+fake_model.touch()
+os.environ.update(PAINTER_TAG_LLAMA=str(fake_tags), PAINTER_TAG_MODEL=str(fake_model))
 app.exec()
 if child.poll() is None:
     child.kill()

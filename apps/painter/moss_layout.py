@@ -323,7 +323,8 @@ class Editor(object):
                 return
             self.checkpoint()
             self.drag_started = True
-        self.doc['items'] = copy.deepcopy(original)
+        for row, start in zip(self.doc['items'], original):
+            row['box'] = list(start['box'])
         if mode != 'draw':
             x, y = max(0, min(1, x)), max(0, min(1, y))
         if mode == 'move':
@@ -415,7 +416,7 @@ def palette_bands(palette, colours, x, y, width, height, opacity):
         escape(value, {'"': '&quot;'}), opacity) for band, value in enumerate(values)]
 
 
-def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_colours=None):
+def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_colours=None, layers=False):
     """Portable rough composition preview; not a prediction of generated pixels."""
     d = editor.doc
     font = font or dict(family='sans-serif', size=11, height=13, weight=400, style='normal')
@@ -443,9 +444,17 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_col
     margin = d['margin']
     s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="#999" stroke-dasharray="3 3"/>' % (margin * w, margin * h, (1 - 2 * margin) * w, (1 - 2 * margin) * h))
     s.append('<defs><clipPath id="canvas"><rect width="%f" height="%f"/></clipPath></defs><g clip-path="url(#canvas)">' % (w, h))
+    parts = []
+    if layers:
+        parts.append((''.join(s) + '</g></g></svg>', vw, vh, 0, 0, False))
     for n, item in enumerate(d['items']):
         x, y, bw, bh = item['box']
         x, y, bw, bh = x * w, y * h, bw * w, bh * h
+        if layers:
+            px, py = ox + x - 4, oy + y - 4
+            rw, rh = int(math.ceil(bw + 8)), int(math.ceil(bh + 8))
+            s = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">' % (rw, rh)]
+            x = y = 4
         selected = item['id'] in editor.selected
         colour = '#ffb454' if selected else font.get('inactive', '#bbbbbb')
         text_colour = colour
@@ -476,8 +485,16 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_col
         if selected and not item.get('locked'):
             for hx, hy in [(0, 0), (.5, 0), (1, 0), (0, .5), (1, .5), (0, 1), (.5, 1), (1, 1)]:
                 s.append('<rect x="%f" y="%f" width="6" height="6" fill="white" stroke="%s"/>' % (x + hx * bw - 3, y + hy * bh - 3, colour))
+        if layers:
+            parts.append((''.join(s) + '</svg>', rw, rh, px, py, True))
+    if layers:
+        s = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d"><g transform="translate(%f,%f)"><g>' % (vw, vh, ox, oy)]
     if editor.marquee:
         x, y, bw, bh = editor.marquee
         s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="white" stroke-dasharray="4 3"/>' % (x * w, y * h, bw * w, bh * h))
     s.append('</g></g></svg>')
+    if layers:
+        if editor.marquee:
+            parts.append((''.join(s), vw, vh, 0, 0, True))
+        return [(xml.encode('utf-8'), pw, ph, px, py, clip) for xml, pw, ph, px, py, clip in parts], (ox, oy, w, h)
     return ''.join(s).encode('utf-8'), (ox, oy, w, h)

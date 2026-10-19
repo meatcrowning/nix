@@ -622,9 +622,32 @@ class Window(Gtk.Window):
             self.send('frame')
         return True
 
+    def generate_tags(self, request, callback):
+        if getattr(self, 'tag_callback', None):
+            callback(dict(error='Tag generation is already running.'))
+            return
+        self.tag_callback = callback
+        self.connection.send(dict(op='tag_start', request=request))
+
+    def poll_tags(self):
+        if not self.closing and getattr(self, 'tag_callback', None):
+            self.connection.send(dict(op='tag_poll'))
+        return False
+
     def receive(self, op, reply):
         if self.closing:
             return False
+        if op in ('tag_start', 'tag_poll') or (op == 'disconnected' and getattr(self, 'tag_callback', None)):
+            result = reply.get('state', {}) if reply.get('ok') else dict(error=reply.get('error', 'Tag worker disconnected'))
+            if result.get('busy') and not result.get('error'):
+                GLib.timeout_add(150, self.poll_tags)
+            else:
+                callback = getattr(self, 'tag_callback', None)
+                self.tag_callback = None
+                if callback:
+                    callback(result)
+            if op != 'disconnected':
+                return False
         if not reply.get('ok'):
             self.message(reply.get('error', 'Painter failed'), True)
             if op == 'disconnected':

@@ -253,6 +253,24 @@ def qt():
     editor.fields['enabled'].edit(True)
     assert editor.model.doc['items'][0]['text'] == 'Hello\n世界'
     assert editor.model.doc['items'][0]['palette'] == ['#ff0000','#00ff00']
+    pending = []
+    ui.generate_tags = lambda request, callback: pending.append((request, callback))
+    editor.tag_count.edit(3)
+    editor.auto_tags()
+    assert pending[-1][0]['count'] == 3 and editor.tag_busy
+    assert not editor.tag_auto.enabled
+    pending[-1][1](dict(tags=['lettering', 'headline', 'poster'], error=''))
+    assert editor.row()['tags'] == ['lettering', 'headline', 'poster']
+    editor.model.undo(); editor.refresh()
+    assert editor.row()['tags'] == []
+    editor.auto_tags()
+    editor.fields['item.tags'].edit('hand edited')
+    pending[-1][1](dict(tags=['stale'], error=''))
+    assert editor.row()['tags'] == ['hand edited'], 'overwrote edits made during inference'
+    editor.auto_tags()
+    ui.model_name = 'another model'
+    pending[-1][1](dict(tags=['wrong model'], error=''))
+    assert editor.row()['tags'] == ['hand edited'] and editor.tag_auto.enabled
     editor.units.edit('pixels')
     editor.fields['box.position'].edit('128, 102.4')
     assert editor.model.doc['items'][0]['box'][0] == .125
