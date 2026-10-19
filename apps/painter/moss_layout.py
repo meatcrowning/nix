@@ -407,6 +407,14 @@ def preview_lines(text, width, font_size):
             for line in (textwrap.wrap(paragraph, columns) or [''])]
 
 
+def palette_bands(palette, colours, x, y, width, height, opacity):
+    values = [(colours or {}).get(value) for value in palette]
+    values = [value for value in values if value]
+    return ['<rect x="%f" y="%f" width="%f" height="%f" fill="%s" fill-opacity="%s"/>' % (
+        x + width * band / len(values), y, width / len(values), height,
+        escape(value, {'"': '&quot;'}), opacity) for band, value in enumerate(values)]
+
+
 def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_colours=None):
     """Portable rough composition preview; not a prediction of generated pixels."""
     d = editor.doc
@@ -419,6 +427,7 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_col
          '<g transform="translate(%f,%f)"><rect width="%f" height="%f" fill="none" stroke="#bbbbbb"/>' % (ox, oy, w, h)]
     if reference:
         s.append('<image width="%f" height="%f" opacity="%f" preserveAspectRatio="xMidYMid meet" xlink:href="data:image/png;base64,%s"/>' % (w, h, d['opacity'], reference))
+    s.extend(palette_bands(d.get('summary', {}).get('palette', []), palette_colours, 0, 0, w, h, '.18'))
     if d['grid']:
         for axis, dim in [(0, w), (1, h)]:
             step = max(.01, d['grid_step'])
@@ -441,12 +450,8 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_col
         colour = '#ffb454' if selected else font.get('inactive', '#bbbbbb')
         text_colour = colour
         s.append('<g>')
-        palette = [(palette_colours or {}).get(value) for value in item.get('palette', [])]
-        palette = [value for value in palette if value]
-        for band, value in enumerate(palette):
-            s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="%s" fill-opacity="%s"/>' % (
-                x + bw * band / len(palette), y, bw / len(palette), bh,
-                escape(value, {'"': '&quot;'}), '.18' if item.get('enabled', True) else '.08'))
+        s.extend(palette_bands(item.get('palette', []), palette_colours, x, y, bw, bh,
+                               '.18' if item.get('enabled', True) else '.08'))
         s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="%s" stroke-width="%s" stroke-opacity="%s"/>' % (x, y, bw, bh, colour, 2 if selected else 1, '1' if item.get('enabled', True) else '.6'))
         title = '%d %s' % (n + 1, item['label'])
         label_offset = 14 if item.get('locked') else 3

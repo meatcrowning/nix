@@ -162,9 +162,10 @@ class Toolkit(object):
         return box
 
     def field(self, parent, title, kind, options, callback):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-        parent.pack_start(box, False, False, 0)
-        if kind != 'check' and title and not hasattr(parent, 'sizes'):
+        inline = kind.startswith('inline_')
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL if inline else Gtk.Orientation.VERTICAL, spacing=3)
+        parent.pack_start(box, inline, inline, 0)
+        if not inline and kind not in ('check', 'iconcheck') and title and not hasattr(parent, 'sizes'):
             self.label(box, title)
         swatches = None
         if kind == 'combo':
@@ -175,8 +176,12 @@ class Toolkit(object):
             box.pack_start(control, False, False, 0)
             if hasattr(parent, 'sizes'):
                 parent.sizes.add_widget(control)
-        elif kind == 'check':
-            control = Gtk.CheckButton(label=title)
+        elif kind in ('check', 'iconcheck'):
+            control = Gtk.ToggleButton() if kind == 'iconcheck' else Gtk.CheckButton(label=title)
+            if kind == 'iconcheck':
+                control.set_image(Gtk.Image.new_from_stock(Gtk.STOCK_SELECT_ALL, Gtk.IconSize.MENU))
+                control.set_tooltip_text(title)
+                control.get_accessible().set_name(title)
             control.connect('toggled', lambda *_: callback())
             box.pack_start(control, False, False, 0)
         elif kind == 'number':
@@ -200,6 +205,11 @@ class Toolkit(object):
                 control.resize_handle = self.resize_handle(box, scroll, 40, 600, self.window.wording_resized, 'Drag to resize the exact wording')
         else:
             control = Gtk.Entry()
+            if inline:
+                control.set_width_chars(8)
+                control.set_placeholder_text(title)
+                control.set_tooltip_text(title + '; comma-separated')
+                control.get_accessible().set_name(title)
             if kind == 'pair':
                 control.set_width_chars(6)
                 control.set_tooltip_text(title + '; comma-separated')
@@ -208,9 +218,9 @@ class Toolkit(object):
                 parent.sizes.add_widget(control)
             else:
                 control.connect('changed', lambda *_: callback())
-            box.pack_start(control, False, False, 0)
-            if kind == 'palette':
-                swatches = self.row(box)
+            box.pack_start(control, inline, inline, 0)
+            if kind in ('palette', 'inline_palette'):
+                swatches = None if inline else self.row(box)
                 picker = Gtk.ColorButton()
                 picker.set_title(title)
                 def picked(*_):
@@ -219,8 +229,9 @@ class Toolkit(object):
                     old = control.get_text().strip()
                     control.set_text(value if title == 'Text colour' or not old else old + ', ' + value)
                 picker.connect('color-set', picked)
-                chooser = self.row(box)
-                self.label(chooser, 'Choose colour' if title == 'Text colour' else 'Add colour')
+                chooser = box if inline else self.row(box)
+                if not inline:
+                    self.label(chooser, 'Choose colour' if title == 'Text colour' else 'Add colour')
                 chooser.pack_start(picker, False, False, 0)
                 picker.set_tooltip_text('Choose a colour to add; edit the list above to remove colours.')
         if kind in ('text', 'entry', 'palette') and title not in ('Vertical guides (%; comma-separated)', 'Horizontal guides (%; comma-separated)'):
@@ -252,7 +263,7 @@ class Toolkit(object):
 
     def get(self, field):
         kind, control = field[:2]
-        if kind == 'check': return control.get_active()
+        if kind in ('check', 'iconcheck'): return control.get_active()
         if kind == 'number': return control.get_value()
         if kind == 'combo': return (control.get_active_id() or '').replace('_empty', '')
         if kind == 'text':
@@ -264,7 +275,7 @@ class Toolkit(object):
 
     def set(self, field, value):
         kind, control = field[:2]
-        if kind == 'check': control.set_active(bool(value))
+        if kind in ('check', 'iconcheck'): control.set_active(bool(value))
         elif kind == 'number': control.set_value(float(value or 0))
         elif kind == 'combo':
             if not control.set_active_id(value or '_empty'): control.set_active(-1)

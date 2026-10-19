@@ -113,7 +113,7 @@ class Toolkit(QObject):
         tabs._nodes.append(page)
         return page
     def field(self, parent, title, kind, options, callback):
-        return Node(kind, title, parent, options=options, callback=callback)
+        return Node(kind, title, parent, options=options, callback=callback, expand=kind.startswith("inline_"))
     def get(self, field): return field._value
     def set(self, field, value):
         if field._value != value:

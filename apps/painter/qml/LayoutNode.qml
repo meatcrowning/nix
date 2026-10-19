@@ -262,14 +262,16 @@ Item {
     Component {
         id: fieldComponent
         ColumnLayout {
-            implicitWidth: node.spec.kind === "pair" ? 78 : node.spec.kind === "combo" ? (node.spec.title ? 140 : 90) : 200
-            Label { text: node.spec.title; visible: node.spec.kind !== "check" && node.spec.kind !== "pair" && node.spec.title !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            implicitWidth: node.spec.kind === "iconcheck" ? 32 : node.spec.kind.startsWith("inline_") ? 140 : node.spec.kind === "pair" ? 78 : node.spec.kind === "combo" ? (node.spec.title ? 140 : 90) : 200
+            Label { text: node.spec.title; visible: node.spec.kind !== "iconcheck" && !node.spec.kind.startsWith("inline_") && node.spec.kind !== "check" && node.spec.kind !== "pair" && node.spec.title !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Loader {
                 Layout.fillWidth: true
                 sourceComponent: {
                     switch (node.spec.kind) {
                     case "combo": return comboField
                     case "check": return checkField
+                    case "iconcheck": return iconCheckField
+                    case "inline_palette": return inlinePaletteField
                     case "number": return numberField
                     case "text": return textField
                     case "pair": return pairField
@@ -319,6 +321,37 @@ Item {
             currentIndex: node.spec.options.indexOf(node.spec.value)
             displayText: currentText || (node.spec.title === "" ? "Mixed" : "Unspecified")
             onActivated: index => node.spec.edit(node.spec.options[index])
+        }
+    }
+    Component {
+        id: iconCheckField
+        Button {
+            checkable: true
+            checked: node.spec.value === true
+            icon.name: "edit-select-all"
+            display: AbstractButton.IconOnly
+            Accessible.name: node.spec.title
+            ToolTip.visible: hovered
+            ToolTip.text: node.spec.title
+            onToggled: node.spec.edit(checked)
+        }
+    }
+    Component {
+        id: inlinePaletteField
+        RowLayout {
+            Loader { sourceComponent: entryField; Layout.fillWidth: true }
+            Button {
+                icon.name: "color-picker"
+                display: AbstractButton.IconOnly
+                Accessible.name: "Add scene colour"
+                ToolTip.visible: hovered
+                ToolTip.text: "Add scene colour"
+                onClicked: sceneColour.open()
+            }
+            ColorDialog {
+                id: sceneColour
+                onAccepted: node.spec.colour(selectedColor.toString(), "")
+            }
         }
     }
     Component { id: checkField; CheckBox { text: node.spec.title; checked: node.spec.value === true; onToggled: node.spec.edit(checked) } }
@@ -400,6 +433,10 @@ Item {
                 objectName: "layoutField_" + node.spec.title
                 anchors.fill: parent
                 text: node.spec.value || ""
+                placeholderText: node.spec.kind.startsWith("inline_") ? node.spec.title : ""
+                Accessible.name: node.spec.title
+                ToolTip.visible: hovered && node.spec.kind.startsWith("inline_")
+                ToolTip.text: node.spec.title + "; comma-separated"
                 persistentSelection: true
                 onTextChanged: if (text !== node.spec.value) node.spec.edit(text)
             }

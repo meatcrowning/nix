@@ -180,8 +180,9 @@ owns normalized geometry and compilation to centered pixel coordinates;
 `layout_gtk.py` and `layout_qt.py`. Only `registry.build` compiles conditioning,
 using the actual output dimensions and current positive prompt as scene caption.
 Keep reference underlays, groups, locks and guides out of model-facing JSON.
-Layouts sit beneath the prompt boxes. The Region tab contains its list, canvas,
-then fields; Scene and Canvas tabs contain only their settings.
+Layouts sit beneath the prompt boxes. The Region tab contains its list, a row
+for the layout-enable icon, medium/genre tags and scene palette, then the
+canvas and region fields. Scene and Canvas retain their remaining settings.
 GTK embeds `layout_gtk.py`; Qt Quick renders the `layout_qt.py` descriptor tree
 through `LayoutNode.qml`.
 Add arms one box-drawing gesture, then returns to selection. The toolbar type

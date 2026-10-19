@@ -44,6 +44,10 @@ class LayoutUI(object):
         u.tab_body(tabs, self.side)
         region = u.tab(tabs, 'Region')
         self.list = u.region_list(region, self.selection_changed)
+        scene_controls = u.row(region)
+        self.add(scene_controls, 'enabled', 'Use layout for generation', 'iconcheck')
+        self.add(scene_controls, 'summary.meta', 'Medium / genre tags', 'inline_entry')
+        self.add(scene_controls, 'summary.palette', 'Scene palette', 'inline_palette')
         self.canvas = u.canvas(region, self)
         scene = u.tab(tabs, 'Scene')
         canvas = u.tab(tabs, 'Canvas')
@@ -54,10 +58,7 @@ class LayoutUI(object):
         self.align = u.field(canvas, 'Align / distribute selected regions', 'combo', ['left', 'center', 'right', 'top', 'middle', 'bottom', 'distribute horizontal', 'distribute vertical'], lambda: None)
         u.set(self.align, 'left')
         u.button(canvas, 'Align / distribute', lambda: self.command(lambda: self.model.align(u.get(self.align))))
-        self.add(scene, 'enabled', 'Use layout for generation', 'check')
         self.add(scene, 'summary.canvas', 'Composition', 'combo', M.CANVASES)
-        self.add(scene, 'summary.meta', 'Medium / genre tags (comma-separated)')
-        self.add(scene, 'summary.palette', 'Scene palette', 'palette')
         u.label(scene, 'Layout is experimental placement guidance. The preview is a composition sketch, not a generated result.')
         self.add(region, 'item.caption', 'Prompt', 'text')
         self.add(region, 'item.text', 'Exact wording', 'text')
@@ -302,8 +303,9 @@ class LayoutUI(object):
 
     def render(self, w, h, font=None):
         self.viewport = (max(100, w), max(100, h))
+        palettes = [self.model.doc.get('summary', {})] + self.model.doc['items']
         colours = {value: self.ui.preview_colour(value)
-                   for item in self.model.doc['items'] for value in item.get('palette', [])}
+                   for item in palettes for value in item.get('palette', [])}
         data, self.rect = M.svg(self.model, self.viewport[0], self.viewport[1], self.reference, self.zoom, self.pan, font, colours)
         return data
 
