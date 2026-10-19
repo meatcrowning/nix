@@ -404,6 +404,10 @@ def test():
                 dict(key='steps', kind='number', label='Steps', value=17, text='17'),
                 dict(key='sampler_name', kind='choice', label='Sampler', value='euler', text='euler')]))
             while Gtk.events_pending(): Gtk.main_iteration()
+            compare_x, compare_y = window.compare_panel.translate_coordinates(window.parameter_overlay, 0, 0)
+            current_x, current_y = window.params_scroll.translate_coordinates(window.parameter_overlay, 0, 0)
+            assert compare_x >= current_x + window.params_scroll.get_allocated_width(), (
+                'comparison overlaps current settings', compare_x, current_x, window.params_scroll.get_allocated_width())
             assert window.compare_panel.get_allocated_width() == window.params_scroll.get_allocated_width()
             assert (window.viewer.get_allocated_width(), window.viewer.get_allocated_height()) == before_viewport
             field, text = window.compare_controls[0]

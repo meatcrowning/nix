@@ -480,7 +480,8 @@ class Window(Gtk.Window):
     def compare_position(self, overlay, widget, allocation):
         if widget != self.compare_panel:
             return False
-        allocation.x = self.sidebar_split.get_child2().get_allocation().x
+        # Paned children have window-local origins; the right child's x is 0.
+        allocation.x = self.params_scroll.get_allocated_width()
         allocation.y = 0
         allocation.width = self.params_scroll.get_allocated_width()
         allocation.height = overlay.get_allocated_height()
