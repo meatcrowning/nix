@@ -212,7 +212,7 @@ def prepare(directory, environment):
     spec = importlib.util.spec_from_file_location("file_actions", HERE / "file-actions.py")
     file_actions = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(file_actions)
-    file_actions.install(data_home, PACKAGE, CONFIG["python"])
+    file_actions.install(data_home, PACKAGE, CONFIG["python"], state["config_home"])
 
     integration.host_icons(directory, state, CONFIG)
     isolated.install_defaults(state)

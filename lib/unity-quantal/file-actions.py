@@ -1,4 +1,5 @@
 """Native handlers for the original Files application's context menu."""
+import configparser
 import json
 from pathlib import Path
 import subprocess
@@ -7,7 +8,22 @@ import sys
 HERE = Path(__file__).resolve().parent
 
 
-def install(data_home, package, python):
+def install(data_home, package, python, config_home):
+    # Nautilus-Actions otherwise wraps native file actions in its own submenu.
+    preferences = Path(config_home) / 'nautilus-actions/nautilus-actions.conf'
+    settings = configparser.ConfigParser(interpolation=None)
+    settings.optionxform = str
+    settings.read(preferences)
+    if not settings.has_section('runtime'):
+        settings.add_section('runtime')
+    settings['runtime']['items-create-root-menu'] = 'false'
+    settings['runtime']['items-add-about-item'] = 'false'
+    preferences.parent.mkdir(parents=True, exist_ok=True)
+    temporary = preferences.with_suffix('.tmp')
+    with temporary.open('w') as stream:
+        settings.write(stream)
+    temporary.replace(preferences)
+
     directory = Path(data_home) / 'unity-quantal-session/file-manager/actions'
     directory.mkdir(parents=True, exist_ok=True)
     command = '/usr/local/bin/unity-host-launch -- ' + python + ' ' + str(package / 'libexec/unity-quantal/file-actions.py')
