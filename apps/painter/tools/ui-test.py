@@ -736,7 +736,7 @@ def test_chrome(win, ctl):
     titlebar = ["-" if isinstance(a, str) else a["id"]
                 for a in prop(APP, "tbButtons")]
     check("the titlebar has no orphan menu separators",
-          titlebar == ["gen", "stop", "-", "p", "g", "pv", "-", "set"],
+          titlebar == ["gen", "stop", "-", "injall", "compareparams", "-", "p", "g", "pv", "-", "set"],
           titlebar)
 
     # A panel badge can be a filename, and it must not run out of its panel.
@@ -5377,6 +5377,19 @@ def test_moss(win, ctl, tmp):
             win.grabWindow().save(os.environ["PAINTER_LAYOUT_SHOT"])
         import spellcheck
         from PySide6.QtCore import QMetaObject, Q_ARG, Qt
+        before_compare = dict(prop(APP, 'gen'))
+        comparison = next(item for item in walk(win.contentItem()) if item.objectName() == 'parameterCompare')
+        viewport = find(win.contentItem(), 'ResultsPane')
+        viewport_size = (viewport.width(), viewport.height())
+        comparison.setProperty('params', dict(model='Saved model', positive='Saved prompt', negative='blur',
+                               steps=17, cfg=3.5, seed=9007199254740991, toggles=dict(negpip=True)))
+        APP.setProperty('showParameterCompare', True)
+        spin(50)
+        check('comparison opens without changing current settings', prop(APP, 'gen') == before_compare)
+        check('comparison preserves viewport dimensions', (viewport.width(), viewport.height()) == viewport_size)
+        check('comparison renders saved prompt', any(prop(item, 'text') == 'Saved prompt'
+              for item in walk(comparison) if item.metaObject().indexOfProperty('text') >= 0))
+        APP.setProperty('showParameterCompare', False)
         class FixtureWriter:
             def start(self, request, callback):
                 self.request, self.callback = request, callback

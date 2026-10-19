@@ -100,6 +100,7 @@ class Window(Gtk.Window):
         self.save_timer = None
         self.connected = True
         self.closing = False
+        self.compare_open = False
         self.copy_serial = 0
         self.image_menu = None
         self.layout_doc = {}
@@ -131,7 +132,8 @@ class Window(Gtk.Window):
                        ('older', '_Previous Output', 'Page_Up', lambda: self.walk(-1)),
                        ('newer', '_Next Output', 'Page_Down', lambda: self.walk(1)),
                        ('refresh', '_Refresh', 'F5', lambda: self.send('rescan'))]),
-            ('_Generation', [('cancel', '_Cancel Jobs', None, lambda: self.send('cancel'))])]:
+            ('_Generation', [('cancel', '_Cancel and Save', None, lambda: self.send('cancel')),
+                              ('hard_stop', '_Hard Stop', None, lambda: self.send('hard_stop'))])]:
             top = Gtk.MenuItem.new_with_mnemonic(title)
             menu = Gtk.Menu()
             top.set_submenu(menu)
@@ -153,14 +155,16 @@ class Window(Gtk.Window):
         for key, stock, text, callback in [
             ('generate', Gtk.STOCK_EXECUTE, 'Generate', self.generate),
             ('cancel', Gtk.STOCK_STOP, 'Cancel', lambda: self.send('cancel')),
-            ('browse', Gtk.STOCK_INDEX, 'Browse', self.browse),
-            ('preview', Gtk.STOCK_ZOOM_FIT, 'View', self.view),
             ('restore', Gtk.STOCK_REVERT_TO_SAVED, 'Use Settings', self.restore),
-            ('open', Gtk.STOCK_OPEN, 'Open', self.open_output)]:
-            button = Gtk.ToolButton.new_from_stock(stock)
+            ('compare_params', Gtk.STOCK_PROPERTIES, 'Compare Settings', self.toggle_parameter_compare)]:
+            button = (Gtk.ToggleToolButton.new_from_stock(stock) if key == 'compare_params'
+                      else Gtk.ToolButton.new_from_stock(stock))
             button.set_label(text)
             button.set_is_important(True)
             button.connect('clicked', lambda _w, fn=callback: fn())
+            if key == 'cancel':
+                button.get_child().connect('button-press-event', self.cancel_menu)
+                button.set_tooltip_text('Stop after this step and decode; right-click for Hard stop')
             toolbar.insert(button, -1)
             self.actions.setdefault(key, []).append(button)
         outer.pack_start(toolbar, False, False, 0)
@@ -178,7 +182,19 @@ class Window(Gtk.Window):
         split.set_position(380)
         split.connect_after('button-release-event', self.sidebar_resized)
         split.connect_after('accept-position', self.sidebar_resized)
-        outer.pack_start(split, True, True, 0)
+        self.parameter_overlay = Gtk.Overlay()
+        self.parameter_overlay.add(split)
+        outer.pack_start(self.parameter_overlay, True, True, 0)
+        self.compare_panel = Gtk.EventBox()
+        self.compare_panel.set_no_show_all(True)
+        self.compare_scroll = Gtk.ScrolledWindow()
+        self.compare_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.compare_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.compare_content.set_border_width(12)
+        self.compare_scroll.add_with_viewport(self.compare_content)
+        self.compare_panel.add(self.compare_scroll)
+        self.parameter_overlay.add_overlay(self.compare_panel)
+        self.parameter_overlay.connect('get-child-position', self.compare_position)
         params = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         params.set_border_width(12)
         params_scroll = Gtk.ScrolledWindow()
@@ -449,6 +465,101 @@ class Window(Gtk.Window):
         GLib.timeout_add(40, self.poll)
         self.poll_count = 0
 
+    def cancel_menu(self, widget, event):
+        if event.button != 3:
+            return False
+        menu = Gtk.Menu()
+        item = Gtk.MenuItem(label='Hard stop')
+        item.connect('activate', lambda *_: self.send('hard_stop'))
+        menu.append(item)
+        menu.show_all()
+        self.stop_menu = menu
+        menu.popup(None, None, None, None, event.button, event.time)
+        return True
+
+    def compare_position(self, overlay, widget, allocation):
+        if widget != self.compare_panel:
+            return False
+        allocation.x = self.sidebar_split.get_child2().get_allocation().x
+        allocation.y = 0
+        allocation.width = self.params_scroll.get_allocated_width()
+        allocation.height = overlay.get_allocated_height()
+        return True
+
+    def toggle_parameter_compare(self):
+        self.compare_open = not self.compare_open
+        self.compare_panel.set_visible(self.compare_open)
+        if self.compare_open:
+            self.compare_scroll.show_all()
+            self.request_parameter_compare()
+
+    def request_parameter_compare(self):
+        if not self.compare_open:
+            return
+        for child in self.compare_content.get_children():
+            child.destroy()
+        note = label('Loading saved settings…' if self.selection and not self.selection.startswith('live://')
+                     else 'Select a saved output to compare.')
+        note.set_line_wrap(True)
+        self.compare_content.pack_start(note, False, False, 0)
+        self.compare_content.show_all()
+        if self.selection and not self.selection.startswith('live://'):
+            self.send('compare_params', path=self.selection)
+
+    def receive_parameter_compare(self, result):
+        if not self.compare_open or result.get('path') != self.selection:
+            return
+        for child in self.compare_content.get_children():
+            child.destroy()
+        title = label(os.path.basename(result['path']))
+        title.set_selectable(True)
+        title.set_line_wrap(True)
+        self.compare_content.pack_start(title, False, False, 0)
+        self.compare_controls = []
+        for field in result.get('fields', []):
+            title = label(field['label'])
+            self.compare_content.pack_start(title, False, False, 0)
+            kind = field['kind']
+            if kind == 'heading':
+                continue
+            if kind == 'prompt':
+                control = Gtk.TextView()
+                control.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+                control.set_editable(False)
+                control.get_buffer().set_text(field['text'])
+                holder = scroll(control, 100)
+            elif kind == 'check':
+                control = Gtk.CheckButton(label=field['label'])
+                control.set_active(field['value'])
+                control.connect('toggled', lambda w, value=field['value']: w.set_active(value))
+                holder = control
+                title.set_no_show_all(True)
+                title.hide()
+            elif kind == 'number':
+                value = float(field['value'])
+                control = CompactSpin(adjustment=Gtk.Adjustment(value, value, value, 1, 1, 0), climb_rate=1, digits=6)
+                control.set_editable(False)
+                control.connect('output', lambda w, text=field['text']: (w.set_text(text), True)[1])
+                control.set_text(field['text'])
+                holder = control
+            elif kind == 'choice':
+                control = Gtk.ComboBoxText.new_with_entry()
+                control.append_text(field['text'])
+                control.set_active(0)
+                control.get_child().set_editable(False)
+                holder = control
+            else:
+                control = Gtk.Entry()
+                control.set_text(field['text'])
+                control.set_editable(False)
+                holder = control
+            self.compare_controls.append((field, control))
+            self.compare_content.pack_start(holder, False, False, 0)
+        if not result.get('fields'):
+            self.compare_content.pack_start(label('No generation settings are saved in this output.'), False, False, 0)
+        self.compare_content.show_all()
+        self.compare_scroll.get_vadjustment().set_value(0)
+
     def text_box(self, key, height):
         box = ResizableText(height, lambda value: self.send('settings', heights={key: value}))
         box.text.get_buffer().connect('changed', self.changed)
@@ -702,6 +813,17 @@ class Window(Gtk.Window):
     def receive(self, op, reply):
         if self.closing:
             return False
+        if op == 'compare_params':
+            if reply.get('ok'):
+                self.receive_parameter_compare(reply['state'])
+            elif self.compare_open:
+                for child in self.compare_content.get_children():
+                    child.destroy()
+                note = label(reply.get('error', 'Could not read output settings'))
+                note.set_line_wrap(True)
+                self.compare_content.pack_start(note, False, False, 0)
+                self.compare_content.show_all()
+            return False
         if op in ('tag_start', 'tag_poll') or (op == 'disconnected' and getattr(self, 'tag_callback', None)):
             result = reply.get('state', {}) if reply.get('ok') else dict(error=reply.get('error', 'Tag worker disconnected'))
             if result.get('busy') and not result.get('error'):
@@ -936,8 +1058,10 @@ class Window(Gtk.Window):
             enabled = self.connected
             if key == 'generate':
                 enabled = enabled and bool(self.state.get('ready')) and bool(self.state.get('model'))
-            elif key == 'cancel':
+            elif key in ('cancel', 'hard_stop'):
                 enabled = enabled and bool(self.state.get('busy') or self.state.get('queue'))
+            elif key == 'compare_params':
+                enabled = self.compare_open or (enabled and bool(self.selection and not self.selection.startswith('live://')))
             elif key in ('restore', 'open', 'preview', 'zoom_in', 'zoom_out', 'fit', 'actual', 'older', 'newer'):
                 enabled = enabled and bool(self.selection)
             if key in ('zoom_in', 'zoom_out', 'fit', 'actual') and self.viewer.video:
@@ -1235,6 +1359,7 @@ class Window(Gtk.Window):
             if not path:
                 self.viewer.info.set_text('Select an output')
             self.send('view', path=path)
+            self.request_parameter_compare()
         self.update_actions()
 
     def move_viewer(self, box, page):

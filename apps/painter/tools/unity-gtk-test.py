@@ -383,6 +383,37 @@ def test():
             event.scroll.y = cy + view.scroll.get_vadjustment().get_value() - view.visible_origin[1]
             view.events.emit('scroll-event', event)
         elif step[0] == 16:
+            original_send, stops = window.send, []
+            window.send = lambda op, **kwargs: stops.append(op)
+            try:
+                window.actions['cancel'][-1].emit('clicked')
+                event = Gdk.Event.new(Gdk.EventType.BUTTON_PRESS)
+                event.button.button, event.button.time = 3, Gdk.CURRENT_TIME
+                assert window.actions['cancel'][-1].get_child().emit('button-press-event', event)
+                window.stop_menu.get_children()[0].activate()
+                window.stop_menu.popdown()
+                assert stops == ['cancel', 'hard_stop']
+            finally:
+                window.send = original_send
+            current = dict(window.values())
+            before_viewport = (window.viewer.get_allocated_width(), window.viewer.get_allocated_height())
+            window.toggle_parameter_compare()
+            while Gtk.events_pending(): Gtk.main_iteration()
+            window.receive_parameter_compare(dict(path=window.selection, fields=[
+                dict(key='positive', kind='prompt', label='Prompt', value='Saved prompt', text='Saved prompt'),
+                dict(key='steps', kind='number', label='Steps', value=17, text='17'),
+                dict(key='sampler_name', kind='choice', label='Sampler', value='euler', text='euler')]))
+            while Gtk.events_pending(): Gtk.main_iteration()
+            assert window.compare_panel.get_allocated_width() == window.params_scroll.get_allocated_width()
+            assert (window.viewer.get_allocated_width(), window.viewer.get_allocated_height()) == before_viewport
+            field, text = window.compare_controls[0]
+            assert text.get_mapped() and window.compare_scroll.get_visible()
+            buf = text.get_buffer()
+            buf.select_range(buf.get_start_iter(), buf.get_end_iter())
+            assert buf.get_has_selection() and not text.get_editable()
+            assert window.values() == current
+            window.toggle_parameter_compare()
+            assert not window.compare_panel.get_visible()
             original = dict(window.state)
             for rate, expected in [(2.5, '2.50 it/s'), (.25, '4.00 s/it'), (0, '')]:
                 state = dict(original, busy=True, progress=.42, elapsed=125, rate=rate)

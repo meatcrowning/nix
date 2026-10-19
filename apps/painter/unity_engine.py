@@ -301,6 +301,11 @@ class Engine:
     def dispatch(self, request):
         c = self.ctl
         op = request.get('op')
+        if op == 'compare_params':
+            import outmeta
+            from parameter_compare import fields
+            path = self.output_path(request['path'])
+            return dict(path=path, fields=fields(outmeta.params_for(path)))
         if op in ('tag_start', 'tag_poll'):
             from tagger import Tagger
             if not hasattr(self, 'tagger'):
@@ -339,6 +344,8 @@ class Engine:
                 else:
                     self.player.play()
         elif op == 'cancel':
+            c.stopAndSave()
+        elif op == 'hard_stop':
             c.cancel()
         elif op == 'rescan':
             c.rescan()

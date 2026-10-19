@@ -43,8 +43,13 @@ One actions table owns menus/toolbars; `tbButtons` filters rows marked `tb:`
 for Hyprland. Missing targets disable actions. Plasma QAction shortcuts disable
 duplicate QML shortcuts with `!root.plasma`. ResultsPane/ParamsPane explicitly
 forward child properties; extend the forwarding blocks with new properties.
-Parameters and results share a scene/splitter, not a QDockWidget. F7/showParams
-must switch view when the width cannot hold both panes.
+Parameters and results share a scene/splitter, not a QDockWidget.
+Compare Settings displays saved output metadata as selectable, read-only controls
+in a sibling overlay matching the parameters width. It must not resize the
+viewport, apply settings, or select a model. Keep missing metadata absent rather
+than substituting current defaults. Cancel uses stop-and-save; its Hard stop
+context action interrupts without decoding. F7/showParams must switch view when
+the width cannot hold both panes.
 
 Keep the content background MouseArea at `z: -1000`: unclaimed presses must not
 turn into Oxygen window drags. Native chrome retains its own dragging. Under

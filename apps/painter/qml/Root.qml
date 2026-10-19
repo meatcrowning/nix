@@ -580,6 +580,18 @@ Item {
         }
     }
 
+    property bool showParameterCompare: false
+    ParameterCompare {
+        visible: root.showParameterCompare
+        z: 30
+        x: root.split ? Math.max(0, controls.x - width) : 0
+        y: controls.y
+        width: controls.width
+        height: root.height - root.barH - y
+        params: root.selParams
+        path: root.selOne
+    }
+
     // ------------------------------------------------------------- overlays
 
     // The status bar owns the bottom strip of the window; the splitter stops
@@ -748,7 +760,7 @@ Item {
           menu: "file", icon: App.busy ? "list-add" : "media-playback-start",
           bar: true, shortcut: "Ctrl+Return" },
         { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
-          tip: "Stop and save", menu: "file", icon: "process-stop",
+          tip: "Cancel", barText: "Cancel", menu: "file", icon: "process-stop",
           bar: true, shortcut: "Ctrl+." },
         "-",
         { id: "open", tip: "Open in Viewer", menu: "file",
@@ -765,8 +777,11 @@ Item {
         // finished job (its words, its numbers, both) plus its prompt on the
         // clipboard. They act on the selected output, and there being no
         // selection is what greys them.
-        { id: "injall",    tip: "Reuse All Settings", menu: "edit",
+        { id: "injall", label: "use", tip: "Use Settings", menu: "edit", bar: true, barText: "Use Settings", tb: true,
           icon: "edit-paste", state: root.selParams ? 0 : 2 },
+        { id: "compareparams", label: "cmp", tip: "Compare Settings", menu: "edit",
+          icon: "view-split-left-right", bar: true, barText: "Compare Settings", tb: true,
+          checkable: true, state: root.showParameterCompare ? 1 : root.selOne !== "" ? 0 : 2 },
         { id: "injprompt", tip: "Reuse Prompt", menu: "edit",
           state: root.selParams ? 0 : 2 },
         { id: "injparams", tip: "Reuse Parameters", menu: "edit",
@@ -965,6 +980,7 @@ Item {
         else if (id === "full") App.toggleFullScreen()
         else if (id === "back") root.inView = false
         else if (id === "forward") root.enterView("")
+        else if (id === "compareparams") root.showParameterCompare = !root.showParameterCompare
         else if (id === "compare") root.showCompare = !root.showCompare
         else if (id.indexOf("cols") === 0) root.gridColumns = parseInt(id.substring(4))
         else if (id === "prev") root.stepOutput(-1)
@@ -1008,7 +1024,7 @@ Item {
         function onClicked(id) { root.tbAction(id) }
         function onRclicked(id, x, y) {
             if (id === "stop") root.ctxMenu.open(x, y, [
-                { label: "Cancel All Without Saving", trigger: () => App.cancel() }
+                { label: "Hard stop", trigger: () => App.cancel() }
             ])
         }
     }

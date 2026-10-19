@@ -130,6 +130,25 @@ engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
 assert engine.settings['seed'] == 42 and not engine.settings['randomSeed']
 assert engine.settings['positive'] == 'restored prompt'
 
+before_compare = json.dumps(engine.settings, sort_keys=True)
+compare = engine.dispatch(dict(op='compare_params', path='/home/test/out/fixture.png'))
+assert next(f for f in compare['fields'] if f.get('key') == 'positive')['text'] == 'restored prompt'
+assert json.dumps(engine.settings, sort_keys=True) == before_compare
+assert engine.model == params['model']
+from parameter_compare import fields
+large_seed = next(f for f in fields(dict(seed=2**64-1)) if f.get('key') == 'seed')
+assert large_seed['value'] == '18446744073709551615'
+assert fields({}) == []
+assert next(f for f in fields(dict(width=1024, height=1024, aspectW=7)) if f.get('key') == 'aspectW')['value'] == 7
+stop_calls = []
+real_soft, real_hard = ctl.stopAndSave, ctl.cancel
+ctl.stopAndSave = lambda: stop_calls.append('decode')
+ctl.cancel = lambda: stop_calls.append('hard')
+engine.dispatch(dict(op='cancel'))
+engine.dispatch(dict(op='hard_stop'))
+assert stop_calls == ['decode', 'hard']
+ctl.stopAndSave, ctl.cancel = real_soft, real_hard
+
 # Layout state survives settings persistence and is cleared by an older output.
 import moss_layout
 layout_editor = moss_layout.Editor(moss_layout.fresh(640, 768, 'A poster'))

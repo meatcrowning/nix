@@ -664,6 +664,13 @@ class Painter(QObject):
     statusChanged = Signal()
     promptWritten = Signal(str, 'QVariant')
 
+    @Slot('QVariant', result='QVariantList')
+    def comparisonFields(self, params):
+        from parameter_compare import fields
+        if hasattr(params, 'toVariant'):
+            params = params.toVariant()
+        return fields(params)
+
     @Slot(str, 'QVariant')
     def writePrompt(self, identity, request):
         from tagger import Tagger
@@ -3015,6 +3022,19 @@ def main():
         # `menuOrder`, and kdeshell keeps File first and Settings/Help last
         # whatever an app says (pylib/kdeshell.py MENU_ORDER).
         shell.bind_chrome(bar)
+        def bind_stop_menu():
+            button = shell._bar_buttons.get("stop")
+            if button is None or button.property("painterStopMenu"):
+                return
+            from PySide6.QtWidgets import QMenu
+            menu = QMenu(button)
+            menu.addAction("Hard stop", ctl.cancel)
+            button.setProperty("painterStopMenu", True)
+            button.setContextMenuPolicy(Qt.CustomContextMenu)
+            button.customContextMenuRequested.connect(
+                lambda point: menu.popup(button.mapToGlobal(point)))
+        bar.buttonsChanged.connect(lambda: QTimer.singleShot(0, bind_stop_menu))
+        bind_stop_menu()
         shell.bind_status()      # statusLine / statusProgress / statusRight
         # Settings → Configure painter… opens a real dialog here, not the
         # slide-out drawer, which is shaped for a titlebar cell that this
