@@ -31,7 +31,7 @@ Panel {
         // is what refuses the clicks: it propagates to the delegates' own
         // MouseAreas, so nothing has to remember to check.
         opacity: App.mode === "" ? 1 : 0.45
-        enabled: App.mode === ""
+        enabled: App.mode === "" && !root.comparisonMode
 
         KineticListView {
             id: list

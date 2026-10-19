@@ -22,6 +22,7 @@ Item {
     // exactly what the dock does — and then the pane is inert rather than
     // broken: `gen` is an empty object, not a crash.
     property Item app
+    property bool comparisonMode: false
 
     // ------------------------------------------------------- the app surface
     readonly property var gen: app ? app.gen : ({})

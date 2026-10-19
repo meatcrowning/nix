@@ -65,7 +65,7 @@ Column {
         }
         Button {
             text: "Write"
-            enabled: !writer.busy
+            enabled: !writer.busy && !root.comparisonMode
             onClicked: writer.write()
         }
         Button {

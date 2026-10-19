@@ -39,6 +39,7 @@ Column {
         label: "Encoder"
         hint: "Picked by matching this model's own dimensions against each encoder's hidden size."
         Picker {
+            enabled: !root.comparisonMode
             width: 250
             options: App.encoderNames
             value: App.encoderName
@@ -51,6 +52,7 @@ Column {
         label: "VAE"
         hint: "Some VAEs are structurally identical, so this falls back to a hash and then to your choice."
         Picker {
+            enabled: !root.comparisonMode
             width: 250
             options: App.vaeNames
             value: App.vaeName

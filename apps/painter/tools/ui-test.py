@@ -5381,7 +5381,7 @@ def test_moss(win, ctl, tmp):
         comparison = next(item for item in walk(win.contentItem()) if item.objectName() == 'parameterCompare')
         viewport = find(win.contentItem(), 'ResultsPane')
         viewport_size = (viewport.width(), viewport.height())
-        comparison.setProperty('params', dict(model='Saved model', positive='Saved prompt', negative='blur',
+        comparison.setProperty('params', dict(model=model, positive='Saved prompt', negative='blur', moss_layout=before_compare['moss_layout'],
                                steps=17, cfg=3.5, seed=9007199254740991, toggles=dict(negpip=True)))
         APP.setProperty('showParameterCompare', True)
         spin(50)
@@ -5389,7 +5389,17 @@ def test_moss(win, ctl, tmp):
         check('comparison preserves viewport dimensions', (viewport.width(), viewport.height()) == viewport_size)
         check('comparison renders saved prompt', any(prop(item, 'text') == 'Saved prompt'
               for item in walk(comparison) if item.metaObject().indexOfProperty('text') >= 0))
+        saved_pane = find(comparison, 'ParamsPane')
+        check('comparison uses the full parameter pane', saved_pane is not None)
+        saved_editor = find(comparison, 'LayoutEditor')
+        check('comparison includes layout editor', saved_editor is not None)
+        from PySide6.QtQml import qmlContext
+        saved_app = qmlContext(saved_editor).contextProperty('App')
+        check('comparison layout state is isolated', saved_app.layoutEditor is not ctl.layoutEditor)
+        saved_app.layoutEditor.editor.fields['summary.meta'].edit('saved tags')
+        check('comparison layout edits leave current settings alone', prop(APP, 'gen') == before_compare)
         APP.setProperty('showParameterCompare', False)
+        spin(50)
         class FixtureWriter:
             def start(self, request, callback):
                 self.request, self.callback = request, callback
@@ -5466,6 +5476,35 @@ def test_moss(win, ctl, tmp):
               {"positive": "a lake", "negative": "blur"})
 
 
+def test_snapshot_families(win, ctl):
+    from PySide6.QtQml import qmlContext
+    comparison = next(item for item in walk(win.contentItem()) if item.objectName() == 'parameterCompare')
+    current, selected = prop(APP, 'gen'), ctl.selectedName
+    prefs = qmlContext(APP).contextProperty('Prefs')
+    original_height = prefs.get('layout.canvasHeight')
+    APP.setProperty('showParameterCompare', True)
+    for row in ctl.models._rows:
+        family = ctl.reg.family_of(row['entry']) or {}
+        saved = dict(model=row['name'], positive='Saved family prompt', seed=42,
+                     edit=bool(family.get('edit')), loras=[dict(name='saved.safetensors', strength=.75)])
+        comparison.setProperty('params', saved)
+        spin(30)
+        pane = find(comparison, 'ParamsPane')
+        context = qmlContext(pane)
+        saved_app = context.contextProperty('App')
+        check('saved model context: ' + row['name'], saved_app.selectedName == row['name'])
+        context.contextProperty('Prefs').set('layout.canvasHeight', 999)
+        context.contextProperty('Loras').clear()
+        check('saved panel remains independent: ' + row['name'],
+              prop(APP, 'gen') == current and ctl.selectedName == selected
+              and prefs.get('layout.canvasHeight') == original_height)
+    comparison.setProperty('params', dict(model='Unavailable model', positive='Old output'))
+    spin(30)
+    check('unavailable model retains full panel', find(comparison, 'ParamsPane') is not None)
+    APP.setProperty('showParameterCompare', False)
+    spin(30)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -5491,6 +5530,7 @@ def main():
             test_preview_zoom(win, ctl, tmp)
         elif only == "moss":
             test_moss(win, ctl, tmp)
+            test_snapshot_families(win, ctl)
         elif only == "krea":
             test_krea(win, ctl, tmp)
         elif only == "tab":

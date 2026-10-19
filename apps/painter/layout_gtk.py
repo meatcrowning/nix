@@ -33,8 +33,8 @@ class CompactFields(Gtk.Bin):
 
 
 class Toolkit(object):
-    def __init__(self, parent):
-        self.window = parent.get_toplevel()
+    def __init__(self, parent, owner=None):
+        self.window = owner if owner is not None else parent.get_toplevel()
         self.alive = True
         self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.root.connect('destroy', lambda *_: setattr(self, 'alive', False))
@@ -476,7 +476,7 @@ class Toolkit(object):
         return base64.b64encode(data).decode('ascii') if ok else ''
 
     def choose_file(self):
-        dialog = Gtk.FileChooserDialog('Reference underlay', self.window, Gtk.FileChooserAction.OPEN,
+        dialog = Gtk.FileChooserDialog('Reference underlay', self.root.get_toplevel(), Gtk.FileChooserAction.OPEN,
                                       (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
         path = dialog.get_filename() if dialog.run() == Gtk.ResponseType.OK else ''
         dialog.destroy()
@@ -491,8 +491,8 @@ class Toolkit(object):
         return Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_text() or ''
 
 
-def open_editor(parent, doc, accepted):
-    toolkit = Toolkit(parent)
+def open_editor(parent, doc, accepted, owner=None):
+    toolkit = Toolkit(parent, owner)
     editor = LayoutUI(toolkit, doc, accepted)
     toolkit.root.show_all()
     toolkit.select_tab(editor.tabs, 0)

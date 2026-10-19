@@ -63,6 +63,7 @@ Panel {
     }
 
     FrameWell {
+        enabled: !root.comparisonMode
         active: root.gen.useInputImage && !panel.still
         path: App.inputImage
         url: App.inputImageUrl
@@ -86,6 +87,7 @@ Panel {
     }
 
     FrameWell {
+        enabled: !root.comparisonMode
         active: root.gen.useLastFrame && !panel.still
         path: App.lastImage
         url: App.lastImageUrl

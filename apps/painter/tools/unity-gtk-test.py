@@ -399,10 +399,16 @@ def test():
             before_viewport = (window.viewer.get_allocated_width(), window.viewer.get_allocated_height())
             window.toggle_parameter_compare()
             while Gtk.events_pending(): Gtk.main_iteration()
-            window.receive_parameter_compare(dict(path=window.selection, fields=[
-                dict(key='positive', kind='prompt', label='Prompt', value='Saved prompt', text='Saved prompt'),
-                dict(key='steps', kind='number', label='Steps', value=17, text='17'),
-                dict(key='sampler_name', kind='choice', label='Sampler', value='euler', text='euler')]))
+            import copy
+            saved = copy.deepcopy(window.state)
+            saved['settings']['positive'] = 'Saved prompt'
+            saved['settings']['steps'] = 17
+            import moss_layout
+            document = moss_layout.Editor(moss_layout.fresh(640, 768, 'Saved prompt'))
+            document.add('object')['caption'] = 'Saved region'
+            saved['settings']['moss_layout'] = document.doc
+            saved['flags']['layoutSupport'] = True
+            window.receive_parameter_compare(dict(path=window.selection, snapshot=saved))
             while Gtk.events_pending(): Gtk.main_iteration()
             compare_x, compare_y = window.compare_panel.translate_coordinates(window.parameter_overlay, 0, 0)
             current_x, current_y = window.params_scroll.translate_coordinates(window.parameter_overlay, 0, 0)
@@ -410,11 +416,21 @@ def test():
                 'comparison overlaps current settings', compare_x, current_x, window.params_scroll.get_allocated_width())
             assert window.compare_panel.get_allocated_width() == window.params_scroll.get_allocated_width()
             assert (window.viewer.get_allocated_width(), window.viewer.get_allocated_height()) == before_viewport
-            field, text = window.compare_controls[0]
-            assert text.get_mapped() and window.compare_scroll.get_visible()
+            form = window.compare_form
+            assert set(form.controls) == set(window.controls)
+            assert set(form.rows) == set(window.rows)
+            text = form.controls['positive']
+            assert window.compare_scroll.get_visible()
             buf = text.get_buffer()
             buf.select_range(buf.get_start_iter(), buf.get_end_iter())
-            assert buf.get_has_selection() and not text.get_editable()
+            assert buf.get_has_selection()
+            assert form.values()['positive'] == 'Saved prompt'
+            form.controls['steps'].set_value(19)
+            assert form.values()['steps'] == 19
+            assert form.layout_editor is not window.layout_editor
+            assert form.layout_editor.ui.window is form
+            assert form.layout_doc['items'][0]['caption'] == 'Saved region'
+            form.layout_editor.ui.set(form.layout_editor.fields['summary.meta'], 'saved medium')
             assert window.values() == current
             window.toggle_parameter_compare()
             assert not window.compare_panel.get_visible()

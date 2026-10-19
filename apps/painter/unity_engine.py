@@ -25,16 +25,8 @@ FLAGS = ('layoutSupport', 'isVideo', 'isEdit', 'editSampling', 'editPatches', 's
          'supportsLoras', 'encoderControls', 'referenceImages', 'optionalEditImage',
          'fixedSampling', 'nativeScheduler')
 HEIGHT_KEYS = {'positive': 'prompt.posH', 'negative': 'prompt.negH', 'system_prompt': 'unity.systemH'}
-BASE = dict(moss_layout={}, positive='', negative='', aspectW=1, aspectH=1, width=1024, height=1024, steps=20, cfg=7.0,
-            denoise=1.0, sampler_name='euler', scheduler='normal', seed=-1,
-            randomSeed=True, reuseSeed=False, count=1, batch_size=1,
-            duration=5.0, fps=24.0, megapixels=1.0, still=False,
-            editNoScale=True, editMegapixels=1.0, useInputImage=False,
-            useLastFrame=False, negpip=False, modelSampling=False,
-            ms=dict(shift_start=3.5, shift_end=1.2, start_percent=0.0, end_percent=.5,
-                    curve='ease_in', outside_window='hold', multiplier=1.0),
-            system_prompt='', krea_sampling='native', krea_shift=1.0,
-            reference_megapixels=1.0, useReferences=False)
+from parameter_compare import BASE, snapshot
+
 
 
 def submission(g, ctl):
@@ -303,9 +295,8 @@ class Engine:
         op = request.get('op')
         if op == 'compare_params':
             import outmeta
-            from parameter_compare import fields
             path = self.output_path(request['path'])
-            return dict(path=path, fields=fields(outmeta.params_for(path)))
+            return dict(path=path, snapshot=snapshot(outmeta.params_for(path), c))
         if op in ('tag_start', 'tag_poll'):
             from tagger import Tagger
             if not hasattr(self, 'tagger'):

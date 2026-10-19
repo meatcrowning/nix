@@ -22,6 +22,7 @@ Panel {
 
     // The primary — it decides the output size, the rest are references.
     FrameWell {
+        enabled: !root.comparisonMode
         active: true
         path: App.inputImage
         url: App.inputImageUrl
@@ -40,6 +41,7 @@ Panel {
 
     TextButton {
         label: "[ Choose image… ]"
+        enabled: !root.comparisonMode
         visible: App.optionalEditImage || App.referenceImages
         winActive: root.winActive
         onClicked: root.importImage()
@@ -53,6 +55,7 @@ Panel {
             required property int index
             required property string modelData
             FrameWell {
+                enabled: !root.comparisonMode
                 width: parent.width
                 active: true
                 path: modelData
@@ -78,6 +81,7 @@ Panel {
 
     // Add references below the last used well without reserving a preview.
     FrameWell {
+        enabled: !root.comparisonMode
         compact: true
         active: App.editMultipleImages && App.inputImage !== ""
         path: ""

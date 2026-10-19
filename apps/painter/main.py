@@ -664,12 +664,18 @@ class Painter(QObject):
     statusChanged = Signal()
     promptWritten = Signal(str, 'QVariant')
 
-    @Slot('QVariant', result='QVariantList')
-    def comparisonFields(self, params):
-        from parameter_compare import fields
+    @Slot(QObject, 'QVariant')
+    def mountComparison(self, host, params):
+        from comparison_qt import Comparison
         if hasattr(params, 'toVariant'):
             params = params.toVariant()
-        return fields(params)
+        if not hasattr(self, '_parameter_comparisons'):
+            self._parameter_comparisons = {}
+        previous = self._parameter_comparisons.pop(host, None)
+        if previous:
+            previous.close()
+        if params:
+            self._parameter_comparisons[host] = Comparison(self, host, params)
 
     @Slot(str, 'QVariant')
     def writePrompt(self, identity, request):

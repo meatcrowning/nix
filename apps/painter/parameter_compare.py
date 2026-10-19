@@ -1,77 +1,78 @@
-"""Saved-output controls, independent of the live generation state."""
+"""Project saved metadata into an independent normal parameter-panel state."""
+import copy
+import math
 
-LABELS = {
-    'model': 'Model', 'positive': 'Prompt', 'negative': 'Negative prompt',
-    'aspectW': 'AR width', 'aspectH': 'AR height', 'megapixels': 'MP',
-    'seed': 'Seed number', 'width': 'Width', 'height': 'Height',
-    'steps': 'Steps', 'cfg': 'Guidance', 'sampler_name': 'Sampler',
-    'scheduler': 'Schedule', 'denoise': 'Denoise', 'batch_size': 'Batch size',
-    'duration': 'Seconds', 'fps': 'Frames per second', 'system_prompt': 'System prompt',
-    'shift_start': 'Starting shift', 'shift_end': 'Ending shift',
-    'start_percent': 'Start fraction', 'end_percent': 'End fraction',
-    'multiplier': 'Multiplier', 'curve': 'Curve', 'outside_window': 'Outside interval',
-    'negpip': 'Negative prompt weighting', 'model_sampling': 'Model sampling patch',
-    'caption': 'Prompt', 'text': 'Exact wording', 'tags': 'Tags', 'palette': 'Palette',
-    'krea_sampling': 'Krea sampling', 'krea_shift': 'Krea shift',
-    'reference_megapixels': 'Reference budget (MP)', 'meta': 'Medium / genre tags',
-}
-ORDER = ('model', 'positive', 'negative', 'seed', 'aspectW', 'aspectH', 'megapixels', 'width', 'height', 'steps', 'cfg',
-         'sampler_name', 'scheduler', 'denoise', 'batch_size', 'duration', 'fps',
-         'system_prompt', 'krea_sampling', 'krea_shift', 'reference_megapixels')
+BASE = dict(moss_layout={}, positive='', negative='', aspectW=1, aspectH=1, width=1024, height=1024, steps=20, cfg=7.0,
+            denoise=1.0, sampler_name='euler', scheduler='normal', seed=-1,
+            randomSeed=True, reuseSeed=False, count=1, batch_size=1,
+            duration=5.0, fps=24.0, megapixels=1.0, still=False,
+            editNoScale=True, editMegapixels=1.0, useInputImage=False,
+            useLastFrame=False, negpip=False, modelSampling=False,
+            ms=dict(shift_start=3.5, shift_end=1.2, start_percent=0.0, end_percent=.5,
+                    curve='ease_in', outside_window='hold', multiplier=1.0),
+            system_prompt='', krea_sampling='native', krea_shift=1.0,
+            reference_megapixels=1.0, useReferences=False)
 
 
-def fields(params):
-    """Show only recorded values; never fill gaps with today's defaults."""
+def snapshot(params, ctl):
     if not params:
-        return []
-    data = dict(params)
-    data.update({k: v for k, v in (data.pop('prompt_boxes', {}) or {}).items()
-                 if k in ('positive', 'negative')})
-    if data.get('width', 0) > 0 and data.get('height', 0) > 0:
-        import math
-        width, height = int(data['width']), int(data['height'])
-        data.setdefault('aspectW', width // math.gcd(width, height))
-        data.setdefault('aspectH', height // math.gcd(width, height))
-        data.setdefault('megapixels', width * height / 1000000.0)
-    result = []
-
-    def add(key, value, title=None):
-        if value is None:
-            return
-        name = title or LABELS.get(key, key.replace('_', ' ').capitalize())
-        if isinstance(value, dict):
-            result.append(dict(kind='heading', label=name, value='', text=''))
-            for child in sorted(value):
-                add(child, value[child])
-            return
-        if isinstance(value, list):
-            if all(isinstance(v, (str, type(u''))) for v in value):
-                value = ', '.join(value)
-            else:
-                for index, item in enumerate(value):
-                    add(key, item, '%s %d' % (name, index + 1))
-                return
-        kind = ('choice' if key in ('model', 'sampler_name', 'scheduler', 'curve', 'outside_window', 'krea_sampling', 'kind') else
-                'check' if isinstance(value, bool) else
-                'number' if isinstance(value, (int, float)) and key != 'seed' and abs(value) <= 2**53 else
-                'prompt' if key in ('positive', 'negative', 'caption', 'text', 'system_prompt') else 'entry')
-        text = str(value) if not isinstance(value, (str, type(u''))) else value
-        result.append(dict(key=key, label=name, value=value if kind in ('number', 'check') else text, text=text, kind=kind))
-
-    for key in ORDER:
-        if key in data:
-            add(key, data.pop(key))
-    layout = data.pop('moss_layout', None)
-    for key in sorted(data):
-        add(key, data[key])
-    if layout:
-        add('summary', layout.get('summary', {}), 'Scene')
-        for index, region in enumerate(layout.get('items', [])):
-            result.append(dict(kind='heading', label='Region %d' % (index + 1), value='', text=''))
-            for key in ('kind', 'caption', 'text', 'tags', 'palette', 'box', 'typography', 'enabled', 'locked'):
-                if key in region:
-                    value = region[key]
-                    if key == 'box':
-                        value = ', '.join(str(v) for v in value)
-                    add(key, value)
-    return result
+        return None
+    p = copy.deepcopy(params)
+    name = p.get('model', '')
+    index = ctl.models.index_of_name(name)
+    entry = ctl.models.entry_at(index) if index >= 0 else None
+    family = (ctl.reg.family_of(entry) or {}) if entry and ctl.reg else {}
+    # Layout-bearing outputs remain inspectable even when their model is absent.
+    moss = family.get('id') == 'moss_image' or bool(p.get('moss_layout'))
+    defaults = ctl.reg.defaults_for(entry) if entry and ctl.reg else {}
+    g = copy.deepcopy(BASE)
+    g.update({k: v for k, v in defaults.items() if k in g})
+    g.update({k: v for k, v in p.items() if k in g})
+    g.update({k: v for k, v in (p.get('prompt_boxes') or {}).items() if k in ('positive', 'negative')})
+    if p.get('width', 0) > 0 and p.get('height', 0) > 0:
+        w, h = int(p['width']), int(p['height'])
+        divisor = math.gcd(w, h)
+        g.update(aspectW=p.get('aspectW', w // divisor), aspectH=p.get('aspectH', h // divisor),
+                 megapixels=p.get('megapixels', w * h / 1000000.0))
+    g.update(randomSeed=False, reuseSeed=False, still=p.get('kind') == 'still')
+    toggles = p.get('toggles') or {}
+    g.update(negpip=bool(toggles.get('negpip', g['negpip'])),
+             modelSampling=bool(toggles.get('model_sampling', g['modelSampling'])))
+    if p.get('model_sampling'):
+        g['ms'] = dict(g['ms'], **p['model_sampling'])
+    g.update(useInputImage=bool(p.get('use_input_image')), useLastFrame=bool(p.get('use_last_frame')),
+             useReferences=bool(p.get('reference_images_local')),
+             promptTransform=family.get('prompt_transform', 'none'),
+             multiple=int((family.get('resolution') or {}).get('multiple', 16)))
+    edit = bool(p.get('edit') or p.get('kind') == 'edit')
+    flags = dict(layoutSupport=moss, isVideo=family.get('kind') == 'video' or p.get('kind') in ('video', 'still'),
+                 isEdit=edit, nativeScheduler=family.get('native_scheduler', ''),
+                 supportsPatches=family.get('supports_patches', not moss),
+                 supportsLoras=family.get('supports_loras', not moss))
+    for target, source in [('encoderControls', 'encoder_controls'), ('referenceImages', 'reference_images'),
+                           ('optionalEditImage', 'optional_edit_image'), ('fixedSampling', 'fixed_sampling'),
+                           ('tagCompletion', 'tag_completion')]:
+        flags[target] = bool(family.get(source))
+    for target, source in [('editSampling', 'sampling_controls'), ('editPatches', 'patch_controls'),
+                           ('editSharedImageSize', 'shared_image_size')]:
+        flags[target] = bool((family.get('edit') or {}).get(source))
+    flags['editMultipleImages'] = (family.get('edit') or {}).get('max_images') != 1
+    models = [{k: v for k, v in row.items() if k != 'entry'} for row in ctl.models._rows]
+    if index < 0:
+        models.append(dict(name=name or 'Unrecorded model', known=False, problem='Model unavailable',
+                           family='', label='', quant='', pairing='', overridden=False, path='', size=0))
+        index = len(models) - 1
+    loras = [dict(dict(enabled=True, patches_clip=False, strength=1.0), **row) for row in p.get('loras') or []]
+    return dict(encoder=p.get('encoder', ''), vae=p.get('vae', ''),
+                separatePairing=bool(family) and family.get('loader_shape') != 'checkpoint',
+                model=name or 'Unrecorded model', selectedIndex=index, models=models,
+                mode='edit' if edit else '', modes=ctl.modes(), settings=g, flags=flags,
+                revision=0, samplers=list(ctl.samplers), schedulers=list(ctl.schedulers),
+                curves=list(ctl.curves), outsideWindows=list(ctl.outsideWindows),
+                input=p.get('input_image_local') or next(iter(p.get('reference_images_local') or []), ''), last=p.get('last_image_local', ''),
+                references=(p.get('reference_images_local') or [])[1:], loras=loras,
+                choices=[dict(name=r['name'], ok=True, reason='Saved LoRA', patches_clip=r.get('patches_clip', False), score=0)
+                         for r in loras],
+                wildcards=list(ctl.wildcardNames), wildcardTooltips=dict(ctl.wildcardTooltips),
+                lastSeed=g['seed'], familyLabel=family.get('label', ''),
+                note='Saved output settings. Unrecorded fields use model defaults; edits here are temporary.')

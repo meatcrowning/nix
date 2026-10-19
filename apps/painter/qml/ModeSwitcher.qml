@@ -98,7 +98,7 @@ Column {
                 label: "[ " + modelData.label + " ]"
                 tone: Theme.textDim
                 lit: App.mode === modelData.id
-                enabled: modelData.available
+                enabled: modelData.available && !root.comparisonMode
                 winActive: root.winActive
                 // Clicking the lit one turns it OFF and hands the list back —
                 // the same press that chose it, undoing it.
