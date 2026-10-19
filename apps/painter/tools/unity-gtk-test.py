@@ -424,6 +424,7 @@ def test():
             document = moss_layout.Editor(moss_layout.fresh(640, 768, 'Saved prompt'))
             document.add('object')['caption'] = 'Saved region'
             saved['settings']['moss_layout'] = document.doc
+            saved['settings']['negpip'] = True
             saved['flags']['layoutSupport'] = True
             window.receive_parameter_compare(dict(path=window.selection, snapshot=saved))
             while Gtk.events_pending(): Gtk.main_iteration()
@@ -434,6 +435,10 @@ def test():
             assert window.compare_panel.get_allocated_width() == window.params_scroll.get_allocated_width()
             assert (window.viewer.get_allocated_width(), window.viewer.get_allocated_height()) == before_viewport
             form = window.compare_form
+            assert form.ppm.get_visible() and form.ppm.get_active()
+            assert form.ppm.get_parent() is form.sampling.get_child()
+            form.ppm.set_active(False)
+            assert form.values()['negpip'] is False
             assert set(form.controls) == set(window.controls)
             assert set(form.rows) == set(window.rows)
             text = form.controls['positive']

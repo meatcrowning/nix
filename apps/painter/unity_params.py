@@ -242,6 +242,12 @@ class ParameterForm(object):
         self.grid.attach(loras, 0, self.grid_row, 2, 1)
         self.loras_button = loras
 
+        self.ppm = Gtk.CheckButton(label='PPM')
+        self.ppm.set_tooltip_text('Enable NegPiP and prompt weighting for MOSS-Image, e.g. (detail:1.5) or (detail:-1).')
+        self.ppm.connect('toggled', lambda control: self.controls['negpip'].set_active(control.get_active()))
+        self.controls['negpip'].connect('toggled', lambda control: self.ppm.set_active(control.get_active()))
+        params.pack_start(self.ppm, False, False, 0)
+
         return params_scroll
 
     def text_box(self, key, height):
@@ -463,6 +469,7 @@ class ParameterForm(object):
         self.controls['megapixels'].set_digits(6 if flags.get('layoutSupport') else 1)
         self.controls['megapixels'].set_range(.05 if flags.get('layoutSupport') else .1, 16 if flags.get('layoutSupport') else 8)
         self.layout_box.set_visible(bool(flags.get('layoutSupport')))
+        self.ppm.set_visible(bool(flags.get('layoutSupport')))
         edit, video = flags.get('isEdit', False), flags.get('isVideo', False)
         still = self.controls['still'].get_active()
         sampling = not edit or flags.get('editSampling', False)

@@ -5275,6 +5275,7 @@ def test_krea(win, ctl, tmp):
 
 
 def test_moss(win, ctl, tmp):
+    from PySide6.QtCore import QMetaObject, Qt, Q_ARG
     import importlib.util
     import unity_engine as E
     from PySide6.QtCore import QPointF
@@ -5289,6 +5290,11 @@ def test_moss(win, ctl, tmp):
         ctl.selectModelByName(model)
         spin(150)
         g = prop(APP, "gen")
+        ppm = next(item for item in walk(win.contentItem()) if item.property("label") == "PPM")
+        check(model + " PPM defaults off", not ppm.property("checked"))
+        QMetaObject.invokeMethod(ppm, "toggled", Qt.DirectConnection, Q_ARG(bool, True))
+        check(model + " PPM reaches settings", prop(APP, "gen")["negpip"] is True)
+        APP.set("negpip", False)
         check(model + " has author defaults", (g["steps"], g["cfg"], g["sampler_name"],
               g["scheduler"]) == (50, 3, "euler", "sgm_uniform"))
         check(model + " is a manual text-to-image choice", ctl.mode == "" and

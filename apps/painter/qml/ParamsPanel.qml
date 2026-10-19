@@ -92,4 +92,12 @@ Panel {
             }
         }
     }
+    Toggle {
+        label: "PPM"
+        visible: App.layoutSupport
+        checked: root.gen.negpip
+        onToggled: function (v) { root.set("negpip", v) }
+        ToolTipArea { anchors.fill: parent; text: "Enable NegPiP and prompt weighting for MOSS-Image, e.g. (detail:1.5) or (detail:-1)." }
+    }
+
 }

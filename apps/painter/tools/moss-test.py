@@ -77,6 +77,29 @@ def main():
                 assert inputs("scheduler")["denoise"] == overrides.get("denoise", 1)
                 assert "model_sampling" not in roles and "negpip" not in roles
                 assert built["params"]["prompt_boxes"] == {k: p[k] for k in ("positive", "negative")}
+            weighted = reg.build(entry, dict(positive="A (red:1.5) cap", negative="blur",
+                                             toggles={"negpip": True, "model_sampling": True}))
+            graph = G.Graph(weighted["prompt"])
+            assert graph.node("negpip")["class_type"] == "CLIPNegPip"
+            assert graph.node("negpip")["inputs"]["model"] == [graph.id_of("moss_guidance"), 0]
+            assert graph.node("encode_pos")["inputs"]["clip"] == [graph.id_of("negpip"), 1]
+            assert graph.node("encode_pos")["inputs"]["text"] == "A (red:1.5) cap, (blur:-1)"
+            assert graph.node("encode_neg")["inputs"]["text"] == ""
+            assert not graph.has("model_sampling")
+            for role in ("scheduler", "sampler"):
+                assert graph.node(role)["inputs"]["model"] == [graph.id_of("negpip"), 0]
+            assert weighted["params"]["toggles"] == {"negpip": True, "model_sampling": False}
+            assert weighted["params"]["prompt_boxes"] == {"positive": "A (red:1.5) cap", "negative": "blur"}
+            import moss_layout
+            layout = moss_layout.fresh(1024, 1024, "A poster")
+            editor = moss_layout.Editor(layout)
+            editor.add('object')['caption'] = '(hat:1.5)'
+            layout = editor.doc
+            layout['enabled'] = True
+            weighted_layout = reg.build(entry, dict(positive="A (red:1.5) cap", negative="blur",
+                                                    moss_layout=layout, toggles={"negpip": True}))
+            compiled = json.loads(G.Graph(weighted_layout['prompt']).node('encode_pos')['inputs']['text'])
+            assert compiled['summary']['caption'] == "A (red:1.5) cap, (blur:-1)"
             for p in ({"edit": True}, {"loras": [{"name": "wrong.safetensors"}]}):
                 try:
                     reg.build(entry, p)
