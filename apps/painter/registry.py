@@ -14,6 +14,7 @@ import os
 
 import fingerprint as fp
 import graph as G
+from dimensions import calc_dims
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FAMILY_DIR = os.path.join(HERE, "families")
@@ -1051,23 +1052,6 @@ def video_frames(duration: float, fps: float, min_frames: int = 5, chunk: int = 
     n = max(int(min_frames), int(round(float(duration) * float(fps))))
     n += (int(min_frames) - (n % int(chunk))) % int(chunk)
     return int(n)
-
-
-def calc_dims(aspect: str, megapixels: float, multiple: int = 64):
-    """Width/height for an aspect ratio at a target pixel count."""
-    try:
-        aw, ah = (float(x) for x in str(aspect).split(":"))
-    except ValueError:
-        aw = ah = 1.0
-    total = max(megapixels, 0.05) * 1_000_000
-    import math
-
-    h = math.sqrt(total * ah / aw)
-    w = h * aw / ah
-    q = max(int(multiple), 1)
-    w = max(q, int(round(w / q)) * q)
-    h = max(q, int(round(h / q)) * q)
-    return int(w), int(h)
 
 
 # ---------------------------------------------------------------------------

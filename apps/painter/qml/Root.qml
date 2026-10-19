@@ -286,6 +286,14 @@ Item {
                 gen = known
                 if (root.restored) saveSoon.restart()
             }
+            if (current && current.multiple) {
+                var sizeGen = clone(gen)
+                sizeGen.multiple = current.multiple
+                var dimensions = App.dims(sizeGen.aspectW + ":" + sizeGen.aspectH, sizeGen.megapixels, sizeGen.multiple)
+                restoreSize(sizeGen, Object.assign({}, sizeGen, dimensions))
+                sizeGen.width = dimensions.width; sizeGen.height = dimensions.height
+                gen = sizeGen
+            }
             return
         }
 
@@ -303,6 +311,9 @@ Item {
             // `danbooru_prompt` remains single-line itself.
             var d = App.modelDefaults()
             if (d && d.promptTransform !== undefined) g.promptTransform = d.promptTransform
+            if (d && d.multiple) g.multiple = d.multiple
+            var savedDims = App.dims(g.aspectW + ":" + g.aspectH, g.megapixels, g.multiple)
+            restoreSize(g, Object.assign({}, g, savedDims))
             gen = g
             materializeSeedPolicy()
             recomputeDims()
@@ -349,6 +360,14 @@ Item {
         g.width = wh.width; g.height = wh.height
         gen = g
         if (root.restored) saveSoon.restart()
+    }
+
+    function restoreSize(g, source) {
+        if (!(source.width > 0 && source.height > 0)) return
+        var size = App.sizeControls(source.width, source.height, g.multiple, source)
+        g.aspectW = size.aspectW
+        g.aspectH = size.aspectH
+        g.megapixels = size.megapixels
     }
 
     // The ONE place width/height are computed. Every control that can change
@@ -429,6 +448,7 @@ Item {
             seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed,
             batch_size: g.batch_size,
             width: g.width, height: g.height,
+            aspectW: g.aspectW, aspectH: g.aspectH, megapixels: g.megapixels,
             toggles: ({ negpip: g.negpip, model_sampling: g.modelSampling }),
             model_sampling: g.ms
         }
@@ -463,11 +483,7 @@ Item {
             g.positive = document.summary.caption
             // Preserve the requested ratio/budget through ordinary region edits.
             if (document.width !== g.width || document.height !== g.height) {
-                var a = document.width, b = document.height
-                while (b) { var t = a % b; a = b; b = t }
-                g.aspectW = document.width / a
-                g.aspectH = document.height / a
-                g.megapixels = document.width * document.height / 1000000
+                restoreSize(g, document)
             }
             root.gen = g
             root.recomputeDims()
@@ -1293,18 +1309,9 @@ Item {
         // The seed is a parameter, and reusing one is the whole point of
         // reusing an image's numbers — so it also stops being random.
         if (p.seed !== undefined) { g.seed = p.seed; g.randomSeed = false }
-        // Size comes back as the CONTROLS that produce it, not as raw pixels:
-        // width/height are derived, so setting them here would be undone by the
-        // next recompute and the panel would quietly disagree with the image it
-        // came from. Reduce the ratio (gcd) and back out the megapixels.
-        if (p.width > 0 && p.height > 0) {
-            var a = p.width, b = p.height
-            while (b) { var t = a % b; a = b; b = t }
-            g.aspectW = Math.round(p.width / a)
-            g.aspectH = Math.round(p.height / a)
-            g.megapixels = p.moss_layout && p.moss_layout.version ? p.width * p.height / 1000000
-                          : Math.round(p.width * p.height / 100000) / 10
-        }
+        // New outputs retain the requested controls; older outputs recover a
+        // compact equivalent only when it produces the same pixel dimensions.
+        restoreSize(g, p)
         if (p.toggles) {
             g.negpip = p.toggles.negpip === true
             g.modelSampling = p.toggles.model_sampling === true

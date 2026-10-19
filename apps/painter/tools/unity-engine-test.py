@@ -151,7 +151,7 @@ assert engine.model == params['model']
 from parameter_compare import snapshot
 assert snapshot(dict(seed=2**64-1), ctl)['settings']['seed'] == 2**64-1
 assert snapshot({}, ctl) is None
-assert snapshot(dict(width=1024, height=1024, aspectW=7), ctl)['settings']['aspectW'] == 7
+assert snapshot(dict(width=1024, height=1024, aspectW=7, aspectH=7, megapixels=1.05), ctl)['settings']['aspectW'] == 7
 stop_calls = []
 real_soft, real_hard = ctl.stopAndSave, ctl.cancel
 ctl.stopAndSave = lambda: stop_calls.append('decode')

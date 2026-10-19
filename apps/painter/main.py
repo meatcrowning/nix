@@ -1683,6 +1683,11 @@ class Painter(QObject):
                                     .get("clip_type_significant", True))
         return d
 
+    @Slot(int, int, int, 'QVariantMap', result='QVariantMap')
+    def sizeControls(self, width, height, multiple, preferred):
+        from dimensions import controls_for_size
+        return controls_for_size(width, height, multiple, preferred)
+
     @Slot(str, float, int, result="QVariant")
     def dims(self, aspect, megapixels, multiple):
         w, h = R.calc_dims(aspect, megapixels, multiple)

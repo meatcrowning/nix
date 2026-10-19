@@ -143,9 +143,13 @@ def run(parent):
     tabs.set_current_page(0)
     saved_values, saved_settings = parent.values(), parent.state['settings']
     saved_doc, saved_loading = parent.layout_doc, parent.loading
+    saved_multiple = parent.state.get('multiple', 64)
+    parent.state['multiple'] = 16
     parent.loading = True
     mp_digits = parent.controls['megapixels'].get_digits()
     try:
+        from dimensions import calc_dims
+        assert calc_dims('1:1', .082944, 64) == (256, 256)
         mp = parent.controls['megapixels']
         mp.set_digits(6)
         for value, display in [(1.0, '1'), (1.6, '1.6'), (.998656, '0.998656')]:
@@ -157,12 +161,16 @@ def run(parent):
         parent.layout_changed(M.fresh(1328, 752, 'Edited region'))
         values = parent.values()
         assert (values['aspectW'], values['aspectH'], values['megapixels']) == (16, 9, 1.0)
+        parent.layout_changed(M.fresh(1408, 2128, 'Rounded canvas'))
+        values = parent.values()
+        assert (values['aspectW'], values['aspectH'], values['megapixels']) == (2, 3, 3.0)
         parent.layout_changed(M.fresh(1600, 1000, 'Resized canvas'))
         values = parent.values()
         assert (values['aspectW'], values['aspectH'], values['megapixels']) == (8, 5, 1.6)
     finally:
         parent.controls['megapixels'].set_digits(mp_digits)
         parent.state['settings'], parent.layout_doc = saved_settings, saved_doc
+        parent.state['multiple'] = saved_multiple
         for key in ('aspectW', 'aspectH', 'megapixels'):
             parent.controls[key].set_value(saved_values[key])
         parent.controls['positive'].get_buffer().set_text(saved_values['positive'])

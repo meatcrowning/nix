@@ -553,12 +553,10 @@ class ParameterForm(object):
         # Region edits must not replace the requested ratio/budget with the
         # model's rounded pixel dimensions. Only an explicit canvas resize does.
         if (result['width'], result['height']) != (settings['width'], settings['height']):
-            a, b = result['width'], result['height']
-            while b:
-                a, b = b, a % b
-            self.controls['aspectW'].set_value(result['width'] // a)
-            self.controls['aspectH'].set_value(result['height'] // a)
-            self.controls['megapixels'].set_value(result['width'] * result['height'] / 1000000.0)
+            from dimensions import controls_for_size
+            size = controls_for_size(result['width'], result['height'], self.state.get('multiple', settings.get('multiple', 16)), self.values())
+            for key, value in size.items():
+                self.controls[key].set_value(value)
         self.loading = was_loading
         self.changed()
 

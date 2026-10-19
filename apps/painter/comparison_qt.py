@@ -75,6 +75,11 @@ class SnapshotApp(QObject):
     @Slot(result='QVariantList')
     def modes(self): return self.state['modes']
 
+    @Slot(int, int, int, 'QVariantMap', result='QVariantMap')
+    def sizeControls(self, width, height, multiple, preferred):
+        from dimensions import controls_for_size
+        return controls_for_size(width, height, multiple, preferred)
+
     @Slot(str, float, int, result='QVariantMap')
     def dims(self, aspect, megapixels, multiple):
         from registry import calc_dims

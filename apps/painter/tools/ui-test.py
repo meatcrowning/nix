@@ -3060,7 +3060,7 @@ def test_inject(win, ctl, tmp):
           == (44, 3.5, "heun", 99, False),
           (g["steps"], g["cfg"], g["sampler_name"], g["seed"], g["randomSeed"]))
     check("...including the size, as aspect + MP",
-          (g["aspectW"], g["aspectH"]) == (19, 13) and (g["width"], g["height"]) == (1216, 832),
+          (g["aspectW"], g["aspectH"]) == (3, 2) and (g["width"], g["height"]) == (1216, 832),
           (g["aspectW"], g["aspectH"], g["width"], g["height"]))
 
     base = prop(APP, "gen"); base["positive"] = "before"; base["steps"] = 7
@@ -5500,6 +5500,22 @@ def test_moss(win, ctl, tmp):
         after_layout = prop(APP, 'gen')
         check(model + ' region edits preserve requested ratio and budget',
               (after_layout['aspectW'], after_layout['aspectH'], after_layout['megapixels']) == (16, 9, 1.0))
+        APP.set('aspectW', 88)
+        APP.set('aspectH', 133)
+        APP.set('megapixels', 2.996224)
+        APP.recomputeDims()
+        APP.applyDefaults()
+        repaired = prop(APP, 'gen')
+        check(model + ' saved derived controls simplify on restore',
+              (repaired['aspectW'], repaired['aspectH'], repaired['megapixels'], repaired['width'], repaired['height']) == (2, 3, 3.0, 1408, 2128))
+        APP.injectAll({"width": 1408, "height": 2128, "positive": "Legacy output"})
+        compact = prop(APP, 'gen')
+        check(model + ' legacy output recovers compact controls without resizing',
+              (compact['aspectW'], compact['aspectH'], compact['megapixels'], compact['width'], compact['height']) == (2, 3, 3.0, 1408, 2128))
+        APP.injectAll({"width": 1328, "height": 752, "aspectW": 16, "aspectH": 9, "megapixels": 1.0})
+        compact = prop(APP, 'gen')
+        check(model + ' output restores original requested controls',
+              (compact['aspectW'], compact['aspectH'], compact['megapixels'], compact['width'], compact['height']) == (16, 9, 1.0, 1328, 752))
         document = moss_layout.fresh(1280, 720, "A poster")
         layout_editor = moss_layout.Editor(document)
         layout_editor.add("text")["caption"] = "A large headline"

@@ -217,8 +217,10 @@ def test():
             window.is_active = window.original_active
             assert window.values()['positive'] == 'restored prompt'
             assert window.values()['seed'] == 42
-            assert window.values()['aspectW'] == 5
-            assert window.values()['aspectH'] == 6
+            assert window.values()['aspectW'] == 4
+            assert window.values()['aspectH'] == 5
+            from dimensions import calc_dims
+            assert calc_dims('4:5', window.values()['megapixels'], window.state['multiple']) == (640, 768)
             assert registrations, 'GTK global menu did not register'
             assert window.picture.get_pixbuf() is not None
             assert window.viewer.scale > 1.0, ('fit size', window.viewer.scale, window.viewer.scroll.get_allocated_width(), window.viewer.scroll.get_allocated_height())

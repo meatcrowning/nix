@@ -18,6 +18,7 @@ from PySide6.QtCore import QTimer, QBuffer, QIODevice, QUrl, Qt
 from PySide6.QtGui import QGuiApplication, QImage
 
 import userprefs
+from dimensions import controls_for_size
 from unityipc import Server
 
 
@@ -43,7 +44,7 @@ def submission(g, ctl):
             if not g['still']:
                 keys += ['duration', 'fps']
         else:
-            keys += ['negative', 'cfg', 'batch_size']
+            keys += ['negative', 'cfg', 'batch_size', 'aspectW', 'aspectH', 'megapixels']
             if ctl.encoderControls:
                 keys += ['system_prompt', 'krea_sampling', 'krea_shift', 'reference_megapixels']
     p = {key: g[key] for key in keys}
@@ -120,6 +121,7 @@ class Engine:
         g.update(userprefs.saved_for(self.model, self.prefs._doc))
         self.settings = g
         self.resolve_dims()
+        g.update(controls_for_size(g['width'], g['height'], self.multiple, g))
         if not self._restored:
             self._restored = True
             try:
@@ -407,10 +409,7 @@ class Engine:
         g.update({key: value for key, value in (p.get('prompt_boxes') or {}).items()
                   if key in ('positive', 'negative')})
         if p.get('width', 0) > 0 and p.get('height', 0) > 0:
-            divisor = math.gcd(int(p['width']), int(p['height']))
-            g.update(aspectW=int(p['width']) // divisor, aspectH=int(p['height']) // divisor,
-                     megapixels=(p['width'] * p['height'] / 1000000 if p.get('moss_layout') else
-                                 round(p['width'] * p['height'] / 100000) / 10))
+            g.update(controls_for_size(p['width'], p['height'], c.modelDefaults().get('multiple', 64), p))
         if 'seed' in p:
             g.update(randomSeed=False, reuseSeed=False)
         if 'toggles' in p:

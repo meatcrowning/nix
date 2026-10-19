@@ -1,6 +1,6 @@
 """Project saved metadata into an independent normal parameter-panel state."""
 import copy
-import math
+from dimensions import controls_for_size
 
 BASE = dict(moss_layout={}, positive='', negative='', aspectW=1, aspectH=1, width=1024, height=1024, steps=20, cfg=7.0,
             denoise=1.0, sampler_name='euler', scheduler='normal', seed=-1,
@@ -30,10 +30,8 @@ def snapshot(params, ctl):
     g.update({k: v for k, v in p.items() if k in g})
     g.update({k: v for k, v in (p.get('prompt_boxes') or {}).items() if k in ('positive', 'negative')})
     if p.get('width', 0) > 0 and p.get('height', 0) > 0:
-        w, h = int(p['width']), int(p['height'])
-        divisor = math.gcd(w, h)
-        g.update(aspectW=p.get('aspectW', w // divisor), aspectH=p.get('aspectH', h // divisor),
-                 megapixels=p.get('megapixels', w * h / 1000000.0))
+        g.update(controls_for_size(p['width'], p['height'],
+                                   (family.get('resolution') or {}).get('multiple', 16), p))
     g.update(randomSeed=False, reuseSeed=False, still=p.get('kind') == 'still')
     toggles = p.get('toggles') or {}
     g.update(negpip=bool(toggles.get('negpip', g['negpip'])),
