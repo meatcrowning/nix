@@ -43,6 +43,12 @@ from unity_params import ParameterForm, SnapshotForm, scroll, label
 
 class Window(Gtk.Window, ParameterForm):
     def do_key_press_event(self, event):
+        if event.keyval == Gdk.KEY_Escape:
+            forms = [self, getattr(self, 'compare_form', None)]
+            cards = [card for form in forms if form for card in getattr(form, 'wildcard_cards', {}).values()]
+            if any(card.window.get_visible() for card in cards):
+                for card in cards: card.hide()
+                return True
         # GtkWindow activates menu accelerators before forwarding to the editor.
         # Let multiline text consume Enter and navigation before gallery shortcuts.
         if (isinstance(self.get_focus(), (Gtk.TextView, Gtk.Entry)) and

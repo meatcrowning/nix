@@ -73,6 +73,8 @@ def snapshot(params, ctl):
                 references=(p.get('reference_images_local') or [])[1:], loras=loras,
                 choices=[dict(name=r['name'], ok=True, reason='Saved LoRA', patches_clip=r.get('patches_clip', False), score=0)
                          for r in loras],
-                wildcards=list(ctl.wildcardNames), wildcardTooltips=dict(ctl.wildcardTooltips),
+                wildcards=sorted(p.get('wildcard_options', ctl.wildcardOptions)),
+                wildcardOptions=copy.deepcopy(p.get('wildcard_options', ctl.wildcardOptions)),
+                wildcardTooltips=dict(ctl.wildcardTooltips),
                 lastSeed=g['seed'], familyLabel=family.get('label', ''),
                 note='Saved output settings. Unrecorded fields use model defaults; edits here are temporary.')

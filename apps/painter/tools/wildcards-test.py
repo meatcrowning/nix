@@ -58,4 +58,22 @@ with tempfile.TemporaryDirectory() as tmp:
     editor.doc['enabled'] = False
     check('disabled layouts remain literal', W.expand_layout(editor.doc, 99, root) == editor.doc)
 
+    state_path = root / 'settings.json'
+    options = W.load_options(state_path, root)
+    options['colour'][0]['enabled'] = False
+    W.save_options(state_path, options)
+    check('line choices persist across sessions', W.load_options(state_path, root) == options)
+    check('disabled lines never selected', all(W.expand('__colour__', seed, root, options) == 'blue' for seed in range(30)))
+    check('same filtered choice in both boxes', W.expand_prompts('__colour__', '__colour__', 1, root, options) == ('blue', 'blue'))
+    (root / 'colour.txt').write_text('blue\nred\ngreen\n', encoding='utf-8')
+    check('choices follow lines through file reorder and new lines default on',
+          W.load_options(state_path, root)['colour'] == [dict(text='blue', enabled=True), dict(text='red', enabled=False), dict(text='green', enabled=True)])
+    check('metadata snapshot remains reproducible after wildcard file changes', W.expand('__colour__', 1, root, options) == 'blue')
+    options['colour'][1]['enabled'] = False
+    try:
+        W.expand('__colour__', 1, root, options)
+        raise AssertionError('all-disabled wildcard was accepted')
+    except ValueError as error:
+        check('all-disabled referenced wildcard gives actionable error', 'no enabled lines' in str(error))
+
 print("wildcards: all checks passed")

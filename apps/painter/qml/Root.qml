@@ -1273,6 +1273,7 @@ Item {
     }
 
     function injectParams(p) {
+        App.restoreWildcardOptions(p.wildcard_options === undefined ? null : p.wildcard_options)
         var g = clone(gen)
         for (var key of ["system_prompt", "krea_sampling", "krea_shift", "reference_megapixels"])
             if (p[key] !== undefined) g[key] = p[key]

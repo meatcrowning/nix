@@ -58,14 +58,11 @@ Panel {
             spacing: 2
             Repeater {
                 model: App.wildcardNames
-                Button {
+                WildcardButton {
                     required property string modelData
-                    objectName: "wildcard_" + modelData
-                    text: modelData
-                    focusPolicy: Qt.NoFocus
-                    ToolTip.visible: hovered
-                    ToolTip.text: App.wildcardTooltips[modelData] || "No usable lines in this wildcard."
-                    onClicked: {
+                    name: modelData
+                    editable: !root.comparisonMode
+                    onInserted: {
                         panel.pillsWanted = false
                         positive.insertWildcard(modelData)
                     }

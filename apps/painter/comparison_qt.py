@@ -49,6 +49,7 @@ class SnapshotApp(QObject):
         locals()[key] = frozen(key, 'QStringList')
     selectedIndex = frozen('selectedIndex', int)
     lastSeed = frozen('lastSeed')
+    wildcardOptions = frozen('wildcardOptions', 'QVariantMap')
     wildcardTooltips = frozen('wildcardTooltips', 'QVariantMap')
     layoutEditor = Property(QObject, lambda self: self.bridge, constant=True)
     generation = Property('QVariantMap', lambda self: self.state['settings'], constant=True)
@@ -67,6 +68,9 @@ class SnapshotApp(QObject):
         self.bridge = Bridge(self)
         self.bridge.edited.connect(self.layoutEdited)
         self.bridge.toolkit.generate_tags = lambda request, callback: callback(dict(error='Use the current settings panel to write.'))
+
+    @Slot(str, int, bool)
+    def setWildcardLine(self, name, index, enabled): pass
 
     @Slot(result='QVariantList')
     def modes(self): return self.state['modes']

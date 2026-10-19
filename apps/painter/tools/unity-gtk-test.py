@@ -78,6 +78,19 @@ def test():
             assert notifications == ['Generation completed'], notifications
             buttons = window.wildcard_buttons.get_children()
             assert [b.get_label() for b in buttons] == window.state['wildcards']
+            card = window.wildcard_cards['pose']
+            card.show()
+            while Gtk.events_pending(): Gtk.main_iteration()
+            assert card.window.get_mapped() and len(card.checks) == len(window.state['wildcardOptions']['pose'])
+            class Crossing:
+                detail = Gdk.NotifyType.NONLINEAR
+            card.cross(card.button, Crossing(), False, False)
+            card.cross(card.window, Crossing(), True, True)
+            card.maybe_hide()
+            assert card.window.get_visible()
+            card.checks[0].set_active(False)
+            card.hide()
+
             buffer = window.controls['positive'].get_buffer()
             buffer.set_text('alpha omega')
             buffer.place_cursor(buffer.get_iter_at_offset(6))
@@ -162,6 +175,8 @@ def test():
             window.controls['seed'].set_text('1234')
             window.generate()
         elif step[0] == 1:
+            assert not window.state['wildcardOptions']['pose'][0]['enabled']
+            window.send('wildcard_line', name='pose', index=0, enabled=True)
             assert notifications == ['Generation completed'], notifications
             window.is_active = lambda: False
             window.message('Background completion', completion=True)

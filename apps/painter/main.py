@@ -22,6 +22,7 @@ so weights stay warm between launches:  journalctl --user -u comfy-painter -f
 """
 
 import collections
+import copy
 import hashlib
 import json
 import os
@@ -699,20 +700,48 @@ class Painter(QObject):
     jobCompleted = Signal(str)        # native frontend applies its focus policy
     logChanged = Signal()
 
-    @Property('QStringList', constant=True)
-    def wildcardNames(self):
-        return Wildcards.names()
+    wildcardOptionsChanged = Signal()
+    wildcardNamesChanged = Signal()
 
-    @Property('QVariantMap', constant=True)
+    @Property('QStringList', notify=wildcardNamesChanged)
+    def wildcardNames(self):
+        return sorted(self._wildcard_options)
+
+    @Property('QVariantMap', notify=wildcardOptionsChanged)
     def wildcardTooltips(self):
-        return self._wildcard_tooltips
+        return {name: "\n".join(r['text'] for r in rows) or 'No usable lines in this wildcard.'
+                for name, rows in self._wildcard_options.items()}
+
+    @Property('QVariantMap', notify=wildcardOptionsChanged)
+    def wildcardOptions(self):
+        return copy.deepcopy(self._wildcard_options)
+
+    @Slot(str, int, bool)
+    def setWildcardLine(self, name, index, enabled):
+        rows = self._wildcard_options.get(name, [])
+        if 0 <= index < len(rows) and rows[index]['enabled'] != enabled:
+            options = self.wildcardOptions
+            options[name][index]['enabled'] = enabled
+            self.restoreWildcardOptions(options)
+
+    @Slot('QVariant')
+    def restoreWildcardOptions(self, options):
+        if hasattr(options, 'toVariant'):
+            options = options.toVariant()
+        # Older outputs contain no selection snapshot; retain current choices.
+        if options is None:
+            return
+        options = Wildcards.validate_options(options)
+        Wildcards.save_options(STATE / 'wildcards.json', options)
+        names_changed = sorted(options) != self.wildcardNames
+        self._wildcard_options = options
+        if names_changed:
+            self.wildcardNamesChanged.emit()
+        self.wildcardOptionsChanged.emit()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._wildcard_tooltips = {
-            name: "\n".join(Wildcards.choices(name)) or "No usable lines in this wildcard."
-            for name in Wildcards.names()
-        }
+        self._wildcard_options = Wildcards.load_options(STATE / 'wildcards.json')
         self.modeChanged.connect(self.editStateChanged)
         self.modelChanged.connect(self.editStateChanged)
         self.inputImageChanged.connect(self.editStateChanged)
@@ -1929,6 +1958,7 @@ class Painter(QObject):
             self._batch_pending = 0
             self._batch_toasted = False
         base = dict(params)
+        base["wildcard_options"] = copy.deepcopy(base.get("wildcard_options", self._wildcard_options))
         base["loras"] = self.loras.active()
         seed = int(base.get("seed", 0))
         randomise = bool(base.pop("randomSeed", False))
@@ -1964,25 +1994,26 @@ class Painter(QObject):
                 "positive": p.get("positive", ""),
                 "negative": p.get("negative", ""),
             }
-            positive, negative = Wildcards.expand_prompts(
-                raw_boxes["positive"], raw_boxes["negative"], p["seed"])
-            p["positive"] = positive
-            if "negative" in p:
-                p["negative"] = negative
             raw_layout = p.get("moss_layout")
-            if raw_layout:
-                p["moss_layout"] = Wildcards.expand_layout(raw_layout, p["seed"])
             try:
+                positive, negative = Wildcards.expand_prompts(
+                    raw_boxes["positive"], raw_boxes["negative"], p["seed"], options=p['wildcard_options'])
+                p["positive"] = positive
+                if "negative" in p:
+                    p["negative"] = negative
+                if raw_layout:
+                    p["moss_layout"] = Wildcards.expand_layout(raw_layout, p["seed"], options=p['wildcard_options'])
                 built = self.reg.build(entry, p, object_info=self._object_info)
             except G.ValidationError as exc:
                 self._set_status("ready")
                 self.toast.emit(exc.problems[0], True)
                 return
-            except G.GraphError as exc:
+            except (G.GraphError, ValueError) as exc:
                 self._set_status("ready")
                 self.toast.emit(str(exc), True)
                 return
             built["params"]["prompt_boxes"] = raw_boxes
+            built["params"]["wildcard_options"] = copy.deepcopy(p["wildcard_options"])
             if raw_layout:
                 # Execution conditioning contains the resolved descriptions;
                 # restoring/comparing the layout must retain its wildcard tokens.

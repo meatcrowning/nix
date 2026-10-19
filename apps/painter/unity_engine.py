@@ -362,6 +362,8 @@ class Engine:
                 row['patchesClip'] = bool(choices[row['name']].get('patches_clip'))
             c.loras.clear()
             c.restoreLoras(rows)
+        elif op == 'wildcard_line':
+            c.setWildcardLine(request['name'], int(request['index']), bool(request['enabled']))
         elif op == 'restore':
             self.restore(request['path'])
         elif op == 'open':
@@ -398,6 +400,7 @@ class Engine:
                 raise ValueError('The output model is unavailable: ' + model)
             c.setMode('')
             c.selectModel(index)
+        c.restoreWildcardOptions(p.get('wildcard_options'))
         g = self.settings
         g['moss_layout'] = p.get('moss_layout') or {}
         g.update({key: value for key, value in p.items() if key in BASE})
@@ -468,7 +471,7 @@ class Engine:
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,
                     queue=c.queue, elapsed=c.elapsed, rate=c.rate, messages=messages,
-                    wildcards=c.wildcardNames, wildcardTooltips=c.wildcardTooltips,
+                    wildcards=c.wildcardNames, wildcardTooltips=c.wildcardTooltips, wildcardOptions=c.wildcardOptions,
                     samplers=c.samplers, schedulers=c.schedulers, curves=c.curves, outsideWindows=c.outsideWindows,
                     gallery=gallery, total=c.gallery.count, offset=offset, limit=limit,
                     galleryQuery=request.get('filter', ''),

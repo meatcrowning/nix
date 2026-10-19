@@ -129,6 +129,19 @@ except ValueError:
 engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
 assert engine.settings['seed'] == 42 and not engine.settings['randomSeed']
 assert engine.settings['positive'] == 'restored prompt'
+import wildcards as W
+original_options = ctl.wildcardOptions
+engine.dispatch(dict(op='wildcard_line', name='pose', index=0, enabled=False))
+assert not W.load_options(P.STATE / 'wildcards.json')['pose'][0]['enabled']
+saved_options = ctl.wildcardOptions
+params['wildcard_options'] = saved_options
+Path('/home/test/out/fixture.png').write_bytes(P.pngmeta.upsert_text(
+    Path('/home/test/out/fixture.png').read_bytes(), {'painter': json.dumps(params)}))
+ctl.restoreWildcardOptions(original_options)
+engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
+assert ctl.wildcardOptions == saved_options
+ctl.restoreWildcardOptions(original_options)
+
 
 before_compare = json.dumps(engine.settings, sort_keys=True)
 compare = engine.dispatch(dict(op='compare_params', path='/home/test/out/fixture.png'))

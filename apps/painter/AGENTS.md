@@ -187,7 +187,13 @@ per-job seed. Selection is deterministic for `<seed>:<name>` across both boxes a
 missing/empty files leave tokens literal. Store expanded conditioning in output
 parameters and literal text in `prompt_boxes` for lossless injection. Expand
 region captions in a copy before layout compilation; saved `moss_layout` retains
-the original tokens for restore/comparison. Exact wording stays literal. Prompt
+the original tokens for restore/comparison. Exact wording stays literal.
+Wildcard buttons open hover cards with per-line checks. The controller owns
+`wildcards.json` under Painter’s state directory, independently of UI preferences.
+Line text and occurrence preserve checks through file reorders; new lines default
+on. Each job freezes full `wildcard_options` (texts and checks) into metadata;
+Use Settings restores that snapshot, while comparison only displays it. Referencing
+an all-disabled wildcard fails clearly; missing wildcard names remain literal. Prompt
 pills/completion must not reformat arbitrary user text.
 
 MOSS layout documents live in the per-model `moss_layout` setting. `moss_layout.py`

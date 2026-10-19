@@ -5311,6 +5311,35 @@ def test_moss(win, ctl, tmp):
         wildcard_button = next(item for item in walk(editor) if item.objectName() == 'wildcard_pose')
         wildcard_button.metaObject().invokeMethod(wildcard_button, 'clicked')
         check(model + " inserts wildcard at positive caret", prop(APP, 'gen')['positive'] == 'alpha __pose__omega')
+        from PySide6.QtCore import QObject, QPoint, QPointF
+        from PySide6.QtTest import QTest
+        scroll_to(editor)
+        wildcard_flick = wildcard_button.parentItem().parentItem().parentItem()
+        wildcard_flick.setProperty('contentX', max(0, wildcard_button.x() - 10))
+        spin(60)
+        point = wildcard_button.mapToScene(QPointF(wildcard_button.width()/2, wildcard_button.height()/2))
+        QTest.mouseMove(getattr(win, 'keyTarget', win), QPoint(int(point.x()), int(point.y())))
+        spin(500)
+        card = wildcard_button.findChild(QObject, 'wildcardCard_pose')
+        check('wildcard hover opens interactive card', card.property('opened'))
+        content = card.property('contentItem')
+        checkbox = find(content, 'CheckBox')
+        point = checkbox.mapToScene(QPointF(checkbox.width()/2, checkbox.height()/2))
+        QTest.mouseMove(getattr(win, 'keyTarget', win), QPoint(int(point.x()), int(point.y())))
+        spin(400)
+        check('wildcard card stays open under pointer', card.property('opened'))
+        enabled_before = ctl.wildcardOptions['pose'][0]['enabled']
+        click(win, checkbox)
+        spin(60)
+        check('wildcard line toggles without closing card', card.property('opened') and
+              ctl.wildcardOptions['pose'][0]['enabled'] != enabled_before)
+        import main as painter_module
+        import wildcards as wildcard_module
+        check('wildcard line choices persist across sessions',
+              wildcard_module.load_options(painter_module.STATE / 'wildcards.json')['pose'][0]['enabled'] != enabled_before)
+        ctl.setWildcardLine('pose', 0, enabled_before)
+        card.close()
+
         check(model + " exposes both normal prompts", len(find_all(editor, "PromptBox")) == 2
               and g["promptTransform"] == "none")
         panes = find(win.contentItem(), "ParamsPane")
@@ -5488,8 +5517,8 @@ def test_region_wildcard_submission(ctl, tmp):
     original_expand, original_layout = W.expand_prompts, W.expand_layout
     original_submit, original_info = ctl.client.submit, ctl._object_info
     sent = []
-    W.expand_prompts = lambda p, n, seed: original_expand(p, n, seed, root)
-    W.expand_layout = lambda doc, seed: original_layout(doc, seed, root)
+    W.expand_prompts = lambda p, n, seed, **kw: original_expand(p, n, seed, root, **kw)
+    W.expand_layout = lambda doc, seed, **kw: original_layout(doc, seed, root, **kw)
     ctl.client.submit = lambda graph, params: (sent.append(copy.deepcopy((graph, params))) or SimpleNamespace(meta={}))
     ctl._object_info = None
     jobs = ctl._jobs
@@ -5499,11 +5528,14 @@ def test_region_wildcard_submission(ctl, tmp):
         editor.doc['enabled'] = True
         original = copy.deepcopy(editor.doc)
         params = dict(positive='A __colour__ scene', negative='not __colour__',
-                      moss_layout=editor.doc, seed=42, width=1024, height=1024)
+                      moss_layout=editor.doc, seed=42, width=1024, height=1024,
+                      wildcard_options={'colour': [dict(text='red', enabled=True), dict(text='blue', enabled=False)]})
         ctl._start_jobs(ctl.reg.find('moss-base-int8.safetensors'), params, 2, reserved=True)
         check('region wildcards submit each batch job', len(sent) == 2)
         for index, (graph, metadata) in enumerate(sent):
-            colour = W.expand('__colour__', 42 + index, root)
+            colour = W.expand('__colour__', 42 + index, root, params['wildcard_options'])
+            check('disabled lines never reach the graph', colour == 'red')
+            check('generation metadata contains the full line selection', metadata['wildcard_options'] == params['wildcard_options'])
             layout = json.loads(metadata['positive'])
             check('submitted region uses its job seed', layout['items'][0]['caption'] == 'A ' + colour + ' cube')
             check('scene and region use the same wildcard choice', layout['summary']['caption'] == 'A ' + colour + ' scene')

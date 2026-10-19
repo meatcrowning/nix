@@ -5,6 +5,7 @@ import copy
 import random
 from gi.repository import Gtk, GLib, Pango
 from unity_widgets import ResizableText, CompactSpin
+from wildcard_gtk import WildcardCard
 
 def scroll(child, height=None):
     w = Gtk.ScrolledWindow()
@@ -58,6 +59,7 @@ class ParameterForm(object):
         self.model_info.set_no_show_all(True)
         params.pack_start(self.model_info, False, False, 0)
         self.wildcard_names = None
+        self.wildcard_cards = {}
         self.wildcard_buttons = Gtk.Box(spacing=2)
         wildcard_scroll = Gtk.ScrolledWindow()
         wildcard_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
@@ -644,13 +646,18 @@ class ParameterForm(object):
             self.wildcard_names = names
             for button in self.wildcard_buttons.get_children():
                 button.destroy()
+            self.wildcard_cards = {}
             for name in names:
                 button = Gtk.Button(label=name)
                 button.set_focus_on_click(False)
-                button.set_tooltip_text(state.get('wildcardTooltips', {}).get(name, 'No usable lines in this wildcard.'))
+                self.wildcard_cards[name] = WildcardCard(button,
+                    lambda index, enabled, name=name: self.send('wildcard_line', name=name, index=index, enabled=enabled),
+                    editable=not isinstance(self, SnapshotForm))
                 button.connect('clicked', lambda _, name=name: self.insert_wildcard(name))
                 self.wildcard_buttons.pack_start(button, False, False, 0)
             self.wildcard_buttons.show_all()
+        for name, card in self.wildcard_cards.items():
+            card.set_rows(state.get('wildcardOptions', {}).get(name, []))
 
 
 class SnapshotForm(ParameterForm):
