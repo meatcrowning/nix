@@ -1,4 +1,5 @@
 import QtQuick
+import "PromptWeight.js" as PromptWeight
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
@@ -373,6 +374,11 @@ Item {
                     text: node.spec.value || ""
                     wrapMode: node.spec.title === "Exact wording" ? TextEdit.NoWrap : TextEdit.Wrap
                     persistentSelection: true
+                    Keys.onPressed: function(event) {
+                        if (node.spec.kind === "prompt" && (event.modifiers & Qt.ControlModifier)
+                                && (event.key === Qt.Key_Up || event.key === Qt.Key_Down))
+                            event.accepted = PromptWeight.adjust(textEdit, event.key === Qt.Key_Up ? 0.1 : -0.1)
+                    }
                     onTextChanged: if (text !== node.spec.value) node.spec.edit(text)
                 }
                 Spelling { target: textEdit; viewport: textViewport }

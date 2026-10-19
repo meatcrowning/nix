@@ -254,6 +254,9 @@ class ParameterForm(object):
         box = ResizableText(height, lambda value: self.send('settings', heights={key: value}))
         box.text.get_buffer().connect('changed', self.changed)
         self.spelling.attach(box.text)
+        if key in ('positive', 'negative'):
+            from prompt_weight_gtk import attach
+            attach(box.text)
         self.text_boxes[key] = box
         return box
 

@@ -4563,11 +4563,11 @@ def test_tag_complete(win, ctl, keep):
     caret_in("1girl, long hair", len("1girl, long h"))
     key(win, Qt.Key_Up, Qt.ControlModifier)
     check("ctrl+up weights the tag under the caret",
-          edit.property("text") == "1girl, (long hair:1.05)",
+          edit.property("text") == "1girl, (long hair:1.10)",
           repr(edit.property("text")))
     key(win, Qt.Key_Up, Qt.ControlModifier)
     check("...and again, in the SAME group rather than a nested one",
-          edit.property("text") == "1girl, (long hair:1.10)",
+          edit.property("text") == "1girl, (long hair:1.20)",
           repr(edit.property("text")))
     key(win, Qt.Key_Down, Qt.ControlModifier)
     key(win, Qt.Key_Down, Qt.ControlModifier)
@@ -4575,7 +4575,7 @@ def test_tag_complete(win, ctl, keep):
           edit.property("text") == "1girl, long hair", repr(edit.property("text")))
     key(win, Qt.Key_Down, Qt.ControlModifier)
     check("...and it goes below 1 as well",
-          edit.property("text") == "1girl, (long hair:0.95)",
+          edit.property("text") == "1girl, (long hair:0.90)",
           repr(edit.property("text")))
 
     # A selection is what it acts on when there is one.
@@ -4584,7 +4584,7 @@ def test_tag_complete(win, ctl, keep):
     spin(80)
     key(win, Qt.Key_Up, Qt.ControlModifier)
     check("...and a selection is weighted as one thing",
-          edit.property("text") == "a (girl:1.05) in the rain",
+          edit.property("text") == "a (girl:1.10) in the rain",
           repr(edit.property("text")))
 
     edit.setProperty("text", "")
@@ -5400,6 +5400,18 @@ def test_moss(win, ctl, tmp):
         check(model + " drawing saves inline draft", len(prop(APP, "gen")["moss_layout"]["items"]) == 1)
         check(model + " outside drag clips to canvas", all(abs(a-b) < 1e-8 for a,b in zip(prop(APP, "gen")["moss_layout"]["items"][0]["box"][0::2], [0, 1])))
         check(model + " drawing returns to selection", ctl.layoutEditor.editor.model.tool == "select")
+        region_prompt = next(item for item in walk(editor) if item.objectName() == 'layoutField_Prompt')
+        region_prompt.forceActiveFocus()
+        region_prompt.setProperty('text', 'é fox in snow')
+        QMetaObject.invokeMethod(region_prompt, 'select', Q_ARG(int, 2), Q_ARG(int, 5))
+        QTest.keyClick(getattr(win, 'keyTarget', win), Qt.Key_Up, Qt.ControlModifier)
+        check(model + ' region selection gets weight', region_prompt.property('text') == 'é (fox:1.10) in snow')
+        QTest.keyClick(getattr(win, 'keyTarget', win), Qt.Key_Up, Qt.ControlModifier)
+        check(model + ' region weight increments in place', region_prompt.property('text') == 'é (fox:1.20) in snow')
+        check(model + ' region weight reaches saved layout', prop(APP, 'gen')['moss_layout']['items'][0]['caption'] == 'é (fox:1.20) in snow')
+        QTest.keyClick(getattr(win, 'keyTarget', win), Qt.Key_Down, Qt.ControlModifier)
+        QTest.keyClick(getattr(win, 'keyTarget', win), Qt.Key_Down, Qt.ControlModifier)
+        check(model + ' region neutral weight unwraps', region_prompt.property('text') == 'é fox in snow')
         list_handle = next(item for item in walk(editor) if item.objectName() == "regionListResizeHandle")
         if ancestor is not None:
             point = list_handle.mapToItem(ancestor, QPointF(0, 0))

@@ -211,6 +211,9 @@ class Toolkit(object):
             box.pack_start(control, False, False, 0)
         elif kind in ('text', 'prompt'):
             control = Gtk.TextView()
+            if kind == 'prompt':
+                from prompt_weight_gtk import attach
+                attach(control)
             control.set_wrap_mode(Gtk.WrapMode.NONE if title == 'Exact wording' else Gtk.WrapMode.WORD_CHAR)
             control.get_buffer().connect('changed', lambda *_: callback())
             scroll = Gtk.ScrolledWindow()

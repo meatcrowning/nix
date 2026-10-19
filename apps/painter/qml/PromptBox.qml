@@ -1,4 +1,5 @@
 import QtQuick
+import "PromptWeight.js" as PromptWeight
 import QtQuick.Controls
 import "../../qmlcommon"
 
@@ -225,44 +226,12 @@ Rectangle {
     //: selection when there is one and on the tag under the caret otherwise,
     //: reuses the group already around it rather than nesting a second one, and
     //: takes the group away again at 1.0 so a prompt does not silt up with
-    //: `(x:1.00)`. 0.05 a step, which is ComfyUI's default; the range is what
+    //: `(x:1.00)`. 0.1 a step; the range is what
     //: the transform reads as a weight at all (`graph._WEIGHTED`, +/-4).
     function adjustWeight(delta) {
-        var t = input.text
-        var s = input.selectionStart, e = input.selectionEnd
-        if (s === e) {
-            var b = box.tokenBounds()
-            if (!b.ok || b.start === b.end) return false
-            s = b.start; e = b.end
-        }
-        // Already inside a group? Its own bracket is the one to reuse. An
-        // ESCAPED bracket is part of a tag's name and is not a group (§ the tag
-        // completer), so it is skipped here too.
-        var open = -1, closeAt = -1, weight = 1.0
-        var i = s - 1
-        while (i >= 0 && t.charAt(i) === " ") i--
-        if (i >= 0 && t.charAt(i) === "(" && !(i > 0 && t.charAt(i - 1) === "\\")) {
-            var after = t.substring(e)
-            var m = /^\s*:\s*(-?\d*\.?\d+)\s*\)/.exec(after)
-            var bare = /^\s*\)/.exec(after)
-            if (m) { open = i; closeAt = e + m[0].length; weight = parseFloat(m[1]) }
-            else if (bare) { open = i; closeAt = e + bare[0].length; weight = 1.0 }
-        }
-        var body = t.substring(s, e)
-        if (body.trim() === "") return false
-        var w = Math.round((weight + delta) * 100) / 100
-        w = Math.max(-4, Math.min(4, w))
-        var from = open >= 0 ? open : s
-        var to = open >= 0 ? closeAt : e
-        var out = (w === 1) ? body : "(" + body + ":" + w.toFixed(2) + ")"
-        input.remove(from, to)
-        input.insert(from, out)
-        // The body stays selected, so the next press adjusts the same thing
-        // rather than whatever the caret happens to be beside now.
-        var at = from + (w === 1 ? 0 : 1)
-        input.select(at, at + body.length)
+        if (!PromptWeight.adjust(input, delta)) return false
         box.closeCompletion()
-        box.dismissedAt = at
+        box.dismissedAt = input.selectionStart
         return true
     }
 
@@ -464,7 +433,7 @@ Rectangle {
                 // and on every family — it is prompt syntax, not a tag feature.
                 if ((e.key === Qt.Key_Up || e.key === Qt.Key_Down)
                         && (e.modifiers & Qt.ControlModifier)) {
-                    if (box.adjustWeight(e.key === Qt.Key_Up ? 0.05 : -0.05))
+                    if (box.adjustWeight(e.key === Qt.Key_Up ? 0.1 : -0.1))
                         e.accepted = true
                     return
                 }

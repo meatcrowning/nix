@@ -291,6 +291,31 @@ def run(parent):
         assert len(accepted) == before_save + 1, 'final drag position was not saved'
     finally:
         e.render = render
+    from text_history_gtk import snapshot
+    for control in (parent.controls['positive'], parent.controls['negative'], e.fields['item.caption'][1]):
+        saved_text = snapshot(control)[0]
+        control.grab_focus()
+        buf = control.get_buffer()
+        buf.set_text('é fox in snow')
+        buf.select_range(buf.get_iter_at_offset(5), buf.get_iter_at_offset(2))
+        while Gtk.events_pending(): Gtk.main_iteration()
+        event = Gdk.Event.new(Gdk.EventType.KEY_PRESS)
+        event.key.keyval, event.key.state = Gdk.KEY_Up, Gdk.ModifierType.CONTROL_MASK
+        assert control.emit('key-press-event', event)
+        assert snapshot(control)[0] == 'é (fox:1.10) in snow'
+        assert control.emit('key-press-event', event)
+        assert snapshot(control)[0] == 'é (fox:1.20) in snow'
+        event.key.keyval = Gdk.KEY_Down
+        assert control.emit('key-press-event', event)
+        assert snapshot(control)[0] == 'é (fox:1.10) in snow'
+        assert control.emit('key-press-event', event)
+        assert snapshot(control)[0] == 'é fox in snow'
+        control._text_history.apply()
+        assert snapshot(control)[0] == 'é (fox:1.10) in snow', 'weight change must undo in one step'
+        if control is e.fields['item.caption'][1]:
+            assert e.row()['caption'] == snapshot(control)[0]
+        buf.set_text(saved_text)
+    print('PASS: main, negative and region weight shortcuts, 0.1 steps, selection, Unicode and undo')
     u.set(e.fields['item.caption'], 'A fox in the snowy forest')
     u.set(e.tag_count, 3)
     e.tag_auto.clicked()
