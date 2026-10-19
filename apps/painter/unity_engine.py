@@ -462,7 +462,7 @@ class Engine:
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,
                     queue=c.queue, elapsed=c.elapsed, rate=c.rate, messages=messages,
-                    wildcards=c.wildcardNames,
+                    wildcards=c.wildcardNames, wildcardTooltips=c.wildcardTooltips,
                     samplers=c.samplers, schedulers=c.schedulers, curves=c.curves, outsideWindows=c.outsideWindows,
                     gallery=gallery, total=c.gallery.count, offset=offset, limit=limit,
                     galleryQuery=request.get('filter', ''),

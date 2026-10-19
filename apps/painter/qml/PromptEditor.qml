@@ -64,7 +64,7 @@ Panel {
                     text: modelData
                     focusPolicy: Qt.NoFocus
                     ToolTip.visible: hovered
-                    ToolTip.text: "Insert __" + modelData + "__ into the positive prompt"
+                    ToolTip.text: App.wildcardTooltips[modelData] || "No usable lines in this wildcard."
                     onClicked: {
                         panel.pillsWanted = false
                         positive.insertWildcard(modelData)

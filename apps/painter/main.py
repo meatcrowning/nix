@@ -679,8 +679,16 @@ class Painter(QObject):
     def wildcardNames(self):
         return Wildcards.names()
 
+    @Property('QVariantMap', constant=True)
+    def wildcardTooltips(self):
+        return self._wildcard_tooltips
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._wildcard_tooltips = {
+            name: "\n".join(Wildcards.choices(name)) or "No usable lines in this wildcard."
+            for name in Wildcards.names()
+        }
         self.modeChanged.connect(self.editStateChanged)
         self.modelChanged.connect(self.editStateChanged)
         self.inputImageChanged.connect(self.editStateChanged)

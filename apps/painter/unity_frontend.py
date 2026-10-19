@@ -705,7 +705,7 @@ class Window(Gtk.Window):
             for name in names:
                 button = Gtk.Button(label=name)
                 button.set_focus_on_click(False)
-                button.set_tooltip_text('Insert __' + name + '__ into the positive prompt')
+                button.set_tooltip_text(state.get('wildcardTooltips', {}).get(name, 'No usable lines in this wildcard.'))
                 button.connect('clicked', lambda _, name=name: self.insert_wildcard(name))
                 self.wildcard_buttons.pack_start(button, False, False, 0)
             self.wildcard_buttons.show_all()
