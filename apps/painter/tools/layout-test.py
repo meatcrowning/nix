@@ -343,27 +343,27 @@ def qt():
     locked = editor.model.doc['items'][0]
     editor.model.doc['snap'] = False
     editor.selection_changed([locked['id']])
-    assert editor.fields['box.position'].enabled and editor.fields['box.size'].enabled
+    assert not editor.fields['box.position'].enabled and not editor.fields['box.size'].enabled
     original_box = list(locked['box'])
+    undo_count = len(editor.model.undo_stack)
     editor.units.edit('pixels')
-    width, height = editor.model.doc['width'], editor.model.doc['height']
     editor.fields['box.position'].edit('100, 100')
-    assert locked['box'][:2] == [100 / width, 100 / height]
     editor.key('Right')
-    assert abs(locked['box'][0] - 101 / width) < 1e-8 and locked['locked']
-    editor.model.undo(); editor.model.undo(); editor.refresh()
-    assert editor.row()['box'] == original_box
+    assert locked['box'] == original_box and len(editor.model.undo_stack) == undo_count
     editor.model.doc['items'] = [editor.row()]
     row = editor.row()
     row['box'] = [.1, .1, .6, .6]
-    editor.model.press(.3, .3)
-    editor.model.motion(.35, .35)
-    editor.model.release()
-    assert abs(row['box'][0] - .15) < 1e-8 and row['locked']
-    editor.model.press(.75, .75)
-    editor.model.motion(.85, .85)
-    editor.model.release()
-    assert abs(row['box'][2] - .7) < 1e-8
+    for x, y, jitter in ((.3, .3, 0), (.3, .3, .002), (.1, .1, .1), (.3, .3, .1)):
+        editor.selection_changed([row['id']])
+        before_click = copy.deepcopy(editor.model.doc)
+        undo_count = len(editor.model.undo_stack)
+        editor.model.press(x, y)
+        assert not editor.model.selected and editor.model.drag is None
+        editor.model.motion(x + jitter, y + jitter)
+        editor.model.release()
+        editor.refresh()
+        assert editor.model.doc == before_click and len(editor.model.undo_stack) == undo_count
+        assert not editor.fields['box.position'].enabled
     editor.selection_changed([])
     editor.model.press(.3, .3)
     assert editor.model.drag[0] == 'marquee', 'canvas selected a locked region'

@@ -217,9 +217,7 @@ class LayoutUI(object):
         if self.model.drag or doc == self.model.doc:
             return
         selected = list(self.model.selected)
-        list_selected = set(self.model.list_selected)
         self.model = M.Editor(doc)
-        self.model.list_selected = list_selected
         self.model.selected = [row['id'] for row in self.model.doc['items'] if row['id'] in selected]
         self.last_doc = copy.deepcopy(doc)
         self.refresh()
@@ -302,7 +300,6 @@ class LayoutUI(object):
         if self.syncing:
             return
         self.model.selected = ids
-        self.model.list_selected = set(ids)
         self.refresh()
 
     def refresh_list(self):
@@ -453,6 +450,8 @@ class LayoutUI(object):
             return True
         if name in ('Left', 'Right', 'Up', 'Down'):
             def nudge():
+                if not any(self.model.editable(r) for r in self.model.chosen()):
+                    return
                 self.model.checkpoint()
                 step = 10 if shift else 1
                 self.model.move((step if name == 'Right' else -step if name == 'Left' else 0) / self.model.doc['width'],

@@ -211,11 +211,18 @@ def run(parent):
     e.buttons['Lock'].clicked()
     assert not e.model.selected and e.model.doc['items'][0]['locked']
     e.selection_changed([e.model.doc['items'][0]['id']])
-    assert e.fields['box.position'][2].get_sensitive() and e.fields['box.size'][2].get_sensitive()
+    assert not e.fields['box.position'][2].get_sensitive() and not e.fields['box.size'][2].get_sensitive()
     before_locked_move = list(e.row()['box'])
     e.key('Down')
-    assert e.row()['box'] != before_locked_move and e.row()['locked']
-    e.key('z', True)
+    assert e.row()['box'] == before_locked_move and e.row()['locked']
+    locked_id = e.row()['id']
+    bx, by, bw, bh = before_locked_move
+    x, y = ox + (bx + bw / 2) * w, oy + (by + bh / 2) * h
+    e.pointer('press', x, y)
+    assert not e.model.selected and e.model.drag is None
+    e.pointer('move', x + 20, y + 20)
+    e.pointer('release', x + 20, y + 20)
+    e.selection_changed([locked_id])
     assert e.row()['box'] == before_locked_move
     e.buttons['Lock'].clicked()
     assert not e.model.chosen()[0]['locked']

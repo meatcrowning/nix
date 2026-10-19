@@ -147,7 +147,6 @@ class Editor(object):
     def __init__(self, doc):
         self.doc = valid(doc)
         self.selected = []
-        self.list_selected = set()
         self.undo_stack, self.redo_stack = [], []
         self.drag = None
         self.tool = 'select'
@@ -170,7 +169,7 @@ class Editor(object):
         return [i for i in self.doc['items'] if i['id'] in self.selected]
 
     def editable(self, row):
-        return not row.get('locked') or (row['id'] in self.selected and row['id'] in self.list_selected)
+        return not row.get('locked')
 
     def select(self, identity, toggle=False, include_locked=True):
         row = next((r for r in self.doc['items'] if r['id'] == identity), None)
@@ -295,6 +294,13 @@ class Editor(object):
             self.add(self.tool, [x, y, .001, .001])
             self.drag = ('draw', x, y, copy.deepcopy(self.doc['items']))
             return
+        # A selected lock consumes the press before handles or overlapping hits.
+        for row in reversed(self.chosen()):
+            bx, by, bw, bh = row['box']
+            if row.get('locked') and bx <= x <= bx + bw and by <= y <= by + bh:
+                self.selected.remove(row['id'])
+                self.drag = None
+                return
         # Handles take priority over overlapping regions.
         for row in reversed(self.chosen()):
             if not self.editable(row):
@@ -304,13 +310,12 @@ class Editor(object):
                 if abs(x - bx - hx * bw) < threshold and abs(y - by - hy * bh) < threshold:
                     self.drag = ('resize', x, y, copy.deepcopy(self.doc['items']), row['id'], hx, hy)
                     return
-        candidates = [r for r in reversed(self.chosen()) if r.get('locked') and self.editable(r)]
-        candidates += [r for r in reversed(self.doc['items']) if not r.get('locked')]
+        candidates = [r for r in reversed(self.doc['items']) if not r.get('locked')]
         hit = next((r for r in candidates if self.editable(r) and r['box'][0] <= x <= r['box'][0] + r['box'][2]
                     and r['box'][1] <= y <= r['box'][1] + r['box'][3]), None)
         if hit:
             if toggle or hit['id'] not in self.selected or (hit.get('group') and any(r.get('group') == hit['group'] and r['id'] not in self.selected for r in self.doc['items'])):
-                self.select(hit['id'], toggle, include_locked=bool(hit.get('locked') and self.editable(hit)))
+                self.select(hit['id'], toggle, include_locked=False)
             self.drag = ('move', x, y, copy.deepcopy(self.doc['items']))
         else:
             if not toggle:
