@@ -5476,6 +5476,26 @@ def test_moss(win, ctl, tmp):
               {"positive": "a lake", "negative": "blur"})
 
 
+def test_text_history_actions(win):
+    from PySide6.QtCore import Qt, Q_ARG
+    for box in find_all(win.contentItem(), 'PromptBox')[:2]:
+        edit = find(box, 'QQuickTextEdit')
+        before = prop(edit, 'text')
+        edit.forceActiveFocus()
+        edit.setProperty('cursorPosition', len(before))
+        key(win, Qt.Key_X, text='x')
+        after = prop(edit, 'text')
+        check('typing creates text history', after == before + 'x')
+        APP.metaObject().invokeMethod(APP, 'tbAction', Q_ARG('QVariant', 'undo'))
+        check('Edit Undo targets focused text', prop(edit, 'text') == before)
+        APP.metaObject().invokeMethod(APP, 'tbAction', Q_ARG('QVariant', 'redo'))
+        check('Edit Redo targets focused text', prop(edit, 'text') == after)
+        key(win, Qt.Key_Z, Qt.ControlModifier)
+        check('Ctrl+Z undoes text', prop(edit, 'text') == before)
+        key(win, Qt.Key_Z, Qt.ControlModifier | Qt.ShiftModifier)
+        check('Ctrl+Shift+Z redoes text', prop(edit, 'text') == after)
+
+
 def test_snapshot_families(win, ctl):
     from PySide6.QtQml import qmlContext
     comparison = next(item for item in walk(win.contentItem()) if item.objectName() == 'parameterCompare')
@@ -5531,6 +5551,7 @@ def main():
         elif only == "moss":
             test_moss(win, ctl, tmp)
             test_snapshot_families(win, ctl)
+            test_text_history_actions(win)
         elif only == "krea":
             test_krea(win, ctl, tmp)
         elif only == "tab":

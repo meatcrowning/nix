@@ -383,6 +383,8 @@ def test():
             event.scroll.y = cy + view.scroll.get_vadjustment().get_value() - view.visible_origin[1]
             view.events.emit('scroll-event', event)
         elif step[0] == 16:
+            import runpy
+            runpy.run_path('/home/test/nix/apps/painter/tools/text-history-gtk-test.py', init_globals={'parent': window})
             original_send, stops = window.send, []
             window.send = lambda op, **kwargs: stops.append(op)
             try:

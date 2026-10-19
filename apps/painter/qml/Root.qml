@@ -773,6 +773,11 @@ Item {
           icon: "document-import", shortcut: "Ctrl+O",
           state: (App.isEdit || (App.isVideo && !gen.still) || App.optionalEditImage || App.referenceImages) ? 0 : 2 },
         // ------------------------------------------------------------- edit
+        { id: "undo", tip: "Undo", menu: "edit", icon: "edit-undo", shortcut: "Ctrl+Z",
+          state: root.textFocused && root.Window.activeFocusItem.canUndo ? 0 : 2 },
+        { id: "redo", tip: "Redo", menu: "edit", icon: "edit-redo", shortcut: "Ctrl+Shift+Z",
+          state: root.textFocused && root.Window.activeFocusItem.canRedo ? 0 : 2 },
+        "-",
         // The gallery's right-click verbs, hoisted: the same three subsets of a
         // finished job (its words, its numbers, both) plus its prompt on the
         // clipboard. They act on the selected output, and there being no
@@ -953,6 +958,11 @@ Item {
     // ONE handler, TWO chromes: the hyprvtb titlebar column clicks it, and in a
     // Plasma session `menuBar` does (qmlcommon/DeskMenuBar.qml). Same ids.
     function tbAction(id) {
+        if (id === "undo" || id === "redo") {
+            var editor = root.Window.activeFocusItem
+            if (root.textFocused && editor[id] !== undefined) editor[id]()
+            return
+        }
         if (id === "gen") root.submit()
         else if (id === "stop") App.stopAndSave()
         else if (id === "p") root.view = 0

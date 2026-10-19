@@ -554,6 +554,7 @@ class ParameterForm(object):
         dialog = Gtk.FileChooserDialog('Choose an image', self.params_scroll.get_toplevel(), Gtk.FileChooserAction.OPEN,
                                        (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                                         Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+        self.params_scroll.get_toplevel().text_history.watch(dialog)
         filt = Gtk.FileFilter()
         filt.set_name('Images')
         for ext in ['png', 'jpg', 'jpeg', 'webp', 'bmp']:
@@ -566,6 +567,7 @@ class ParameterForm(object):
     def loras_dialog(self):
         dialog = Gtk.Dialog('LoRAs', self.params_scroll.get_toplevel(), Gtk.DialogFlags.MODAL,
                             (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_APPLY, Gtk.ResponseType.OK))
+        self.params_scroll.get_toplevel().text_history.watch(dialog)
         dialog.set_default_size(620, 420)
         store = Gtk.ListStore(bool, str, str, bool, str)
         active = dict((r['name'], r) for r in self.state.get('loras', []))
@@ -631,6 +633,10 @@ class ParameterForm(object):
         if settings_changed:
             self.revision = state['revision']
             self.apply_settings(state['settings'])
+            if old.get('model') != state['model']:
+                for control in self.controls.values():
+                    if hasattr(control, '_text_history'):
+                        control._text_history.reset()
 
     def update_wildcards(self, state):
         names = state.get('wildcards', [])

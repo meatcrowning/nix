@@ -478,6 +478,7 @@ class Toolkit(object):
     def choose_file(self):
         dialog = Gtk.FileChooserDialog('Reference underlay', self.root.get_toplevel(), Gtk.FileChooserAction.OPEN,
                                       (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+        self.root.get_toplevel().text_history.watch(dialog)
         path = dialog.get_filename() if dialog.run() == Gtk.ResponseType.OK else ''
         dialog.destroy()
         return path
@@ -494,6 +495,9 @@ class Toolkit(object):
 def open_editor(parent, doc, accepted, owner=None):
     toolkit = Toolkit(parent, owner)
     editor = LayoutUI(toolkit, doc, accepted)
+    for key, field in editor.fields.items():
+        if key.startswith(('item.', 'type.', 'box.')):
+            field[1]._text_history_scope = lambda: (toolkit.window.state.get('model'), tuple(editor.model.selected))
     toolkit.root.show_all()
     toolkit.select_tab(editor.tabs, 0)
     editor.region_visibility()

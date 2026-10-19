@@ -35,6 +35,7 @@ def local_path(uri):
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'pylib'))
 from unitygtk import Connection
 from spelling_gtk import Spelling
+from text_history_gtk import TextHistory
 
 
 from unity_params import ParameterForm, SnapshotForm, scroll, label
@@ -101,13 +102,17 @@ class Window(Gtk.Window, ParameterForm):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(outer)
         self.actions = {}
+        self.text_history = TextHistory(self.update_text_actions)
+        self.text_history.watch(self)
         menubar = Gtk.MenuBar()
         for title, entries in [
             ('_File', [('generate', '_Generate', '<Control>Return', self.generate),
                        ('open', '_Open Output', '<Control>o', self.open_output),
                        ('folder', 'Open Output _Folder', None, lambda: self.send('folder')),
                        ('quit', '_Quit', '<Control>q', self.close_window)]),
-            ('_Edit', [('restore', '_Use Output Settings', '<Control>r', self.restore),
+            ('_Edit', [('undo', '_Undo', '<Control>z', lambda: self.text_history.apply()),
+                       ('redo', '_Redo', '<Control><Shift>z', lambda: self.text_history.apply(True)),
+                       ('restore', '_Use Output Settings', '<Control>r', self.restore),
                        ('loras', '_LoRAs…', None, self.loras_dialog)]),
             ('_View', [('browse', '_Browse', 'Escape', self.browse),
                        ('preview', '_View Image', 'Return', self.view),
@@ -129,6 +134,9 @@ class Window(Gtk.Window, ParameterForm):
                 item.connect('activate', lambda _w, fn=callback: fn())
                 if accelerator:
                     code, mods = Gtk.accelerator_parse(accelerator)
+                    item.add_accelerator('activate', self.accels, code, mods, Gtk.AccelFlags.VISIBLE)
+                if key == 'redo':
+                    code, mods = Gtk.accelerator_parse('<Control>y')
                     item.add_accelerator('activate', self.accels, code, mods, Gtk.AccelFlags.VISIBLE)
                 if key in ('browse', 'preview'):
                     code, mods = Gtk.accelerator_parse('<Alt>Left' if key == 'browse' else '<Alt>Right')
@@ -491,11 +499,18 @@ class Window(Gtk.Window, ParameterForm):
             self.frame_tick = media['tick']
 
 
+    def update_text_actions(self):
+        for key in ('undo', 'redo'):
+            for widget in self.actions.get(key, []):
+                widget.set_sensitive(self.text_history.available(key == 'redo'))
+
     def update_actions(self):
         self.refresh_prompt_undo()
         for key, widgets in self.actions.items():
             enabled = self.connected
-            if key == 'generate':
+            if key in ('undo', 'redo'):
+                enabled = self.text_history.available(key == 'redo')
+            elif key == 'generate':
                 enabled = enabled and bool(self.state.get('ready')) and bool(self.state.get('model'))
             elif key in ('cancel', 'hard_stop'):
                 enabled = enabled and bool(self.state.get('busy') or self.state.get('queue'))

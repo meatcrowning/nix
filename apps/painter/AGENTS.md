@@ -103,6 +103,11 @@ window, requesting previews near the visible rows; the GTK decoder queue and
 image cache each cap at 64 entries. Keep paging independent of the selected
 preview and preserve scroll position when replacing the window.
 
+GTK 3.6 text history lives in `text_history_gtk.py`, with a separate bounded
+stack per focused editable widget. Global Edit Undo/Redo and Ctrl+Z /
+Ctrl+Shift+Z target that widget; model/region loads must not carry text history
+into a different document. Qt uses the focused editor’s native history.
+
 Use real GTK widgets, Ambiance, server decorations and the original appmenu
 exporter. `lib/unity-quantal/assemble.py` owns that runtime dependency. Verify with
 `tools/unity-test.sh UNITY_PACKAGE` (under this app): a private PID/mount/network
