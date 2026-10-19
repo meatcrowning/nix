@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import random
 import re
 from pathlib import Path
@@ -31,7 +32,7 @@ def expand(text: str, seed: int, root: Path = WILDCARDS) -> str:
 
     Unknown names stay literal so a typo cannot silently disappear from a
     submitted prompt. Repeated uses of one name, including across positive and
-    negative prompts when sharing *cache*, resolve to the same line.
+    negative and region prompts with the same seed, resolve to the same line.
     """
     picked: dict[str, str] = {}
 
@@ -54,3 +55,13 @@ def expand_prompts(positive: str, negative: str, seed: int,
     joined = positive + "\0" + negative
     expanded = expand(joined, seed, root)
     return tuple(expanded.split("\0", 1))
+
+
+def expand_layout(layout: dict, seed: int, root: Path = WILDCARDS) -> dict:
+    """Expand region descriptions in a copy; preserve the editable document."""
+    result = copy.deepcopy(layout)
+    if result.get("enabled"):
+        for item in result.get("items", []):
+            if isinstance(item.get("caption"), str):
+                item["caption"] = expand(item["caption"], seed, root)
+    return result

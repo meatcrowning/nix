@@ -1969,6 +1969,9 @@ class Painter(QObject):
             p["positive"] = positive
             if "negative" in p:
                 p["negative"] = negative
+            raw_layout = p.get("moss_layout")
+            if raw_layout:
+                p["moss_layout"] = Wildcards.expand_layout(raw_layout, p["seed"])
             try:
                 built = self.reg.build(entry, p, object_info=self._object_info)
             except G.ValidationError as exc:
@@ -1980,6 +1983,10 @@ class Painter(QObject):
                 self.toast.emit(str(exc), True)
                 return
             built["params"]["prompt_boxes"] = raw_boxes
+            if raw_layout:
+                # Execution conditioning contains the resolved descriptions;
+                # restoring/comparing the layout must retain its wildcard tokens.
+                built["params"]["moss_layout"] = raw_layout
             job = self.client.submit(built["prompt"], built["params"])
             job.meta = {"params": built["params"], "pairing": built["pairing"]}
             self._jobs += 1

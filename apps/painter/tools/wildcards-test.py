@@ -35,4 +35,27 @@ with tempfile.TemporaryDirectory() as tmp:
     check("both prompt boxes expand", "__" not in pos and "__" not in neg)
     check("one name has one pick across both boxes", pos.split(", ")[1] == neg[4:])
 
+    import copy
+    import moss_layout as M
+    editor = M.Editor(M.fresh(1024, 1024, 'A poster'))
+    region = editor.add('object')
+    region['caption'] = 'A __colour__ cube beside a __missing__ object'
+    text = editor.add('text')
+    text.update(caption='__colour__ lettering', text='__colour__')
+    editor.doc['enabled'] = True
+    original = copy.deepcopy(editor.doc)
+    resolved = W.expand_layout(editor.doc, 99, root)
+    colour = W.expand('__colour__', 99, root)
+    check('region prompts expand with the main prompt selection',
+          resolved['items'][0]['caption'] == 'A ' + colour + ' cube beside a __missing__ object')
+    check('repeated region wildcards share the selection', resolved['items'][1]['caption'] == colour + ' lettering')
+    check('exact wording stays literal', resolved['items'][1]['text'] == '__colour__')
+    check('editable layout is not mutated', editor.doc == original)
+    check('layout geometry is unchanged', resolved['items'][0]['box'] == region['box'])
+    check('layout selection is deterministic', resolved == W.expand_layout(editor.doc, 99, root))
+    check('different job seeds can produce different region prompts',
+          len({W.expand_layout(editor.doc, seed, root)['items'][0]['caption'] for seed in range(20)}) == 2)
+    editor.doc['enabled'] = False
+    check('disabled layouts remain literal', W.expand_layout(editor.doc, 99, root) == editor.doc)
+
 print("wildcards: all checks passed")

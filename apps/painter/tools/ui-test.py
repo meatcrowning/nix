@@ -5476,6 +5476,48 @@ def test_moss(win, ctl, tmp):
               {"positive": "a lake", "negative": "blur"})
 
 
+def test_region_wildcard_submission(ctl, tmp):
+    import copy
+    import moss_layout as M
+    import wildcards as W
+    from types import SimpleNamespace
+    from pathlib import Path
+    root = Path(tmp) / 'region-wildcards'
+    root.mkdir()
+    (root / 'colour.txt').write_text('red\nblue\n', encoding='utf-8')
+    original_expand, original_layout = W.expand_prompts, W.expand_layout
+    original_submit, original_info = ctl.client.submit, ctl._object_info
+    sent = []
+    W.expand_prompts = lambda p, n, seed: original_expand(p, n, seed, root)
+    W.expand_layout = lambda doc, seed: original_layout(doc, seed, root)
+    ctl.client.submit = lambda graph, params: (sent.append(copy.deepcopy((graph, params))) or SimpleNamespace(meta={}))
+    ctl._object_info = None
+    jobs = ctl._jobs
+    try:
+        editor = M.Editor(M.fresh(1024, 1024, 'A __colour__ scene'))
+        editor.add('object')['caption'] = 'A __colour__ cube'
+        editor.doc['enabled'] = True
+        original = copy.deepcopy(editor.doc)
+        params = dict(positive='A __colour__ scene', negative='not __colour__',
+                      moss_layout=editor.doc, seed=42, width=1024, height=1024)
+        ctl._start_jobs(ctl.reg.find('moss-base-int8.safetensors'), params, 2, reserved=True)
+        check('region wildcards submit each batch job', len(sent) == 2)
+        for index, (graph, metadata) in enumerate(sent):
+            colour = W.expand('__colour__', 42 + index, root)
+            layout = json.loads(metadata['positive'])
+            check('submitted region uses its job seed', layout['items'][0]['caption'] == 'A ' + colour + ' cube')
+            check('scene and region use the same wildcard choice', layout['summary']['caption'] == 'A ' + colour + ' scene')
+            check('compiled layout reaches the graph', any(node.get('inputs', {}).get('text') == metadata['positive'] for node in graph.values()))
+            check('saved region tokens survive for restore and comparison', metadata['moss_layout'] == original)
+            check('saved main tokens survive', metadata['prompt_boxes']['positive'] == params['positive'])
+        check('batch expansion leaves the draft untouched', editor.doc == original)
+    finally:
+        W.expand_prompts, W.expand_layout = original_expand, original_layout
+        ctl.client.submit, ctl._object_info = original_submit, original_info
+        ctl._jobs = jobs
+        ctl.gallery.end_live()
+
+
 def test_text_history_actions(win):
     from PySide6.QtCore import Qt, Q_ARG
     for box in find_all(win.contentItem(), 'PromptBox')[:2]:
@@ -5552,6 +5594,7 @@ def main():
             test_moss(win, ctl, tmp)
             test_snapshot_families(win, ctl)
             test_text_history_actions(win)
+            test_region_wildcard_submission(ctl, tmp)
         elif only == "krea":
             test_krea(win, ctl, tmp)
         elif only == "tab":
