@@ -16,7 +16,7 @@ HEX = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
 RGB = re.compile(r"rgba?\(\s*([\d.]+%?)\s*,\s*([\d.]+%?)\s*,\s*([\d.]+%?)(\s*,\s*[\d.]+)?\s*\)")
 
 
-def accent(path):
+def accent(path, brightness=100):
     with Image.open(path) as image:
         image.thumbnail((96, 96))
         pixels = list(image.convert("RGBA").getdata())
@@ -30,7 +30,7 @@ def accent(path):
         total, red, green, blue = bins.get(bucket, (0, 0, 0, 0))
         bins[bucket] = (total + weight, red + r * weight, green + g * weight, blue + b * weight)
     if not bins:
-        return (112, 112, 112)
+        return tuple(round(112 * brightness / 100) for _ in range(3))
     total, r, g, b = max(bins.values())
     h, s, v = colorsys.rgb_to_hsv(r / total / 255, g / total / 255, b / total / 255)
     rgb = colorsys.hsv_to_rgb(h, min(.8, max(.45, s)), min(.78, max(.48, v)))
@@ -40,7 +40,9 @@ def accent(path):
         return sum(c * w for c, w in zip(linear, (.2126, .7152, .0722)))
     while luminance(rgb) > .183:
         rgb = tuple(c * .97 for c in rgb)
-    return tuple(round(c * 255) for c in rgb)
+    # Scale all channels together to preserve the wallpaper hue.
+    factor = min(brightness / 100, 1 / max(rgb))
+    return tuple(round(c * factor * 255) for c in rgb)
 
 
 @lru_cache(maxsize=131072)
@@ -171,12 +173,12 @@ def build_icons(base, color, config, home):
     return derive(base)
 
 
-def build(base, wallpaper, config, home):
+def build(base, wallpaper, config, home, brightness=100):
     if base not in ('Ambiance', 'Ambiance-Dark', 'Radiance'):
         raise ValueError('Dynamic focus color requires Ambiance, Ambiance Dark or Radiance')
     source = Path(config['runtime']) / 'usr/share/themes' / base
     native = Path(config['nativeFocusThemes']) / 'share/themes' / base
-    color = accent(wallpaper)
+    color = accent(wallpaper, brightness)
     key = hashlib.sha256(repr((str(source), str(native), color, 4)).encode()).hexdigest()[:16]
     name = 'Unity-Focus-' + base + '-' + key
     destination = Path(home) / '.themes' / name
@@ -208,6 +210,7 @@ if __name__ == '__main__':
     # Wallpaper and theme notifications can overlap while the icons are built.
     with (cache / 'unity-focus-generation.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        name = build(sys.argv[1], sys.argv[2], config, Path.home())
-        icons = build_icons(sys.argv[3], accent(sys.argv[2]), config, Path.home())
+        brightness = max(25, min(150, int(sys.argv[4]))) if len(sys.argv) > 4 else 100
+        name = build(sys.argv[1], sys.argv[2], config, Path.home(), brightness)
+        icons = build_icons(sys.argv[3], accent(sys.argv[2], brightness), config, Path.home())
         print(json.dumps({'theme': name, 'icons': icons}))

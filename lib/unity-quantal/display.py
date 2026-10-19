@@ -22,7 +22,7 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
                      "unity-quantal", "display.json")
-DEFAULTS = {"brightness": 100, "night": False, "temperature": 4000, "dynamicFocus": False}
+DEFAULTS = {"brightness": 100, "night": False, "temperature": 4000, "dynamicFocus": False, "focusBrightness": 100}
 MIN_BRIGHTNESS, STEP = 10, 5
 COOLEST, WARMEST = 6000, 3000
 
@@ -35,9 +35,11 @@ def load():
         state["brightness"] = int(data.get("brightness", state["brightness"]))
         state["night"] = bool(data.get("night", state["night"]))
         state["dynamicFocus"] = data.get("dynamicFocus") is True
+        state["focusBrightness"] = int(data.get("focusBrightness", 100))
         state["temperature"] = int(data.get("temperature", state["temperature"]))
     except (IOError, OSError, ValueError, TypeError, AttributeError):
         pass
+    state["focusBrightness"] = max(25, min(150, state["focusBrightness"]))
     state["brightness"] = max(MIN_BRIGHTNESS, min(100, state["brightness"]))
     state["temperature"] = max(WARMEST, min(COOLEST, state["temperature"]))
     return state
@@ -248,7 +250,7 @@ class Indicator(Gtk.Application):
         Gdk.Screen.get_default().connect("monitors-changed", lambda *_: self.screen.apply(self.state))
         self.monitor = watch_state(self.reload)
         from focus import FocusColor
-        self.focus = FocusColor(self.state["dynamicFocus"])
+        self.focus = FocusColor(self.state["dynamicFocus"], self.state["focusBrightness"])
 
         self.indicator = AppIndicator3.Indicator.new_with_path(
             "unity-quantal-display", "unity-display-day",
@@ -295,7 +297,7 @@ class Indicator(Gtk.Application):
         self.state.update(values)
         self.state["brightness"] = max(MIN_BRIGHTNESS, min(100, self.state["brightness"]))
         self.screen.apply(self.state)
-        self.focus.set_enabled(self.state["dynamicFocus"])
+        self.focus.configure(self.state["dynamicFocus"], self.state["focusBrightness"])
         save(self.state)
         self.show()
 
@@ -304,7 +306,7 @@ class Indicator(Gtk.Application):
         if state != self.state:
             self.state = state
             self.screen.apply(state)
-            self.focus.set_enabled(state["dynamicFocus"])
+            self.focus.configure(state["dynamicFocus"], state["focusBrightness"])
             self.show()
 
     def step(self, delta):
@@ -402,10 +404,10 @@ class Settings(Gtk.Application):
     def changed(self, *_arguments):
         if self.updating:
             return
-        self.state = {"brightness": int(round(self.brightness.get_value())),
+        self.state = load()
+        self.state.update({"brightness": int(round(self.brightness.get_value())),
                       "night": self.night.get_active(),
-                      "dynamicFocus": load()["dynamicFocus"],
-                      "temperature": int(round(self.temperature.get_value()))}
+                      "temperature": int(round(self.temperature.get_value()))})
         for widget in (self.temperature, self.cooler, self.warmer):
             widget.set_sensitive(self.state["night"])
         # Apply here too, so dragging does not wait for the indicator to notice.
@@ -420,6 +422,13 @@ class Settings(Gtk.Application):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1].startswith("focus-brightness"):
+        state = load()
+        if sys.argv[1] != "focus-brightness":
+            state["focusBrightness"] = max(25, min(150, int(sys.argv[1].split("=", 1)[1])))
+            save(state)
+        print(state["focusBrightness"])
+        sys.exit(0)
     if sys.argv[1:] in (["focus-get"], ["focus-on"], ["focus-off"]):
         state = load()
         if sys.argv[1] != "focus-get":

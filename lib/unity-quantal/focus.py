@@ -28,8 +28,9 @@ def base_icons(name):
 
 
 class FocusColor(object):
-    def __init__(self, enabled):
+    def __init__(self, enabled, brightness=100):
         self.enabled = enabled
+        self.brightness = brightness
         self.serial = 0
         self.interface = Gio.Settings.new('org.gnome.desktop.interface')
         self.background = Gio.Settings.new('org.gnome.desktop.background')
@@ -42,9 +43,10 @@ class FocusColor(object):
         self.applying = False
         self.changed()
 
-    def set_enabled(self, enabled):
-        if self.enabled != enabled:
+    def configure(self, enabled, brightness):
+        if self.enabled != enabled or self.brightness != brightness:
             self.enabled = enabled
+            self.brightness = brightness
             self.changed()
 
     def changed(self, *_args):
@@ -78,12 +80,14 @@ class FocusColor(object):
             self.apply(base, icons)
             return
 
+        brightness = self.brightness
+
         def generate():
             try:
                 with open(os.path.join(HERE, 'config.json')) as stream:
                     config = json.load(stream)
                 result = json.loads(subprocess.check_output([config['focusPython'], os.path.join(HERE, 'focus-theme.py'),
-                                                base, path, icons]).decode('utf-8'))
+                                                base, path, icons, str(brightness)]).decode('utf-8'))
             except Exception as error:
                 print('Dynamic focus color: %s' % error)
                 result = {'theme': base, 'icons': icons}

@@ -77,6 +77,28 @@ print(w.get_style_context().lookup_color('selected_bg_color'))
 color = subprocess.check_output([runtime, '/usr/bin/python2.7', '-c', probe], text=True)
 assert 'True' in color and 'blue=0.780392' in color, color
 print('PASS: wallpaper focus theme reaches original GTK: ' + color.strip())
+# Brightness updates must rebuild both themes and icons, then restore the
+# exact default cache entry without changing the wallpaper or enable state.
+def set_brightness(value):
+    subprocess.run([runtime, '/usr/bin/python2.7',
+                    str(package / 'libexec/unity-quantal/display.py'),
+                    'focus-brightness=' + str(value)], check=True)
+
+original_icon = setting('get', 'org.gnome.desktop.interface', 'icon-theme')
+set_brightness(50)
+dimmed = wait_for(lambda: (lambda name: name if 'Unity-Focus-' in name and name != first else None)(
+    setting('get', 'org.gnome.desktop.interface', 'gtk-theme')))
+assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') != original_icon
+dark = (Path.home() / '.themes' / dimmed.strip("'") / '.complete').read_text()
+normal = (Path.home() / '.themes' / first.strip("'") / '.complete').read_text()
+assert all(int(dark[i:i+2], 16) <= int(normal[i:i+2], 16) for i in (1, 3, 5))
+set_brightness(125)
+brightened = wait_for(lambda: (lambda name: name if 'Unity-Focus-' in name and name not in (first, dimmed) else None)(
+    setting('get', 'org.gnome.desktop.interface', 'gtk-theme')))
+set_brightness(100)
+wait_for(lambda: setting('get', 'org.gnome.desktop.interface', 'gtk-theme') == first)
+assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') == original_icon
+print('PASS: brightness changes themes and icons and restores the default color')
 native_css = Path.home() / '.themes' / first.strip("'") / 'gtk-3.20/gtk-main.css'
 assert '#f07746' not in native_css.read_text(), native_css
 print('PASS: native GTK theme carries the same wallpaper accent')
@@ -190,7 +212,7 @@ assert setting('get', 'org.gnome.desktop.background', 'picture-options') == "'sc
 assert setting('get', 'org.gnome.desktop.background', 'picture-uri') == repr(image.as_uri())
 print('PASS: Files actions installed, phone argv verified without sending, wallpaper updates')
 ui_probe = '''
-import ctypes, sys
+import ctypes, sys, time
 from gi.repository import Gtk
 sys.path.insert(0, %r)
 import display
@@ -202,20 +224,38 @@ get_object.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
 get_object.restype = ctypes.c_void_p
 assert get_object(hash(builder), 'background-panel')
 box = builder.get_object('background-panel')
-buttons = [w for w in box.get_children() if w.get_name() == 'unity-dynamic-focus-color']
+row = [w for w in box.get_children() if w.get_name() == 'unity-dynamic-focus-row'][0]
+buttons = [w for w in row.get_children() if w.get_name() == 'unity-dynamic-focus-color']
 assert len(buttons) == 1
 button = buttons[0]
 assert not button.get_active()
+scale = [w for w in row.get_children() if w.get_name() == 'unity-focus-brightness'][0]
+assert scale.get_value() == 100
+assert not scale.get_sensitive()
 button.set_active(True)
 assert display.load()['dynamicFocus'] is True
+assert scale.get_sensitive()
+scale.set_value(65)
+deadline = time.time() + 3
+while display.load()['focusBrightness'] != 65 and time.time() < deadline:
+ while Gtk.events_pending(): Gtk.main_iteration()
+ time.sleep(.02)
+assert display.load()['focusBrightness'] == 65
 button.set_active(False)
 assert display.load()['dynamicFocus'] is False
+assert not scale.get_sensitive()
+assert display.load()['focusBrightness'] == 65
 assert get_object(hash(builder), 'background-panel')
-assert len([w for w in box.get_children() if w.get_name() == 'unity-dynamic-focus-color']) == 1
+assert len([w for w in box.get_children() if w.get_name() == 'unity-dynamic-focus-row']) == 1
 app = display.Settings()
 app.register(None)
 app.do_activate()
 assert not hasattr(app, 'dynamic_focus')
+app.brightness.set_value(80)
+assert display.load()['focusBrightness'] == 65
+scale.set_value(70)
+row.destroy()
+assert display.load()['focusBrightness'] == 70
 print('PASS: native Appearance toggle persists both states; Display Settings has no duplicate')
 ''' % str(package / 'libexec/unity-quantal')
 subprocess.run([runtime, '/usr/bin/env', 'LD_PRELOAD=' + config['appearanceFocus'],
