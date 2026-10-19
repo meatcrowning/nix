@@ -19,6 +19,7 @@ class LayoutUI(object):
         self.pan = [0.0, 0.0]
         self.panning = None
         self.tag_busy = False
+        self.prompt_history = []
         u = self.ui
         root = u.root
         self.last_doc = copy.deepcopy(self.model.doc)
@@ -61,7 +62,13 @@ class LayoutUI(object):
         u.button(canvas, 'Align / distribute', lambda: self.command(lambda: self.model.align(u.get(self.align))))
         self.add(scene, 'summary.canvas', 'Composition', 'combo', M.CANVASES)
         u.label(scene, 'Layout is experimental placement guidance. The preview is a composition sketch, not a generated result.')
-        self.add(region, 'item.caption', 'Prompt', 'text')
+        self.prompt_header = u.row(region)
+        u.label(self.prompt_header, 'Prompt')
+        self.prompt_tokens = u.field(self.prompt_header, '', 'tokens', (16, 512, 16), lambda: None)
+        u.set(self.prompt_tokens, 128)
+        self.prompt_auto = u.button(self.prompt_header, 'Write', lambda: self.auto_tags('prompt'))
+        self.prompt_revert = u.button(self.prompt_header, 'Undo', self.undo_prompt)
+        self.add(region, 'item.caption', 'Prompt', 'prompt')
         self.add(region, 'item.text', 'Exact wording', 'text')
         self.lettering_row = u.row(region)
         for key, title, choices in M.TYPE_FIELDS[:3]:
@@ -96,11 +103,27 @@ class LayoutUI(object):
         self.status = u.label(root, '')
         self.refresh()
 
-    def auto_tags(self):
+    def prompt_undo_entry(self):
+        row = self.row()
+        if row:
+            key = (self.ui.tag_context(), row['id'])
+            return next((entry for entry in reversed(self.prompt_history)
+                         if entry[:2] == key and entry[3] == row.get('caption', '')), None)
+
+    def undo_prompt(self):
+        entry = self.prompt_undo_entry()
+        if entry and not self.tag_busy:
+            self.model.checkpoint()
+            self.row()['caption'] = entry[2]
+            self.prompt_history.remove(entry)
+            self.refresh()
+            self.ui.set_label(self.status, '')
+
+    def auto_tags(self, task='tags'):
         row = self.row()
         if self.tag_busy or not row:
             return
-        if not row.get('caption', '').strip():
+        if task == 'tags' and not row.get('caption', '').strip():
             self.ui.set_label(self.status, 'Write a region prompt first.')
             return
         snapshot = copy.deepcopy(row)
@@ -108,7 +131,7 @@ class LayoutUI(object):
         context = self.ui.tag_context()
         self.tag_busy = True
         self.region_visibility()
-        self.ui.set_label(self.status, 'Generating tags…')
+        self.ui.set_label(self.status, 'Writing prompt…' if task == 'prompt' else 'Generating tags…')
         def finished(result):
             self.tag_busy = False
             if self.ui.tag_context() is None:
@@ -121,16 +144,23 @@ class LayoutUI(object):
             # Never replace edits made while inference was running, including
             # switching models/regions, changing the prompt, or manual tags.
             if current != snapshot or self.model.doc['summary'].get('caption', '') != scene:
-                self.ui.set_label(self.status, 'Tags discarded because the region changed.')
+                self.ui.set_label(self.status, 'Result discarded because the region changed.')
                 return
             if result.get('error'):
                 self.ui.set_label(self.status, result['error'])
                 return
             self.model.checkpoint()
-            current['tags'] = result['tags']
+            if task == 'prompt':
+                self.prompt_history.append((context, current['id'], current.get('caption', ''), result['prompt']))
+                self.prompt_history = self.prompt_history[-20:]
+                current['caption'] = result['prompt']
+            else:
+                current['tags'] = result['tags']
             self.refresh()
             self.ui.set_label(self.status, '')
-        self.ui.generate_tags(dict(count=int(self.ui.get(self.tag_count)),
+        self.ui.generate_tags(dict(task=task, count=int(self.ui.get(self.tag_count)),
+                                   tokens=int(self.ui.get(self.prompt_tokens)), tags=row.get('tags', []),
+                                   palette=row.get('palette', []), wording=row.get('text', ''),
                                    caption=row['caption'], scene=scene, kind=row['label']), finished)
 
     def toggle_hidden(self):
@@ -282,6 +312,10 @@ class LayoutUI(object):
 
     def region_visibility(self):
         row = self.row()
+        self.ui.enable_widget(self.prompt_header, row is not None)
+        self.ui.enable_widget(self.prompt_auto, row is not None and not self.tag_busy)
+        self.ui.sensitive(self.prompt_tokens, row is not None and not self.tag_busy)
+        self.ui.enable_widget(self.prompt_revert, not self.tag_busy and self.prompt_undo_entry() is not None)
         self.ui.enable_widget(self.tag_header, row is not None)
         self.ui.enable_widget(self.tag_auto, row is not None and not self.tag_busy)
         self.ui.sensitive(self.tag_count, row is not None and not self.tag_busy)

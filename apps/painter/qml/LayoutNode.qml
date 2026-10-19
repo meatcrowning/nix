@@ -110,8 +110,8 @@ Item {
             checked: checkable && node.spec.value === true
             display: actionIcon ? AbstractButton.IconOnly : AbstractButton.TextOnly
             Accessible.name: adding ? "Add region" : text
-            ToolTip.visible: hovered && (actionIcon !== "" || text === "Auto")
-            ToolTip.text: text === "Auto" ? "Generate tags from the region prompt" : adding ? "Add region" : node.spec.title === "Lock" ? "Lock / unlock selected regions" : node.spec.title === "Hide" ? "Hide / show selected regions in generation" : text
+            ToolTip.visible: hovered && (actionIcon !== "" || text === "Auto" || text === "Write")
+            ToolTip.text: text === "Write" ? "Write or polish the region prompt" : text === "Auto" ? "Generate tags from the region prompt" : adding ? "Add region" : node.spec.title === "Lock" ? "Lock / unlock selected regions" : node.spec.title === "Hide" ? "Hide / show selected regions in generation" : text
             onClicked: node.spec.activate()
         }
     }
@@ -262,8 +262,8 @@ Item {
     Component {
         id: fieldComponent
         ColumnLayout {
-            implicitWidth: node.spec.kind === "count" ? 64 : node.spec.kind === "iconcheck" ? 32 : node.spec.kind.startsWith("inline_") ? 140 : node.spec.kind === "pair" ? 78 : node.spec.kind === "combo" ? (node.spec.title ? 140 : 90) : 200
-            Label { text: node.spec.title; visible: node.spec.kind !== "iconcheck" && !node.spec.kind.startsWith("inline_") && node.spec.kind !== "check" && node.spec.kind !== "pair" && node.spec.title !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            implicitWidth: node.spec.kind === "tokens" ? 80 : node.spec.kind === "count" ? 64 : node.spec.kind === "iconcheck" ? 32 : node.spec.kind.startsWith("inline_") ? 140 : node.spec.kind === "pair" ? 78 : node.spec.kind === "combo" ? (node.spec.title ? 140 : 90) : 200
+            Label { text: node.spec.title; visible: node.spec.kind !== "prompt" && node.spec.kind !== "iconcheck" && !node.spec.kind.startsWith("inline_") && node.spec.kind !== "check" && node.spec.kind !== "pair" && node.spec.title !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Loader {
                 Layout.fillWidth: true
                 sourceComponent: {
@@ -271,8 +271,8 @@ Item {
                     case "combo": return comboField
                     case "check": return checkField
                     case "iconcheck": return iconCheckField
-                    case "number": case "count": return numberField
-                    case "text": return textField
+                    case "number": case "count": case "tokens": return numberField
+                    case "text": case "prompt": return textField
                     case "pair": return pairField
                     default: return entryField
                     }
@@ -334,9 +334,9 @@ Item {
     Component {
         id: numberField
         SpinBox {
-            Accessible.name: node.spec.kind === "count" ? "Tag count" : node.spec.title
-            ToolTip.visible: hovered && node.spec.kind === "count"
-            ToolTip.text: "Number of tags to generate"
+            Accessible.name: node.spec.kind === "tokens" ? "Token limit" : node.spec.kind === "count" ? "Tag count" : node.spec.title
+            ToolTip.visible: hovered && (node.spec.kind === "count" || node.spec.kind === "tokens")
+            ToolTip.text: node.spec.kind === "tokens" ? "Maximum output tokens" : "Number of tags to generate"
             property int factor: node.spec.options[2] < 1 ? 100 : 1
             from: node.spec.options[0] * factor
             to: node.spec.options[1] * factor

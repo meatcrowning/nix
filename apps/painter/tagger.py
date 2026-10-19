@@ -15,7 +15,7 @@ class Tagger(QObject):
 
     def start(self, request, callback=None):
         if self.process is not None:
-            result = dict(busy=True, error='Tag generation is already running.')
+            result = dict(busy=True, error='The local writer is already running.')
             if callback:
                 callback(result)
             return result

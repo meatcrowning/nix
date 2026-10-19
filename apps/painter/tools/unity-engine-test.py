@@ -195,7 +195,7 @@ watchdog.start(45000)
 # The GTK tag control traverses the actual socket and asynchronous worker,
 # with a tiny fake completion process and scratch model instead of inference.
 fake_tags = Path('/home/test/fake-tags')
-fake_tags.write_text('#!' + sys.executable + '\nprint("snow, fox, forest,", flush=True)\n')
+fake_tags.write_text('#!' + sys.executable + '\nimport sys\nprint("A fox rests in snow. [end of text]" if "Write a concise visual description" in sys.argv[-1] else "snow, fox, forest,", flush=True)\n')
 fake_tags.chmod(0o700)
 fake_model = Path('/home/test/tag-model')
 fake_model.touch()

@@ -144,6 +144,10 @@ class Toolkit(object):
             button.get_accessible().set_name(tooltip)
         if hasattr(parent, 'sizes'):
             parent.sizes.add_widget(button)
+        if title == 'Write':
+            button.set_tooltip_text('Write or polish the region prompt')
+        if title == 'Undo' and not hasattr(parent, 'sizes'):
+            button.set_tooltip_text('Restore the prompt before local generation')
         if title == 'Auto':
             button.set_tooltip_text('Generate tags from the region prompt')
         button.connect('clicked', lambda *_: callback() if not getattr(button, 'syncing', False) else None)
@@ -176,7 +180,7 @@ class Toolkit(object):
         inline = kind.startswith('inline_')
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL if inline else Gtk.Orientation.VERTICAL, spacing=3)
         parent.pack_start(box, inline, inline, 0)
-        if not inline and kind not in ('check', 'iconcheck') and title and not hasattr(parent, 'sizes'):
+        if not inline and kind not in ('check', 'iconcheck', 'prompt') and title and not hasattr(parent, 'sizes'):
             self.label(box, title)
         swatches = None
         if kind == 'combo':
@@ -195,16 +199,16 @@ class Toolkit(object):
                 control.get_accessible().set_name(title)
             control.connect('toggled', lambda *_: callback())
             box.pack_start(control, False, False, 0)
-        elif kind in ('number', 'count'):
+        elif kind in ('number', 'count', 'tokens'):
             control = Gtk.SpinButton.new_with_range(*options)
             control.set_digits(2 if options[2] < 1 else 0)
-            if kind == 'count':
-                control.set_width_chars(2)
-                control.set_tooltip_text('Number of tags to generate')
-                control.get_accessible().set_name('Tag count')
+            if kind in ('count', 'tokens'):
+                control.set_width_chars(3 if kind == 'tokens' else 2)
+                control.set_tooltip_text('Maximum output tokens' if kind == 'tokens' else 'Number of tags to generate')
+                control.get_accessible().set_name('Token limit' if kind == 'tokens' else 'Tag count')
             control.connect('value-changed', lambda *_: callback())
             box.pack_start(control, False, False, 0)
-        elif kind == 'text':
+        elif kind in ('text', 'prompt'):
             control = Gtk.TextView()
             control.set_wrap_mode(Gtk.WrapMode.NONE if title == 'Exact wording' else Gtk.WrapMode.WORD_CHAR)
             control.get_buffer().connect('changed', lambda *_: callback())
@@ -236,7 +240,7 @@ class Toolkit(object):
             box.pack_start(control, inline, inline, 0)
             if kind == 'palette':
                 swatches = self.row(box)
-        if kind in ('text', 'entry', 'palette') and title not in ('Vertical guides (%; comma-separated)', 'Horizontal guides (%; comma-separated)'):
+        if kind in ('text', 'prompt', 'entry', 'palette') and title not in ('Vertical guides (%; comma-separated)', 'Horizontal guides (%; comma-separated)'):
             spelling = getattr(self.window, 'spelling', None)
             if spelling: spelling.attach(control)
         field = (kind, control, box, swatches)
@@ -266,9 +270,9 @@ class Toolkit(object):
     def get(self, field):
         kind, control = field[:2]
         if kind in ('check', 'iconcheck'): return control.get_active()
-        if kind in ('number', 'count'): return control.get_value()
+        if kind in ('number', 'count', 'tokens'): return control.get_value()
         if kind == 'combo': return (control.get_active_id() or '').replace('_empty', '')
-        if kind == 'text':
+        if kind in ('text', 'prompt'):
             b = control.get_buffer()
             value = b.get_text(b.get_start_iter(), b.get_end_iter(), True)
             return value.decode('utf-8') if isinstance(value, bytes) else value
@@ -278,10 +282,10 @@ class Toolkit(object):
     def set(self, field, value):
         kind, control = field[:2]
         if kind in ('check', 'iconcheck'): control.set_active(bool(value))
-        elif kind in ('number', 'count'): control.set_value(float(value or 0))
+        elif kind in ('number', 'count', 'tokens'): control.set_value(float(value or 0))
         elif kind == 'combo':
             if not control.set_active_id(value or '_empty'): control.set_active(-1)
-        elif kind == 'text': control.get_buffer().set_text(value or '')
+        elif kind in ('text', 'prompt'): control.get_buffer().set_text(value or '')
         else: control.set_text(value or '')
 
     def sensitive(self, field, enabled):

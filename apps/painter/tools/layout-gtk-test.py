@@ -248,6 +248,17 @@ def run(parent):
         time.sleep(.01)
     assert e.row()['tags'] == ['snow', 'fox', 'forest'], (e.row(), e.status.get_text())
     assert not e.tag_busy and e.tag_auto.get_sensitive()
+    previous_prompt = e.row()['caption']
+    u.set(e.prompt_tokens, 48)
+    e.prompt_auto.clicked()
+    assert e.tag_busy and not e.prompt_revert.get_sensitive()
+    deadline = time.time() + 5
+    while e.tag_busy and time.time() < deadline:
+        while Gtk.events_pending(): Gtk.main_iteration()
+        time.sleep(.01)
+    assert e.row()['caption'] == 'A fox rests in snow.', e.status.get_text()
+    e.prompt_revert.clicked()
+    assert e.row()['caption'] == previous_prompt and e.row()['tags'] == ['snow', 'fox', 'forest']
     assert 'item.locked' not in e.fields and 'item.enabled' not in e.fields
     for signal, kind, y in [('button-press-event', Gdk.EventType.BUTTON_PRESS, 100),
                             ('motion-notify-event', Gdk.EventType.MOTION_NOTIFY, 180),

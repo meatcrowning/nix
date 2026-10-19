@@ -189,7 +189,11 @@ Add arms one box-drawing gesture, then returns to selection. The toolbar type
 selector changes selected regions, or the next added type when none are selected.
 Drag on empty canvas to box-select; moving a selection keeps its spacing.
 Draft edits persist immediately, including incomplete regions; generation validates required captions.
-Region tags use the inline count and Auto controls. `tagger.py` runs a bounded
+Region tags use the inline count and Auto controls; the region prompt has a
+token limit, Write and prompt-only Undo. Prompt output is capped in llama, with
+any incomplete trailing sentence removed. Undo restores only the last generated
+prompt when its text is still unchanged; it must not roll back other fields.
+`tagger.py` runs a bounded
 `tagger_worker.py` subprocess with the CPU-only llama/model paths supplied by
 `home/prog/painter.nix` on both hosts. Stop after N complete unique tags; retain
 manual edits if the region/model changes during inference. The CPU worker has

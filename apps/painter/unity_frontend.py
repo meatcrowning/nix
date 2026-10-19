@@ -624,7 +624,7 @@ class Window(Gtk.Window):
 
     def generate_tags(self, request, callback):
         if getattr(self, 'tag_callback', None):
-            callback(dict(error='Tag generation is already running.'))
+            callback(dict(error='The local writer is already running.'))
             return
         self.tag_callback = callback
         self.connection.send(dict(op='tag_start', request=request))

@@ -6,7 +6,7 @@ import sys
 import tempfile
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tagger_worker import Tags, generate
+from tagger_worker import Tags, Prompt, generate
 
 p = Tags(3)
 assert not p.feed('red fox, RED FOX, , snow')
@@ -16,6 +16,21 @@ assert p.items == ['red fox', 'snowy pine', 'winter']
 p = Tags(1)
 assert not p.feed('unfinished')
 assert p.feed(',extra,') and p.items == ['unfinished']
+
+p = Prompt()
+assert not p.feed('A red fox rests in snow. Its tail is par')
+assert p.finish() == 'A red fox rests in snow.'
+p = Prompt()
+p.feed('A red fox rests [end of text]')
+assert p.finish() == 'A red fox rests'
+p = Prompt()
+p.feed('Incomplete sentence')
+try:
+    p.finish()
+except ValueError:
+    pass
+else:
+    raise AssertionError('accepted truncated prose without a complete sentence')
 
 with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
@@ -35,6 +50,8 @@ with tempfile.TemporaryDirectory() as tmp:
         assert 'only 1 of 2' in str(e)
     else:
         raise AssertionError('accepted a truncated tag')
+    fake("import sys\nassert sys.argv[sys.argv.index('-n') + 1] == '48'\nprint('A fox rests in snow. An unfinished tail', flush=True)\n")
+    assert generate(dict(task='prompt', tokens=48, caption='fox'), str(binary), str(model)) == 'A fox rests in snow.'
     fake('time.sleep(20)\n')
     start = time.monotonic()
     try:

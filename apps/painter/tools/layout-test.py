@@ -278,6 +278,23 @@ def qt():
     ui.model_name = 'another model'
     pending[-1][1](dict(tags=['wrong model'], error=''))
     assert editor.row()['tags'] == ['hand edited'] and editor.tag_auto.enabled
+    editor.prompt_tokens.edit(48)
+    before_prompt = editor.row()['caption']
+    editor.prompt_auto.activate()
+    assert pending[-1][0]['task'] == 'prompt' and pending[-1][0]['tokens'] == 48
+    assert pending[-1][0]['palette'] == ['#ff0000', '#00ff00']
+    assert not editor.tag_auto.enabled and not editor.prompt_revert.enabled
+    pending[-1][1](dict(prompt='A large, ornate headline.', error=''))
+    assert editor.row()['caption'] == 'A large, ornate headline.'
+    assert editor.prompt_revert.enabled
+    editor.fields['item.tags'].edit('keep these tags')
+    editor.prompt_revert.activate()
+    assert editor.row()['caption'] == before_prompt and editor.row()['tags'] == ['keep these tags']
+    assert not editor.prompt_revert.enabled
+    editor.prompt_auto.activate()
+    editor.fields['item.caption'].edit('New manual prompt')
+    pending[-1][1](dict(prompt='Stale generated prompt.', error=''))
+    assert editor.row()['caption'] == 'New manual prompt' and not editor.prompt_revert.enabled
     editor.units.edit('pixels')
     editor.fields['box.position'].edit('128, 102.4')
     assert editor.model.doc['items'][0]['box'][0] == .125
