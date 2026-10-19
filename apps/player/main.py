@@ -5501,6 +5501,8 @@ def main():
         # it. Same API, two implementations (apps/AGENTS.md).
         kdeshell.select_plasma_files(engine)
     ctx = engine.rootContext()
+    desktop = os.environ.get("DESK_SESSION") or os.environ.get("XDG_CURRENT_DESKTOP", "")
+    ctx.setContextProperty("StandaloneControls", "unity" in desktop.lower().split(":"))
     # air (the MacBook, OS hostname "book") has a much smaller screen than
     # top: the QML lowers the window minimums and caps the now-playing cover
     # there. Keyed on hostname, not the launcher, so a bare `python3 main.py`
