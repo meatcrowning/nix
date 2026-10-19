@@ -12,6 +12,13 @@ import moss_layout as M
 
 
 def core():
+    from layout_cache import LayerCache
+    cache = LayerCache(lambda *args: object(), limit=1000, scale=2)
+    cache.get(b'a' * 500, 5, 5)
+    cache.get(b'b' * 500, 5, 5)
+    assert len(cache.entries) == 1 and cache.bytes == 900
+    cache.get(b'oversized' * 200, 5, 5)
+    assert not cache.entries and cache.bytes == 0
     e = M.Editor(M.fresh(1024, 1024, 'A travel poster'))
     a = e.add('text', [.1, .2, .4, .2])
     a.update(caption='A large heading', text='旅へ\nEXPLORE', palette=['#123456'], tags=['title'])

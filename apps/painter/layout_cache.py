@@ -10,8 +10,9 @@ class LayerCache(object):
         self.bytes = 0
         self.misses = 0
 
-    def size(self, width, height):
-        return int(math.ceil(width * self.scale)) * int(math.ceil(height * self.scale)) * 4
+    def size(self, svg, width, height):
+        # Keys can contain embedded reference PNGs; count them as well as pixels.
+        return len(svg) + int(math.ceil(width * self.scale)) * int(math.ceil(height * self.scale)) * 4
 
     def get(self, svg, width, height):
         key = (svg, width, height)
@@ -21,10 +22,10 @@ class LayerCache(object):
             return value
         self.misses += 1
         value = self.render(svg, width, height)
-        size = self.size(width, height)
+        size = self.size(*key)
         while self.entries and self.bytes + size > self.limit:
             old, _ = self.entries.popitem(last=False)
-            self.bytes -= self.size(old[1], old[2])
+            self.bytes -= self.size(*old)
         if size <= self.limit:
             self.entries[key] = value
             self.bytes += size
