@@ -248,7 +248,7 @@ class LayoutUI(object):
                 self.ui.visible(field, key in ('item.caption', 'item.tags', 'item.palette') or row is not None)
             if key.startswith('type.') or key == 'item.text':
                 self.ui.visible(field, bool(row and row['label'] == 'text'))
-        self.ui.set_label(self.warning, M.text_warning(row, self.model.doc['width'], self.model.doc['height']) if row else 'Select one region to edit its fields.')
+        self.ui.set_label(self.warning, M.text_warning(row, self.model.doc['width'], self.model.doc['height']) if row else '')
 
     def refresh(self):
         self.syncing = True

@@ -47,7 +47,7 @@ def run(parent):
         assert e.fields[key][2].get_visible()
         assert not e.fields[key][2].get_sensitive()
         assert not u.get(e.fields[key])
-    assert e.warning.get_visible()
+    assert not e.warning.get_visible()
     while Gtk.events_pending(): Gtk.main_iteration()
     tabs.set_current_page(1)
     while Gtk.events_pending(): Gtk.main_iteration()
