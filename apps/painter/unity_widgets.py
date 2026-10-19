@@ -22,11 +22,13 @@ class CompactSpin(Gtk.SpinButton):
 
 
 class PreviewDivider(Gtk.Paned):
+    handle_size = 10
+
     def __init__(self):
         Gtk.Paned.__init__(self, orientation=Gtk.Orientation.HORIZONTAL)
         self.set_name('painter-preview-divider')
         css = Gtk.CssProvider()
-        css.load_from_data(b'#painter-preview-divider { -GtkPaned-handle-size: 10; }')
+        css.load_from_data(('#painter-preview-divider { -GtkPaned-handle-size: %d; }' % self.handle_size).encode('ascii'))
         self.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.connect_after('draw', self.draw_grip)
 

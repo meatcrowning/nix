@@ -213,7 +213,7 @@ assert E.userprefs.saved_for(engine.model)['positive'] == 'last edit before clos
 assert E.userprefs.load()['prompt.posH'] == 285
 assert E.userprefs.load()['prompt.negH'] == 40
 assert E.userprefs.load()['unity.systemH'] == 600
-assert E.userprefs.load()['unity.previewWidth'] == 360
+assert E.userprefs.load()['unity.historyWidth'] == 240
 assert E.userprefs.load()['unity.sidebarWidth'] == 440
 assert E.userprefs.load()['layout.canvasHeight'] == 380
 assert E.userprefs.load()['layout.regionListHeight'] >= 80

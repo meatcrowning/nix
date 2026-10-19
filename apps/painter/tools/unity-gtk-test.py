@@ -404,6 +404,11 @@ def test():
             window.walk(-1 if index else 1)
             assert window.selection != old
             select('fixture.png')
+            window.browse()
+            while Gtk.events_pending(): Gtk.main_iteration()
+            window.browse_pane.set_position(window.browse_pane.get_allocated_width() - 10 - 240)
+            while Gtk.events_pending(): Gtk.main_iteration()
+            assert window.history_size() == 240
             window.controls['positive'].get_buffer().set_text('last edit before closing')
             window.close_window()
             print('PASS: GTK 3.6 controls, resized prompts, fit/zoom/compare, muted video, Browse/View, global menu')
@@ -420,6 +425,7 @@ GLib.timeout_add(1200, test)
 Gtk.main()
 if not failed[0]:
     window = Window(sys.argv[1])
+    window.resize(1180, 780)
     def reopened():
         if not window.state.get('model'):
             return True
@@ -428,8 +434,9 @@ if not failed[0]:
             assert window.text_boxes['negative'].height == 40
             assert window.text_boxes['system_prompt'].height == 600
             assert window.values()['positive'] == 'last edit before closing'
-            assert window.browse_pane.get_position() == 360, window.browse_pane.get_position()
-            assert window.state['previewWidth'] == 360
+            assert window.history_size() == 240, window.history_size()
+            assert window.state['historyWidth'] == 240
+            assert window.history_scroll.get_allocated_width() == 240
             assert not window.sampling.get_expanded()
             window.sampling.set_expanded(True)
             assert window.sampling.get_expanded()

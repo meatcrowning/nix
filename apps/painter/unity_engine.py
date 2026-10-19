@@ -81,6 +81,7 @@ class Engine:
         self._restored = False
         self.sampling_expanded = prefs.get('unity.samplingExpanded') is not False
         width = prefs.get('unity.previewWidth')
+        self.history_width = max(0, min(10000, int(prefs.get('unity.historyWidth') or 0)))
         self.preview_width = max(0, min(10000, int(400 if width is None else width)))
         self.sidebar_width = max(200, min(10000, int(prefs.get('unity.sidebarWidth') or 380)))
         self.layout_height = max(140, min(1200, int(prefs.get('layout.canvasHeight') or 300)))
@@ -150,6 +151,7 @@ class Engine:
                        loras=json.dumps(self.ctl.lorasSnapshot()))
         doc.update({pref: self.heights[key] for key, pref in HEIGHT_KEYS.items()})
         doc['unity.samplingExpanded'] = self.sampling_expanded
+        doc['unity.historyWidth'] = self.history_width
         doc['unity.previewWidth'] = self.preview_width
         doc['unity.sidebarWidth'] = self.sidebar_width
         doc['layout.canvasHeight'] = self.layout_height
@@ -164,6 +166,7 @@ class Engine:
 
     def update(self, request):
         for key, attr, low, high in [('sidebarWidth', 'sidebar_width', 200, 10000),
+                                     ('historyWidth', 'history_width', 0, 10000),
                                      ('layoutHeight', 'layout_height', 140, 1200),
                                      ('regionListHeight', 'region_list_height', 28, 600),
                                      ('regionPromptHeight', 'region_prompt_height', 40, 600),
@@ -454,7 +457,7 @@ class Engine:
         return dict(model=self.model, models=[{k: v for k, v in row.items() if k != 'entry'}
                                               for row in c.models._rows], modes=c.modes(), mode=c.mode,
                     settings=self.settings, revision=self.revision, heights=self.heights, multiple=self.multiple,
-                    previewWidth=self.preview_width, sidebarWidth=self.sidebar_width,
+                    previewWidth=self.preview_width, historyWidth=self.history_width, sidebarWidth=self.sidebar_width,
                     samplingExpanded=self.sampling_expanded,
                     layoutHeight=self.layout_height, regionListHeight=self.region_list_height,
                     regionPromptHeight=self.region_prompt_height, wordingHeight=self.wording_height,

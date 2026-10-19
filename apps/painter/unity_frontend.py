@@ -87,6 +87,8 @@ class Window(Gtk.Window):
         self.history_fetch_timer = None
         self.text_boxes = {}
         self.heights_loaded = False
+        self.restore_history_width = 0
+        self.history_save_timer = None
         self.layout_height = 300
         self.region_list_height = 0
         self.region_prompt_height = 95
@@ -401,10 +403,12 @@ class Window(Gtk.Window):
         self.browse_pane.set_position(400)
         self.browse_pane.connect_after('button-release-event', self.preview_resized)
         self.browse_pane.connect_after('accept-position', self.preview_resized)
+        self.browse_pane.connect_after('size-allocate', self.restore_history_size)
+        self.browse_pane.connect('notify::position', self.history_position_changed)
         self.preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.browse_pane.pack1(self.preview_box, False, False)
+        self.browse_pane.pack1(self.preview_box, True, False)
         self.history_scroll = scroll(self.gallery)
-        self.browse_pane.pack2(self.history_scroll, True, False)
+        self.browse_pane.pack2(self.history_scroll, False, False)
         self.history_scroll.get_vadjustment().connect('value-changed', self.history_scrolled)
         self.pages.append_page(self.browse_pane, Gtk.Label(label='Browse'))
         self.full_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -581,9 +585,31 @@ class Window(Gtk.Window):
         if not self.loading:
             self.send('settings', samplingExpanded=self.sampling.get_expanded())
 
+    def history_size(self):
+        return max(0, self.browse_pane.get_allocated_width() -
+                   self.browse_pane.get_position() - self.browse_pane.handle_size)
+
+    def restore_history_size(self, widget, allocation):
+        if self.restore_history_width and allocation.width > 1:
+            width = self.restore_history_width
+            self.restore_history_width = 0
+            widget.set_position(max(0, allocation.width - widget.handle_size - width))
+
+    def history_position_changed(self, *_):
+        if self.heights_loaded and not self.restore_history_width and not self.closing:
+            if self.history_save_timer:
+                GLib.source_remove(self.history_save_timer)
+            self.history_save_timer = GLib.timeout_add(150, self.save_history_size)
+
+    def save_history_size(self):
+        self.history_save_timer = None
+        if not self.closing:
+            self.preview_resized()
+        return False
+
     def preview_resized(self, *_):
         if self.heights_loaded and self.pages.get_current_page() == 0:
-            self.send('settings', previewWidth=self.browse_pane.get_position())
+            self.send('settings', previewWidth=self.browse_pane.get_position(), historyWidth=self.history_size())
         return False
 
     def poll(self):
@@ -659,6 +685,8 @@ class Window(Gtk.Window):
         if not self.heights_loaded:
             self.sampling.set_expanded(state.get('samplingExpanded', True))
             self.browse_pane.set_position(state['previewWidth'])
+            self.restore_history_width = state.get('historyWidth', 0)
+            self.browse_pane.queue_resize()
             self.sidebar_split.set_position(state['sidebarWidth'])
             self.layout_height = state['layoutHeight']
             self.region_list_height = state['regionListHeight']
@@ -1213,7 +1241,10 @@ class Window(Gtk.Window):
         if self.save_timer:
             GLib.source_remove(self.save_timer)
             self.save_timer = None
-        if self.connected and not self.send('settings', save=True):
+        geometry = {}
+        if self.heights_loaded and self.pages.get_current_page() == 0 and not self.restore_history_width:
+            geometry['historyWidth'] = self.history_size()
+        if self.connected and not self.send('settings', save=True, **geometry):
             self.closing = False
             return True
         # Queue shutdown after the final settings acknowledgement, so quitting
