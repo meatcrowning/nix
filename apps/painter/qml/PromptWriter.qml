@@ -70,6 +70,12 @@ Column {
         }
         Button {
             text: "Undo"
+            icon.name: "edit-undo"
+            display: AbstractButton.IconOnly
+            implicitWidth: implicitHeight
+            Accessible.name: "Undo prompt writing"
+            ToolTip.visible: hovered
+            ToolTip.text: "Restore the prompt before local generation"
             enabled: !writer.busy && writer.history !== null
                      && writer.history.model === App.selectedName
                      && root.gen[writer.scope] === writer.history.after

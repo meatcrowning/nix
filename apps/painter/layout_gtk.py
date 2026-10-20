@@ -128,7 +128,7 @@ class Toolkit(object):
     def button(self, parent, title, callback):
         icons = {'Add': Gtk.STOCK_ADD, 'Undo': Gtk.STOCK_UNDO, 'Redo': Gtk.STOCK_REDO,
                  'Delete': Gtk.STOCK_REMOVE, 'Duplicate': Gtk.STOCK_COPY, 'Lock': Gtk.STOCK_DIALOG_AUTHENTICATION, 'Hide': Gtk.STOCK_CLOSE}
-        icon = icons.get(title) if hasattr(parent, 'sizes') else None
+        icon = icons.get(title) if hasattr(parent, 'sizes') or title == 'Undo' else None
         button = (Gtk.ToggleButton if title in ('Lock', 'Hide') else Gtk.Button)(label=None if icon else title)
         if icon:
             image = Gtk.Image.new_from_stock(icon, Gtk.IconSize.MENU)
@@ -149,6 +149,7 @@ class Toolkit(object):
             button.set_tooltip_text('Write or polish the region prompt')
         if title == 'Undo' and not hasattr(parent, 'sizes'):
             button.set_tooltip_text('Restore the prompt before local generation')
+            button.get_accessible().set_name('Undo prompt writing')
         if title == 'Auto':
             button.set_tooltip_text('Generate tags from the region prompt')
         button.connect('clicked', lambda *_: callback() if not getattr(button, 'syncing', False) else None)
