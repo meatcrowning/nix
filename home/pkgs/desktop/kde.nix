@@ -35,7 +35,6 @@ in {
     # "Go to Folder…" (a directory picker). home/prog/plasma-menubar.nix.
     kdialog
     kate
-    kdenlive
     # The Dynamic scheme renders the KStyle-painted window field beneath the
     # terminal text. Keep Konsole managed on both hosts so that scheme and its
     # deliberate chrome defaults do not depend on Fedora's system package.
@@ -62,6 +61,9 @@ in {
     kcolorpicker
    # plasma-framework
     ]) ++ lib.optionals (host == "top") [
+    # Book uses Fedora's kdenlive package and shared Qt/multimedia libraries,
+    # avoiding the separate ffmpeg-full build and its development closure.
+    kdePackages.kdenlive
     # breeze-square-overlay patches this locally, so there's no cache hit —
     # it always compiles from source (KDE Frameworks/Qt, genuinely slow).
     # Skipped on air for now to keep first bring-up fast; corners just stay

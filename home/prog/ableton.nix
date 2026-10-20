@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, lib, host, ... }:
 
 let
   theme = pkgs.writeShellScriptBin "ableton-theme" ''
@@ -25,7 +25,7 @@ let
     exec ${pkgs.wineWow64Packages.staging}/bin/wine "Ableton Live 11 Suite.exe" "$@"
   '';
 in
-{
+lib.mkIf (host == "top") {
   home.packages = [ ableton theme ];
 
   # This desktop-file ID is the one Wine generated under wine/Programs/. A
