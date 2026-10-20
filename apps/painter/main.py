@@ -3098,13 +3098,13 @@ def main():
         # program keeps one. It filters the gallery by filename and prompt.
         # Right-aligned with the RESULTS pane rather than with the window: it
         # filters the outputs, so it belongs over them and not over the
-        # parameter column. `paneLeadW` is where that pane ends (the splitter).
+        # parameter column.
         shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
         # ...and the toolbar itself only spans the results pane, floating over
         # it, so the parameter column runs all the way up to the menubar with
         # no band of empty toolbar above it. The field's right edge follows for
-        # free — the toolbar ends at the splitter.
-        shell.use_overlay_toolbar(width_prop="paneLeadW")
+        # free as the results pane moves and resizes.
+        shell.use_overlay_toolbar(width_prop="resultsWidth", x_prop="resultsX")
         # The window is how the controller knows whether he is watching: a batch
         # that finishes behind a rolled-up or unfocused painter says so with a
         # desktop toast instead (Painter._onscreen).

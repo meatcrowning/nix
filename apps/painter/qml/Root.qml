@@ -43,6 +43,8 @@ Item {
     // and the parameter column does not — it runs up to the menubar. 0 in the
     // Hyprland session, where there is no toolbar at all.
     property int chromeInset: 0
+    readonly property real resultsX: results.x
+    readonly property real resultsWidth: results.width
 
     // BROWSE OR VIEW — Gwenview's spine, and the one piece of this that is not
     // chrome: the grid answers "what have I made", View answers "what does THIS
@@ -581,9 +583,9 @@ Item {
         id: controls
         active: root.showParams
         x: 0
-        y: menuBar.height
+        y: menuBar.height + (root.split ? 0 : root.chromeInset)
         width: root.split ? root.width - root.paneLeadW - root.splitterW : root.width
-        height: parent.height - menuBar.height
+        height: parent.height - y
         visible: root.showParams && (root.split || root.view === 0)
         sourceComponent: ParamsPane {
             app: root

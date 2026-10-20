@@ -723,6 +723,7 @@ def _build_shell_class():
             self._search_align = ""
             self._overlay = None            # the container the toolbar floats in
             self._overlay_width_prop = None
+            self._overlay_x_prop = None
             self._overlay_inset_prop = None
             self._no_drag = _build_no_drag_filter()(self.window)
             self._overlay_filter = _build_overlay_filter()(self)
@@ -1960,7 +1961,7 @@ def _build_shell_class():
                                   else Qt.ToolButtonIconOnly)
 
         # ----------------------------------------------------- overlay toolbar
-        def use_overlay_toolbar(self, width_prop=None, inset_prop="chromeInset"):
+        def use_overlay_toolbar(self, width_prop=None, inset_prop="chromeInset", x_prop=None):
             """Float the toolbar OVER the content instead of giving it a band.
 
             A `QToolBar` in a main window's toolbar area spans the whole width,
@@ -1968,8 +1969,8 @@ def _build_shell_class():
             has nothing to do with the toolbar's buttons and looked, to him,
             like it had a strip of nothing above it. Here the toolbar becomes an
             ordinary child of the central widget, sized to `width_prop` (a QML
-            property holding the x of the pane it belongs over) and stacked on
-            top of the view. The QML puts its own content below it by reading
+            property holding the pane's width), positioned at `x_prop`, and
+            stacked on top of the view. The QML puts its own content below it by reading
             `inset_prop`, which this keeps up to date; anything it does NOT
             inset — the sidebar — runs up to the menubar.
             """
@@ -1983,12 +1984,14 @@ def _build_shell_class():
             self.window.setCentralWidget(container)
             self._overlay = container
             self._overlay_width_prop = width_prop
+            self._overlay_x_prop = x_prop
             self._overlay_inset_prop = inset_prop
             container.installEventFilter(self._overlay_filter)
-            if width_prop and self._root is not None:
-                sig = getattr(self._root, str(width_prop) + "Changed", None)
-                if sig is not None and hasattr(sig, "connect"):
-                    sig.connect(self._layout_overlay)
+            if self._root is not None:
+                for prop in (width_prop, x_prop):
+                    sig = getattr(self._root, str(prop) + "Changed", None) if prop else None
+                    if sig is not None and hasattr(sig, "connect"):
+                        sig.connect(self._layout_overlay)
             self._layout_overlay()
             return container
 
@@ -2002,12 +2005,19 @@ def _build_shell_class():
             # just re-docked reports whatever band the main window gave it.
             h = tb.sizeHint().height() if tb.isVisible() else 0
             w = c.width()
+            x = 0
+            if self._overlay_x_prop and self._root is not None:
+                try:
+                    x = int(float(self._root.property(self._overlay_x_prop)))
+                except (TypeError, ValueError):
+                    pass
             if self._overlay_width_prop and self._root is not None:
                 try:
                     w = int(float(self._root.property(self._overlay_width_prop) or w))
                 except (TypeError, ValueError):
                     pass
-            tb.setGeometry(0, 0, max(0, min(w, c.width())), h)
+            x = max(0, min(x, c.width()))
+            tb.setGeometry(x, 0, max(0, min(w, c.width() - x)), h)
             tb.raise_()
             if self._root is not None and self._overlay_inset_prop:
                 self._root.setProperty(self._overlay_inset_prop, h)

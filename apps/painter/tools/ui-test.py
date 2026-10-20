@@ -5633,10 +5633,14 @@ def test_snapshot_families(win, ctl):
     spin(30)
 
 
-def test_sidebar(win, ctl, tmp):
+def test_sidebar(win, ctl, tmp, shell=None):
     """Pane order, scroll access and resize propagation through the real scene."""
     from PySide6.QtCore import QPointF
     import importlib.util
+    if shell is not None:
+        shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
+        shell.use_overlay_toolbar(width_prop="resultsWidth", x_prop="resultsX")
+        spin(100)
     spec = importlib.util.spec_from_file_location("moss_checks", Path(__file__).with_name("moss-test.py"))
     models = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(models)
@@ -5718,6 +5722,40 @@ def test_sidebar(win, ctl, tmp):
     comparison = by_name("parameterCompare")
     check("comparison opens beside the parameters", comparison.x() >= pane.width())
     APP.setProperty("showParameterCompare", False)
+    if shell is not None:
+        def toolbar_fits():
+            geometry = shell._toolbar.geometry()
+            return (geometry.x() == round(results.x())
+                    and geometry.width() == round(results.width())
+                    and prop(APP, "chromeInset") == geometry.height()
+                    and results.y() >= geometry.height())
+
+        check("native toolbar occupies only the results pane", toolbar_fits())
+        APP.setProperty("splitRatio", 0.4)
+        spin(80)
+        check("native toolbar follows the divider", toolbar_fits())
+        APP.setProperty("showParams", False)
+        spin(80)
+        check("native toolbar fills the window when parameters hide",
+              toolbar_fits() and shell._toolbar.x() == 0)
+        APP.setProperty("showParams", True)
+        shell.window.setMinimumSize(0, 0)
+        shell.window.resize(520, 700)
+        APP.setProperty("view", 0)
+        spin(100)
+        pane = find(content, "ParamsPane")
+        check("narrow parameter view clears the native toolbar",
+              not prop(APP, "split") and pane.mapToItem(APP, QPointF()).y()
+              >= prop(APP, "chromeInset") and toolbar_fits(),
+              (APP.width(), prop(APP, "split"), pane.mapToItem(APP, QPointF()).y(),
+               prop(APP, "chromeInset"), shell._toolbar.geometry(), results.x(), results.width(), results.y()))
+        shell.window.resize(1280, 900)
+        spin(100)
+        shell.window.addToolBar(shell._toolbar)
+        shell._reassert_overlay()
+        spin(100)
+        check("restored native toolbar returns above results",
+              shell._toolbar.parent() is shell._overlay and toolbar_fits())
 
 
 def main():
@@ -5737,7 +5775,7 @@ def main():
                 "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar"):
         print("== %s ==" % only)
         if only == "sidebar":
-            test_sidebar(win, ctl, tmp)
+            test_sidebar(win, ctl, tmp, keep[-1] if os.environ.get("PAINTER_UI_NATIVE") == "1" else None)
         elif only == "gallery":
             test_thumb_cache(win, ctl, tmp)
             test_filter(win, ctl, tmp)
