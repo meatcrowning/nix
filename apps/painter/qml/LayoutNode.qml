@@ -362,15 +362,16 @@ Item {
                 id: textViewport
                 width: parent.width
                 height: textBox.promptHeight
-                contentWidth: node.spec.title === "Exact wording" ? Math.max(width, textEdit.contentWidth + textEdit.leftPadding + textEdit.rightPadding) : width
-                contentHeight: textEdit.implicitHeight
+                contentWidth: node.spec.title === "Exact wording" ? Math.max(width - textBar.barW, textEdit.contentWidth + textEdit.leftPadding + textEdit.rightPadding) : width - textBar.barW
+                contentHeight: textEdit.height
                 clip: true
-                ScrollBar.vertical: VScroll { }
-                ScrollBar.horizontal: ScrollBar { policy: node.spec.title === "Exact wording" ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+                ScrollBar.vertical: VScroll { id: textBar }
+                ScrollBar.horizontal: ScrollBar { id: textHBar; policy: node.spec.title === "Exact wording" ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
                 TextArea {
                     id: textEdit
                     objectName: "layoutField_" + node.spec.title
-                    width: parent.width
+                    width: textViewport.width - textBar.barW
+                    height: Math.max(implicitHeight, textViewport.height - (textHBar.visible ? textHBar.height : 0))
                     text: node.spec.value || ""
                     wrapMode: node.spec.title === "Exact wording" ? TextEdit.NoWrap : TextEdit.Wrap
                     persistentSelection: true

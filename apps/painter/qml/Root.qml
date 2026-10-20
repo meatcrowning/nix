@@ -100,11 +100,8 @@ Item {
     // clamps are the same two minimums as before, so the handle cannot starve
     // either side: the controls stop reading below ~300px and the gallery below
     // ~200px. Same shape as filer's splitter.
-    // THE RESULTS LEAD. The controls used to be on the left; they are on the
-    // right now, so `paneLeadW` sizes the RESULTS pane and the two floors swap
-    // with them — a gallery stops being readable at ~200px, the controls at
-    // ~300px. A ratio saved before the swap is inverted once on restore, so the
-    // divider comes back where it looked rather than mirrored.
+    // Keep the stored ratio as the results share, independent of pane order.
+    // Moving the controls left must preserve their remembered width.
     readonly property real splitDefault: 0.58
     property real splitRatio: splitDefault
     readonly property int splitterW: 4
@@ -522,7 +519,7 @@ Item {
     ResultsPane {
         id: results
         app: root
-        x: 0
+        x: root.split ? controls.width + root.splitterW : 0
         // under the Plasma menubar (0 high in the Hyprland session) and under
         // the toolbar that floats over this pane
         y: menuBar.height + root.chromeInset
@@ -535,7 +532,7 @@ Item {
         id: splitBar
         visible: root.split
         z: 10
-        x: root.paneLeadW
+        x: controls.width
         y: menuBar.height
         width: root.splitterW
         // Stops at the status bar: a handle drawn over it also GRABS over it,
@@ -553,6 +550,7 @@ Item {
 
         MouseArea {
             id: splitDrag
+            objectName: "parameterSplitHandle"
             anchors.fill: parent
             // a 4px divider is a 10px grab target, across the divider
             anchors.leftMargin: -3
@@ -563,7 +561,8 @@ Item {
             onPositionChanged: function (m) {
                 if (!pressed) return
                 var p = mapToItem(root, m.x, m.y)
-                root.splitRatio = Math.max(0, Math.min(1, p.x / Math.max(1, root.width)))
+                root.splitRatio = Math.max(0, Math.min(1,
+                    1 - p.x / Math.max(1, root.width - root.splitterW)))
             }
             // Written on release, not on every pixel of the drag: a ratio is one
             // decision, not sixty file writes.
@@ -577,14 +576,13 @@ Item {
         }
     }
 
-    // controls, on the right — unless they are in a dock, in which case this
-    // window has none and the Loader builds nothing.
+    // Parameters lead; results use the remaining space on the right.
     Loader {
         id: controls
         active: root.showParams
-        x: root.split ? root.paneLeadW + root.splitterW : 0
+        x: 0
         y: menuBar.height
-        width: root.split ? Math.max(1, root.width - x) : root.width
+        width: root.split ? root.width - root.paneLeadW - root.splitterW : root.width
         height: parent.height - menuBar.height
         visible: root.showParams && (root.split || root.view === 0)
         sourceComponent: ParamsPane {
@@ -600,7 +598,7 @@ Item {
     ParameterCompare {
         visible: root.showParameterCompare
         z: 30
-        x: root.split ? Math.max(0, controls.x - width) : 0
+        x: root.split ? controls.width + root.splitterW : 0
         y: controls.y
         width: controls.width
         height: root.height - root.barH - y

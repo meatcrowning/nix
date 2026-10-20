@@ -30,7 +30,7 @@ Panel {
         // list says one thing and the lit button says another. `enabled: false`
         // is what refuses the clicks: it propagates to the delegates' own
         // MouseAreas, so nothing has to remember to check.
-        opacity: App.mode === "" ? 1 : 0.45
+        opacity: Theme.plasmaPalette || App.mode === "" ? 1 : 0.45
         enabled: App.mode === "" && !root.comparisonMode
 
         KineticListView {
@@ -44,6 +44,9 @@ Panel {
             ScrollBar.vertical: VScroll { id: mbar }
 
             delegate: Rectangle {
+                id: modelRow
+                readonly property color rowText: Theme.plasmaPalette && index === App.selectedIndex
+                                                 ? Theme.selectionText : Theme.text
                 // clear of the scrollbar's gutter, never under it
                 width: list.width - mbar.barW
                 height: known ? 34 : 52
@@ -61,18 +64,19 @@ Panel {
                         width: parent.width
                         PixelText {
                             text: name
-                            color: known ? (index === App.selectedIndex ? Theme.accent : Theme.text)
+                            color: Theme.plasmaPalette ? modelRow.rowText
+                                 : known ? (index === App.selectedIndex ? Theme.accent : Theme.text)
                                          : Theme.warn
                             elide: Text.ElideMiddle
                             width: Math.min(implicitWidth, parent.width - 130)
                         }
-                        PixelText { text: label; color: Theme.dim }
-                        PixelText { text: quant; color: Theme.dim; visible: quant !== "" }
-                        PixelText { text: overridden ? "(set)" : ""; color: Theme.info }
+                        PixelText { text: label; color: Theme.plasmaPalette ? modelRow.rowText : Theme.dim }
+                        PixelText { text: quant; color: Theme.plasmaPalette ? modelRow.rowText : Theme.dim; visible: quant !== "" }
+                        PixelText { text: overridden ? "(set)" : ""; color: Theme.plasmaPalette ? modelRow.rowText : Theme.info }
                     }
                     PixelText {
                         text: problem !== "" ? problem : pairing
-                        color: problem !== "" ? Theme.crit : Theme.textDim
+                        color: Theme.plasmaPalette ? modelRow.rowText : problem !== "" ? Theme.crit : Theme.textDim
                         width: parent.width
                         elide: Text.ElideRight
                     }

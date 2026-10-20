@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import "../../qmlcommon"
 
 // The parameter column, as a pane that can stand on its own.
@@ -307,16 +308,13 @@ Item {
             anchors.bottomMargin: root.bottomInset
             contentHeight: controlsCol.implicitHeight
             clip: true
-            // NO BAR ON THIS SIDE. The parameter column is a stack of panels
-            // that collapse — its length is something he sets, not something he
-            // has to navigate — and the gutter cost every control 11-16px of a
-            // 300px column. The scrollbar that §9.2 asks for is on the results
-            // side, where the content really is unbounded. The wheel and the
-            // compositor's kinetic scroll are untouched.
+            objectName: "parameterScroll"
+            contentWidth: width - parameterBar.barW
+            ScrollBar.vertical: VScroll { id: parameterBar; objectName: "parameterScrollBar" }
 
             Column {
                 id: controlsCol
-                width: controlsFlick.width
+                width: controlsFlick.contentWidth
                 spacing: 10
                 // Sections slide out of each other's way while one is being
                 // dragged, rather than teleporting — the desktop's one slide

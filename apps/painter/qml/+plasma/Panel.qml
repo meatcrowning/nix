@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import org.kde.kirigami as Kirigami
 
 // Panel, in a Plasma session: THE SECTION IS A BUTTON, and an open one is that
 // button held down.
@@ -19,6 +20,8 @@ import QtQuick.Controls
 Item {
     id: panel
     property string face: "plasma"
+    Kirigami.Theme.inherit: false
+    Kirigami.Theme.colorSet: Kirigami.Theme.Button
 
     property string title: ""
     property string persistKey: ""
@@ -202,7 +205,6 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: panel.badge
             elide: Text.ElideMiddle
-            opacity: 0.7
             horizontalAlignment: Text.AlignRight
         }
         TextButton {

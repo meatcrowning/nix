@@ -567,6 +567,7 @@ Rectangle {
 
         MouseArea {
             id: grab
+            objectName: box.negative ? "negativePromptResizeHandle" : "positivePromptResizeHandle"
             anchors.fill: parent
             anchors.topMargin: -3
             anchors.bottomMargin: -3

@@ -5633,6 +5633,93 @@ def test_snapshot_families(win, ctl):
     spin(30)
 
 
+def test_sidebar(win, ctl, tmp):
+    """Pane order, scroll access and resize propagation through the real scene."""
+    from PySide6.QtCore import QPointF
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("moss_checks", Path(__file__).with_name("moss-test.py"))
+    models = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(models)
+    models.models(Path(os.environ["PAINTER_MODELS"]))
+    ctl.setMode("")
+    ctl.rescan()
+    ctl.selectModelByName("moss-base-int8.safetensors")
+    spin(150)
+    content = win.contentItem()
+    pane = find(content, "ParamsPane")
+    results = find(content, "ResultsPane")
+    editor = find(content, "PromptEditor")
+    by_name = lambda name: next(it for it in walk(content) if it.objectName() == name)
+    scroller = by_name("parameterScroll")
+    bar = by_name("parameterScrollBar")
+    check("parameters lead on the left", pane.mapToItem(APP, QPointF()).x() == 0
+          and results.x() >= pane.width())
+    check("saved results share retains its width",
+          results.width() == prop(APP, "paneLeadW"))
+    divider = by_name("parameterSplitHandle")
+    original_ratio, original_width = prop(APP, "splitRatio"), pane.width()
+    drag(win, divider, divider.width() / 2, 150, divider.width() / 2 + 60, 150)
+    check("dragging the divider right widens the left sidebar",
+          abs(pane.width() - original_width - 60) < 3)
+    APP.setProperty("splitRatio", original_ratio)
+    spin(100)
+    check("parameter scrollbar appears on overflow",
+          bar.isVisible() and prop(bar, "size") < 1)
+    check("parameter content reserves the scrollbar gutter",
+          prop(scroller, "contentWidth") <= scroller.width() - prop(bar, "barW"))
+    if os.environ.get("PAINTER_UI_NATIVE") == "1":
+        label = next(it for it in walk(editor) if prop(it, "text") == "Seed number")
+        title = next(it for it in walk(editor) if prop(it, "text") == "Prompt")
+        check("plain labels use the section's native foreground and font",
+              prop(label, "color") == prop(title, "color")
+              and prop(label, "font").family() == prop(title, "font").family(),
+              (label.metaObject().className(), prop(label, "color").name(),
+               prop(title, "color").name(), prop(label, "font").toString(),
+               prop(title, "font").toString()))
+        selected = next(it for it in walk(find(content, "ModelPicker"))
+                        if prop(it, "text") == ctl.selectedName)
+        check("selected model uses native highlighted text",
+              prop(selected, "color") == prop(_THEME[0], "selectionText"))
+    handle = by_name("positivePromptResizeHandle")
+    box = find_all(editor, "PromptBox")[0]
+    for delta in (70, -100):
+        scroll_to(box)
+        spin(100)
+        before = (box.height(), editor.height(), prop(scroller, "contentHeight"))
+        drag(win, handle, handle.width() / 2, handle.height() / 2,
+             handle.width() / 2, handle.height() / 2 + delta)
+        spin(180)
+        check("prompt handle changes the editor height " + str(delta),
+              abs(box.height() - before[0] - delta) < 2)
+        check("prompt section and scroll extent follow the handle " + str(delta),
+              abs(editor.height() - before[1] - delta) < 2
+              and abs(prop(scroller, "contentHeight") - before[2] - delta) < 2,
+              (before, box.height(), editor.height(), prop(scroller, "contentHeight")))
+
+    ctl.layoutEditor.editor.command(lambda: ctl.layoutEditor.editor.model.add())
+    spin(100)
+    text = by_name("layoutField_Prompt")
+    handle = by_name("regionPromptResizeHandle")
+    for delta in (60, -80):
+        y = handle.mapToItem(prop(scroller, "contentItem"), QPointF()).y()
+        scroller.setProperty("contentY", max(0, y - 220))
+        spin(100)
+        before = (text.height(), editor.height(), prop(scroller, "contentHeight"))
+        drag(win, handle, handle.width() / 2, 5, handle.width() / 2, 5 + delta)
+        spin(180)
+        check("region text fills the resized field " + str(delta),
+              abs(text.height() - before[0] - delta) < 2,
+              (before[0], text.height()))
+        check("region resize propagates to section and scrollbar " + str(delta),
+              abs(editor.height() - before[1] - delta) < 2
+              and abs(prop(scroller, "contentHeight") - before[2] - delta) < 2)
+    APP.setProperty("showParameterCompare", True)
+    spin(60)
+    comparison = by_name("parameterCompare")
+    check("comparison opens beside the parameters", comparison.x() >= pane.width())
+    APP.setProperty("showParameterCompare", False)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -5647,9 +5734,11 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery"):
+                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar"):
         print("== %s ==" % only)
-        if only == "gallery":
+        if only == "sidebar":
+            test_sidebar(win, ctl, tmp)
+        elif only == "gallery":
             test_thumb_cache(win, ctl, tmp)
             test_filter(win, ctl, tmp)
             test_live_row(win, ctl, tmp)
@@ -5683,7 +5772,7 @@ def main():
             test_preview_zoom(win, ctl, tmp)
         else:
             test_live_row(win, ctl, tmp)
-        real = [w for w in WARNINGS if "Qt Quick Layouts" not in w]
+        real = [w for w in WARNINGS if only == "sidebar" or "Qt Quick Layouts" not in w]
         for w in real:
             print("QML WARNING: " + w)
         check("no QML warnings", not real, len(real))
