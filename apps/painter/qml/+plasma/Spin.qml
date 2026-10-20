@@ -23,11 +23,16 @@ Item {
     property real to: 1000000
     property real step: 1
     property int decimals: 0
+    property bool trimZeros: false
     property bool editing: box.activeFocus
     signal edited(real value)
 
     readonly property real scale: Math.pow(10, decimals)
     function clamp(v) { return Math.max(from, Math.min(to, v)) }
+    function fmt(v) {
+        var text = decimals > 0 ? v.toFixed(decimals) : String(Math.round(v))
+        return trimZeros && decimals > 0 ? text.replace(/\.?0+$/, "") : text
+    }
 
     implicitWidth: box.implicitWidth
     implicitHeight: box.implicitHeight
@@ -54,8 +59,7 @@ Item {
         value: Math.round(spin.clamp(spin.value) * spin.scale)
 
         textFromValue: function (v) {
-            var real = v / spin.scale
-            return spin.decimals > 0 ? real.toFixed(spin.decimals) : String(Math.round(real))
+            return spin.fmt(v / spin.scale)
         }
         valueFromText: function (text) {
             var real = parseFloat(String(text).replace(",", "."))
