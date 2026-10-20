@@ -139,14 +139,15 @@
   systemd.user.services.vivaldi-theme-prefs = {
     Unit.Description = "Refresh Vivaldi's saved desktop theme after exit";
     Service = {
-      Type = "oneshot";
+      # The browser may stay open for days; activation must not wait for its
+      # exit. Keep the lock waiter supervised as a running background service.
+      Type = "exec";
       # A fast close/reopen can remove and recreate SingletonLock between two
       # inotify deliveries.  Once either delivery starts us, wait on the lock
       # itself instead of trusting a second event, then write after the final
       # preferences flush.  `-L`, rather than `-e`, matters: Chromium's lock
       # is a deliberately dangling hostname-pid symlink.
       ExecStart = "${pkgs.bash}/bin/bash -c 'while test -L ${config.home.homeDirectory}/.config/vivaldi/SingletonLock || test -L ${config.home.homeDirectory}/.var/app/com.vivaldi.Vivaldi/config/vivaldi/SingletonLock; do ${pkgs.coreutils}/bin/sleep 2; done; exec ${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/vivaldi-theme.py --prefs'";
-      TimeoutStartSec = "infinity";
     };
   };
 
