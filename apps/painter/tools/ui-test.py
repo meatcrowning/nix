@@ -5639,7 +5639,6 @@ def test_sidebar(win, ctl, tmp, shell=None):
     import importlib.util
     if shell is not None:
         shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
-        shell.use_overlay_toolbar(width_prop="resultsWidth", x_prop="resultsX")
         spin(100)
     spec = importlib.util.spec_from_file_location("moss_checks", Path(__file__).with_name("moss-test.py"))
     models = importlib.util.module_from_spec(spec)
@@ -5671,6 +5670,34 @@ def test_sidebar(win, ctl, tmp, shell=None):
           bar.isVisible() and prop(bar, "size") < 1)
     check("parameter content reserves the scrollbar gutter",
           prop(scroller, "contentWidth") <= scroller.width() - prop(bar, "barW"))
+    fields = by_name("layoutCoordinateFields")
+    if shell is not None:
+        shell.window.resize(1800, 900)
+    else:
+        win.setWidth(1800)
+    spin(100)
+    for ratio, shown in ((0.2, True), (0.8, False), (0.2, True)):
+        APP.setProperty("splitRatio", ratio)
+        spin(120)
+        check("coordinate fields respond to actual sidebar width " + str(ratio),
+              fields.isVisible() == shown, (pane.width(), fields.width(), fields.isVisible()))
+    ui = ctl.layoutEditor.editor
+    def node_item(spec):
+        return next(it for it in walk(editor) if it.property("spec") == spec)
+    header, tokens, write, undo = [node_item(s) for s in
+                                  (ui.prompt_header, ui.prompt_tokens, ui.prompt_auto, ui.prompt_revert)]
+    check("region prompt actions stay adjacent at the left",
+          tokens.mapToItem(header, QPointF()).x() < 80
+          and 0 <= write.mapToItem(header, QPointF()).x()
+          - tokens.mapToItem(header, QPointF(tokens.width(), 0)).x() <= 8
+          and 0 <= undo.mapToItem(header, QPointF()).x()
+          - write.mapToItem(header, QPointF(write.width(), 0)).x() <= 8)
+    if shell is not None:
+        shell.window.resize(1280, 900)
+    else:
+        win.setWidth(1280)
+    APP.setProperty("splitRatio", original_ratio)
+    spin(100)
     if os.environ.get("PAINTER_UI_NATIVE") == "1":
         label = next(it for it in walk(editor) if prop(it, "text") == "Seed number")
         title = next(it for it in walk(editor) if prop(it, "text") == "Prompt")
@@ -5702,6 +5729,11 @@ def test_sidebar(win, ctl, tmp, shell=None):
 
     ctl.layoutEditor.editor.command(lambda: ctl.layoutEditor.editor.model.add())
     spin(100)
+    check("region list has a view background",
+          prop(by_name("regionListBackground"), "color") == prop(_THEME[0], "bg")
+          and by_name("regionListBackground").height() == by_name("regionList").height())
+    check("selected canvas regions use the theme accent",
+          prop(by_name("mossLayoutCanvas"), "selectedColor") == prop(_THEME[0], "focusColor"))
     text = by_name("layoutField_Prompt")
     handle = by_name("regionPromptResizeHandle")
     for delta in (60, -80):
@@ -5723,39 +5755,35 @@ def test_sidebar(win, ctl, tmp, shell=None):
     check("comparison opens beside the parameters", comparison.x() >= pane.width())
     APP.setProperty("showParameterCompare", False)
     if shell is not None:
-        def toolbar_fits():
-            geometry = shell._toolbar.geometry()
-            return (geometry.x() == round(results.x())
-                    and geometry.width() == round(results.width())
-                    and prop(APP, "chromeInset") == geometry.height()
-                    and results.y() >= geometry.height())
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QToolButton
 
-        check("native toolbar occupies only the results pane", toolbar_fits())
+        def toolbar_fits():
+            toolbar = shell._toolbar
+            return (toolbar.width() == shell.window.width()
+                    and toolbar.mapTo(shell.window, QPoint()).x() == 0
+                    and shell.view.mapTo(shell.window, QPoint()).y()
+                    >= toolbar.mapTo(shell.window, QPoint()).y() + toolbar.height())
+
+        labels = []
+        for action in shell._toolbar.actions():
+            widget = shell._toolbar.widgetForAction(action)
+            if isinstance(widget, QToolButton):
+                labels.append(widget.text().replace('&', ''))
+        check("toolbar buttons match Unity order", labels ==
+              ['Generate', 'Cancel', 'Use Settings', 'Compare Settings'], labels)
+        check("native toolbar spans the window above both panes", toolbar_fits())
         APP.setProperty("splitRatio", 0.4)
         spin(80)
-        check("native toolbar follows the divider", toolbar_fits())
+        check("divider leaves full-width toolbar unchanged", toolbar_fits())
         APP.setProperty("showParams", False)
         spin(80)
-        check("native toolbar fills the window when parameters hide",
-              toolbar_fits() and shell._toolbar.x() == 0)
+        check("toolbar remains full-width with parameters hidden", toolbar_fits())
         APP.setProperty("showParams", True)
         shell.window.setMinimumSize(0, 0)
         shell.window.resize(520, 700)
-        APP.setProperty("view", 0)
         spin(100)
-        pane = find(content, "ParamsPane")
-        check("narrow parameter view clears the native toolbar",
-              not prop(APP, "split") and pane.mapToItem(APP, QPointF()).y()
-              >= prop(APP, "chromeInset") and toolbar_fits(),
-              (APP.width(), prop(APP, "split"), pane.mapToItem(APP, QPointF()).y(),
-               prop(APP, "chromeInset"), shell._toolbar.geometry(), results.x(), results.width(), results.y()))
-        shell.window.resize(1280, 900)
-        spin(100)
-        shell.window.addToolBar(shell._toolbar)
-        shell._reassert_overlay()
-        spin(100)
-        check("restored native toolbar returns above results",
-              shell._toolbar.parent() is shell._overlay and toolbar_fits())
+        check("narrow view clears the full-width toolbar", toolbar_fits())
 
 
 def main():

@@ -3096,15 +3096,8 @@ def main():
         shell.on_action("set", open_settings)
         # The filter field at the right-hand end of the toolbar, where every KDE
         # program keeps one. It filters the gallery by filename and prompt.
-        # Right-aligned with the RESULTS pane rather than with the window: it
-        # filters the outputs, so it belongs over them and not over the
-        # parameter column.
+        # Keep the four primary actions at the left of a full-width toolbar.
         shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
-        # ...and the toolbar itself only spans the results pane, floating over
-        # it, so the parameter column runs all the way up to the menubar with
-        # no band of empty toolbar above it. The field's right edge follows for
-        # free as the results pane moves and resizes.
-        shell.use_overlay_toolbar(width_prop="resultsWidth", x_prop="resultsX")
         # The window is how the controller knows whether he is watching: a batch
         # that finishes behind a rolled-up or unfocused painter says so with a
         # desktop toast instead (Painter._onscreen).
@@ -3213,23 +3206,6 @@ def main():
                     print(f"[dock {ident}]")
                     walk(item)
 
-            # PAINTER_OVERLAY_CHECK: prove the floating toolbar survives a
-            # window-state restore. `restoreState()` re-docks a toolbar by
-            # objectName, which is what broke it on his first relaunch; this
-            # forces exactly that (re-adding it to a toolbar area) and then asks
-            # the shell to re-assert itself.
-            if plasma and os.environ.get("PAINTER_OVERLAY_CHECK"):
-                shell.window.addToolBar(shell._toolbar)      # what a restore does
-                app.processEvents()
-                print("overlay after re-dock: parent=%s geo=%s"
-                      % (shell._toolbar.parent() is shell._overlay,
-                         shell._toolbar.geometry()))
-                shell._reassert_overlay()
-                app.processEvents()
-                print("overlay reasserted:   parent=%s geo=%s inset=%s"
-                      % (shell._toolbar.parent() is shell._overlay,
-                         shell._toolbar.geometry(),
-                         shell.root.property("chromeInset")))
             # PAINTER_FAKE_PROGRESS: drive the status bar's progress widget to a
             # value without a backend, so the shot shows the running state.
             # There is no other way to see it offscreen — the real one needs a

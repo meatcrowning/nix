@@ -482,7 +482,7 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_col
             s = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="%f %f %d %d">' % (rw, rh, cx, cy, rw, rh)]
             x = y = 4
         selected = item['id'] in editor.selected
-        colour = ('#a0a0a0' if selected else '#808080') if item.get('locked') else '#ffb454' if selected else font.get('inactive', '#bbbbbb')
+        colour = ('#a0a0a0' if selected else '#808080') if item.get('locked') else font.get('selected', '#ffb454') if selected else font.get('inactive', '#bbbbbb')
         text_colour = colour
         s.append('<g>')
         s.extend(palette_bands(item.get('palette', []), palette_colours, x, y, bw, bh,

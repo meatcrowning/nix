@@ -62,13 +62,33 @@ Item {
     Component {
         id: rowComponent
         RowLayout {
+            id: rowLayout
             spacing: node.spec.kind === "toolbar" ? 2 : 6
+            // Measure all requested controls, including a currently hidden
+            // coordinate group, so widening can restore it without a latch.
+            readonly property real requestedWidth: {
+                var total = 0, count = 0
+                for (var i = 0; i < rowItems.count; ++i) {
+                    var child = rowItems.itemAt(i)
+                    if (!child || !child.modelData.shown) continue
+                    total += child.item ? child.item.implicitWidth : 0
+                    count++
+                }
+                return total + Math.max(0, count - 1) * spacing
+            }
+            readonly property bool coordinatesFit: width >= requestedWidth
+            readonly property bool hasStretch: {
+                for (var i = 0; i < node.spec.nodes.length; ++i)
+                    if (node.spec.nodes[i].expand) return true
+                return false
+            }
             Repeater {
+                id: rowItems
                 model: node.spec.nodes
                 Loader {
                     required property QtObject modelData
                     Layout.preferredHeight: item ? item.implicitHeight : 0
-                    visible: modelData.shown
+                    visible: modelData.shown && (modelData.kind !== "compact" || rowLayout.coordinatesFit)
                     Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
                     Layout.fillWidth: modelData.expand
                     Layout.fillHeight: node.spec.kind === "toolbar" || modelData.expand || modelData.kind === "inspector"
@@ -77,6 +97,12 @@ Item {
                         : node.spec.kind === "toolbar" && modelData.kind !== "compact" && modelData.kind !== "spacer"
                           ? (item ? item.implicitWidth : 0) : 0
                 }
+            }
+            Item {
+                visible: node.spec.kind !== "toolbar" && !rowLayout.hasStretch
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Layout.preferredWidth: 0
             }
         }
     }
@@ -92,6 +118,7 @@ Item {
                     visible: modelData.shown
                     Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     Layout.fillHeight: modelData.expand
                 }
             }
@@ -155,18 +182,27 @@ Item {
         id: listComponent
         Item {
             id: listBox
+            NativeContentContext {}
             property int listHeight: Prefs.get("layout.regionListHeight") || 0
             implicitHeight: regionList.height + 10
+            Rectangle {
+                objectName: "regionListBackground"
+                width: parent.width
+                height: regionList.height
+                color: Theme.bg
+                border.color: Theme.border
+            }
             KineticListView {
                 id: regionList
+                objectName: "regionList"
                 width: parent.width
                 height: listBox.listHeight > 0 ? listBox.listHeight : Math.min(140, contentHeight)
                 clip: true
                 model: node.spec.rows
-                ScrollBar.vertical: VScroll { }
+                ScrollBar.vertical: VScroll { id: listBar }
                 delegate: ItemDelegate {
                     required property var modelData
-                    width: ListView.view.width
+                    width: ListView.view.width - listBar.barW
                     text: modelData.title
                     highlighted: node.spec.selected.indexOf(modelData.identity) >= 0
                     MouseArea {
@@ -218,6 +254,7 @@ Item {
                 height: canvasBox.canvasHeight
                 bridge: node.bridge
                 inactiveColor: Theme.dim
+                selectedColor: Theme.focusColor
                 previewFont: (typeof DeskStyle !== "undefined" && DeskStyle
                               && typeof DeskStyle.editorFontForScale === "function")
                              ? DeskStyle.editorFontForScale(Screen.devicePixelRatio)

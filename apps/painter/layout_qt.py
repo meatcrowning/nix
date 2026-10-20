@@ -194,6 +194,7 @@ class LayoutCanvas(QQuickPaintedItem):
     bridgeChanged = Signal()
     previewFontChanged = Signal()
     inactiveColorChanged = Signal()
+    selectedColorChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -210,6 +211,7 @@ class LayoutCanvas(QQuickPaintedItem):
         self._layers = LayerCache(raster)
         self._preview_font = QFont()
         self._inactive_color = QColor('#bbbbbb')
+        self._selected_color = QColor()
         self.setAcceptedMouseButtons(Qt.LeftButton | Qt.MiddleButton)
         self.setAntialiasing(True)
 
@@ -240,11 +242,21 @@ class LayoutCanvas(QQuickPaintedItem):
 
     inactiveColor = Property(QColor, lambda s: s._inactive_color, set_inactive_color, notify=inactiveColorChanged)
 
+    def set_selected_color(self, colour):
+        if colour != self._selected_color:
+            self._selected_color = QColor(colour)
+            self.selectedColorChanged.emit()
+            self.update()
+
+    selectedColor = Property(QColor, lambda s: s._selected_color, set_selected_color, notify=selectedColorChanged)
+
     def paint(self, painter):
         if self._bridge:
             f = self._preview_font
             font = dict(inactive=self._inactive_color.name(), family=f.family(), size=QFontInfo(f).pixelSize(), weight=int(f.weight()),
                         style='italic' if f.italic() else 'normal', height=QFontMetricsF(f).height())
+            if self._selected_color.isValid():
+                font['selected'] = self._selected_color.name()
             editor = self._bridge.editor
             scale = painter.device().devicePixelRatioF()
             if scale != self._layer_scale:

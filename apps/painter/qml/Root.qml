@@ -37,15 +37,6 @@ Item {
     // thread every frame (apps/painter/main.py records his verdict).
     property bool showParams: true
 
-    // How much chrome floats OVER the top of the results pane. Under Plasma the
-    // toolbar is not a band across the window but a strip over that pane only
-    // (pylib/kdeshell.py `use_overlay_toolbar`), so the results start below it
-    // and the parameter column does not — it runs up to the menubar. 0 in the
-    // Hyprland session, where there is no toolbar at all.
-    property int chromeInset: 0
-    readonly property real resultsX: results.x
-    readonly property real resultsWidth: results.width
-
     // BROWSE OR VIEW — Gwenview's spine, and the one piece of this that is not
     // chrome: the grid answers "what have I made", View answers "what does THIS
     // one look like", which no thumbnail can. Return or a double-click enters,
@@ -522,11 +513,10 @@ Item {
         id: results
         app: root
         x: root.split ? controls.width + root.splitterW : 0
-        // under the Plasma menubar (0 high in the Hyprland session) and under
-        // the toolbar that floats over this pane
-        y: menuBar.height + root.chromeInset
+        // Native window chrome sits above the entire QML scene.
+        y: menuBar.height
         width: root.split ? root.paneLeadW : root.width
-        height: parent.height - root.barH - menuBar.height - root.chromeInset
+        height: parent.height - root.barH - menuBar.height
         visible: !root.showParams || root.split || root.view === 1
     }
 
@@ -583,7 +573,7 @@ Item {
         id: controls
         active: root.showParams
         x: 0
-        y: menuBar.height + (root.split ? 0 : root.chromeInset)
+        y: menuBar.height
         width: root.split ? root.width - root.paneLeadW - root.splitterW : root.width
         height: parent.height - y
         visible: root.showParams && (root.split || root.view === 0)
@@ -774,7 +764,7 @@ Item {
           tip: App.busy ? "Queue another generation" : "Generate",
           menuText: App.busy ? "Queue Another Generation" : "Generate",
           menu: "file", icon: App.busy ? "list-add" : "media-playback-start",
-          bar: true, shortcut: "Ctrl+Return" },
+          bar: true, barText: "Generate", shortcut: "Ctrl+Return" },
         { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
           tip: "Cancel", barText: "Cancel", menu: "file", icon: "process-stop",
           bar: true, shortcut: "Ctrl+." },
@@ -827,7 +817,7 @@ Item {
           tip: "Gallery" },
         { id: "pv",   label: "pv",   tb: true, state: root.showPreview ? 1 : 0,
           tip: "Preview viewport", menu: "view", icon: "document-preview",
-          bar: true, barText: "Preview", checkable: true, shortcut: "F8" },
+          checkable: true, shortcut: "F8" },
         { id: "params", tip: "Parameters", menu: "view",
           icon: "view-split-left-right", checkable: true,
           state: root.showParams ? 1 : 0, shortcut: "F7" },
@@ -835,10 +825,9 @@ Item {
         // Browse and View are the second radio pair, and the one that decides
         // what the results pane IS.
         { id: "browse", tip: "Browse", menu: "view", icon: "view-list-icons",
-          checkable: true, group: "mode", state: root.inView ? 0 : 1,
-          bar: true, barText: "Browse" },
+          checkable: true, group: "mode", state: root.inView ? 0 : 1 },
         { id: "viewone", tip: "View", menu: "view", icon: "view-preview",
-          checkable: true, group: "mode", bar: true, barText: "View",
+          checkable: true, group: "mode",
           state: root.inView ? 1 : (root.selOne === "" && Gallery.count === 0 ? 2 : 0) },
         "-",
         // Zoom is the View mode's, and a clip has none (OutputView.qml).
@@ -857,7 +846,7 @@ Item {
         // it is a switch for a thing that cannot happen, which is worse than no
         // switch at all; `hidden` is read by `actions` below.
         { id: "compare", tip: "Compare", menu: "view", icon: "view-split-left-right",
-          bar: true, barText: "Compare", checkable: true,
+          checkable: true,
           hidden: !root.canCompare,
           state: root.showCompare ? 1 : 0,
           menuText: "Compare before/after" },
@@ -913,9 +902,9 @@ Item {
           icon: "process-stop", state: App.backendRunning ? 0 : 2 },
         "-",
         { id: "rescan", tip: "Rescan Models", menu: "tools",
-          icon: "view-refresh", shortcut: "Ctrl+R", bar: true },
+          icon: "view-refresh", shortcut: "Ctrl+R" },
         { id: "unload", tip: "Unload Models", menu: "tools",
-          icon: "edit-clear-history", bar: true, state: App.backendRunning ? 0 : 2 },
+          icon: "edit-clear-history", state: App.backendRunning ? 0 : 2 },
         // --------------------------------------------------------- settings
         { id: "set",  label: "st",   tb: true, state: root.showSettings ? 1 : 0,
           tip: "Settings", bottom: true, menu: "settings",

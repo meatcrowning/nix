@@ -184,6 +184,11 @@ def core():
     ns = {'s': 'http://www.w3.org/2000/svg'}
     labels = rendered.findall('.//s:text', ns)
     assert len(labels) > 1 and all(t.attrib['fill'] == '#ffb454' for t in labels)
+    themed = ET.fromstring(M.svg(preview, 700, 700, font=dict(
+        family='sans-serif', size=11, height=13, weight=400, style='normal',
+        selected='#123abc'))[0])
+    assert all(t.attrib['fill'] == '#123abc' for t in themed.findall('.//s:text', ns))
+    assert any(r.attrib.get('stroke') == '#123abc' for r in themed.findall('.//s:rect', ns))
     assert '…' not in ''.join(t.text or '' for t in labels)
     assert rendered.find('s:g/s:rect', ns).attrib['fill'] == 'none'
     row = preview.add('text', [.1, .1, .3, .8])
