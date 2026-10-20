@@ -28,7 +28,9 @@ class Node(QObject):
     options = Property('QVariantList', lambda s: s._options, constant=True)
     nodes = Property('QVariantList', lambda s: s._nodes, constant=True)
     value = Property('QVariant', lambda s: s._value, notify=changed)
-    shown = Property(bool, lambda s: s._visible, notify=changed)
+    # Hide the layout slot as well as the label; an empty child Label alone
+    # still leaves its Loader's preferred height and inter-row spacing.
+    shown = Property(bool, lambda s: s._visible and (s._kind != 'label' or bool(s._title)), notify=changed)
     enabled = Property(bool, lambda s: s._enabled, notify=changed)
     expand = Property(bool, lambda s: s._expand, constant=True)
     rows = Property('QVariantList', lambda s: s._rows, notify=changed)

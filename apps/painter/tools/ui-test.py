@@ -5734,6 +5734,21 @@ def test_sidebar(win, ctl, tmp, shell=None):
           and by_name("regionListBackground").height() == by_name("regionList").height())
     check("selected canvas regions use the theme accent",
           prop(by_name("mossLayoutCanvas"), "selectedColor") == prop(_THEME[0], "focusColor"))
+    palette = node_item(ui.fields["item.palette"])
+    region = palette.parentItem().parentItem()
+    palette_bottom = palette.mapToItem(region, QPointF(0, palette.height())).y()
+    check("region ends at the palette without empty message rows",
+          not ui.warning.shown and not ui.status.shown
+          and abs(region.implicitHeight() - palette_bottom) < 1,
+          (region.implicitHeight(), palette_bottom))
+    ctl.layoutEditor.toolkit.set_label(ui.warning, "A region warning")
+    spin(80)
+    check("nonempty region warnings still take space",
+          ui.warning.shown and region.implicitHeight() > palette_bottom)
+    ctl.layoutEditor.toolkit.set_label(ui.warning, "")
+    spin(80)
+    check("clearing a warning releases its space",
+          abs(region.implicitHeight() - palette_bottom) < 1)
     text = by_name("layoutField_Prompt")
     handle = by_name("regionPromptResizeHandle")
     for delta in (60, -80):

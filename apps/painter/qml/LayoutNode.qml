@@ -317,7 +317,7 @@ Item {
                 }
             }
             Row {
-                visible: node.spec.kind === "palette"
+                visible: node.spec.kind === "palette" && node.spec.swatches.length > 0
                 spacing: 4
                 Repeater {
                     model: node.spec.swatches
