@@ -19,6 +19,14 @@
     # so these values just make the first seed match the current wallpaper.
     # Colors are 0xSSRRGGBB (SS = styling; 01 = bold).
     displayManager.ly.settings = {
+      # The graphical wrapper redirects output through systemd-cat and starts
+      # graphical targets. A plain TTY shell must keep its terminal streams.
+      setup_cmd = toString (pkgs.writeShellScript "ly-session-setup" ''
+        if [ "''${XDG_SESSION_TYPE:-}" = tty ]; then
+          exec "$@"
+        fi
+        exec ${config.services.displayManager.sessionData.wrapper} "$@"
+      '');
       animation = "colormix";
       colormix_col1 = "0x00EBCD9B"; # accent
       colormix_col2 = "0x00544C3A"; # dim
