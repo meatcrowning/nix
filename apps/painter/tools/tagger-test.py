@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tagger_worker import Tags, Prompt, generate
 
@@ -56,6 +57,10 @@ with tempfile.TemporaryDirectory() as tmp:
     assert generate(dict(task='prompt', scope='negative', tokens=48, caption='', scene='A fox.', moss=True), str(binary), str(model)) == 'blurred eyes, duplicated limbs'
     fake("import sys\nprompt = sys.argv[sys.argv.index('-p') + 1]\nassert 'cohesive visual description' in prompt and 'one region' not in prompt\nprint('A fox rests in snow.[end of text]', flush=True)\n")
     assert generate(dict(task='prompt', scope='positive', tokens=48, caption='fox'), str(binary), str(model)) == 'A fox rests in snow.'
+    for scope in ('positive', 'region', 'negative'):
+        instruction = 'general list of visual artifacts' if scope == 'negative' else 'invent a fresh, specific visual idea'
+        fake("import sys\nprompt = sys.argv[sys.argv.index('-p') + 1]\nassert %r in prompt\nprint('A fresh scene.[end of text]', flush=True)\n" % instruction)
+        assert generate(dict(task='prompt', scope=scope, caption=''), str(binary), str(model)) == 'A fresh scene.'
     fake('time.sleep(20)\n')
     start = time.monotonic()
     try:
@@ -67,7 +72,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert time.monotonic() - start < 3
     assert os.environ.get('QT_QPA_PLATFORM') == 'offscreen'
     from PySide6.QtCore import QCoreApplication, QTimer
-    from tagger import Tagger
+    from tagger import Tagger, worker_command
     app = QCoreApplication([])
     os.environ.update(PAINTER_TAG_LLAMA=str(binary), PAINTER_TAG_MODEL=str(model), XDG_RUNTIME_DIR=tmp)
     fake("print('fox, snow,', flush=True)\ntime.sleep(20)\n")
@@ -76,11 +81,43 @@ with tempfile.TemporaryDirectory() as tmp:
     def finished(reply):
         replies.append(reply)
         app.quit()
-    assert service.start(dict(count=2, caption='fox in snow'), finished)['busy']
+    with patch('tagger.socket.gethostname', return_value='top'):
+        assert service.start(dict(count=2, caption='fox in snow'), finished)['busy']
     assert service.start(dict(count=2, caption='another'))['error']
     QTimer.singleShot(5000, app.quit)
     app.exec()
     service.cancel()
     assert replies and replies[0]['tags'] == ['fox', 'snow'], replies
     assert not service.result['busy'] and service.process is None
-print('PASS: complete unique tags, exact cutoff, truncated output, deadline and async process cleanup')
+    ssh = root / 'ssh'
+    ssh.write_text('#!' + sys.executable + '\nimport json, sys\n'
+                   'assert sys.argv[-2] == "top.local"\n'
+                   'assert sys.argv[-1].endswith("painter --prompt-worker")\n'
+                   'assert "ControlPath=/fake/control" in sys.argv\n'
+                   'assert json.load(sys.stdin)["caption"] == ""\n'
+                   'print(json.dumps(dict(prompt="A fresh scene.", error="")))\n')
+    ssh.chmod(0o700)
+    with patch('tagger.socket.gethostname', return_value='book'), patch.dict(os.environ, {
+            'PAINTER_BACKEND_SSH_BIN': str(ssh), 'PAINTER_BACKEND_SSH': 'top.local',
+            'PAINTER_BACKEND_SSH_CTL': '/fake/control'}):
+        assert worker_command()[0] == str(ssh)
+        replies.clear()
+        service.start(dict(task='prompt', caption=''), finished)
+        app.exec()
+        assert replies and replies[0]['prompt'] == 'A fresh scene.', replies
+        # Transport failure must report an error, never run the local model.
+        ssh.write_text('#!' + sys.executable + '\nraise SystemExit(255)\n')
+        replies.clear()
+        service.start(dict(task='prompt', caption=''), finished)
+        app.exec()
+        assert replies and replies[0]['error'] and 'top' in replies[0]['error'], replies
+        replies.clear()
+        ssh.write_text('#!' + sys.executable + '\nimport time\ntime.sleep(20)\n')
+        service.start(dict(task='prompt', caption=''), finished)
+        service.deadline.start(50)
+        app.exec()
+        assert replies and 'timed out' in replies[0]['error'], replies
+        assert service.process is None and not service.deadline.isActive()
+    with patch('tagger.socket.gethostname', return_value='book'), patch.dict(os.environ, {}, clear=True):
+        assert worker_command()[-2] == 'top'
+print('PASS: tags, empty prompts, top routing, SSH failure, deadlines and worker cleanup')

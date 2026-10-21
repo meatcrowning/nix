@@ -76,7 +76,7 @@ class ParameterForm(object):
             limit.set_tooltip_text('Maximum output tokens')
             write, undo = Gtk.Button(label='Write'), Gtk.Button()
             undo.set_image(Gtk.Image.new_from_stock(Gtk.STOCK_UNDO, Gtk.IconSize.MENU))
-            undo.set_tooltip_text('Restore the prompt before local generation')
+            undo.set_tooltip_text('Restore the prompt before generation')
             undo.get_accessible().set_name('Undo prompt writing')
             undo.set_sensitive(False)
             for widget in (limit, write, undo):

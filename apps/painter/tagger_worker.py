@@ -90,15 +90,15 @@ def generate(request, binary=None, model=None, timeout=90):
     if not 1 <= count <= 32:
         raise ValueError('Choose between 1 and 32 tags.')
     caption = str(request.get('caption', '')).strip()[:2000]
-    if not caption and not (prose and (request.get('scene') or request.get('tags'))):
+    if not caption and not prose:
         raise ValueError('Write a prompt or scene idea first.')
     binary = binary or os.environ.get('PAINTER_TAG_LLAMA', '')
     model = model or os.environ.get('PAINTER_TAG_MODEL', '')
     if not Path(binary).is_file() or not Path(model).is_file():
-        raise ValueError('Local tag model is unavailable. Relaunch Painter after rebuilding.')
+        raise ValueError("Top's tag model is unavailable. Rebuild Painter on top.")
     available = next(int(line.split()[1]) * 1024 for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:'))
     if available < 4 * 1024**3:
-        raise ValueError('Local writing needs at least 4 GiB of available RAM.')
+        raise ValueError('Writing on top needs at least 4 GiB of available RAM.')
     system = ('Extract concise visual tags for an image region. Output only distinct descriptive '
               'phrases separated by commas. Include a comma after EVERY tag, including the last. '
               'No introduction, explanation, numbering, reasoning or markup. Describe only what '
@@ -135,6 +135,12 @@ def generate(request, binary=None, model=None, timeout=90):
             system += (' MOSS accepts natural-language descriptions and tags. Use plain descriptive language; '
                        'avoid SD weighting syntax, quality-booster padding, settings and command flags. '
                        'Keep exact visible wording quoted verbatim. Do not emit layout JSON.')
+    if prose and not caption:
+        if scope == 'negative':
+            system += ' If no scene is supplied, suggest a short general list of visual artifacts to avoid.'
+        else:
+            system += (' If no subject or scene is supplied, invent a fresh, specific visual idea. '
+                       'Use any supplied context; do not ask questions or mention missing input.')
     context = json.dumps(context, ensure_ascii=False)
     # The pinned LFM GGUF uses ChatML. Supplying the completed empty thinking
     # block starts directly in its final answer instead of spending the budget
@@ -156,7 +162,7 @@ def generate(request, binary=None, model=None, timeout=90):
             selector.register(proc.stderr, selectors.EVENT_READ)
             while selector.get_map():
                 if time.monotonic() >= deadline:
-                    raise ValueError('Local writing timed out. Try a smaller output limit or a shorter prompt.')
+                    raise ValueError('Writing on top timed out. Try a smaller output limit or a shorter prompt.')
                 for key, _ in selector.select(min(.2, max(0, deadline - time.monotonic()))):
                     data = os.read(key.fileobj.fileno(), 4096)
                     if not data:
@@ -166,12 +172,12 @@ def generate(request, binary=None, model=None, timeout=90):
                         continue
                     seen += len(data)
                     if seen > 16384:
-                        raise ValueError('Local tagger exceeded its output limit.')
+                        raise ValueError("Top's tagger exceeded its output limit.")
                     if parser.feed(decoder.decode(data)):
                         return parser.finish() if prose else parser.items
         proc.wait(timeout=1)
         if proc.returncode:
-            raise ValueError('Local tag model failed to run (exit %s).' % proc.returncode)
+            raise ValueError("Top's tag model failed to run (exit %s)." % proc.returncode)
         if prose:
             return parser.finish()
         # Only delimiters complete tags; a token limit can leave a partial word.
@@ -192,6 +198,7 @@ def main():
     def cancelled(*_):
         raise SystemExit(0)
     signal.signal(signal.SIGTERM, cancelled)
+    signal.signal(signal.SIGHUP, cancelled)
     lock = None
     try:
         root = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp'))
@@ -199,7 +206,7 @@ def main():
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise ValueError('Another Painter window is using the local writer. Try again shortly.')
+            raise ValueError('Another Painter window is using the writer on top. Try again shortly.')
         request = json.loads(sys.stdin.buffer.readline(16384))
         value = generate(request)
         result = dict(prompt=value, error='') if request.get('task') == 'prompt' else dict(tags=value, error='')

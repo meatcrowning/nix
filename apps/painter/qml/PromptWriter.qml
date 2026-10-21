@@ -75,7 +75,7 @@ Column {
             implicitWidth: implicitHeight
             Accessible.name: "Undo prompt writing"
             ToolTip.visible: hovered
-            ToolTip.text: "Restore the prompt before local generation"
+            ToolTip.text: "Restore the prompt before generation"
             enabled: !writer.busy && writer.history !== null
                      && writer.history.model === App.selectedName
                      && root.gen[writer.scope] === writer.history.after

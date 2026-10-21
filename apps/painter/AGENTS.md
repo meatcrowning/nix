@@ -222,10 +222,12 @@ writers use separate instructions; MOSS adds concise prompting guidance rather
 than loading the entire user guide. Prompt output is capped in llama, with
 any incomplete trailing sentence (or negative-list item) removed. Undo restores only the last generated
 prompt when its text is still unchanged; it must not roll back other fields.
-`tagger.py` runs a bounded
-`tagger_worker.py` subprocess with the CPU-only llama/model paths supplied by
-`home/prog/painter.nix` on both hosts. Stop after N complete unique tags; retain
-manual edits if the region/model changes during inference. The CPU worker has
+`tagger.py` always runs inference on top: locally there, or over Book’s
+existing backend SSH route using `painter --prompt-worker`. That headless entry
+point loads no GUI or image backend and uses top’s packaged CPU-only llama/model
+paths from `home/prog/painter.nix`. There is no local fallback on Book. Empty
+prompt boxes request a fresh idea (or general negative exclusions). Stop after
+N complete unique tags; retain manual edits if the region/model changes during inference. The CPU worker has
 its own single-job lock, RAM check and resource/deadline limits; it must not
 acquire or release GPU backend leases. It exits after each request.
 The canvas caches independently positioned raster layers with a bounded byte

@@ -34,6 +34,17 @@ import threading
 import time
 from pathlib import Path
 
+# Headless SSH entry point: inherit top's packaged model paths without opening
+# a window, initializing Qt, or touching the image backend.
+if __name__ == '__main__' and sys.argv[1:] == ['--prompt-worker']:
+    import socket
+    if socket.gethostname().split('.')[0] != 'top':
+        print(json.dumps(dict(error='Prompt writing must run on top.')))
+        raise SystemExit(1)
+    from tagger_worker import main as prompt_worker
+    prompt_worker()
+    raise SystemExit(0)
+
 from PySide6.QtCore import (QAbstractListModel, QFileSystemWatcher, QModelIndex,
                             QObject, Property, QProcess, QRunnable,
                             QSortFilterProxyModel, Qt, QThreadPool,

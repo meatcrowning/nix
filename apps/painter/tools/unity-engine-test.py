@@ -231,6 +231,9 @@ fake_tags.chmod(0o700)
 fake_model = Path('/home/test/tag-model')
 fake_model.touch()
 os.environ.update(PAINTER_TAG_LLAMA=str(fake_tags), PAINTER_TAG_MODEL=str(fake_model))
+# Keep the isolated harness local regardless of its inherited hostname.
+import tagger
+tagger.worker_command = lambda: [sys.executable, str(Path(tagger.__file__).with_name('tagger_worker.py'))]
 app.exec()
 if child.poll() is None:
     child.kill()
