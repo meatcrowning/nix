@@ -132,18 +132,18 @@ second = wait_for(lambda: (lambda name: name if 'Unity-Focus-' in name and name 
 assert first != second
 wait_for(lambda: setting('get', 'org.gnome.desktop.wm.preferences', 'theme') == second)
 assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') != icon_name
-# Exercise both PNG loader boundaries in one original-GTK process, including
-# theme changes and disabling. No shell UI or input is needed.
+# Exercise both PNG loader boundaries without GTK, matching Compiz's process.
+# A private settings backend keeps these theme changes away from the daemon.
 shell_probe = r"""
 import ctypes, os, sys
-from gi.repository import Gtk, GdkPixbuf
+from gi.repository import Gio, GdkPixbuf
 api = ctypes.CDLL(None)
 api.fread.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_void_p]
 api.fread.restype = ctypes.c_size_t
 api.fclose.argtypes = [ctypes.c_void_p]
-settings = Gtk.Settings.get_default()
+settings = Gio.Settings.new('org.gnome.desktop.interface')
 for theme in sys.argv[1:]:
- settings.set_property('gtk-theme-name', theme)
+ settings.set_string('gtk-theme', theme)
  for name in ['close_dash.png', 'close_dash_prelight.png', 'close_dash_pressed.png',
               'close_dash_disabled.png', 'switcher_round_rect.png']:
   path = '/usr/share/unity/6/' + name
@@ -165,7 +165,7 @@ for theme in sys.argv[1:]:
   assert actual.get_pixels() == wanted.get_pixels(), (theme, name, 'pixbuf')
 print('PASS: shell PNG loaders follow accent changes and restore original artwork')
 """
-subprocess.run([runtime, '/usr/bin/env', 'LD_PRELOAD=' + config['shellFocus'],
+subprocess.run([runtime, '/usr/bin/env', 'LD_PRELOAD=' + config['shellFocus'], 'GSETTINGS_BACKEND=memory',
                 '/usr/bin/python2.7', '-c', shell_probe,
                 first.strip("'"), second.strip("'"), 'Ambiance-Dark'], check=True)
 

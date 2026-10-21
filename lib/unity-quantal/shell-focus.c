@@ -1,11 +1,12 @@
 /* Unity 6's Dash buttons and switcher outline bypass panel::Style.
  * Redirect only these assets at the shared PNG file-loading boundary. Panel
  * style changes already reload buttons; each switcher show creates its view.
- * GTK resolves from the original process, not the build-time SDK.
+ * Compiz does not load GTK. Read the theme through the runtime's GSettings,
+ * resolving its entry points only after the session plugins have loaded GIO.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#include <gtk/gtk.h>
+#include <gio/gio.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -20,9 +21,15 @@ static gchar *themed_path(const char *path)
         strcmp(name, "close_dash_pressed.png") && strcmp(name, "close_dash_disabled.png") &&
         strcmp(name, "switcher_round_rect.png")) return NULL;
     resolving = 1;
-    GtkSettings *settings = gtk_settings_get_default();
+    GSettings *(*settings_new)(const gchar *) = dlsym(RTLD_DEFAULT, "g_settings_new");
+    gchar *(*settings_string)(GSettings *, const gchar *) = dlsym(RTLD_DEFAULT, "g_settings_get_string");
+    void (*object_unref)(gpointer) = dlsym(RTLD_DEFAULT, "g_object_unref");
     gchar *theme = NULL, *result = NULL;
-    if (settings) g_object_get(settings, "gtk-theme-name", &theme, NULL);
+    if (settings_new && settings_string && object_unref) {
+        GSettings *settings = settings_new("org.gnome.desktop.interface");
+        theme = settings_string(settings, "gtk-theme");
+        object_unref(settings);
+    }
     if (theme && g_str_has_prefix(theme, "Unity-Focus-") && !strchr(theme, '/')) {
         result = g_build_filename(g_get_home_dir(), ".themes", theme, "unity-shell", name, NULL);
         if (!g_file_test(result, G_FILE_TEST_IS_REGULAR)) {

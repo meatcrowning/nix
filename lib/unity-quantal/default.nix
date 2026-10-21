@@ -169,12 +169,12 @@ let
   '';
   shellFocus = runCommand "unity-quantal-shell-focus" {
     nativeBuildInputs = [ stdenv.cc pkg-config ];
-    buildInputs = [ gtk3 ];
+    buildInputs = [ glib ];
     hardeningDisable = [ "bindnow" ];
   } ''
     mkdir -p "$out/lib"
     $CC -Wall -Wextra -Werror -Wno-deprecated-declarations -shared -fPIC -O2 \
-      $(pkg-config --cflags gtk+-3.0) ${./shell-focus.c} -ldl -o "$out/lib/shell-focus.so"
+      $(pkg-config --cflags gio-2.0) ${./shell-focus.c} -ldl -o "$out/lib/shell-focus.so"
   '';
   appearanceFocus = runCommand "unity-quantal-appearance-focus" {
     nativeBuildInputs = [ stdenv.cc pkg-config ];
