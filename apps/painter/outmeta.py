@@ -30,6 +30,7 @@ from pathlib import Path
 
 import mp4meta
 import pngmeta
+from moss_layout import import_prompt
 
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mkv", ".mov"}
 
@@ -43,7 +44,7 @@ def params_for(path) -> dict | None:
             own = tags.get("painter")
             if own:
                 try:
-                    return json.loads(own)
+                    return import_prompt(json.loads(own))
                 except ValueError:
                     return None
             return params_from_graph(tags.get("prompt"))
@@ -51,7 +52,7 @@ def params_for(path) -> dict | None:
         own = text.get("painter")
         if own:
             try:
-                return json.loads(own)
+                return import_prompt(json.loads(own))
             except ValueError:
                 return None
         out = params_from_graph(text.get("prompt"))
@@ -270,4 +271,4 @@ def params_from_graph(raw) -> dict | None:
     if out.get("frames") and out.get("fps"):
         out["duration"] = round(out["frames"] / float(out["fps"]), 1)
 
-    return out or None
+    return import_prompt(out) if out else None

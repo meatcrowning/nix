@@ -143,6 +143,76 @@ def compile(doc, width=None, height=None, caption=None):
                            bbox_format='yxyx'), ensure_ascii=False, separators=(',', ':'))
 
 
+def parse_prompt(text, width=1024, height=1024):
+    """Read draft pixel xyxy or compiled MOSS yxyx into editor geometry.
+
+    Ordinary/incomplete text is not an import. Recognized invalid layouts raise
+    so callers can retain the text while editing and reject it on submission.
+    """
+    raw = (text or '').strip()
+    if raw.startswith('```') and raw.endswith('```'):
+        raw = raw.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or 'items' not in payload or 'summary' not in payload:
+        return None
+    space = payload.get('bbox_coord_space', 'abs_centralized')
+    form = payload.get('bbox_format', 'yxyx')
+    if space not in ('abs', 'abs_centralized') or form not in ('xyxy', 'yxyx'):
+        raise ValueError('Unsupported MOSS bbox coordinates')
+    if set(payload) - set(('width', 'height', 'summary', 'items', 'bbox_coord_space', 'bbox_format')):
+        raise ValueError('Unsupported MOSS layout fields')
+    d = fresh(payload.get('width', width), payload.get('height', height))
+    d['enabled'] = True
+    if not isinstance(payload['summary'], dict) or set(payload['summary']) - set(('caption', 'canvas', 'meta', 'palette')):
+        raise ValueError('Unsupported MOSS scene fields')
+    d['summary'].update(payload['summary'])
+    for item in payload['items']:
+        if set(item) - set(('label', 'caption', 'text', 'bbox', 'tags', 'palette')):
+            raise ValueError('Unsupported MOSS region fields')
+        a, b, c, e = item['bbox']
+        x1, y1, x2, y2 = (a, b, c, e) if form == 'xyxy' else (b, a, e, c)
+        if space == 'abs_centralized':
+            x1, x2 = x1 + d['width'] // 2, x2 + d['width'] // 2
+            y1, y2 = y1 + d['height'] // 2, y2 + d['height'] // 2
+        row = dict(item)
+        row.pop('bbox')
+        row.update(id=uuid.uuid4().hex, enabled=True, locked=False, typography={},
+                   box=[x1 / d['width'], y1 / d['height'],
+                        (x2 - x1) / d['width'], (y2 - y1) / d['height']])
+        d['items'].append(row)
+    d = valid(d)
+    compile(d)  # Require complete captions/text before consuming the source.
+    return d
+
+
+def import_prompt(params, strict=False):
+    """Project legacy conditioning or a pasted draft without mutating metadata."""
+    p = copy.deepcopy(params)
+    if not isinstance(p, dict):
+        return p
+    boxes = p.get('prompt_boxes') or {}
+    text = boxes.get('positive', p.get('positive', ''))
+    try:
+        doc = parse_prompt(text, p.get('width') or 1024, p.get('height') or 1024)
+    except (ValueError, TypeError, KeyError, AttributeError, ZeroDivisionError, OverflowError):
+        if strict:
+            raise ValueError('Invalid MOSS bbox prompt')
+        return p
+    if doc is None:
+        return p
+    # Literal prompt_boxes take precedence over compiled conditioning above.
+    # JSON in that box is an import even if an older, disabled draft exists.
+    p['moss_layout'] = doc
+    p['positive'] = doc['summary']['caption']
+    p.update(width=doc['width'], height=doc['height'])
+    if boxes:
+        p['prompt_boxes']['positive'] = p['positive']
+    return p
+
+
 class Editor(object):
     def __init__(self, doc):
         self.doc = valid(doc)

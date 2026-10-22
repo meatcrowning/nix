@@ -676,6 +676,11 @@ class Painter(QObject):
     statusChanged = Signal()
     promptWritten = Signal(str, 'QVariant')
 
+    @Slot('QVariantMap', result='QVariantMap')
+    def importLayoutPrompt(self, params):
+        from moss_layout import import_prompt
+        return import_prompt(params)
+
     @Slot(QObject, 'QVariant')
     def mountComparison(self, host, params):
         from comparison_qt import Comparison
@@ -1973,7 +1978,8 @@ class Painter(QObject):
             self._batch_saved = []
             self._batch_pending = 0
             self._batch_toasted = False
-        base = dict(params)
+        from moss_layout import import_prompt
+        base = import_prompt(params) if self.reg.family_of(entry).get("id") == "moss_image" else dict(params)
         base["wildcard_options"] = copy.deepcopy(base.get("wildcard_options", self._wildcard_options))
         base["loras"] = self.loras.active()
         seed = int(base.get("seed", 0))

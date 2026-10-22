@@ -17,7 +17,8 @@ BASE = dict(moss_layout={}, positive='', negative='', aspectW=1, aspectH=1, widt
 def snapshot(params, ctl):
     if not params:
         return None
-    p = copy.deepcopy(params)
+    from moss_layout import import_prompt
+    p = import_prompt(params)
     name = p.get('model', '')
     index = ctl.models.index_of_name(name)
     entry = ctl.models.entry_at(index) if index >= 0 else None

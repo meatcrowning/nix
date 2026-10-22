@@ -178,6 +178,27 @@ Path('/home/test/out/fixture.png').write_bytes(original)
 engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
 assert engine.settings['moss_layout'] == {}
 
+# Legacy bbox metadata and freshly pasted drafts share the same editor state.
+layout_editor.doc['enabled'] = True
+raw = moss_layout.compile(layout_editor.doc)
+Path('/home/test/out/fixture.png').write_bytes(P.pngmeta.upsert_text(original, {
+    'painter': json.dumps(dict(params, positive=raw, width=640, height=768))}))
+engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
+assert engine.settings['positive'] == 'A poster'
+assert engine.settings['moss_layout']['items'][0]['box'] == layout_editor.doc['items'][0]['box']
+Path('/home/test/out/fixture.png').write_bytes(original)
+engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
+# Gate the input path as MOSS without loading or submitting a model.
+original_family = ctl._selected_family
+ctl._selected_family = lambda: dict(id='moss_image')
+try:
+    engine.dispatch(dict(op='settings', model=engine.model, settings=dict(positive=raw)))
+    assert engine.settings['positive'] == 'A poster'
+    assert engine.settings['moss_layout']['enabled']
+finally:
+    ctl._selected_family = original_family
+engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
+
 # Different pipelines must not inherit controls their graphs ignore.
 from types import SimpleNamespace
 for edit, video in [(False, False), (True, False), (False, True)]:

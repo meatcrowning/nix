@@ -177,6 +177,13 @@ Item {
     function set(key, value) {
         var g = clone(gen)
         g[key] = value
+        if (key === "positive" && App.layoutSupport) {
+            var imported = App.importLayoutPrompt(g)
+            if (imported.positive !== value) {
+                g = imported
+                restoreSize(g, imported.moss_layout)
+            }
+        }
         gen = g
     }
 

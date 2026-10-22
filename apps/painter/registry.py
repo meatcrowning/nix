@@ -436,6 +436,9 @@ class Registry:
         if edit:
             defaults = {**defaults, **(espec.get("defaults") or {})}
         p = {**defaults, **(params or {})}
+        if fam["id"] == "moss_image":
+            from moss_layout import import_prompt
+            p = import_prompt(p, strict=True)
 
         # --- loader ---------------------------------------------------------
         if fam.get("loader_shape") == "checkpoint":

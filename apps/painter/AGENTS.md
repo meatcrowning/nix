@@ -198,6 +198,8 @@ pills/completion must not reformat arbitrary user text.
 
 MOSS layout documents live in the per-model `moss_layout` setting. `moss_layout.py`
 owns normalized geometry and compilation to centered pixel coordinates;
+its prompt importer recovers pixel drafts and compiled bbox conditioning into
+scene text and editable regions for paste, output restore and comparison.
 `layout_ui.py` owns editor actions, with native GTK and Qt adapters in
 `layout_gtk.py` and `layout_qt.py`. Only `registry.build` compiles conditioning,
 using the actual output dimensions and current positive prompt as scene caption.

@@ -228,6 +228,13 @@ class Engine:
             g['moss_layout'] = valid(g['moss_layout'])
         self.settings = g
         self.resolve_dims()
+        if self.ctl.layoutSupport:
+            from moss_layout import import_prompt
+            imported = import_prompt(self.settings)
+            if imported['positive'] != self.settings['positive']:
+                imported.update(controls_for_size(imported['width'], imported['height'], self.multiple))
+                self.settings = imported
+                self.revision += 1
         self.save()
 
     def resolve_dims(self):

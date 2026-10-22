@@ -173,6 +173,50 @@ def core():
             assert json.loads(node['inputs']['text'])['summary']['caption'] == 'Overall scene'
             assert built['params']['moss_layout'] == e.doc
             assert built['params']['prompt_boxes']['positive'] == 'Overall scene'
+    draft = dict(width=1536, height=1024, bbox_coord_space='abs', bbox_format='xyxy',
+                 summary=dict(caption='A campaign', canvas='single', meta=['poster']),
+                 items=[dict(label='text', caption='Green title', text='旅へ\nEXPLORE',
+                             bbox=[928, 272, 1408, 448], tags=['title'], palette=['green'])])
+    raw = json.dumps(draft)
+    imported = M.import_prompt(dict(positive=raw, negative='blur', width=1024, height=1024))
+    assert imported['positive'] == 'A campaign' and imported['negative'] == 'blur'
+    assert imported['width'] == 1536 and imported['height'] == 1024
+    doc = imported['moss_layout']
+    assert doc['items'][0]['box'] == [928/1536, 272/1024, 480/1536, 176/1024]
+    conditioning = M.compile(doc)
+    assert json.loads(conditioning)['items'][0]['bbox'] == [-240, 160, -64, 640]
+    assert json.loads(M.compile(M.parse_prompt(conditioning, 1536, 1024))) == json.loads(conditioning)
+    assert M.parse_prompt('```json\n' + raw + '\n```')['summary']['caption'] == 'A campaign'
+    literal = dict(positive=raw, negative='literal negative')
+    legacy = dict(positive=conditioning, prompt_boxes=literal, width=1536, height=1024)
+    restored = M.import_prompt(legacy)
+    assert restored['prompt_boxes']['positive'] == 'A campaign'
+    assert legacy['prompt_boxes'] == literal
+    stale = M.import_prompt(dict(legacy, moss_layout=M.fresh()))
+    assert stale['moss_layout']['items'][0]['box'] == doc['items'][0]['box']
+    saved = dict(restored, moss_layout=dict(doc, reference='/keep/me'))
+    assert M.import_prompt(saved) == saved
+    for bad in ('plain prose', '{"items":', raw.replace('928', '1928'), raw.replace('"xyxy"', '"unknown"')):
+        value = dict(positive=bad)
+        assert M.import_prompt(value) == value
+    with tempfile.TemporaryDirectory() as tmp:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'pylib'))
+        import outmeta, pngmeta
+        path = Path(tmp) / 'legacy.png'
+        # Metadata reading needs no pixel decoding.
+        png = pngmeta.SIG + pngmeta._chunk(b'IDAT', b'') + pngmeta._chunk(b'IEND', b'')
+        path.write_bytes(pngmeta.upsert_text(png, {'painter': json.dumps(legacy)}))
+        assert outmeta.params_for(path)['moss_layout']['items'][0]['box'] == doc['items'][0]['box']
+        fixture.models(Path(tmp))
+        reg = fixture.R.Registry(tmp, fixture.R.Overrides(str(Path(tmp)/'overrides.json')), use_cache=False)
+        for entry in reg.base_models():
+            built = reg.build(entry, dict(positive=raw))
+            assert built['params']['prompt_boxes']['positive'] == 'A campaign'
+            assert built['params']['width'] == 1536
+            assert json.loads(built['params']['positive']) == json.loads(conditioning)
+            legacy_graph = outmeta.params_from_graph(built['prompt'])
+            assert legacy_graph['positive'] == 'A campaign'
+            assert legacy_graph['moss_layout']['items'][0]['box'] == doc['items'][0]['box']
     preview = M.Editor(M.fresh())
     preview.add('character', [.1, .1, .8, .8])['caption'] = 'Red coat & blue scarf <bright>'
     svg = M.svg(preview, 700, 700)[0].decode('utf-8')

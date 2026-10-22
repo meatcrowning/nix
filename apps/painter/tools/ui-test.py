@@ -5527,6 +5527,13 @@ def test_moss(win, ctl, tmp):
         updated = prop(APP, "gen")
         check(model + " accepts editable layout", updated["moss_layout"]["enabled"] and
               updated["positive"] == "A poster" and updated["width"] == 1280 and updated["height"] == 720)
+        import moss_layout as M
+        pasted = M.Editor(M.fresh(1280, 720, 'Imported scene'))
+        pasted.add('object', [.125, .25, .5, .5])['caption'] = 'A cup'
+        pasted.doc['enabled'] = True
+        APP.set('positive', M.compile(pasted.doc))
+        check('bbox paste extracts scene', prop(APP, 'gen')['positive'] == 'Imported scene')
+        check('bbox paste populates canvas', prop(APP, 'gen')['moss_layout']['items'][0]['box'] == [.125, .25, .5, .5])
         APP.injectAll({"positive": "A poster", "moss_layout": layout_editor.doc, "width": 1280, "height": 720})
         check(model + " restores exact layout dimensions", prop(APP, "gen")["width"] == 1280 and prop(APP, "gen")["height"] == 720)
         APP.injectPrompt({"positive": "ordinary prompt"})
