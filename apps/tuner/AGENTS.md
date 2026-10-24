@@ -3,7 +3,7 @@
 A GTK 3 / PyGObject app, unlike the Qt apps beside it: it is made for top's
 Unity 12.10 session, which themes host GTK apps with Ambiance Dark and the
 Ubuntu font, so it uses stock GTK widgets and draws the dial and
-spectrum/waterfall (views.py), plus the segmented RDS face (rdsview.py).
+spectrum/waterfall (views.py), plus the segmented receiver face (face.py).
 The dongle and package are top-only
 (sys/hw/rtl-sdr.nix, home/prog/tuner.nix); there is no air branch.
 
@@ -12,7 +12,8 @@ The dongle and package are top-only
 | dsp.py | demodulators, filters, AGC, squelch, noise blankers; numpy/scipy only |
 | rds.py | bounded asynchronous Redsea MPX pipe and station metadata; no device access |
 | online.py | bounded background station-feed requests; local bookmark associations |
-| rdsview.py | scrolling fourteen-segment RDS display and its map/unmap timer |
+| face.py | the drawn receiver display: cell grid, controls, meters, marquee, animation timer |
+| rdsview.py | fourteen-segment glyph table and single-cell drawing |
 | hd.py | nrsc5 pipe API, HD metadata and streaming 44.1→48 kHz conversion; no device access |
 | hdreceiver.py | HD capture session and bounded burst-audio output worker |
 | radio.py | the radio thread: librtlsdr reads, retuning, playback/UDP/recorder |
@@ -32,17 +33,22 @@ the dongle. Retuning, mode changes, and receive sessions invalidate decoder
 results by generation. Do not persist received station text. Confirmed named
 FM bookmarks may supply fallback identity, explicitly labeled Bookmark rather
 than received RDS.
-The top controls and readouts share a car-stereo face (faceplate.py): three
-rows (transport and settings; signal and go-to; frequency with station text),
-every character one size (faceplate.SIZE). Typeset labels use the local
-fourteen-segment font; drawn readouts and bargraph meters use faceplate.cell(),
-which matches the font's outlines. Lit segments take the GTK theme's selection
-colour and glow (faceplate.glow). The dial reads in MHz with only significant
-digits shown; one blank hover cell after them keeps finer digits tunable.
+The top of the window is one drawn display (face.py): a grid of
+fourteen-segment cells in three rows (transport, gain, mode, step, clock;
+signal, indicators, analyzer, direct entry, HD channel; frequency, station,
+scrolling text). Every cell shows its unlit segments; meters and the analyzer
+light the cells' own uprights. main.py's toggles, combos, gain adjustment and
+level labels are unpacked state objects the face reads each frame and drives
+on input, so every drawn control works by click, scroll and keyboard. Lit
+segments take the GTK theme's selection colour and glow (faceplate.py). Motion
+follows real state (meter fall and peak hold, live analyzer, REC and HD-seek
+blink, clock colon, station marquee and alternating identity) and stops when
+GTK animations are off. The dial reads in MHz with only significant digits
+shown; one blank cell after them keeps finer digits tunable. segment.ttf now
+only styles the face's popup menus.
 Regenerate segment.ttf with tools/build-segment-font.py (fontTools)
 when changing the rdsview.py geometry. Fontconfig registers it in-process only.
-The frequency and station text remain visible together, regardless of old Text
-preferences; the station line omits the frequency the dial already shows.
+The station line omits the frequency the dial already shows.
 HD selection is in the Radio menu. Unavailable, waiting, and lost-signal
 states are explicit. The marquee advances whole characters through
 fixed segment cells; GTK's animation setting governs it. Metadata resets must

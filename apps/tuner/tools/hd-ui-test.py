@@ -35,11 +35,38 @@ assert places == list(range(places[0], places[-1] - 1, -1)) and 6 in places and 
 assert w.dial.boxes[0][0] >= 0
 assert w.dial.boxes[-1][1] < w.dial.get_allocated_width()
 assert not hasattr(w, 'rds_button') and not hasattr(w, 'hd_button')
-# Native labels and selectors must resolve to the actual segment font.
-from gi.repository import Pango
-font = w.mode_combo.get_pango_context().load_font(Pango.FontDescription('Tuner Segment 14'))
+# The face's popup menus resolve to the actual segment font.
+from gi.repository import Gdk, Pango
+font = w.get_pango_context().load_font(Pango.FontDescription('Tuner Segment 14'))
 assert font.describe().get_family() == 'Tuner Segment', font.describe().to_string()
-assert w.level_label.get_style_context().get_font(m.Gtk.StateFlags.NORMAL).get_family() == 'Tuner Segment'
+# One grid, three rows: every drawn control drives the state it shows.
+f = w.face
+f.born -= 5  # past the power-on sweep
+now = time.monotonic(); f._compose(now)
+zones = {z['name']: z for z in f.zones}
+assert {'start', 'record', 'mute', 'gain', 'mode', 'step', 'signal', 'go', 'freq', 'station'} <= set(zones), zones
+assert {z['row'] for z in f.zones} == {0, 1, 2}
+muted = w.mute_button.get_active()
+f._activate('mute', zones['mute']); assert w.mute_button.get_active() != muted
+f._activate('mute', zones['mute']); assert w.mute_button.get_active() == muted
+gain = w.volume.get_value(); f._adjust('gain', -1); assert w.volume.get_value() == gain - 1
+f._adjust('gain', 1)
+step = w.step_combo.get_active(); f._adjust('step', -1); assert w.step_combo.get_active() == step - 1
+f._adjust('step', 1)
+f._activate('step', zones['step']); settle()
+items = f.menu.get_children()
+assert len(items) == len(w.step_combo.get_model()) and items[step].get_active()
+items[step - 1].activate(); assert w.step_combo.get_active() == step - 1
+f.menu.popdown(); f._adjust('step', 1)
+# Meters are built from the cells' own uprights, never from other shapes.
+f.level.set_value(50); f._ballistics(time.monotonic()); f._compose(time.monotonic())
+meter = [f.cells.get((1, zones['signal']['col'] + i), ('',))[0] for i in range(zones['signal']['width'])]
+assert any(meter) and all(set(cell) <= set('efjmbc') for cell in meter), meter
+f.level.set_value(0)
+# Station text keeps scrolling even when it fits.
+f.set_message('RDS', 'SHORT'); f.since -= 5
+assert not f._marquee(30, time.monotonic(), True).startswith('SHORT')
+assert f._marquee(30, time.monotonic(), False).startswith('SHORT')
 w.radio.running = True; w.radio.hd_enabled = True
 w._refresh_rds(); assert w.rds_display.text == 'Searching for HD Radio'
 gen = w.radio.metadata_generation
@@ -51,6 +78,9 @@ assert w.hd_combo.get_sensitive()
 if os.environ.get('TUNER_UI_SHOT'):
     import cairo
     settle()
+    f.level.set_value(62); f.peak = 75; f.peak_at = time.monotonic()
+    f.band_targets = [.2, .7, .9, .5, .3, .8, .6, .2, .1, .4, .7, .3]; f.band_at = time.monotonic()
+    f._ballistics(time.monotonic())
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w.get_allocated_width(), w.get_allocated_height())
     w.draw(cairo.Context(surface))
     surface.write_to_png(os.environ['TUNER_UI_SHOT'])
@@ -62,7 +92,16 @@ state.update(program=1, title='HD2 SONG')
 w._hd_update(gen, state); assert 'HD2 SONG' in w.rds_display.text
 w.tune(102700000)
 assert w.dial.value == 102700000 and w.dial.get_mapped()
-settle(); assert [box[2] for box in w.dial.boxes] == [8, 7, 6, 5, 4]
+settle(); f._compose(time.monotonic()); assert [box[2] for box in w.dial.boxes] == [8, 7, 6, 5, 4]
+# Typing on the face tunes directly.
+class Key:
+    def __init__(self, keyval): self.keyval = keyval
+f._activate('go', zones['go'])
+for ch in '101.1':
+    f._edit_key(Key(Gdk.unicode_to_keyval(ord(ch))))
+f._edit_key(Key(Gdk.KEY_Return))
+assert w.s['frequency'] == 101100000 and f.editing is None
+w.tune(102700000)
 assert w.radio.hd_program == 0 and w.hd_data == {}
 w._hd_update(gen, state); assert 'HD2 SONG' not in w.rds_display.text
 state.update(program=0, locked=False)
@@ -88,19 +127,19 @@ assert calls == ['stop'] and w.hd_restart
 w._stopped()
 assert calls == ['stop', ('start', True)] and not w.hd_restart
 # Unlit segments use neutral charcoal and fixed cell positions.
-from rdsview import RdsDisplay
+import rdsview
 class Canvas:
     def __init__(self): self.colors = []
     def set_source_rgb(self, *rgb): self.colors.append(rgb)
     def set_source_rgba(self, *rgba): self.colors.append(rgba)
     def __getattr__(self, name): return lambda *a: None
-c = Canvas(); RdsDisplay._glyph(c, ' ', 0, 0, 20, 40)
+c = Canvas(); rdsview.glyph(c, ' ', 0, 0, 20, 40)
 assert c.colors and all(rgb == (.13, .13, .13) for rgb in c.colors)
 # Lit segments take the theme's selection colour; the readout drops dead zeros.
 import faceplate, views
 found, accent = w.get_style_context().lookup_color('theme_selected_bg_color')
 assert not found or faceplate.LIT == (accent.red, accent.green, accent.blue), faceplate.LIT
-c = Canvas(); RdsDisplay._glyph(c, '8', 0, 0, 20, 40)
+c = Canvas(); rdsview.glyph(c, '8', 0, 0, 20, 40)
 assert any(rgba[:3] == faceplate.LIT for rgba in c.colors)
 assert [views.mhz_text(f) for f in (96900000, 96000000, 1234567, 102710000)] == \
     ['96.9', '96.0', '1.234567', '102.71']

@@ -29,10 +29,9 @@ import gqrxfiles  # noqa: E402
 import radio  # noqa: E402
 import online  # noqa: E402
 import rtl  # noqa: E402
-from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView, mhz_text  # noqa: E402
-import faceplate  # noqa: E402
-from faceplate import SegmentMeter, SegmentScale, style_faceplate  # noqa: E402
-from rdsview import RdsDisplay  # noqa: E402
+from views import COLOUR_MAPS, DISPLAY_DEFAULTS, SpectrumView, mhz_text  # noqa: E402
+from face import Face  # noqa: E402
+from faceplate import style_faceplate  # noqa: E402
 
 APP_ID = "tuner"
 SETTINGS = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tuner/settings.json"
@@ -254,69 +253,36 @@ class TunerWindow(Gtk.ApplicationWindow):
         return bar
 
     def _face(self):
-        """Three rows of one-size segment text: transport and settings, signal,
-        then frequency with station text."""
-        face = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        face.set_name("tuner-face")
-        face.set_border_width(4)
-        gap = faceplate.cell(faceplate.ROW)[4]  # one character between sections
-        rows = [Gtk.Box(spacing=gap) for _ in range(3)]
-        for row in rows:
-            row.set_size_request(-1, faceplate.ROW)
-            face.pack_start(row, False, False, 0)
-
-        def section(row, *children, end=False):
-            group = Gtk.Box(spacing=gap // 2)
-            for child in children:
-                child.set_valign(Gtk.Align.CENTER)
-                group.pack_start(child, False, False, 0)
-            (row.pack_end if end else row.pack_start)(group, False, False, 0)
-            return group
-
-        def toggle(label, tip, handler):
-            button = Gtk.ToggleButton(label=label, relief=Gtk.ReliefStyle.NONE)
-            button.set_tooltip_text(tip)
+        """The receiver display (face.py). These GTK objects are never packed:
+        they hold the face's state and signals, and the menus drive them too."""
+        def toggle(label, handler):
+            button = Gtk.ToggleButton(label=label)
             button.connect("toggled", handler)
             return button
 
-        self.start_button = toggle("Start", "Start or stop receiving (Ctrl+Space)", self._toggle_start)
-        self.record_button = toggle("Record", "Record the audio to a WAV file (Ctrl+R)", self._toggle_record)
-        self.mute_button = toggle("Mute", "Mute (Ctrl+M)", lambda b: self._rx("mute", b.get_active()))
+        self.start_button = toggle("Start", self._toggle_start)
+        self.record_button = toggle("Record", self._toggle_record)
+        self.mute_button = toggle("Mute", lambda b: self._rx("mute", b.get_active()))
         self.mute_button.set_active(self.rx["mute"])
-        section(rows[0], self.start_button, self.record_button, self.mute_button)
         self.volume = Gtk.Adjustment(value=self.rx["volume_db"], lower=-40, upper=30,
                                      step_increment=0.5, page_increment=3)
         self.volume.connect("value-changed", lambda a: self._rx("volume_db", round(a.get_value(), 1)))
-        scale = SegmentScale(adjustment=self.volume)
-        scale.set_draw_value(False)
-        scale.set_tooltip_text("Audio gain")
-        section(rows[0], Gtk.Label(label="Gain"), scale)
         self.mode_combo = self._combo(dsp.MODES, self.rx["mode"])
         self.mode_combo.connect("changed", lambda c: self._set_mode(c.get_active_text()))
         self.step_combo = self._combo([step_label(s) for s in STEPS], step_label(self.s["step"]))
         self.step_combo.connect("changed", lambda c: self._save("step", STEPS[c.get_active()]))
-        section(rows[0], Gtk.Label(label="Mode"), self.mode_combo,
-                Gtk.Label(label="Step"), self.step_combo)
-
-        self.level_bar = SegmentMeter()
-        self.level_label = Gtk.Label(label="– dBFS", xalign=0, width_chars=11)
-        self.stereo_label = Gtk.Label(xalign=0, width_chars=7)
-        section(rows[1], Gtk.Label(label="Signal"), self.level_bar, self.level_label,
-                self.stereo_label)
-        go = Gtk.Entry(placeholder_text="MHz", width_chars=10)
-        go.set_tooltip_text("Type a frequency in MHz and press Enter")
-        go.connect("activate", self._go)
+        self.level_label = Gtk.Label(label="– dBFS")
+        self.stereo_label = Gtk.Label()
         self.hd_combo = Gtk.ComboBoxText()
-        self.hd_combo.set_tooltip_text("HD channels detected on this frequency")
         self.hd_combo.connect("changed", self._select_hd)
-        section(rows[1], Gtk.Label(label="Go to"), go, self.hd_combo)
 
-        self.dial = FrequencyDial()
-        self.dial.connect("changed", lambda d, v: self.tune(v))
-        self.rds_display = RdsDisplay()
-        rows[2].pack_start(self.dial, False, False, 0)
-        rows[2].pack_start(self.rds_display, True, True, 0)
-        return face
+        self.face = Face(self)
+        self.face.connect("changed", lambda f, v: self.tune(v))
+        self.face.connect("go", lambda f, text: self._go(text))
+        # The face is the dial, the station text and the signal meter.
+        self.dial = self.rds_display = self.face
+        self.level_bar = self.face.level
+        return self.face
 
     @staticmethod
     def _scrolled(child):
@@ -862,6 +828,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     def _refresh_hd(self):
         data = self.hd_data
+        self.rds_display.rds_lit = False
         heading = "HD%d" % (self.radio.hd_program + 1)
         if data.get("station"):
             heading += "  ·  " + data["station"]
@@ -910,6 +877,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         if data.get("error"):
             detail += "\n" + data["error"]
         fresh = self.rds_seen and time.monotonic() - self.rds_seen <= 10
+        self.rds_display.rds_lit = bool(self.radio.running and fresh and data.get("pi"))
         name = online.bookmark_name(self.bookmarks.items, self.s["frequency"])
         if (self.radio.running and self.rx["mode"] in dsp.WFM_MODES and name
                 and not (fresh and data.get("radiotext"))):
@@ -941,13 +909,12 @@ class TunerWindow(Gtk.ApplicationWindow):
         step = self.s["step"]
         return int(round(freq / step) * step)
 
-    def _go(self, entry):
+    def _go(self, text):
         try:
-            mhz = float(entry.get_text().replace(",", "."))
+            mhz = float(text.replace(",", "."))
         except ValueError:
             return
         self.tune(int(round(mhz * 1e6)))
-        entry.set_text("")
 
     def _rx(self, key, value):
         self.rx[key] = value
@@ -1153,6 +1120,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     def _spectrum_cb(self, row, center, rate):
         GLib.idle_add(self.spectrum.push, row, center, rate)
+        GLib.idle_add(self.face.analyze, row)
 
     def _status_cb(self, level, stereo, squelched, overload, recording):
         GLib.idle_add(self._show_status, level, stereo, squelched, overload, recording)
