@@ -68,7 +68,8 @@ client.close(); assert client.poll((2, 'B'), 'B')[0] == ''
 tree = ast.parse((Path(__file__).resolve().parent.parent / 'main.py').read_text())
 cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'TunerWindow')
 method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == '_refresh_rds')
-namespace = {'time': time, 'online': online, 'dsp': NS(WFM_MODES=('WFM (stereo)', 'WFM (mono)'))}
+namespace = {'time': time, 'online': online, 'dsp': NS(WFM_MODES=('WFM (stereo)', 'WFM (mono)')),
+             'mhz_text': lambda hz: '%g' % (hz / 1e6)}
 exec(compile(ast.Module(body=[method], type_ignores=[]), 'main.py', 'exec'), namespace)
 shown = []
 class FakeOnline:
