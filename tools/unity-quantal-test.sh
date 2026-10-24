@@ -397,6 +397,8 @@ for name, mime in [("image.png", "image/png"), ("image.jpg", "image/jpeg"), ("im
 glib.g_object_unref(factory)
 print("PASS: original Files factory generates and caches PNG, JPEG, WebP, H.264 and WebM previews")
 '
+sidebar_test=$("$TEST_PYTHON" -c 'import json,os,pathlib; print(pathlib.Path(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["filesSidebar"]).parent.parent / "bin/files-sidebar-test")')
+"$UNITY_PACKAGE/bin/unity-quantal-runtime" "$sidebar_test"
 if [ "${UNITY_TEST_PREVIEWS_ONLY:-0}" = 1 ]; then
   exit 0
 fi

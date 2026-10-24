@@ -423,6 +423,12 @@ def runtime(arguments):
     if arguments[0] == "/usr/bin/gnome-system-monitor":
         environment["LD_PRELOAD"] = CONFIG["monitorFilesystems"] + ":" + CONFIG["monitorTheme"]
         environment["UNITY_MONITOR_LOGO"] = CONFIG["monitorLogo"]
+    if arguments[0] == "/usr/bin/nautilus":
+        environment["LD_PRELOAD"] = CONFIG["filesSidebar"]
+        environment["UNITY_FILES_PHONE_COMMAND"] = shlex.join([
+            "/usr/local/bin/unity-host-launch", "--", CONFIG["bridgePython"],
+            str(HERE / "file-actions.py"), "browse-phone",
+        ])
     if arguments[0] == "/usr/lib/gvfs/gvfs-udisks2-volume-monitor":
         environment["LD_PRELOAD"] = CONFIG["volumeCompat"]
     if arguments[0] == "/usr/lib/bamf/bamfdaemon":

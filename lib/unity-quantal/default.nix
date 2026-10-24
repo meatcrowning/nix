@@ -216,6 +216,22 @@ let
     $CC -Wall -Wextra -Werror -shared -fPIC -O2 ${./monitor-filesystems.c} -ldl \
       -o "$out/lib/monitor-filesystems.so"
   '';
+  filesSidebar = runCommand "unity-quantal-files-sidebar" {
+    nativeBuildInputs = [ stdenv.cc pkg-config ];
+    buildInputs = [ gtk3 ];
+    hardeningDisable = [ "bindnow" ];
+  } ''
+    mkdir -p "$out/lib"
+    $CC -Wall -Wextra -Werror -shared -fPIC -O2 \
+      $(pkg-config --cflags gtk+-3.0) ${./files-sidebar.c} -ldl -o "$out/lib/files-sidebar.so"
+    mkdir -p "$out/bin"
+    cp ${./files-sidebar.c} files-sidebar.c
+    cp ${./files-sidebar-test.c} files-sidebar-test.c
+    $CC -Wall -Wextra -Werror -rdynamic -Wl,--as-needed \
+      -DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_34 -DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_34 \
+      files-sidebar-test.c \
+      $(pkg-config --cflags --libs gtk+-3.0) -ldl -o "$out/bin/files-sidebar-test"
+  '';
   volumeCompat = runCommand "unity-quantal-volume-compat" {
     nativeBuildInputs = [ stdenv.cc ];
   } ''
@@ -269,6 +285,7 @@ stdenvNoCC.mkDerivation {
       scrollGrab = "${scrollGrab}/lib/scroll-grab.so";
       volumeCompat = "${volumeCompat}/lib/volume-compat.so";
       monitorFilesystems = "${monitorFilesystems}/lib/monitor-filesystems.so";
+      filesSidebar = "${filesSidebar}/lib/files-sidebar.so";
       monitorTheme = "${monitorTheme}/lib/monitor-theme.so";
       monitorLogo = "${nixos-icons}/share/icons/hicolor/72x72/apps/nix-snowflake.png";
       isolatedArchive = "${isolatedArchive}/usr/bin/file-roller";
@@ -424,7 +441,7 @@ stdenvNoCC.mkDerivation {
     EOF
   '';
   passthru = {
-    inherit runtime fonts viewer;
+    inherit runtime fonts viewer filesSidebar;
     testTools = symlinkJoin {
       name = "unity-quantal-test-tools";
       paths = [ bash coreutils findutils gnugrep gnused bubblewrap xorg-server xprop
