@@ -70,7 +70,7 @@ class FrequencyDial(Gtk.DrawingArea):
         self.add_events(Gdk.EventMask.SCROLL_MASK | Gdk.EventMask.SMOOTH_SCROLL_MASK
                         | Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.POINTER_MOTION_MASK
                         | Gdk.EventMask.LEAVE_NOTIFY_MASK | Gdk.EventMask.KEY_PRESS_MASK)
-        self.set_size_request(360, 48)
+        self.set_size_request(-1, faceplate.ROW)
         self.set_tooltip_text("Scroll over a digit, or click its top or bottom half, to tune")
         self.connect("draw", self._draw)
         self.connect("scroll-event", self._scroll)
@@ -83,7 +83,10 @@ class FrequencyDial(Gtk.DrawingArea):
     def set_value(self, value):
         value = max(0, min(int(value), 10 ** self.DIGITS - 1))
         if value != self.value:
+            before = len(self._places()[1])
             self.value = value
+            if len(self._places()[1]) != before:
+                self.queue_resize()
             self.queue_draw()
 
     def _emit(self, value):
@@ -92,47 +95,45 @@ class FrequencyDial(Gtk.DrawingArea):
             self.set_value(value)
             self.emit("changed", value)
 
-    def _draw(self, widget, cr):
-        alloc = self.get_allocation()
-        layout = PangoCairo.create_layout(cr)
-        font = Pango.FontDescription("Ubuntu Mono Bold")
-        font.set_absolute_size(alloc.height * 0.72 * Pango.SCALE)
-        layout.set_font_description(font)
-        layout.set_text("0", -1)
-        digit_w, digit_h = layout.get_pixel_size()
-        sep_w = digit_w * 0.45
-        unit_w = digit_w * 0.42
+    def _places(self):
         text = "%0*d" % (self.DIGITS, self.value)
         lit = [p for p, ch in zip(range(self.DIGITS - 1, -1, -1), text) if ch != "0"]
-        # Read as MHz: only significant digits light, with one blank cell at
-        # each end that lights while hovered, so any finer digit stays tunable.
+        # Read as MHz: only significant digits show, plus one blank cell after
+        # them that lights while hovered, so any finer digit stays tunable.
+        # Coarser digits appear by carrying from the leading one.
         last = min(lit + [5])
-        self.reach = (min(max(lit + [6]) + 1, self.DIGITS - 1), max(last - 1, 0))
-        places = range(self.reach[0], self.reach[1] - 1, -1)
-        total = len(places) * digit_w + sep_w + digit_w * 0.3 + 3 * unit_w
-        x = (alloc.width - total) / 2
-        y = (alloc.height - digit_h) / 2
+        self.reach = (max(lit + [6]), max(last - 1, 0))
+        return text, range(self.reach[0], self.reach[1] - 1, -1)
+
+    def do_get_preferred_width(self):
+        advance = faceplate.cell(faceplate.ROW)[4]
+        width = round((len(self._places()[1]) + 3.5) * advance)  # point, MHZ
+        return width, width
+
+    def _draw(self, widget, cr):
+        height = self.get_allocated_height()
+        inset, top, glyph_w, glyph_h, advance = faceplate.cell(height)
+        text, places = self._places()
+        x = 0
         self.boxes = []
         for place in places:
             ch = text[self.DIGITS - 1 - place]
             if self.hover == place:
                 cr.set_source_rgba(*faceplate.LIT, 0.18)
-                cr.rectangle(x, 3, digit_w, alloc.height - 6)
+                cr.rectangle(x, 0, advance, height)
                 cr.fill()
-            blank = place in self.reach and ch == "0" and place not in (6, 5)
+            blank = place == self.reach[1] and ch == "0" and place != 5
             if not blank or self.hover == place:
-                RdsDisplay._glyph(cr, ch, x + 3, y + 6, digit_w - 6, digit_h - 12)
-            self.boxes.append((x, x + digit_w, place))
-            x += digit_w
+                RdsDisplay._glyph(cr, ch, x + inset, top, glyph_w, glyph_h)
+            self.boxes.append((x, x + advance, place))
+            x += advance
             if place == 6:
-                cr.arc(x + sep_w / 2, y + digit_h * 0.8, max(digit_w * 0.07, 1.5), 0, 2 * math.pi)
+                cr.arc(x + advance * .25, top + glyph_h * .96, glyph_h * .07, 0, 2 * math.pi)
                 faceplate.glow(cr, 1, fill=True)
-                x += sep_w
-        x += digit_w * 0.3
-        unit_h = digit_h * 0.38
+                x += advance * .5
         for ch in "MHZ":
-            RdsDisplay._glyph(cr, ch, x, y + digit_h - 6 - unit_h, unit_w - 3, unit_h)
-            x += unit_w
+            RdsDisplay._glyph(cr, ch, x + inset, top, glyph_w, glyph_h)
+            x += advance
         return True
 
     def _place_at(self, x):

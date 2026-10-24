@@ -62,7 +62,7 @@ state.update(program=1, title='HD2 SONG')
 w._hd_update(gen, state); assert 'HD2 SONG' in w.rds_display.text
 w.tune(102700000)
 assert w.dial.value == 102700000 and w.dial.get_mapped()
-settle(); assert [box[2] for box in w.dial.boxes] == [9, 8, 7, 6, 5, 4]
+settle(); assert [box[2] for box in w.dial.boxes] == [8, 7, 6, 5, 4]
 assert w.radio.hd_program == 0 and w.hd_data == {}
 w._hd_update(gen, state); assert 'HD2 SONG' not in w.rds_display.text
 state.update(program=0, locked=False)

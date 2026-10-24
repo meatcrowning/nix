@@ -32,15 +32,19 @@ the dongle. Retuning, mode changes, and receive sessions invalidate decoder
 results by generation. Do not persist received station text. Confirmed named
 FM bookmarks may supply fallback identity, explicitly labeled Bookmark rather
 than received RDS.
-The top controls and readouts share a car-stereo face (faceplate.py); lit
-segments take the GTK theme's selection colour and glow (faceplate.glow), and
-all its text uses the local fourteen-segment font and meters use discrete lit
-blocks. The dial reads in MHz with only significant digits lit; one blank
-hover cell at each end keeps finer and coarser digits tunable. Regenerate segment.ttf with tools/build-segment-font.py (fontTools)
+The top controls and readouts share a car-stereo face (faceplate.py): three
+rows (transport and settings; signal and go-to; frequency with station text),
+every character one size (faceplate.SIZE). Typeset labels use the local
+fourteen-segment font; drawn readouts and bargraph meters use faceplate.cell(),
+which matches the font's outlines. Lit segments take the GTK theme's selection
+colour and glow (faceplate.glow). The dial reads in MHz with only significant
+digits shown; one blank hover cell after them keeps finer digits tunable.
+Regenerate segment.ttf with tools/build-segment-font.py (fontTools)
 when changing the rdsview.py geometry. Fontconfig registers it in-process only.
 The frequency and station text remain visible together, regardless of old Text
-preferences. HD selection is in the Radio menu. Unavailable, waiting, and
-lost-signal states are explicit. The marquee advances whole characters through
+preferences; the station line omits the frequency the dial already shows.
+HD selection is in the Radio menu. Unavailable, waiting, and lost-signal
+states are explicit. The marquee advances whole characters through
 fixed segment cells; GTK's animation setting governs it. Metadata resets must
 never discard the audio IQ queue; RDS conversion stays in its worker.
 

@@ -30,6 +30,7 @@ import radio  # noqa: E402
 import online  # noqa: E402
 import rtl  # noqa: E402
 from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView, mhz_text  # noqa: E402
+import faceplate  # noqa: E402
 from faceplate import SegmentMeter, SegmentScale, style_faceplate  # noqa: E402
 from rdsview import RdsDisplay  # noqa: E402
 
@@ -117,11 +118,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(box)
         box.pack_start(self._menubar(), False, False, 0)
-        face = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        face.set_name("tuner-face")
-        face.set_border_width(6)
-        face.pack_start(self._toolbar(), False, False, 0)
-        face.pack_start(self._dial_row(), False, False, 0)
+        face = self._face()
         style_faceplate(face)
         box.pack_start(face, False, False, 0)
         self.infobar = Gtk.InfoBar(message_type=Gtk.MessageType.WARNING, show_close_button=True)
@@ -256,84 +253,70 @@ class TunerWindow(Gtk.ApplicationWindow):
                        ("Zoom _Out", "<Control>minus", lambda: self._zoom(-1))])
         return bar
 
-    def _toolbar(self):
-        bar = Gtk.Toolbar()
-        bar.set_style(Gtk.ToolbarStyle.TEXT)
-        self.start_button = Gtk.ToggleToolButton(icon_name="media-playback-start", label="Start")
-        self.start_button.set_tooltip_text("Start or stop receiving (Ctrl+Space)")
-        self.start_button.set_is_important(True)
-        self.start_button.connect("toggled", self._toggle_start)
-        bar.insert(self.start_button, -1)
-        self.record_button = Gtk.ToggleToolButton(icon_name="media-record", label="Record")
-        self.record_button.set_tooltip_text("Record the audio to a WAV file (Ctrl+R)")
-        self.record_button.set_is_important(True)
-        self.record_button.connect("toggled", self._toggle_record)
-        bar.insert(self.record_button, -1)
-        bar.insert(Gtk.SeparatorToolItem(), -1)
-        self.mute_button = Gtk.ToggleToolButton(icon_name="audio-volume-muted", label="Mute")
-        self.mute_button.set_tooltip_text("Mute (Ctrl+M)")
+    def _face(self):
+        """Three rows of one-size segment text: transport and settings, signal,
+        then frequency with station text."""
+        face = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        face.set_name("tuner-face")
+        face.set_border_width(4)
+        gap = faceplate.cell(faceplate.ROW)[4]  # one character between sections
+        rows = [Gtk.Box(spacing=gap) for _ in range(3)]
+        for row in rows:
+            row.set_size_request(-1, faceplate.ROW)
+            face.pack_start(row, False, False, 0)
+
+        def section(row, *children, end=False):
+            group = Gtk.Box(spacing=gap // 2)
+            for child in children:
+                child.set_valign(Gtk.Align.CENTER)
+                group.pack_start(child, False, False, 0)
+            (row.pack_end if end else row.pack_start)(group, False, False, 0)
+            return group
+
+        def toggle(label, tip, handler):
+            button = Gtk.ToggleButton(label=label, relief=Gtk.ReliefStyle.NONE)
+            button.set_tooltip_text(tip)
+            button.connect("toggled", handler)
+            return button
+
+        self.start_button = toggle("Start", "Start or stop receiving (Ctrl+Space)", self._toggle_start)
+        self.record_button = toggle("Record", "Record the audio to a WAV file (Ctrl+R)", self._toggle_record)
+        self.mute_button = toggle("Mute", "Mute (Ctrl+M)", lambda b: self._rx("mute", b.get_active()))
         self.mute_button.set_active(self.rx["mute"])
-        self.mute_button.connect("toggled", lambda b: self._rx("mute", b.get_active()))
-        bar.insert(self.mute_button, -1)
+        section(rows[0], self.start_button, self.record_button, self.mute_button)
         self.volume = Gtk.Adjustment(value=self.rx["volume_db"], lower=-40, upper=30,
                                      step_increment=0.5, page_increment=3)
         self.volume.connect("value-changed", lambda a: self._rx("volume_db", round(a.get_value(), 1)))
-        item = Gtk.ToolItem()
         scale = SegmentScale(adjustment=self.volume)
         scale.set_draw_value(False)
         scale.set_tooltip_text("Audio gain")
-        hbox = Gtk.Box(spacing=4)
-        hbox.pack_start(Gtk.Label(label="Gain"), False, False, 0)
-        hbox.pack_start(scale, False, False, 0)
-        item.add(hbox)
-        bar.insert(item, -1)
-        return bar
+        section(rows[0], Gtk.Label(label="Gain"), scale)
+        self.mode_combo = self._combo(dsp.MODES, self.rx["mode"])
+        self.mode_combo.connect("changed", lambda c: self._set_mode(c.get_active_text()))
+        self.step_combo = self._combo([step_label(s) for s in STEPS], step_label(self.s["step"]))
+        self.step_combo.connect("changed", lambda c: self._save("step", STEPS[c.get_active()]))
+        section(rows[0], Gtk.Label(label="Mode"), self.mode_combo,
+                Gtk.Label(label="Step"), self.step_combo)
 
-    def _dial_row(self):
-        row = Gtk.Box(spacing=10)
-        row.set_border_width(6)
-        self.dial = FrequencyDial()
-        self.dial.connect("changed", lambda d, v: self.tune(v))
-        self.rds_display = RdsDisplay()
-        readout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        readout.pack_start(self.dial, False, False, 0)
-        readout.pack_start(self.rds_display, False, False, 0)
-        readout.set_valign(Gtk.Align.CENTER)
-        row.pack_start(readout, True, True, 0)
+        self.level_bar = SegmentMeter()
+        self.level_label = Gtk.Label(label="– dBFS", xalign=0, width_chars=11)
+        self.stereo_label = Gtk.Label(xalign=0, width_chars=7)
+        section(rows[1], Gtk.Label(label="Signal"), self.level_bar, self.level_label,
+                self.stereo_label)
+        go = Gtk.Entry(placeholder_text="MHz", width_chars=10)
+        go.set_tooltip_text("Type a frequency in MHz and press Enter")
+        go.connect("activate", self._go)
         self.hd_combo = Gtk.ComboBoxText()
         self.hd_combo.set_tooltip_text("HD channels detected on this frequency")
         self.hd_combo.connect("changed", self._select_hd)
-        self.hd_combo.set_valign(Gtk.Align.CENTER)
-        row.pack_start(self.hd_combo, False, False, 0)
+        section(rows[1], Gtk.Label(label="Go to"), go, self.hd_combo)
 
-        controls = Gtk.Grid(column_spacing=6, row_spacing=4)
-        self.mode_combo = self._combo(dsp.MODES, self.rx["mode"])
-        self.mode_combo.connect("changed", lambda c: self._set_mode(c.get_active_text()))
-        controls.attach(Gtk.Label(label="Mode", xalign=1), 0, 0, 1, 1)
-        controls.attach(self.mode_combo, 1, 0, 1, 1)
-        self.step_combo = self._combo([step_label(s) for s in STEPS], step_label(self.s["step"]))
-        self.step_combo.connect("changed", lambda c: self._save("step", STEPS[c.get_active()]))
-        controls.attach(Gtk.Label(label="Step", xalign=1), 0, 1, 1, 1)
-        controls.attach(self.step_combo, 1, 1, 1, 1)
-        row.pack_start(controls, False, False, 0)
-
-        meter = Gtk.Grid(column_spacing=6, row_spacing=4)
-        self.level_bar = SegmentMeter()
-        self.level_bar.set_size_request(150, 24)
-        self.level_bar.set_valign(Gtk.Align.CENTER)
-        self.level_label = Gtk.Label(label="– dBFS", xalign=1, width_chars=11)
-        self.stereo_label = Gtk.Label(xalign=0, width_chars=7)
-        meter.attach(Gtk.Label(label="Signal", xalign=1), 0, 0, 1, 1)
-        meter.attach(self.level_bar, 1, 0, 1, 1)
-        meter.attach(self.level_label, 2, 0, 1, 1)
-        go = Gtk.Entry(placeholder_text="MHz", width_chars=11)
-        go.set_tooltip_text("Type a frequency in MHz and press Enter")
-        go.connect("activate", self._go)
-        meter.attach(Gtk.Label(label="Go to", xalign=1), 0, 1, 1, 1)
-        meter.attach(go, 1, 1, 1, 1)
-        meter.attach(self.stereo_label, 2, 1, 1, 1)
-        row.pack_start(meter, False, False, 0)
-        return row
+        self.dial = FrequencyDial()
+        self.dial.connect("changed", lambda d, v: self.tune(v))
+        self.rds_display = RdsDisplay()
+        rows[2].pack_start(self.dial, False, False, 0)
+        rows[2].pack_start(self.rds_display, True, True, 0)
+        return face
 
     @staticmethod
     def _scrolled(child):
@@ -879,7 +862,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     def _refresh_hd(self):
         data = self.hd_data
-        heading = "%s MHz  ·  HD%d" % (mhz_text(self.s["frequency"]), self.radio.hd_program + 1)
+        heading = "HD%d" % (self.radio.hd_program + 1)
         if data.get("station"):
             heading += "  ·  " + data["station"]
         if not self.radio.running:
@@ -894,6 +877,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         detail = heading + "\n" + message
         if data.get("mer"):
             detail += "\nHD MER: %.1f / %.1f dB" % tuple(data["mer"])
+        detail = "%s MHz  ·  %s" % (mhz_text(self.s["frequency"]), detail)
         self.rds_display.set_message(heading, message, detail)
 
     def _refresh_rds(self):
@@ -901,7 +885,7 @@ class TunerWindow(Gtk.ApplicationWindow):
             self.online.poll(None, "")
             self._refresh_hd()
             return
-        heading = "%s MHz  ·  RDS" % mhz_text(self.s["frequency"])
+        heading = "RDS"
         data = self.rds_data
         if not self.radio.running:
             message = "Receiver stopped"
@@ -932,7 +916,7 @@ class TunerWindow(Gtk.ApplicationWindow):
             key = (self.radio.metadata_generation, self.s["frequency"], name)
             text, status = self.online.poll(key, name)
             origin = "Online" if text else "Bookmark"
-            heading = "%s MHz  ·  %s  ·  %s" % (mhz_text(self.s["frequency"]), origin, name)
+            heading = "%s  ·  %s" % (origin, name)
             if fresh and data.get("ps"):
                 heading += "  ·  RDS: " + data["ps"]
             message = text or name
@@ -941,6 +925,7 @@ class TunerWindow(Gtk.ApplicationWindow):
                 detail += "\n" + text
         else:
             self.online.poll(None, "")
+        detail = "%s MHz  ·  %s" % (mhz_text(self.s["frequency"]), detail)
         self.rds_display.set_message(heading, message, detail)
 
     def _select_bookmark(self, freq):
@@ -1140,12 +1125,10 @@ class TunerWindow(Gtk.ApplicationWindow):
                 self.radio.playback.target = self.s["output"]
                 self.radio.start(hw)
                 self._status("Receiving")
-            button.set_icon_name("media-playback-stop")
             button.set_label("Stop")
         else:
             self.hd_restart = False
             self.radio.stop()
-            button.set_icon_name("media-playback-start")
             button.set_label("Start")
             if self.record_button.get_active():
                 self.record_button.set_active(False)

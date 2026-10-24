@@ -16,6 +16,18 @@ from gi.repository import Gtk, PangoCairo, PangoFc
 # style_faceplate() refreshes it, and the theme setting re-runs that.
 LIT = (0.941, 0.467, 0.275)
 GHOST = (.13, .13, .13)
+# Every character on the face is this size, typeset (segment.ttf) or drawn.
+SIZE = 20
+ROW = SIZE + 4
+
+
+def cell(height):
+    """(x inset, glyph top, glyph width, glyph height, advance) of one
+    character, matching segment.ttf's outlines, centred in a row `height` tall."""
+    # The font's em box is 900 up / 100 down; a glyph spans 130..830 units
+    # vertically and 70..530 across a 600-unit advance.
+    return (.07 * SIZE, (height - SIZE) / 2 + .07 * SIZE,
+            .46 * SIZE, .70 * SIZE, .60 * SIZE)
 
 CSS = """
 #tuner-face {
@@ -23,11 +35,11 @@ CSS = """
     color: @lit;
     border: 2px solid #302c24;
     border-radius: 3px;
-    padding: 8px;
+    padding: 2px 6px;
 }
 #tuner-face * {
     font-family: "Tuner Segment";
-    font-size: 17px;
+    font-size: @sizepx;
     font-weight: normal;
     color: @lit;
     text-shadow: 0 0 2px alpha(@lit, 0.85), 0 0 7px alpha(@lit, 0.45);
@@ -41,7 +53,17 @@ CSS = """
     border: 1px solid transparent;
     border-radius: 0;
     box-shadow: none;
-    padding: 5px 7px;
+    min-height: 0;
+    padding: 0 4px;
+}
+#tuner-face entry { border-bottom-color: mix(@lit, #090a08, 0.7); }
+#tuner-face combobox box { min-height: 0; }
+#tuner-face scale, #tuner-face scale * {
+    min-height: 0;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
 }
 #tuner-face button:hover, #tuner-face button:focus, #tuner-face entry:focus {
     border-bottom-color: @lit;
@@ -100,7 +122,8 @@ def _restyle(widget):
              "<path d='M1 2L6 7L11 2' fill='none' stroke='%s' stroke-width='2'/></svg>"
              % _hex(LIT))
     css = (CSS.replace('@arrow', base64.b64encode(arrow.encode()).decode())
-           .replace('@lit', _hex(LIT)).replace('@core', _hex(core())))
+           .replace('@lit', _hex(LIT)).replace('@core', _hex(core()))
+           .replace('@size', str(SIZE)))
     _provider.load_from_data(css.encode())
     widget.queue_draw()
 
@@ -126,32 +149,42 @@ def style_faceplate(widget):
     widget.get_settings().connect('notify::gtk-theme-name', lambda *a: _restyle(widget))
 
 
-def _blocks(widget, cr, fraction, focused=False):
-    width, height = widget.get_allocated_width(), widget.get_allocated_height()
-    count, gap, inset = 20, 3, 5
-    cell = (width - 2 * inset) / count
+def _bars(widget, cr, fraction, focused=False):
+    """A bargraph in the readouts' own segment cells: two lit bars per character."""
+    height = widget.get_allocated_height()
+    inset, top, _, glyph_h, advance = cell(height)
+    pitch = advance / 2
+    count = widget.BARS
     lit = round(max(0, min(1, fraction)) * count)
+    bar = pitch * .55
     cr.set_source_rgb(*GHOST)
     for index in range(lit, count):
-        cr.rectangle(inset + index * cell, height / 2 - 5, max(1, cell - gap), 10)
+        cr.rectangle(inset + index * pitch, top, bar, glyph_h)
     cr.fill()
     for index in range(lit):
-        cr.rectangle(inset + index * cell, height / 2 - 5, max(1, cell - gap), 10)
+        cr.rectangle(inset + index * pitch, top, bar, glyph_h)
     if lit:
-        glow(cr, 1.5, fill=True)
+        glow(cr, 1, fill=True)
     if focused:
-        cr.rectangle(inset, height / 2 + 9, width - 2 * inset, 1)
+        cr.rectangle(inset, top + glyph_h + 2, count * pitch - (pitch - bar), 1)
         glow(cr, 1, fill=True)
     return True
 
 
+def _bars_width(count):
+    inset, _, _, _, advance = cell(ROW)
+    return round(2 * inset + count * advance / 2)
+
+
 class SegmentMeter(Gtk.DrawingArea):
+    BARS = 20
+
     def __init__(self):
         super().__init__()
         self.value = 0
-        self.set_size_request(150, 24)
+        self.set_size_request(_bars_width(self.BARS), ROW)
         self.get_accessible().set_name('Signal level')
-        self.connect('draw', lambda w, cr: _blocks(w, cr, self.value / 100))
+        self.connect('draw', lambda w, cr: _bars(w, cr, self.value / 100))
 
     def set_value(self, value):
         self.value = value
@@ -160,14 +193,16 @@ class SegmentMeter(Gtk.DrawingArea):
 
 
 class SegmentScale(Gtk.Scale):
-    """Keep GTK range input and accessibility; render only discrete lit cells."""
+    """Keep GTK range input and accessibility; render only segment bars."""
+    BARS = 14
+
     def __init__(self, adjustment):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adjustment)
-        self.set_size_request(160, 28)
+        self.set_size_request(_bars_width(self.BARS), ROW)
         self.connect('draw', self._draw)
         self.get_accessible().set_name('Audio gain')
 
     def _draw(self, widget, cr):
         adj = self.get_adjustment()
         fraction = (adj.get_value() - adj.get_lower()) / (adj.get_upper() - adj.get_lower())
-        return _blocks(self, cr, fraction, self.has_focus())
+        return _bars(self, cr, fraction, self.has_focus())

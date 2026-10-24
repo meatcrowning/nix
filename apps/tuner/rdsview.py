@@ -3,8 +3,9 @@
 import time
 import unicodedata
 
-from gi.repository import GLib, Gtk, Pango, PangoCairo
+from gi.repository import GLib, Gtk
 
+import faceplate
 from faceplate import GHOST, glow
 
 # a..h are the perimeter/middle bars; i..n are diagonals and centre uprights.
@@ -33,7 +34,7 @@ GLYPHS = {
 
 
 def display_text(text):
-    text = text.replace('—', '-').replace('–', '-').replace('’', "'")
+    text = text.replace('—', '-').replace('–', '-').replace('’', "'").replace('·', ' ')
     return ''.join(c for c in unicodedata.normalize('NFKD', text.upper())
                    if not unicodedata.combining(c))
 
@@ -52,7 +53,7 @@ def cell_text(text, cells, elapsed, animate=True):
 class RdsDisplay(Gtk.DrawingArea):
     def __init__(self):
         super().__init__()
-        self.set_size_request(360, 48)
+        self.set_size_request(240, faceplate.ROW)
         self.heading = 'RDS'
         self.text = 'Receiver stopped'
         self.since = time.monotonic()
@@ -98,34 +99,24 @@ class RdsDisplay(Gtk.DrawingArea):
 
     def _draw(self, widget, cr):
         w, h = self.get_allocated_width(), self.get_allocated_height()
-        cr.save()
-        cr.rectangle(8, 2, max(w - 16, 1), max(h - 4, 1))
-        cr.clip()
-        layout = PangoCairo.create_layout(cr)
-        layout.set_font_description(Pango.FontDescription('Tuner Segment 11'))
-        layout.set_ellipsize(Pango.EllipsizeMode.END)
-        layout.set_width(max(w - 16, 1) * Pango.SCALE)
-        layout.set_text(self.heading, -1)
-        cr.move_to(9, 2)
-        PangoCairo.layout_path(cr, layout)
-        glow(cr, .6, fill=True, alpha=.8)
-        _, title_h = layout.get_pixel_size()
-        glyph_h = max(14, h - title_h - 10)
-        glyph_w = glyph_h * .55
-        advance = glyph_w + 5
-        cells = max(1, int(max(w - 20, 1) / advance))
-        self._scrolling = len(display_text(self.text)) > cells
-        text = cell_text(self.text, cells, time.monotonic() - self.since,
+        inset, top, glyph_w, glyph_h, advance = faceplate.cell(h)
+        cells = max(1, int((w - inset) / advance))
+        # One row: the station identity, then the text marquee in the rest.
+        heading = ' '.join(display_text(self.heading).split())[:cells // 2]
+        heading = heading + '  ' if heading else ''
+        room = max(1, cells - len(heading))
+        self._scrolling = len(display_text(self.text)) > room
+        text = cell_text(self.text, room, time.monotonic() - self.since,
                          self.get_settings().get_property('gtk-enable-animations'))
-        for i, char in enumerate(text):
-            self._glyph(cr, char, 10 + i * advance, title_h + 5, glyph_w, glyph_h)
-        cr.restore()
+        for i, char in enumerate(heading + text):
+            self._glyph(cr, char, inset + i * advance, top, glyph_w, glyph_h,
+                        .7 if i < len(heading) else 1)
         return True
 
     @staticmethod
-    def _glyph(cr, char, x, y, w, h):
+    def _glyph(cr, char, x, y, w, h, alpha=1.0):
         active = '' if char in '.:,' else GLYPHS.get(char, GLYPHS['?'])
-        width = max(1.1, h * .065)
+        width = max(1.1, h * .09)  # segment.ttf's stroke, so drawn and typeset text match
         cr.set_line_width(width)
         lit = []
         cr.set_source_rgb(*GHOST)
@@ -141,9 +132,9 @@ class RdsDisplay(Gtk.DrawingArea):
             cr.move_to(x + start[0] * w, y + start[1] * h)
             cr.line_to(x + end[0] * w, y + end[1] * h)
         if lit:
-            glow(cr, width)
+            glow(cr, width, alpha=alpha)
         if char in '.:,':
             for dy in ((.32, .72) if char == ':' else (.92,)):
                 cr.new_sub_path()
                 cr.arc(x + w * .5, y + h * dy, max(1, h * .045), 0, 6.284)
-            glow(cr, 1, fill=True)
+            glow(cr, 1, fill=True, alpha=alpha)
