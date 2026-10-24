@@ -62,6 +62,7 @@ cp "$repo/tools/unity-tweaks-check.py" "$run/tweaks-check.py"
 cp "$repo/tools/unity-input-check.py" "$run/input-check.py"
 cp "$repo/tools/unity-sounds-check.py" "$run/sounds-check.py"
 cp "$repo/tools/unity-indicators-check.py" "$run/indicators-check.py"
+cp "$repo/tools/unity-terminal-profile-check.py" "$run/home/terminal-profile-check.py"
 cp "$repo/tools/unity-notifications-check.py" "$run/notifications-check.py"
 cp "$repo/tools/unity-focus-check.py" "$run/focus-check.py"
 cp "$repo/tools/unity-now-playing-check.py" "$run/now-playing-check.py"
@@ -329,6 +330,7 @@ if [ "$UNITY_TEST_INDICATORS_ONLY" = 1 ]; then
   "$UNITY_PACKAGE/bin/unity-quantal-refresh"
   bridge_python=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["bridgePython"])')
   "$bridge_python" /work/indicators-check.py
+  "$UNITY_PACKAGE/bin/unity-quantal-runtime" /usr/bin/python2.7 "$HOME/terminal-profile-check.py" "$UNITY_PACKAGE/libexec/unity-quantal"
   "$bridge_python" /work/notifications-check.py
   exit 0
 fi

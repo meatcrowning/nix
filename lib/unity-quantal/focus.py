@@ -7,6 +7,7 @@ import subprocess
 import threading
 
 from gi.repository import Gio, GLib
+from terminal_profile import DesktopThemeProfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERATED = re.compile(r'^Unity-Focus-(Ambiance-Dark|Ambiance|Radiance)-[0-9a-f]{16}$')
@@ -29,6 +30,7 @@ def base_icons(name):
 
 class FocusColor(object):
     def __init__(self, enabled, brightness=100):
+        self.terminal_profile = DesktopThemeProfile()
         self.enabled = enabled
         self.brightness = brightness
         self.serial = 0

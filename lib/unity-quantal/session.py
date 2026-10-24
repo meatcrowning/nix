@@ -691,6 +691,13 @@ def apply_preferences(environment, log=None):
             subprocess.run([RUNTIME, "/usr/bin/gsettings", "set",
                             "org.compiz.workarounds:/org/compiz/profiles/unity/plugins/workarounds/",
                             key, "true"], env=environment, check=True, stdout=log, stderr=log)
+    # The legacy Evolution appointment fetch blocks the clock's GTK menu on
+    # unavailable calendar backends. The month grid does not need that fetch.
+    for key, value in [("show-events", "false"), ("show-calendar", "true"),
+                       ("time-format", "'custom'"),
+                       ("custom-time-format", "'%b %e %Y %l:%M %p'")]:
+        subprocess.run([RUNTIME, "/usr/bin/gsettings", "set", "com.canonical.indicator.datetime", key, value],
+                       env=environment, check=True, stdout=log, stderr=log)
     # Meta drags windows: left button moves, right button resizes. The GNOME
     # modifier keys mirror it for the original apps and settings panels.
     # With GNOME integration on, Compiz reads these only at startup; a running

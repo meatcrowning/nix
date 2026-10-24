@@ -139,6 +139,14 @@ panel = call('com.canonical.Unity.Panel.Service', '/com/canonical/Unity/Panel/Se
     'com.canonical.Unity.Panel.Service.Sync')[0]
 for name in ['unity-quantal-gpu', 'unity-quantal-load', 'unity-quantal-temperature']:
     assert any(row[2] == name and row[8] and row[9] for row in panel), (name, panel)
+clock = next(row for row in panel if row[0] == 'libdatetime.so' and row[1])
+assert time.strftime('%Y') in clock[3], clock
+clock_menu = call('com.canonical.indicator.datetime', '/com/canonical/indicator/datetime/menu',
+                  'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]')
+calendar = next(props for _, props, _ in clock_menu[1][2]
+                if props.get('type') == 'x-canonical-calendar-item')
+assert calendar.get('visible', True) and calendar.get('enabled', True), calendar
+print('PASS: clock includes year and calendar menu responds with an enabled month grid', flush=True)
 user = next(row for row in panel if row[0] == 'libusermenu.so' and row[1])
 assert user[3] == 'Unity Test' and user[4] and user[5] and user[8] and user[9], user
 priorities = {row[0]: row[-1] for row in panel if row[1]}

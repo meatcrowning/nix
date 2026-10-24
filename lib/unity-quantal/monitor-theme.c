@@ -126,3 +126,18 @@ GtkWidget *gtk_label_new(const gchar *text)
     /* The System page otherwise reports the ISO's GNOME version as the desktop. */
     return original(text && g_str_has_prefix(text, "GNOME ") ? "Unity 6.8" : text);
 }
+
+GtkWidget *gtk_frame_new(const gchar *label)
+{
+    GtkWidget *(*original)(const gchar *) = dlsym(RTLD_NEXT, "gtk_frame_new");
+    /* Only the System page's standalone hostname heading uses this markup. */
+    char *heading = g_strdup_printf("<big><big><b><u>%s</u></b></big></big>", g_get_host_name());
+    gboolean hostname = g_strcmp0(label, heading) == 0;
+    g_free(heading);
+    GtkWidget *frame = original(label);
+    if (hostname) {
+        gtk_widget_set_no_show_all(frame, TRUE);
+        gtk_widget_hide(frame);
+    }
+    return frame;
+}

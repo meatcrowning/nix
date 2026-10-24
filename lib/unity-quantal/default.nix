@@ -266,7 +266,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      focus.py focus-theme.py file-actions.py mirror.py notifications.py notification-settings.py sounds.py media.py indicators.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
+      focus.py focus-theme.py terminal_profile.py file-actions.py mirror.py notifications.py notification-settings.py sounds.py media.py indicators.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     mkdir -p "$out/lib/gtk-3.0/modules"
     ln -s ${libcanberra-gtk3}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so \

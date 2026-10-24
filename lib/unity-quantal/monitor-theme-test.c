@@ -61,6 +61,16 @@ int main(int argc, char **argv)
     GtkWidget *label = gtk_label_new("GNOME 3.6.0");
     g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(label)), ==, "Unity 6.8");
     gtk_widget_destroy(label);
+    gchar *heading = g_strdup_printf("<big><big><b><u>%s</u></b></big></big>", g_get_host_name());
+    GtkWidget *frame = gtk_frame_new(heading);
+    gtk_widget_show_all(frame);
+    g_assert(!gtk_widget_get_visible(frame));
+    gtk_widget_destroy(frame);
+    g_free(heading);
+    frame = gtk_frame_new("Other frame");
+    gtk_widget_show_all(frame);
+    g_assert(gtk_widget_get_visible(frame));
+    gtk_widget_destroy(frame);
     cairo_destroy(cr);
     cairo_surface_destroy(surface);
     gtk_widget_destroy(window);
