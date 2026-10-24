@@ -5,8 +5,6 @@ import unicodedata
 
 from gi.repository import GLib, Gtk, Pango, PangoCairo
 
-from views import _rounded
-
 # a..h are the perimeter/middle bars; i..n are diagonals and centre uprights.
 SEGMENTS = (
     ((.12, .04), (.88, .04)), ((.95, .10), (.95, .43)),
@@ -98,9 +96,6 @@ class RdsDisplay(Gtk.DrawingArea):
 
     def _draw(self, widget, cr):
         w, h = self.get_allocated_width(), self.get_allocated_height()
-        cr.set_source_rgb(.035, .026, .014)
-        _rounded(cr, 0, 0, w, h, 4)
-        cr.fill()
         cr.save()
         cr.rectangle(8, 2, max(w - 16, 1), max(h - 4, 1))
         cr.clip()

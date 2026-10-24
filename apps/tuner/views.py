@@ -7,6 +7,8 @@ import cairo
 import numpy as np
 from gi.repository import Gdk, GObject, Gtk, Pango, PangoCairo
 
+from rdsview import RdsDisplay
+
 ORANGE = (0.941, 0.467, 0.275)  # Ubuntu's selection orange
 
 
@@ -84,9 +86,6 @@ class FrequencyDial(Gtk.DrawingArea):
 
     def _draw(self, widget, cr):
         alloc = self.get_allocation()
-        cr.set_source_rgb(0.08, 0.08, 0.075)
-        _rounded(cr, 0, 0, alloc.width, alloc.height, 4)
-        cr.fill()
         layout = PangoCairo.create_layout(cr)
         font = Pango.FontDescription("Ubuntu Mono Bold")
         font.set_absolute_size(alloc.height * 0.72 * Pango.SCALE)
@@ -111,17 +110,12 @@ class FrequencyDial(Gtk.DrawingArea):
                 cr.set_source_rgba(*ORANGE, 0.25)
                 cr.rectangle(x, 3, digit_w, alloc.height - 6)
                 cr.fill()
-            if leading:
-                cr.set_source_rgba(0.95, 0.93, 0.88, 0.08)
-            else:
-                cr.set_source_rgb(0.95, 0.93, 0.88)
-            layout.set_text(ch, -1)
-            cr.move_to(x, y)
-            PangoCairo.show_layout(cr, layout)
+            RdsDisplay._glyph(cr, " " if leading else ch, x + 3, y + 6,
+                              digit_w - 6, digit_h - 12)
             self.boxes.append((x, x + digit_w, place))
             x += digit_w
             if place in (9, 6, 3):
-                cr.set_source_rgba(0.95, 0.93, 0.88, 0.08 if leading else 0.8)
+                cr.set_source_rgba(1, .60, .16, 0.08 if leading else 0.8)
                 cr.arc(x + sep_w / 2, y + digit_h * 0.82, max(digit_w * 0.08, 1.5), 0, 2 * math.pi)
                 cr.fill()
                 x += sep_w

@@ -30,6 +30,7 @@ import radio  # noqa: E402
 import online  # noqa: E402
 import rtl  # noqa: E402
 from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView  # noqa: E402
+from faceplate import style_faceplate  # noqa: E402
 from rdsview import RdsDisplay  # noqa: E402
 
 APP_ID = "tuner"
@@ -116,7 +117,13 @@ class TunerWindow(Gtk.ApplicationWindow):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(box)
         box.pack_start(self._menubar(), False, False, 0)
-        box.pack_start(self._toolbar(), False, False, 0)
+        face = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        face.set_name("tuner-face")
+        face.set_border_width(6)
+        face.pack_start(self._toolbar(), False, False, 0)
+        face.pack_start(self._dial_row(), False, False, 0)
+        style_faceplate(face)
+        box.pack_start(face, False, False, 0)
         self.infobar = Gtk.InfoBar(message_type=Gtk.MessageType.WARNING, show_close_button=True)
         self.info_label = Gtk.Label(xalign=0)
         self.info_label.set_line_wrap(True)
@@ -124,7 +131,6 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.infobar.connect("response", lambda bar, r: bar.hide())
         self.infobar.set_no_show_all(True)
         box.pack_start(self.infobar, False, False, 0)
-        box.pack_start(self._dial_row(), False, False, 0)
 
         self.paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         self.spectrum = SpectrumView()
@@ -156,7 +162,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         box.pack_start(self.statusbar, False, False, 0)
 
         self.show_all()
-        self.dial_stack.set_visible_child_name("rds" if self.s["rds_display"] else "frequency")
+        self.rds_display.set_visible(self.s["rds_display"])
         if self.s["pane"]:
             self.paned.set_position(self.s["pane"])
         self.notebook.set_current_page(self.s["tab"])
@@ -248,7 +254,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     def _toolbar(self):
         bar = Gtk.Toolbar()
-        bar.get_style_context().add_class(Gtk.STYLE_CLASS_PRIMARY_TOOLBAR)
+        bar.set_style(Gtk.ToolbarStyle.TEXT)
         self.start_button = Gtk.ToggleToolButton(icon_name="media-playback-start", label="Start")
         self.start_button.set_tooltip_text("Start or stop receiving (Ctrl+Space)")
         self.start_button.set_is_important(True)
@@ -286,13 +292,15 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.dial = FrequencyDial()
         self.dial.connect("changed", lambda d, v: self.tune(v))
         self.rds_display = RdsDisplay()
-        self.dial_stack = Gtk.Stack()
-        self.dial_stack.add_named(self.dial, "frequency")
-        self.dial_stack.add_named(self.rds_display, "rds")
-        row.pack_start(self.dial_stack, True, True, 0)
+        self.rds_display.set_no_show_all(True)
+        readout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        readout.pack_start(self.dial, False, False, 0)
+        readout.pack_start(self.rds_display, False, False, 0)
+        readout.set_valign(Gtk.Align.CENTER)
+        row.pack_start(readout, True, True, 0)
         self.rds_button = Gtk.ToggleButton(label="Text", relief=Gtk.ReliefStyle.NONE)
         self.rds_button.set_valign(Gtk.Align.CENTER)
-        self.rds_button.set_tooltip_text("Switch between frequency and station text")
+        self.rds_button.set_tooltip_text("Show station text below the frequency")
         self.rds_button.set_active(self.s["rds_display"])
         self.rds_button.connect("toggled", self._toggle_rds)
         row.pack_start(self.rds_button, False, False, 0)
@@ -815,7 +823,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     def _toggle_rds(self, button):
         active = button.get_active()
-        self.dial_stack.set_visible_child_name("rds" if active else "frequency")
+        self.rds_display.set_visible(active)
         self._save("rds_display", active)
         self._refresh_rds()
 
@@ -847,7 +855,7 @@ class TunerWindow(Gtk.ApplicationWindow):
     def _sync_hd_controls(self):
         enabled = self.s["hd"]
         self.rds_button.set_label("Text")
-        self.rds_button.set_tooltip_text("Switch between frequency and station text")
+        self.rds_button.set_tooltip_text("Show station text below the frequency")
         self.receiver_page.set_sensitive(not enabled)
         self.receiver_page.set_tooltip_text("Analog receiver settings; HD uses its own decoder" if enabled else None)
         self.spectrum.filter = (-200000, 200000) if enabled else (self.rx["filter_low"], self.rx["filter_high"])

@@ -32,7 +32,9 @@ the dongle. Retuning, mode changes, and receive sessions invalidate decoder
 results by generation. Do not persist received station text. Confirmed named
 FM bookmarks may supply fallback identity, explicitly labeled Bookmark rather
 than received RDS.
-The Hz/Text toggle is persistent; unavailable, waiting, and
+The top controls and readouts share an amber car-stereo face (faceplate.py);
+the frequency dial remains visible above the optional station text. The Text
+toggle is persistent; unavailable, waiting, and
 lost-signal states are explicit. The marquee advances whole characters through
 fixed segment cells; GTK's animation setting governs it. Metadata resets must
 never discard the audio IQ queue; RDS conversion stays in its worker.

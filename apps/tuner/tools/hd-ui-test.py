@@ -25,7 +25,14 @@ assert not w.hd_combo.get_visible()
 w.hd_button.set_active(True); settle()
 assert w.s['hd'] and w.hd_combo.get_visible()
 assert not w.rate_combo.get_sensitive() and not w.receiver_page.get_sensitive()
-assert w.dial_stack.get_visible_child_name() == 'rds'
+assert w.rds_display.get_visible() and w.dial.get_mapped()
+w.rds_button.set_active(False); settle()
+assert not w.rds_display.get_visible() and w.dial.get_mapped()
+w.rds_button.set_active(True); settle()
+assert w.rds_display.get_mapped() and w.dial.get_mapped()
+assert len(w.dial.boxes) == w.dial.DIGITS
+assert w.dial.boxes[0][0] >= 0
+assert w.dial.boxes[-1][1] < w.dial.get_allocated_width()
 assert w.rds_button.get_label() == 'Text'
 w.radio.running = True; w.radio.hd_enabled = True
 w._refresh_rds(); assert w.rds_display.text == 'Searching for HD Radio'
@@ -42,6 +49,7 @@ w._hd_update(gen, state); assert 'SONG' not in w.rds_display.text
 state.update(program=1, title='HD2 SONG')
 w._hd_update(gen, state); assert 'HD2 SONG' in w.rds_display.text
 w.tune(102700000)
+assert w.dial.value == 102700000 and w.dial.get_mapped()
 assert w.radio.hd_program == 0 and w.hd_data == {}
 w._hd_update(gen, state); assert 'HD2 SONG' not in w.rds_display.text
 state.update(program=0, locked=False)
