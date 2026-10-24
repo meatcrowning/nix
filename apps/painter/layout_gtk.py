@@ -49,6 +49,8 @@ class Toolkit(object):
 
     def show_widget(self, widget, visible):
         widget.set_visible(visible)
+        if hasattr(widget, 'resize_handle'):
+            widget.resize_handle.set_visible(visible)
 
     def preview_colour(self, value):
         colour = Gdk.RGBA()
@@ -437,6 +439,10 @@ class Toolkit(object):
         events.connect('destroy', cancel_draw)
         parent.pack_start(events, False, False, 0)
         events.resize_handle = self.resize_handle(parent, events, 140, 1200, self.window.layout_resized, 'Drag to resize the layout')
+        events.show_all()
+        events.resize_handle.show_all()
+        events.set_no_show_all(True)
+        events.resize_handle.set_no_show_all(True)
         events.repaint = queue_draw
         return events
 

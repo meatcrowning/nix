@@ -216,11 +216,11 @@ def test():
             viewport.add(grid)
             fixture.add(viewport)
             fixture.show_all()
-            for width in (640, 800, 480):
+            for width in (640, 800, 480, 400):
                 fixture.resize(width, 400)
                 while Gtk.events_pending(): Gtk.main_iteration()
                 available = grid.get_allocated_width() - 2 * grid.get_margin()
-                columns = max(1, (available + grid.get_column_spacing()) // (150 + 2 * (grid.get_item_padding() + grid.focus_width()) + grid.get_column_spacing()))
+                columns = max(1, (available + grid.get_column_spacing()) // (112 + 2 * (grid.get_item_padding() + grid.focus_width()) + grid.get_column_spacing()))
                 assert grid.get_item_row(Gtk.TreePath.new_from_string(str(columns - 1))) == 0, ('history row wastes a column', width, columns, grid.get_item_width())
                 assert grid.get_item_row(Gtk.TreePath.new_from_string(str(columns))) == 1
             fixture.destroy()

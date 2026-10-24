@@ -13,6 +13,7 @@ import uuid
 from xml.sax.saxutils import escape
 
 KINDS = ['object', 'character', 'text']
+REGION_ICONS = {'object': '◇', 'character': '👤', 'text': '✎'}
 CANVASES = ['single', 'multi_panel', 'collage']
 POLICIES = ['stretch', 'fit', 'keep sizes']
 TYPE_FIELDS = [('family', 'Lettering', ['', 'sans serif', 'serif', 'monospace', 'handwritten']),
@@ -558,13 +559,13 @@ def svg(editor, vw, vh, reference='', zoom=1, pan=(0, 0), font=None, palette_col
         s.extend(palette_bands(item.get('palette', []), palette_colours, x, y, bw, bh,
                                '.18' if item.get('enabled', True) else '.08'))
         s.append('<rect x="%f" y="%f" width="%f" height="%f" fill="none" stroke="%s" stroke-width="%s" stroke-opacity="%s"/>' % (x, y, bw, bh, colour, 2 if selected else 1, '1' if item.get('enabled', True) else '.6'))
-        title = '%d %s' % (n + 1, item['label'])
+        title = REGION_ICONS[item['label']]
         label_offset = 14 if item.get('locked') else 3
         if item.get('locked'):
             s.append('<g transform="translate(%f,%f)" fill="none" stroke="%s" stroke-width="1.3"><path d="M2 5V3a3 3 0 0 1 6 0v2"/><rect x="1" y="5" width="8" height="6" fill="black"/></g>' % (x + 3, y + 3, colour))
         caption = ' '.join(item.get('caption', '').split())
         if caption:
-            title += ' — ' + caption
+            title += ' ' + caption
         labels = preview_lines(title, bw - label_offset - 3, fs)
         s.append('<defs><clipPath id="label%d"><rect x="%f" y="%f" width="%f" height="%f"/></clipPath></defs>' % (n, x, y, bw, bh))
         for j, line in enumerate(labels):

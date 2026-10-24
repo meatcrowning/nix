@@ -220,7 +220,7 @@ def core():
     preview = M.Editor(M.fresh())
     preview.add('character', [.1, .1, .8, .8])['caption'] = 'Red coat & blue scarf <bright>'
     svg = M.svg(preview, 700, 700)[0].decode('utf-8')
-    assert '1 character — Red coat &amp; blue scarf &lt;bright&gt;' in svg
+    assert M.REGION_ICONS['character'] + ' Red coat &amp; blue scarf &lt;bright&gt;' in svg
     assert 'clip-path="url(#label0)"' in svg
     preview.chosen()[0]['caption'] = 'long description ' * 100
     import xml.etree.ElementTree as ET
@@ -268,6 +268,12 @@ def qt():
     ui = Toolkit()
     accepted = []
     editor = LayoutUI(ui, M.fresh(caption='A poster'), accepted.append)
+    before_toggle = copy.deepcopy(editor.model.doc)
+    editor.preview_toggle.edit(False)
+    assert not editor.canvas.shown
+    assert editor.model.doc == before_toggle
+    editor.preview_toggle.edit(True)
+    assert editor.canvas.shown
     app.processEvents()
     editor.render(700, 500)
     cursor = (233, 177)
@@ -425,10 +431,10 @@ def qt():
     e = b.editor.model
     e.doc['guides'] = 'none'
     e.doc['grid'] = False
-    e.add('object', [.2, .2, .3, .3])
+    e.add('object', [.2, .2, .3, .3]).update(caption='Foreground')
     e.add('object', [.35, .35, .25, .25])
     backdrop = e.add('object', [.1, .1, .8, .8])
-    backdrop.update(locked=True, palette=['blue'])
+    backdrop.update(locked=True, palette=['blue'], caption='Backdrop')
     e.selected = []
     b.editor.refresh()
     canvas = LayoutCanvas()
@@ -457,7 +463,7 @@ def qt():
     b.editor.zoom = 1
     svg = b.editor.render(500, 500)
     assert b'#808080' in svg
-    assert svg.index(b'3 object') < svg.index(b'1 object'), 'locked region painted over unlocked region'
+    assert svg.index(b'Backdrop') < svg.index(b'Foreground'), 'locked region painted over unlocked region'
     before_clear = copy.deepcopy(editor.model.doc)
     editor.paint()
     assert editor.buttons['Clear all']._enabled

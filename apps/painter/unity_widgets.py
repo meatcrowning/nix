@@ -58,7 +58,7 @@ class HistoryGrid(Gtk.IconView):
         worker = threading.Thread(target=self.thumb_worker)
         worker.daemon = True
         worker.start()
-        self.cell_width = 150
+        self.cell_width = 112
         self.pending_fit = None
         self.fitted_width = 0
         self.set_pixbuf_column(0)
@@ -185,7 +185,7 @@ class HistoryGrid(Gtk.IconView):
         # GtkCellArea adds focus-line-width on both sides of each renderer.
         padding = 2 * (self.get_item_padding() + self.focus_width())
         gap = self.get_column_spacing()
-        columns = max(1, (available + gap) // (150 + padding + gap))
+        columns = max(1, (available + gap) // (112 + padding + gap))
         cell_width = max(32, (available - (columns - 1) * gap) // columns - padding)
         if cell_width != self.cell_width:
             self.cell_width = cell_width

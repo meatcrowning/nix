@@ -118,6 +118,12 @@ def run(parent):
     before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
     parent.layout_box.show()
     e = open_editor(parent.layout_box, M.fresh(caption='A travel poster'), accepted.append)
+    e.ui.set(e.preview_toggle, False)
+    e.ui.root.show_all()
+    assert not e.canvas.get_visible() and not e.canvas.resize_handle.get_visible()
+    e.ui.set(e.preview_toggle, True)
+    assert e.canvas.get_visible() and e.canvas.resize_handle.get_visible()
+    e.refresh()
     assert [w for w in Gtk.Window.list_toplevels() if w.get_visible()] == before_windows
     assert e.canvas.get_toplevel() is parent
     assert e.side.get_visible()

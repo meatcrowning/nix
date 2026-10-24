@@ -50,6 +50,8 @@ class LayoutUI(object):
         self.add(scene_controls, 'enabled', 'Use layout for generation', 'iconcheck')
         self.add(scene_controls, 'summary.meta', 'Medium / genre tags', 'inline_entry')
         self.add(scene_controls, 'summary.palette', 'Scene palette', 'inline_palette')
+        self.preview_toggle = u.field(region, 'Show layout preview', 'check', None, self.toggle_preview)
+        u.set(self.preview_toggle, True)
         self.canvas = u.canvas(region, self)
         scene = u.tab(tabs, 'Scene')
         canvas = u.tab(tabs, 'Canvas')
@@ -102,6 +104,10 @@ class LayoutUI(object):
         u.label(canvas, 'Reference is a tracing aid only; it is not sent as image conditioning.')
         self.status = u.label(root, '')
         self.refresh()
+
+    def toggle_preview(self):
+        if hasattr(self, 'canvas'):
+            self.ui.show_widget(self.canvas, self.ui.get(self.preview_toggle))
 
     def prompt_undo_entry(self):
         row = self.row()
@@ -305,8 +311,8 @@ class LayoutUI(object):
     def refresh_list(self):
         previous = self.syncing
         self.syncing = True
-        rows = [(r['id'], '%d. %s%s%s — %s' % (n + 1, r['label'], ' [off]' if not r.get('enabled', True) else '',
-                 (' [locked]' if r.get('locked') else '') + (' [grouped]' if r.get('group') else ''), (r.get('text') or r.get('caption') or 'Describe this region').replace('\n', ' ')[:70])) for n, r in enumerate(self.model.doc['items'])]
+        rows = [(r['id'], '%s%s%s %s' % (M.REGION_ICONS[r['label']], ' [off]' if not r.get('enabled', True) else '',
+                 (' [locked]' if r.get('locked') else '') + (' [grouped]' if r.get('group') else ''), (r.get('text') or r.get('caption') or 'Describe this region').replace('\n', ' ')[:70])) for r in self.model.doc['items']]
         self.ui.set_list(self.list, rows, self.model.selected)
         self.syncing = previous
 
