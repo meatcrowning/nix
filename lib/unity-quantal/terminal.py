@@ -199,6 +199,8 @@ class Screen(Gtk.Box):
         terminal = self.terminal
         self.set_font(window.get_application().font)
         self.set_zoom(DEFAULT_ZOOM)
+        self.background_css = Gtk.CssProvider()
+        self.get_style_context().add_provider(self.background_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.profile = window.get_application().profile
         self.apply_colors()
         terminal.set_cursor_shape(Vte.CursorShape.BLOCK)
@@ -289,6 +291,9 @@ class Screen(Gtk.Box):
         app = self.window.get_application()
         foreground, background = (app.theme_colors() if self.profile == "Desktop Theme"
                                   else (rgba(FOREGROUND), rgba(BACKGROUND)))
+        # VTE rounds its drawing area to whole cells. Paint the tab beneath
+        # it too, including the unused strip beside the scrollbar.
+        self.background_css.load_from_data(('* { background-color: %s; }' % background.to_string()).encode())
         self.terminal.set_colors(foreground, background, [rgba(c) for c in PALETTE])
         self.terminal.set_color_cursor(foreground)
         self.terminal.set_color_cursor_foreground(background)

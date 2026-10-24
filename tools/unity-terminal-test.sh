@@ -19,6 +19,7 @@ paths = next(p.decode() for p in wrapper.read_bytes().split(b'\0') if p.startswi
     BWRAP=c['bwrap'], BASH=c['bash'], PYTHON=c['bridgePython'], XVFB=c['xvfb'],
     TEST_PATH=c['hostPath'], GI_TYPELIB_PATH=paths,
     TEST_PRELOAD=re.search(r'export LD_PRELOAD=([^$\n]+)', launcher)[1],
+    TEST_THEMES=str(package/'share/themes'),
     TEST_FONTS=str(package/'libexec/unity-quantal/terminal-fonts.conf')).items()))
 PY
 source "$run/env"
@@ -37,6 +38,10 @@ major, minor, patch = ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
 ft.FT_Library_Version(handle, ctypes.byref(major), ctypes.byref(minor), ctypes.byref(patch))
 assert (major.value, minor.value, patch.value) == (2, 4, 10)
 ft.FT_Done_FreeType(handle)
+themes = Path.home() / '.themes'
+themes.mkdir(parents=True)
+(themes / 'Ambiance-Dark').symlink_to(Path(os.environ['TEST_THEMES']) / 'Ambiance-Dark')
+T.Gtk.Settings.get_default().set_property('gtk-theme-name', 'Ambiance-Dark')
 app = T.Application([])
 app.register(None)
 window = T.TerminalWindow(app)
@@ -104,6 +109,12 @@ def painted_background(expected):
                                        window.get_allocated_width(), window.get_allocated_height())
     value = bytes.fromhex(expected.lstrip('#'))
     assert image.get_pixels().count(value) > image.get_width() * image.get_height() / 2, expected
+    if expected != T.BACKGROUND:
+        assert bytes.fromhex(T.BACKGROUND[1:]) not in image.get_pixels(), 'original background leaked into themed profile'
+
+# A width between character-cell multiples exposes VTE's unpainted edge.
+window.resize(596, 804)
+painted_background('#282725')
 
 for foreground, background, accent in [('#e8e5de', '#282725', '#3366cc'),
                                         ('#222222', '#ffffff', '#22aa66')]:
@@ -146,6 +157,6 @@ INNER
   --tmpfs /tmp --symlink "$(dirname "$BASH")" /bin --clearenv \
   --setenv HOME /work/home --setenv QT_QPA_PLATFORM offscreen \
   --setenv PATH "$TEST_PATH" --setenv GI_TYPELIB_PATH "$GI_TYPELIB_PATH" \
-  --setenv TEST_PRELOAD "$TEST_PRELOAD" --setenv TEST_FONTS "$TEST_FONTS" \
+  --setenv TEST_THEMES "$TEST_THEMES" --setenv TEST_PRELOAD "$TEST_PRELOAD" --setenv TEST_FONTS "$TEST_FONTS" \
   --setenv PYTHON "$PYTHON" --setenv XVFB "$XVFB" --setenv LANG C.UTF-8 \
   "$BASH" /work/inside.sh
