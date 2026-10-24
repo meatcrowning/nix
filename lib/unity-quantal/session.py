@@ -245,6 +245,11 @@ def prepare(directory, environment):
     viewer.write_text("#!/bin/sh\nexec /usr/local/bin/unity-host-launch -- "
                       + shlex.quote(str(PACKAGE / "bin/unity-quantal-viewer")) + ' "$@"\n')
     viewer.chmod(0o755)
+    # Games-folder entries bypass the rewritten application catalog. Nautilus
+    # must forward their command out of the legacy runtime as well.
+    games = directory / "bridge-bin/games"
+    games.write_text('#!/bin/sh\nexec /usr/local/bin/unity-host-launch -- games "$@"\n')
+    games.chmod(0o755)
     # Compiz's cached Print/Alt+Print commands use PATH. This live-mounted
     # bridge also works while the shell still has the previous Ubuntu root.
     screenshot = directory / "bridge-bin/gnome-screenshot"
