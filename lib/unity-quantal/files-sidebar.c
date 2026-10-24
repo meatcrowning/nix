@@ -70,8 +70,22 @@ static gboolean ensure_phone(gpointer data)
     GtkTreeIter iter;
     gboolean found = FALSE;
     for (gboolean valid = gtk_tree_model_get_iter_first(model, &iter); valid;
-         valid = gtk_tree_model_iter_next(model, &iter))
-        if (is_phone(model, &iter)) { found = TRUE; break; }
+         valid = gtk_tree_model_iter_next(model, &iter)) {
+        if (is_phone(model, &iter)) found = TRUE;
+        char *uri = NULL;
+        gtk_tree_model_get(model, &iter, URI, &uri, -1);
+        if (g_strcmp0(uri, "trash:///") == 0) {
+            /* The native GVfs trash backend uses the host data home, while
+             * Nautilus deletes into the legacy runtime's data home. */
+            char *path = g_build_filename(g_get_user_data_dir(), "Trash", "files", NULL);
+            char *target = g_filename_to_uri(path, NULL, NULL);
+            gtk_list_store_set(GTK_LIST_STORE(model), &iter, URI, target,
+                               TOOLTIP, path, -1);
+            g_free(target);
+            g_free(path);
+        }
+        g_free(uri);
+    }
     if (!found) {
         GdkPixbuf *icon = gtk_icon_theme_load_icon(gtk_icon_theme_get_default(),
                                                   "phone", 16, 0, NULL);

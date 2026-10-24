@@ -24,6 +24,8 @@ static void fill(GtkListStore *store)
         gtk_list_store_insert_with_values(store, &iter, -1, ROW, 0, SECTION, section,
                                          NAME, "ordinary", URI, "file:///tmp", -1);
     }
+    gtk_list_store_insert_with_values(store, &iter, -1, ROW, 0, SECTION, 1,
+                                     NAME, "Trash", URI, "trash:///", -1);
     while (g_main_context_iteration(NULL, FALSE));
 }
 int main(int argc, char **argv)
@@ -38,12 +40,24 @@ int main(int argc, char **argv)
     gtk_tree_view_set_model(GTK_TREE_VIEW(view), model);
     for (int pass = 0; pass < 2; pass++) {
         fill(store);
-        int sections[] = {2, 0, 1, 3}, index = 0, phones = 0;
+        int sections[] = {2, 0, 1, 3}, index = 0, phones = 0, trash = 0;
         GtkTreeIter iter;
         for (gboolean valid = gtk_tree_model_get_iter_first(model, &iter); valid;
              valid = gtk_tree_model_iter_next(model, &iter)) {
             int section, row;
             gtk_tree_model_get(model, &iter, SECTION, &section, ROW, &row, -1);
+            char *name = NULL, *uri = NULL;
+            gtk_tree_model_get(model, &iter, NAME, &name, URI, &uri, -1);
+            if (g_strcmp0(name, "Trash") == 0) {
+                char *path = g_build_filename(g_get_user_data_dir(), "Trash", "files", NULL);
+                char *expected = g_filename_to_uri(path, NULL, NULL);
+                g_assert_cmpstr(uri, ==, expected);
+                g_free(expected);
+                g_free(path);
+                trash++;
+            }
+            g_free(name);
+            g_free(uri);
             if (row == 4) { g_assert_cmpint(index, <, 4); g_assert_cmpint(section, ==, sections[index++]); }
             if (is_phone(model, &iter)) {
                 phones++;
@@ -59,6 +73,7 @@ int main(int argc, char **argv)
         }
         g_assert_cmpint(index, ==, 4);
         g_assert_cmpint(phones, ==, 1);
+        g_assert_cmpint(trash, ==, 1);
         gtk_list_store_clear(store);
     }
     gtk_widget_destroy(view);
