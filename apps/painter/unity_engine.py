@@ -50,6 +50,8 @@ def submission(g, ctl):
     p = {key: g[key] for key in keys}
     if not getattr(ctl, 'layoutSupport', False):
         p.pop('moss_layout', None)
+    if getattr(ctl, 'layoutSupport', False):
+        p.update({key: g[key] for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent')})
     if ctl.isEdit:
         p['edit'] = True
     elif ctl.isVideo and not g['still']:
@@ -412,6 +414,8 @@ class Engine:
         c.restoreWildcardOptions(p.get('wildcard_options'))
         g = self.settings
         g['moss_layout'] = p.get('moss_layout') or {}
+        for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
+            g[key] = p.get(key, BASE[key])
         g.update({key: value for key, value in p.items() if key in BASE})
         g.update({key: value for key, value in (p.get('prompt_boxes') or {}).items()
                   if key in ('positive', 'negative')})

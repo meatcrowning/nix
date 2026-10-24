@@ -2,7 +2,8 @@
 import copy
 from dimensions import controls_for_size
 
-BASE = dict(moss_layout={}, positive='', negative='', aspectW=1, aspectH=1, width=1024, height=1024, steps=20, cfg=7.0,
+BASE = dict(slg_single_layers='22', slg_start_percent=0.0, slg_end_percent=1.0,
+            moss_layout={}, positive='', negative='', aspectW=1, aspectH=1, width=1024, height=1024, steps=20, cfg=7.0,
             denoise=1.0, sampler_name='euler', scheduler='normal', seed=-1,
             randomSeed=True, reuseSeed=False, count=1, batch_size=1,
             duration=5.0, fps=24.0, megapixels=1.0, still=False,

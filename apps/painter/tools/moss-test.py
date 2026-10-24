@@ -77,6 +77,26 @@ def main():
                 assert inputs("scheduler")["denoise"] == overrides.get("denoise", 1)
                 assert "model_sampling" not in roles and "negpip" not in roles
                 assert built["params"]["prompt_boxes"] == {k: p[k] for k in ("positive", "negative")}
+            for layers in ('24, 26', ''):
+                settings = dict(slg_single_layers=layers, slg_start_percent=.125, slg_end_percent=.875)
+                custom = reg.build(entry, settings)
+                inputs = G.Graph(custom['prompt']).node('moss_guidance')['inputs']
+                assert inputs['single_layers'] == layers and inputs['double_layers'] == ''
+                assert inputs['start_percent'] == .125 and inputs['end_percent'] == .875
+                assert all(custom['params'][key] == value for key, value in settings.items())
+                import userprefs
+                doc = {'genByModel': json.dumps({entry.name: settings})}
+                assert all(userprefs.params_for(entry.name, 'image', doc)[key] == value
+                           for key, value in settings.items())
+            for invalid in ({'slg_single_layers': '-1'}, {'slg_single_layers': '22oops'},
+                            {'slg_start_percent': .9, 'slg_end_percent': .1},
+                            {'slg_end_percent': float('nan')}, {'slg_start_percent': -1}):
+                try:
+                    reg.build(entry, invalid)
+                except G.GraphError:
+                    pass
+                else:
+                    raise AssertionError('invalid SLG settings accepted')
             weighted = reg.build(entry, dict(positive="A (red:1.5) cap", negative="blur",
                                              toggles={"negpip": True, "model_sampling": True}))
             graph = G.Graph(weighted["prompt"])

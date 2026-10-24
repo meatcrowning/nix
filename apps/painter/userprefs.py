@@ -135,6 +135,9 @@ def params_for(model_name, kind="image", doc=None):
     for key in ("system_prompt", "krea_sampling"):
         if isinstance(g.get(key), str):
             out[key] = g[key]
+    for key in ("slg_single_layers", "slg_start_percent", "slg_end_percent"):
+        if key in g:
+            out[key] = g[key]
     put("krea_shift")
     put("reference_megapixels")
     put("cfg")

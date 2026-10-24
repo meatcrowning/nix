@@ -26,7 +26,10 @@
     "sampler_name": "euler",
     "scheduler": "sgm_uniform",
     "denoise": 1.0,
-    "add_noise": true
+    "add_noise": true,
+    "slg_single_layers": "22",
+    "slg_start_percent": 0.0,
+    "slg_end_percent": 1.0
   },
   "resolution": {"megapixels": 1.0, "multiple": 16, "aspect": "1:1"}
 }

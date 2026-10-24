@@ -121,6 +121,7 @@ Item {
     // Live generation settings, seeded from the selected model's family.
     property var gen: ({
         positive: "", negative: "", moss_layout: ({}),
+        slg_single_layers: "22", slg_start_percent: 0.0, slg_end_percent: 1.0,
         system_prompt: "", krea_sampling: "native", krea_shift: 1.15,
         reference_megapixels: 0.25, useReferences: false,
         steps: 20, cfg: 1.0, denoise: 1.0,
@@ -261,6 +262,7 @@ Item {
     // saved object predates (a new field) keeps its default instead of vanishing.
     function mergeGen(base, saved) {
         var g = clone(base)
+        g.slg_single_layers = "22"; g.slg_start_percent = 0; g.slg_end_percent = 1
         for (var k in saved) if (k !== "ms" && g[k] !== undefined) g[k] = saved[k]
         g.ms = clone(base.ms)
         if (saved.ms) for (var mk in saved.ms) if (g.ms[mk] !== undefined) g.ms[mk] = saved.ms[mk]
@@ -328,6 +330,7 @@ Item {
         root.defaultsFor = App.selectedName
         var g = clone(gen)
         g.moss_layout = ({})
+        g.slg_single_layers = "22"; g.slg_start_percent = 0; g.slg_end_percent = 1
         g.system_prompt = d.system_prompt !== undefined ? d.system_prompt : ""
         g.krea_sampling = d.krea_sampling || "native"
         g.krea_shift = d.krea_shift !== undefined ? d.krea_shift : 1.15
@@ -448,6 +451,11 @@ Item {
             aspectW: g.aspectW, aspectH: g.aspectH, megapixels: g.megapixels,
             toggles: ({ negpip: g.negpip, model_sampling: g.modelSampling }),
             model_sampling: g.ms
+        }
+        if (App.layoutSupport) {
+            imageParams.slg_single_layers = g.slg_single_layers
+            imageParams.slg_start_percent = g.slg_start_percent
+            imageParams.slg_end_percent = g.slg_end_percent
         }
         if (App.encoderControls) {
             imageParams.system_prompt = g.system_prompt
@@ -1296,6 +1304,9 @@ Item {
                               && App.restoreInputImage(refs[0])
             if (g.useReferences) App.restoreEditImages(refs.slice(1))
         }
+        g.slg_single_layers = p.slg_single_layers !== undefined ? p.slg_single_layers : "22"
+        g.slg_start_percent = p.slg_start_percent !== undefined ? p.slg_start_percent : 0
+        g.slg_end_percent = p.slg_end_percent !== undefined ? p.slg_end_percent : 1
         if (p.steps !== undefined) g.steps = p.steps
         if (p.cfg !== undefined) g.cfg = p.cfg
         if (p.denoise !== undefined) g.denoise = p.denoise

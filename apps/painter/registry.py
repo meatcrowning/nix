@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import math
+import re
 
 import fingerprint as fp
 import graph as G
@@ -514,9 +516,19 @@ class Registry:
             source = [g.id_of("loader"), 0]
             # Native MOSS already uses shift 5 with normalized timesteps.
             # ModelSamplingSD3 would replace its multiplier with 1000.
+            layers = p["slg_single_layers"]
+            if not isinstance(layers, str) or not re.fullmatch(r"\s*(?:[0-9]+(?:\s*,\s*[0-9]+)*)?\s*", layers):
+                raise G.GraphError("SLG layers must be comma-separated nonnegative indices, or empty to disable")
+            try:
+                start, end = float(p["slg_start_percent"]), float(p["slg_end_percent"])
+            except (TypeError, ValueError):
+                raise G.GraphError("SLG start and end must be fractions between 0 and 1")
+            if not (math.isfinite(start) and math.isfinite(end) and 0 <= start <= end <= 1):
+                raise G.GraphError("SLG requires 0 <= start <= end <= 1")
+            p.update(slg_single_layers=layers.strip(), slg_start_percent=start, slg_end_percent=end)
             slg = g.add_node("SkipLayerGuidanceDiTSimple", {
-                "model": source, "double_layers": "", "single_layers": "22",
-                "start_percent": 0.0, "end_percent": 1.0}, "moss_guidance")
+                "model": source, "double_layers": "", "single_layers": p["slg_single_layers"],
+                "start_percent": start, "end_percent": end}, "moss_guidance")
             g.retarget(source, [slg, 0], skip={slg})
 
         # --- LoRA chain ------------------------------------------------------

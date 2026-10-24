@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 // Sampling controls.  The sampler and scheduler lists are whatever the running
 // ComfyUI reports, not a fixed list, so they follow backend updates.
@@ -61,6 +62,39 @@ Panel {
             options: App.nativeScheduler ? [App.nativeScheduler].concat(App.schedulers) : App.schedulers
             value: root.gen.scheduler
             onPicked: function (v) { root.set("scheduler", v) }
+        }
+    }
+
+    Field {
+        label: "SLG layers"
+        visible: App.layoutSupport
+        hint: "Single-stream block indices on the negative pass, comma-separated. Empty disables skipping. MOSS has no double-stream blocks."
+        TextField {
+            objectName: "slgLayers"
+            width: parent.width
+            text: root.gen.slg_single_layers
+            Accessible.name: "SLG single layers"
+            onTextEdited: root.set("slg_single_layers", text)
+        }
+    }
+    Field {
+        label: "SLG start"
+        visible: App.layoutSupport
+        hint: "Sampling fraction where skipping starts (0 to 1)."
+        Spin {
+            objectName: "slgStart"
+            value: root.gen.slg_start_percent; from: 0; to: 1; step: 0.001; decimals: 3
+            onEdited: function(v) { root.set("slg_start_percent", v) }
+        }
+    }
+    Field {
+        label: "SLG end"
+        visible: App.layoutSupport
+        hint: "Sampling fraction where skipping ends (0 to 1)."
+        Spin {
+            objectName: "slgEnd"
+            value: root.gen.slg_end_percent; from: 0; to: 1; step: 0.001; decimals: 3
+            onEdited: function(v) { root.set("slg_end_percent", v) }
         }
     }
 

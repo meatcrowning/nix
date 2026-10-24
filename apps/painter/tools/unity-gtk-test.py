@@ -141,6 +141,21 @@ def test():
                         'scheduler', 'denoise', 'megapixels', 'aspectW'):
                 rows = window.rows[key]
                 assert all(w.get_visible() for w in (rows if isinstance(rows, tuple) else (rows,))), key
+            for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
+                assert not window.controls[key].get_visible()
+            window.state['flags']['layoutSupport'] = True
+            window.visibility()
+            for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
+                assert window.controls[key].get_visible()
+            window.loading = True
+            window.controls['slg_single_layers'].set_text('24, 26')
+            window.controls['slg_start_percent'].set_value(.125)
+            window.controls['slg_end_percent'].set_value(.875)
+            values = window.values()
+            assert values['slg_single_layers'] == '24, 26'
+            assert values['slg_start_percent'] == .125 and values['slg_end_percent'] == .875
+            window.apply_settings(dict(slg_single_layers='22', slg_start_percent=0, slg_end_percent=1))
+            window.loading = False
             window.state['flags'] = flags
             window.visibility()
             shot = Gdk.pixbuf_get_from_window(window.get_window(), 0, 0, window.get_allocated_width(), window.get_allocated_height())
