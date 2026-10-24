@@ -224,6 +224,8 @@ let
     mkdir -p "$out/lib"
     $CC -Wall -Wextra -Werror -shared -fPIC -O2 \
       $(pkg-config --cflags gtk+-3.0) ${./files-sidebar.c} -ldl -o "$out/lib/files-sidebar.so"
+    # Nautilus's thumbnailers and launch bridge inherit the library too.
+    LD_PRELOAD="$out/lib/files-sidebar.so" ${bash}/bin/bash -c 'true'
     mkdir -p "$out/bin"
     cp ${./files-sidebar.c} files-sidebar.c
     cp ${./files-sidebar-test.c} files-sidebar-test.c

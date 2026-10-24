@@ -85,12 +85,18 @@ static gboolean ensure_phone(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+/* Keep GLib references lazy: non-GTK subprocesses inherit this preload. */
+static void unref_model(gpointer model)
+{
+    g_object_unref(model);
+}
+
 static void changed(GtkTreeModel *model, GtkTreePath *path, GtkTreeIter *iter, gpointer data)
 {
     (void)path; (void)iter; (void)data;
     if (!g_object_get_data(G_OBJECT(model), "unity-phone-pending")) {
         g_object_set_data(G_OBJECT(model), "unity-phone-pending", GINT_TO_POINTER(1));
-        g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, ensure_phone, g_object_ref(model), g_object_unref);
+        g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, ensure_phone, g_object_ref(model), unref_model);
     }
 }
 

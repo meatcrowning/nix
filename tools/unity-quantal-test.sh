@@ -364,7 +364,8 @@ ffmpeg -nostdin -v error -f lavfi -i color=c=blue:s=320x180:d=1 \
   -an -c:v libx264 -pix_fmt yuv420p "$HOME/thumbnail-probes/video.mp4"
 ffmpeg -nostdin -v error -f lavfi -i color=c=blue:s=320x180:d=1 \
   -an -c:v libvpx-vp9 "$HOME/thumbnail-probes/video.webm"
-"$UNITY_BASE_PACKAGE/bin/unity-quantal-runtime" "$TEST_PYTHON" -c '
+sidebar_library=$("$TEST_PYTHON" -c 'import json,os; print(json.load(open(os.environ["UNITY_PACKAGE"]+"/libexec/unity-quantal/config.json"))["filesSidebar"])')
+"$UNITY_BASE_PACKAGE/bin/unity-quantal-runtime" /usr/bin/env "LD_PRELOAD=$sidebar_library" "$TEST_PYTHON" -c '
 import ctypes, pathlib
 desktop = ctypes.CDLL("libgnome-desktop-3.so.4")
 glib = ctypes.CDLL("libgobject-2.0.so.0")
