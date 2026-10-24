@@ -359,8 +359,11 @@ test -f /home/unity-test/.local/share/unity-quantal-session/icons/hicolor/96x96/
 mkdir -p "$HOME/thumbnail-probes"
 magick -size 320x180 xc:steelblue "$HOME/thumbnail-probes/image.png"
 magick "$HOME/thumbnail-probes/image.png" "$HOME/thumbnail-probes/image.jpg"
+magick "$HOME/thumbnail-probes/image.png" "$HOME/thumbnail-probes/image.webp"
 ffmpeg -nostdin -v error -f lavfi -i color=c=blue:s=320x180:d=1 \
   -an -c:v libx264 -pix_fmt yuv420p "$HOME/thumbnail-probes/video.mp4"
+ffmpeg -nostdin -v error -f lavfi -i color=c=blue:s=320x180:d=1 \
+  -an -c:v libvpx-vp9 "$HOME/thumbnail-probes/video.webm"
 "$UNITY_BASE_PACKAGE/bin/unity-quantal-runtime" "$TEST_PYTHON" -c '
 import ctypes, pathlib
 desktop = ctypes.CDLL("libgnome-desktop-3.so.4")
@@ -379,7 +382,7 @@ pixbuf.gdk_pixbuf_get_width.argtypes = [ctypes.c_void_p]
 pixbuf.gdk_pixbuf_get_height.argtypes = [ctypes.c_void_p]
 glib.g_object_unref.argtypes = [ctypes.c_void_p]
 factory = desktop.gnome_desktop_thumbnail_factory_new(0)
-for name, mime in [("image.png", "image/png"), ("image.jpg", "image/jpeg"), ("video.mp4", "video/mp4")]:
+for name, mime in [("image.png", "image/png"), ("image.jpg", "image/jpeg"), ("image.webp", "image/webp"), ("video.mp4", "video/mp4"), ("video.webm", "video/webm")]:
     file = pathlib.Path.home() / "thumbnail-probes" / name
     uri, mime = file.as_uri().encode(), mime.encode()
     mtime = int(file.stat().st_mtime)
@@ -392,7 +395,7 @@ for name, mime in [("image.png", "image/png"), ("image.jpg", "image/jpeg"), ("vi
     assert desktop.gnome_desktop_thumbnail_factory_lookup(factory, uri, mtime), name
     glib.g_object_unref(thumb)
 glib.g_object_unref(factory)
-print("PASS: original Files factory generates and caches PNG, JPEG and H.264 video previews")
+print("PASS: original Files factory generates and caches PNG, JPEG, WebP, H.264 and WebM previews")
 '
 if [ "${UNITY_TEST_PREVIEWS_ONLY:-0}" = 1 ]; then
   exit 0

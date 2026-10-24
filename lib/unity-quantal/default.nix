@@ -138,8 +138,18 @@ let
     unset LD_LIBRARY_PATH GDK_PIXBUF_MODULE_FILE GDK_PIXBUF_MODULEDIR
     exec ${ffmpegthumbnailer}/bin/ffmpegthumbnailer "$@"
   '';
+  webpThumbnailer = writeShellScript "unity-webp-thumbnailer" ''
+    unset LD_LIBRARY_PATH GDK_PIXBUF_MODULE_FILE GDK_PIXBUF_MODULEDIR
+    exec ${imagemagick}/bin/magick "$1[0]" -thumbnail "$3x$3>" "PNG:$2"
+  '';
   thumbnailers = runCommand "unity-quantal-thumbnailers" { } ''
     mkdir -p "$out"
+    cat > "$out/webp.thumbnailer" <<EOF
+    [Thumbnailer Entry]
+    TryExec=${webpThumbnailer}
+    Exec=${webpThumbnailer} %i %o %s
+    MimeType=image/webp;
+    EOF
     cp ${gdk-pixbuf}/share/thumbnailers/gdk-pixbuf-thumbnailer.thumbnailer "$out/"
     cp ${ffmpegthumbnailer}/share/thumbnailers/ffmpegthumbnailer.thumbnailer "$out/"
     sed -i -E 's|^(TryExec=).*|\1${imageThumbnailer}|; s|^(Exec=)[^ ]+|\1${imageThumbnailer}|' \
