@@ -238,3 +238,37 @@ wait_for(lambda: 'No recent notifications' in str(call(notifications[2], notific
     'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]')), 'cleared notification menu')
 assert notification_visible(), 'clearing notification history must keep the icon visible'
 print('PASS: CPU/GPU order, GPU readings and graph, all panel entries, stable meter menus; private session history, transient exclusion and clear', flush=True)
+
+# A fake UDP bulb lives only in the harness's network namespace and home.
+import socket
+import threading
+lamp = {'state': False, 'dimming': 40, 'r': 255, 'g': 255, 'b': 255}
+server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+server.bind(('127.0.0.1', 38899))
+def serve_lamp():
+    while True:
+        raw, address = server.recvfrom(4096)
+        request = json.loads(raw)
+        if request['method'] == 'setPilot':
+            lamp.update(request['params'])
+            result = {'success': True}
+        else:
+            result = dict(lamp)
+        server.sendto(json.dumps({'result': result}).encode(), address)
+threading.Thread(target=serve_lamp, daemon=True).start()
+tray = Path.home() / '.local/bin/wizlight-tray.py'
+tray.parent.mkdir(parents=True, exist_ok=True)
+tray.write_text("LIGHTS = [{'name': 'Test Bulb', 'ip': '127.0.0.1'}]\n")
+wiz = next(row for row in applications if row[-1] == 'WiZ Lights')
+def wiz_layout():
+    return call(wiz[2], wiz[3], 'com.canonical.dbusmenu.GetLayout', '--', '0', '-1', '[]')[1][2]
+wait_for(lambda: 'Test Bulb' in str(wiz_layout()), 'WiZ host poll and native menu')
+def wiz_click(label):
+    item = next(id for id, props, _ in wiz_layout() if props.get('label') == label)
+    call(wiz[2], wiz[3], 'com.canonical.dbusmenu.Event', str(item), 'clicked', '<int32 0>', '0')
+wiz_click('Toggle All')
+wait_for(lambda: lamp['state'], 'WiZ menu sends power command through host launcher')
+wiz_click('Increase Brightness (+5%)')
+wait_for(lambda: lamp['dimming'] == 45, 'WiZ menu sends brightness command')
+wait_for(lambda: 'On (45%)' in str(wiz_layout()), 'WiZ menu reconciles state')
+print('PASS: WiZ indicator registration, native menu, host polling, power and brightness', flush=True)

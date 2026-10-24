@@ -265,7 +265,7 @@ stdenvNoCC.mkDerivation {
   dontBuild = true;
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
-    cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
+    cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py wizlights.py \
       focus.py focus-theme.py terminal_profile.py file-actions.py mirror.py notifications.py notification-settings.py sounds.py media.py indicators.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     mkdir -p "$out/lib/gtk-3.0/modules"
@@ -396,6 +396,11 @@ stdenvNoCC.mkDerivation {
     #!${bash}/bin/bash
     exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/cpufreq.py" ${cpufreqIcons}
     EOF
+    cat > "$out/bin/unity-quantal-wizlights" <<EOF
+    #!${bash}/bin/bash
+    exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/wizlights.py" indicator
+    EOF
+    chmod +x "$out/bin/unity-quantal-wizlights"
     cat > "$out/bin/unity-quantal-weather" <<EOF
     #!${bash}/bin/bash
     exec $out/bin/unity-quantal-runtime /usr/bin/python2.7 "$out/libexec/unity-quantal/weather.py" indicator

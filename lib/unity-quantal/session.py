@@ -40,6 +40,7 @@ DISPLAY_COMMAND = stable_command("unity-quantal-display")
 # Session services a refresh replaces: bus name -> command.
 SERVICES = {
     "org.unity_quantal.Display": [DISPLAY_COMMAND, "indicator"],
+    "org.unity_quantal.Wizlights": [stable_command("unity-quantal-wizlights")],
     "org.unity_quantal.Weather": [stable_command("unity-quantal-weather")],
     "org.unity_quantal.SettingsMirror": [stable_command("unity-quantal-settings-mirror")],
     "org.unity_quantal.Sounds": [stable_command("unity-quantal-sounds")],
@@ -297,6 +298,7 @@ def prepare(directory, environment):
         "unity-quantal-media-keys": (CONFIG["mediaKeys"], "Application"),
         "unity-quantal-power": (CONFIG["power"], "Application"),
         "unity-quantal-display": (DISPLAY_COMMAND + " indicator", "Application"),
+        "unity-quantal-wizlights": (SERVICES["org.unity_quantal.Wizlights"][0], "Application"),
         "unity-quantal-weather": (SERVICES["org.unity_quantal.Weather"][0], "Application"),
         "unity-quantal-settings-mirror": (SERVICES["org.unity_quantal.SettingsMirror"][0], "Application"),
         "unity-quantal-sounds": (SERVICES["org.unity_quantal.Sounds"][0], "Application"),
