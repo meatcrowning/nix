@@ -13,6 +13,8 @@ m.rtl.devices = lambda: []
 m.audio.output_devices = lambda: []
 app = m.Gtk.Application(application_id='org.test.tunerhd'); app.register(None)
 path = Path(os.environ['XDG_CONFIG_HOME']) / 'hd-test.json'
+# Old hidden-text preferences must not suppress the permanent readout.
+path.write_text('{"rds_display": false}')
 w = m.TunerWindow(app, str(path), False)
 
 def settle():
@@ -22,18 +24,21 @@ def settle():
 
 settle()
 assert not w.hd_combo.get_visible()
-w.hd_button.set_active(True); settle()
+assert w.rds_display.get_visible() and w.dial.get_visible()
+w.hd_item.set_active(True); settle()
 assert w.s['hd'] and w.hd_combo.get_visible()
 assert not w.rate_combo.get_sensitive() and not w.receiver_page.get_sensitive()
 assert w.rds_display.get_visible() and w.dial.get_mapped()
-w.rds_button.set_active(False); settle()
-assert not w.rds_display.get_visible() and w.dial.get_mapped()
-w.rds_button.set_active(True); settle()
 assert w.rds_display.get_mapped() and w.dial.get_mapped()
 assert len(w.dial.boxes) == w.dial.DIGITS
 assert w.dial.boxes[0][0] >= 0
 assert w.dial.boxes[-1][1] < w.dial.get_allocated_width()
-assert w.rds_button.get_label() == 'Text'
+assert not hasattr(w, 'rds_button') and not hasattr(w, 'hd_button')
+# Native labels and selectors must resolve to the actual segment font.
+from gi.repository import Pango
+font = w.mode_combo.get_pango_context().load_font(Pango.FontDescription('Tuner Segment 14'))
+assert font.describe().get_family() == 'Tuner Segment', font.describe().to_string()
+assert w.level_label.get_style_context().get_font(m.Gtk.StateFlags.NORMAL).get_family() == 'Tuner Segment'
 w.radio.running = True; w.radio.hd_enabled = True
 w._refresh_rds(); assert w.rds_display.text == 'Searching for HD Radio'
 gen = w.radio.metadata_generation
@@ -42,6 +47,12 @@ state = dict(program=0, station='TEST-FM', channels=[0, 1], locked=True, audio=T
 w._hd_update(gen, state)
 assert w.rds_display.text == 'ARTIST - SONG'
 assert w.hd_combo.get_sensitive()
+if os.environ.get('TUNER_UI_SHOT'):
+    import cairo
+    settle()
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w.get_allocated_width(), w.get_allocated_height())
+    w.draw(cairo.Context(surface))
+    surface.write_to_png(os.environ['TUNER_UI_SHOT'])
 w._sync_hd_channels([1]); assert w.hd_combo.get_sensitive()
 w.hd_combo.set_active_id('1')
 assert w.radio.hd_program == 1 and 'SONG' not in w.rds_display.text
@@ -60,8 +71,8 @@ w._stopped()
 w._write_settings()
 w.destroy(); settle()
 w = m.TunerWindow(app, str(path), False)
-assert w.s['hd'] and w.hd_button.get_active() and w.hd_combo.get_visible()
-w.hd_button.set_active(False)
+assert w.s['hd'] and w.hd_item.get_active() and w.hd_combo.get_visible()
+w.hd_item.set_active(False)
 assert w.receiver_page.get_sensitive() and w.rate_combo.get_sensitive()
 assert not w.hd_combo.get_visible()
 # The toggle requests one orderly stop; callback restarts only after release.
@@ -70,7 +81,7 @@ calls = []
 w.radio.stop = lambda: (calls.append('stop'), setattr(w.radio, 'running', False))
 w.radio.start = lambda hw: calls.append(('start', hw['hd']))
 w.start_button.set_active(True)
-w.hd_button.set_active(True)
+w.hd_item.set_active(True)
 assert calls == ['stop'] and w.hd_restart
 w._stopped()
 assert calls == ['stop', ('start', True)] and not w.hd_restart

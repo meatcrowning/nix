@@ -30,7 +30,7 @@ import radio  # noqa: E402
 import online  # noqa: E402
 import rtl  # noqa: E402
 from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView  # noqa: E402
-from faceplate import style_faceplate  # noqa: E402
+from faceplate import SegmentMeter, SegmentScale, style_faceplate  # noqa: E402
 from rdsview import RdsDisplay  # noqa: E402
 
 APP_ID = "tuner"
@@ -48,7 +48,7 @@ OTHER_DEFAULTS = {"output": None, "udp_enabled": False, "udp_host": "localhost",
                   "udp_stereo": False, "rec_dir": str(Path.home()), "step": 100000, "zoom": 1,
                   "peak_hold": True, "auto_range": True, "floor_db": -80.0, "range_db": 60.0,
                   "start_on_launch": True, "tag_filter": "", "window": [1180, 760], "pane": 0,
-                  "tab": 0, "bookmark_columns": [], "rds_display": False}
+                  "tab": 0, "bookmark_columns": []}
 
 
 def step_label(step):
@@ -162,7 +162,6 @@ class TunerWindow(Gtk.ApplicationWindow):
         box.pack_start(self.statusbar, False, False, 0)
 
         self.show_all()
-        self.rds_display.set_visible(self.s["rds_display"])
         if self.s["pane"]:
             self.paned.set_position(self.s["pane"])
         self.notebook.set_current_page(self.s["tab"])
@@ -236,8 +235,9 @@ class TunerWindow(Gtk.ApplicationWindow):
                 mi.connect("activate", lambda _w, cb=callback: cb())
                 sub.append(mi)
             bar.append(item)
+            return sub
 
-        menu("_Radio", [("_Start or Stop", "<Control>space", lambda: self.start_button.set_active(
+        radio_menu = menu("_Radio", [("_Start or Stop", "<Control>space", lambda: self.start_button.set_active(
                             not self.start_button.get_active())),
                         ("_Record", "<Control>r", lambda: self.record_button.set_active(
                             not self.record_button.get_active())),
@@ -245,6 +245,10 @@ class TunerWindow(Gtk.ApplicationWindow):
                             not self.mute_button.get_active())),
                         None,
                         ("_Quit", "<Control>q", lambda: self._quit())])
+        self.hd_item = Gtk.CheckMenuItem(label="HD Radio")
+        self.hd_item.set_active(self.s["hd"])
+        self.hd_item.connect("toggled", self._toggle_hd)
+        radio_menu.insert(self.hd_item, 3)
         menu("_Bookmarks", [("_Add Bookmark…", "<Control>d", self._add_bookmark),
                             ("_Remove Bookmark", None, self._remove_bookmark),
                             ("Re_load from gqrx", None, self._reload_bookmarks)])
@@ -275,12 +279,11 @@ class TunerWindow(Gtk.ApplicationWindow):
                                      step_increment=0.5, page_increment=3)
         self.volume.connect("value-changed", lambda a: self._rx("volume_db", round(a.get_value(), 1)))
         item = Gtk.ToolItem()
-        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=self.volume)
-        scale.set_size_request(160, -1)
+        scale = SegmentScale(adjustment=self.volume)
         scale.set_draw_value(False)
         scale.set_tooltip_text("Audio gain")
         hbox = Gtk.Box(spacing=4)
-        hbox.pack_start(Gtk.Image(icon_name="audio-volume-high", icon_size=Gtk.IconSize.MENU), False, False, 0)
+        hbox.pack_start(Gtk.Label(label="Gain"), False, False, 0)
         hbox.pack_start(scale, False, False, 0)
         item.add(hbox)
         bar.insert(item, -1)
@@ -292,31 +295,16 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.dial = FrequencyDial()
         self.dial.connect("changed", lambda d, v: self.tune(v))
         self.rds_display = RdsDisplay()
-        self.rds_display.set_no_show_all(True)
         readout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         readout.pack_start(self.dial, False, False, 0)
         readout.pack_start(self.rds_display, False, False, 0)
         readout.set_valign(Gtk.Align.CENTER)
         row.pack_start(readout, True, True, 0)
-        self.rds_button = Gtk.ToggleButton(label="Text", relief=Gtk.ReliefStyle.NONE)
-        self.rds_button.set_valign(Gtk.Align.CENTER)
-        self.rds_button.set_tooltip_text("Show station text below the frequency")
-        self.rds_button.set_active(self.s["rds_display"])
-        self.rds_button.connect("toggled", self._toggle_rds)
-        row.pack_start(self.rds_button, False, False, 0)
-
-        hd_controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        self.hd_button = Gtk.ToggleButton(label="HD", relief=Gtk.ReliefStyle.NONE)
-        self.hd_button.set_tooltip_text("Receive digital HD Radio instead of analog FM")
-        self.hd_button.set_active(self.s["hd"])
-        self.hd_button.connect("toggled", self._toggle_hd)
-        hd_controls.pack_start(self.hd_button, False, False, 0)
         self.hd_combo = Gtk.ComboBoxText()
         self.hd_combo.set_tooltip_text("HD channels detected on this frequency")
         self.hd_combo.connect("changed", self._select_hd)
-        hd_controls.pack_start(self.hd_combo, False, False, 0)
-        hd_controls.set_valign(Gtk.Align.CENTER)
-        row.pack_start(hd_controls, False, False, 0)
+        self.hd_combo.set_valign(Gtk.Align.CENTER)
+        row.pack_start(self.hd_combo, False, False, 0)
 
         controls = Gtk.Grid(column_spacing=6, row_spacing=4)
         self.mode_combo = self._combo(dsp.MODES, self.rx["mode"])
@@ -330,8 +318,8 @@ class TunerWindow(Gtk.ApplicationWindow):
         row.pack_start(controls, False, False, 0)
 
         meter = Gtk.Grid(column_spacing=6, row_spacing=4)
-        self.level_bar = Gtk.LevelBar(min_value=0, max_value=100)
-        self.level_bar.set_size_request(150, -1)
+        self.level_bar = SegmentMeter()
+        self.level_bar.set_size_request(150, 24)
         self.level_bar.set_valign(Gtk.Align.CENTER)
         self.level_label = Gtk.Label(label="– dBFS", xalign=1, width_chars=11)
         self.stereo_label = Gtk.Label(xalign=0, width_chars=7)
@@ -821,12 +809,6 @@ class TunerWindow(Gtk.ApplicationWindow):
         if not quiet:
             self._save()
 
-    def _toggle_rds(self, button):
-        active = button.get_active()
-        self.rds_display.set_visible(active)
-        self._save("rds_display", active)
-        self._refresh_rds()
-
     def _rds_update(self, generation, data):
         if generation != self.radio.metadata_generation or not self.radio.running:
             return False
@@ -841,21 +823,17 @@ class TunerWindow(Gtk.ApplicationWindow):
         self.hd_data = {}
         self._sync_hd_channels([])
         self._sync_hd_controls()
-        if self.s["hd"]:
-            self.rds_button.set_active(True)
         if self.radio.running:
             # The old reader must release the dongle before the new mode starts.
             if self.record_button.get_active():
                 self.record_button.set_active(False)
             self.hd_restart = True
-            self.hd_button.set_sensitive(False)
+            self.hd_item.set_sensitive(False)
             self.radio.stop()
         self._refresh_rds()
 
     def _sync_hd_controls(self):
         enabled = self.s["hd"]
-        self.rds_button.set_label("Text")
-        self.rds_button.set_tooltip_text("Show station text below the frequency")
         self.receiver_page.set_sensitive(not enabled)
         self.receiver_page.set_tooltip_text("Analog receiver settings; HD uses its own decoder" if enabled else None)
         self.spectrum.filter = (-200000, 200000) if enabled else (self.rx["filter_low"], self.rx["filter_high"])
@@ -1225,7 +1203,7 @@ class TunerWindow(Gtk.ApplicationWindow):
         if self.radio.thread and self.radio.thread.is_alive():
             GLib.timeout_add(30, self._stopped)
             return False
-        self.hd_button.set_sensitive(True)
+        self.hd_item.set_sensitive(True)
         if self.hd_restart:
             self.hd_restart = False
             self._toggle_start(self.start_button)

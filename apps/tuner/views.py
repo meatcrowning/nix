@@ -94,7 +94,7 @@ class FrequencyDial(Gtk.DrawingArea):
         digit_w, digit_h = layout.get_pixel_size()
         sep_w = digit_w * 0.45
         unit = "Hz"
-        small = Pango.FontDescription("Ubuntu")
+        small = Pango.FontDescription("Tuner Segment")
         small.set_absolute_size(alloc.height * 0.28 * Pango.SCALE)
         total = self.DIGITS * digit_w + 3 * sep_w + digit_w * 1.6
         x = (alloc.width - total) / 2

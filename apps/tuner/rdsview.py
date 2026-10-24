@@ -100,7 +100,7 @@ class RdsDisplay(Gtk.DrawingArea):
         cr.rectangle(8, 2, max(w - 16, 1), max(h - 4, 1))
         cr.clip()
         layout = PangoCairo.create_layout(cr)
-        layout.set_font_description(Pango.FontDescription('Ubuntu Mono 8'))
+        layout.set_font_description(Pango.FontDescription('Tuner Segment 11'))
         layout.set_ellipsize(Pango.EllipsizeMode.END)
         layout.set_width(max(w - 16, 1) * Pango.SCALE)
         layout.set_text(self.heading, -1)
