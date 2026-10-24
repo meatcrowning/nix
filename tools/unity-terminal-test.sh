@@ -75,6 +75,56 @@ loop.run()
 image = T.Gdk.pixbuf_get_from_window(window.get_window(), 0, 0, window.get_allocated_width(), window.get_allocated_height())
 pixels = image.get_pixels()
 assert bytes((12, 200, 77)) in pixels, 'VTE true-colour text did not paint'
+# The actual modern-VTE app must expose the profile and remember it on launch.
+chrome = T.Gtk.CssProvider()
+chrome.load_from_data(T.CSS.encode())
+T.Gtk.StyleContext.add_provider_for_screen(T.Gdk.Screen.get_default(), chrome,
+                                         T.Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+assert set(window.profile_items) == {"Default", "Desktop Theme"}
+window.on_switch()
+assert window.profile_items['Default'].get_active()
+window.profile_items['Desktop Theme'].set_active(True)
+assert screen.profile == app.profile == 'Desktop Theme'
+assert T.Application([]).profile == 'Desktop Theme'
+second = window.add_screen(['/bin/bash', '-c', 'sleep 20'], '/work')
+window.on_switch()
+assert second.profile == 'Desktop Theme'
+window.profile_items['Default'].set_active(True)
+window.notebook.set_current_page(0)
+window.on_switch()
+assert window.profile_items['Desktop Theme'].get_active()
+assert app.profile == 'Default', 'switching tabs must not overwrite the saved preference'
+window.close_screen(second)
+# Test both palettes below the app CSS priority: historical chrome must not
+# shadow the system palette used for terminal text and selection.
+def painted_background(expected):
+    T.GLib.timeout_add(150, lambda: loop.quit())
+    loop.run()
+    image = T.Gdk.pixbuf_get_from_window(window.get_window(), 0, 0,
+                                       window.get_allocated_width(), window.get_allocated_height())
+    value = bytes.fromhex(expected.lstrip('#'))
+    assert image.get_pixels().count(value) > image.get_width() * image.get_height() / 2, expected
+
+for foreground, background, accent in [('#e8e5de', '#282725', '#3366cc'),
+                                        ('#222222', '#ffffff', '#22aa66')]:
+    name = 'TestTheme' + background.lstrip('#')
+    directory = Path.home() / '.themes' / name / 'gtk-3.0'
+    directory.mkdir(parents=True)
+    (directory / 'gtk.css').write_text('@define-color base_color %s;\n@define-color selected_bg_color %s;\n@define-color selected_fg_color #ffffff;\n@define-color text_color %s;\nentry { color: @text_color; }' % (background, accent, foreground))
+    T.Gtk.Settings.get_default().set_property('gtk-theme-name', name)
+    T.GLib.timeout_add(150, lambda: loop.quit())
+    loop.run()
+    actual_fg, actual_bg = app.theme_colors()
+    assert actual_fg.equal(T.rgba(foreground)), actual_fg
+    assert actual_bg.equal(T.rgba(background)), actual_bg
+    painted_background(background)
+    assert app.theme_entry.get_style_context().lookup_color('selected_bg_color')[1].equal(T.rgba(accent))
+window.profile_items['Default'].set_active(True)
+assert T.Application([]).profile == 'Default'
+painted_background(T.BACKGROUND)
+app.profile_path.write_text('{invalid json')
+assert T.Application([]).profile == 'Default'
+print('PASS: actual terminal profile menu, remembered selection, live light/dark colours and unchanged Default')
 window.destroy()
 print('PASS: original FreeType rasterizer, VTE true colour and clean child environment')
 print('PASS: terminal GTK paste shortcuts, Unicode clipboard and shell-quoted URI drops')

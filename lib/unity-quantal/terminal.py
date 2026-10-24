@@ -7,11 +7,14 @@ Quantal's FreeType renders the glyphs; Pango keeps the API required by VTE.
 Chrome colours are Ambiance's, as measured from the original in this session.
 """
 
+import json
 import os
 import pwd
 import re
 import shlex
 import sys
+import tempfile
+from pathlib import Path
 
 # The rasterizer is already loaded; host programs must not inherit it.
 if "_UNITY_TERMINAL_PRELOAD" in os.environ:
@@ -45,24 +48,25 @@ PCRE2_MULTILINE = 0x00000400
 
 # Ambiance's terminal chrome: dark menubar and menus, orange highlight, and the
 # scrollbar and tabs as Ambiance Dark draws them (the session's theme).
+# Private symbol names keep this chrome from shadowing the desktop palette.
 CSS = """
-@define-color dark_bg_color #3c3b37;
-@define-color dark_fg_color #dfdbd2;
-@define-color selected_bg_color #f07746;
-@define-color selected_fg_color #ffffff;
-@define-color bg_color #33322f;
-@define-color button_bg_color shade(@bg_color, 1.02);
+@define-color terminal_dark_bg_color #3c3b37;
+@define-color terminal_dark_fg_color #dfdbd2;
+@define-color terminal_selected_bg_color #f07746;
+@define-color terminal_selected_fg_color #ffffff;
+@define-color terminal_bg_color #33322f;
+@define-color terminal_button_bg_color shade(@terminal_bg_color, 1.02);
 
-window.unity-terminal { background-color: @dark_bg_color; }
+window.unity-terminal { background-color: @terminal_dark_bg_color; }
 
 window.unity-terminal menubar {
-    background-color: @dark_bg_color;
+    background-color: @terminal_dark_bg_color;
     background-image: none;
     border: none;
     box-shadow: none;
     padding: 0;
-    color: @dark_fg_color;
-    text-shadow: 0 -1px shade(@dark_bg_color, 0.6);
+    color: @terminal_dark_fg_color;
+    text-shadow: 0 -1px shade(@terminal_dark_bg_color, 0.6);
 }
 window.unity-terminal menubar > menuitem {
     padding: 2px 4px 3px 4px;
@@ -70,59 +74,59 @@ window.unity-terminal menubar > menuitem {
     border: 1px solid transparent;
     border-bottom: none;
     border-radius: 4px 4px 0 0;
-    color: @dark_fg_color;
+    color: @terminal_dark_fg_color;
 }
 window.unity-terminal menubar > menuitem:hover {
-    border-color: shade(@dark_bg_color, 0.87);
-    background-image: linear-gradient(to bottom, shade(@dark_bg_color, 1.32), shade(@dark_bg_color, 1.11));
+    border-color: shade(@terminal_dark_bg_color, 0.87);
+    background-image: linear-gradient(to bottom, shade(@terminal_dark_bg_color, 1.32), shade(@terminal_dark_bg_color, 1.11));
     box-shadow: none;
-    color: shade(@dark_fg_color, 1.1);
-    text-shadow: 0 -1px shade(@dark_bg_color, 0.7);
+    color: shade(@terminal_dark_fg_color, 1.1);
+    text-shadow: 0 -1px shade(@terminal_dark_bg_color, 0.7);
 }
 
 menu, .menu, .context-menu {
     background-image: none;
-    background-color: shade(@dark_bg_color, 1.08);
-    border: 1px solid shade(@dark_bg_color, 0.8);
-    border-top-color: shade(@dark_bg_color, 0.96);
-    border-bottom-color: shade(@dark_bg_color, 0.96);
+    background-color: shade(@terminal_dark_bg_color, 1.08);
+    border: 1px solid shade(@terminal_dark_bg_color, 0.8);
+    border-top-color: shade(@terminal_dark_bg_color, 0.96);
+    border-bottom-color: shade(@terminal_dark_bg_color, 0.96);
     padding: 5px 0;
-    color: @dark_fg_color;
-    box-shadow: inset 0 1px shade(@dark_bg_color, 1.18), inset 0 -1px shade(@dark_bg_color, 1.18),
-                inset -1px 0 shade(@dark_bg_color, 1.16), inset 1px 0 shade(@dark_bg_color, 1.18);
+    color: @terminal_dark_fg_color;
+    box-shadow: inset 0 1px shade(@terminal_dark_bg_color, 1.18), inset 0 -1px shade(@terminal_dark_bg_color, 1.18),
+                inset -1px 0 shade(@terminal_dark_bg_color, 1.16), inset 1px 0 shade(@terminal_dark_bg_color, 1.18);
 }
 menu menuitem {
     padding: 2px 11px 2px 0;
     border: 1px solid transparent;
     border-radius: 0;
     text-shadow: none;
-    color: @dark_fg_color;
+    color: @terminal_dark_fg_color;
 }
 menu menuitem:hover {
-    background-image: linear-gradient(to bottom, shade(@selected_bg_color, 1.1), shade(@selected_bg_color, 0.9));
-    border-color: shade(@selected_bg_color, 0.7);
-    box-shadow: inset 1px 0 shade(@selected_bg_color, 1.02), inset -1px 0 shade(@selected_bg_color, 1.02),
-                inset 0 1px shade(@selected_bg_color, 1.16), inset 0 -1px shade(@selected_bg_color, 0.96);
-    color: @selected_fg_color;
-    text-shadow: 0 -1px shade(@selected_bg_color, 0.7);
+    background-image: linear-gradient(to bottom, shade(@terminal_selected_bg_color, 1.1), shade(@terminal_selected_bg_color, 0.9));
+    border-color: shade(@terminal_selected_bg_color, 0.7);
+    box-shadow: inset 1px 0 shade(@terminal_selected_bg_color, 1.02), inset -1px 0 shade(@terminal_selected_bg_color, 1.02),
+                inset 0 1px shade(@terminal_selected_bg_color, 1.16), inset 0 -1px shade(@terminal_selected_bg_color, 0.96);
+    color: @terminal_selected_fg_color;
+    text-shadow: 0 -1px shade(@terminal_selected_bg_color, 0.7);
 }
 menu menuitem:disabled, menu menuitem:disabled label {
-    color: mix(@dark_fg_color, @dark_bg_color, 0.5);
-    text-shadow: 0 -1px shade(@dark_bg_color, 0.6);
+    color: mix(@terminal_dark_fg_color, @terminal_dark_bg_color, 0.5);
+    text-shadow: 0 -1px shade(@terminal_dark_bg_color, 0.6);
 }
 menu separator {
     margin: 3px 0 4px 0;
     min-height: 1px;
-    background-color: shade(@dark_bg_color, 0.99);
-    box-shadow: 0 1px alpha(shade(@dark_bg_color, 1.26), 0.5);
+    background-color: shade(@terminal_dark_bg_color, 0.99);
+    box-shadow: 0 1px alpha(shade(@terminal_dark_bg_color, 1.26), 0.5);
 }
-menu check, menu radio { color: @dark_fg_color; }
-menu menuitem:hover check, menu menuitem:hover radio { color: @selected_fg_color; }
-menu arrow { color: @dark_fg_color; }
+menu check, menu radio { color: @terminal_dark_fg_color; }
+menu menuitem:hover check, menu menuitem:hover radio { color: @terminal_selected_fg_color; }
+menu arrow { color: @terminal_dark_fg_color; }
 
 window.unity-terminal scrollbar {
-    background-color: @bg_color;
-    border-left: 1px solid shade(@bg_color, 0.8);
+    background-color: @terminal_bg_color;
+    border-left: 1px solid shade(@terminal_bg_color, 0.8);
     padding: 0;
 }
 window.unity-terminal scrollbar trough { background: none; border: none; }
@@ -130,39 +134,39 @@ window.unity-terminal scrollbar slider {
     min-width: 12px;
     min-height: 30px;
     margin: 0;
-    border: 1px solid shade(@bg_color, 0.86);
+    border: 1px solid shade(@terminal_bg_color, 0.86);
     border-radius: 20px;
-    background-color: @button_bg_color;
-    background-image: linear-gradient(to right, shade(@button_bg_color, 1.08), @button_bg_color, shade(@button_bg_color, 0.94));
-    box-shadow: inset 1px 0 shade(@bg_color, 1.1), inset -1px 0 shade(@bg_color, 1.01),
-                inset 0 1px shade(@bg_color, 1.1), inset 0 -1px shade(@bg_color, 1.1);
+    background-color: @terminal_button_bg_color;
+    background-image: linear-gradient(to right, shade(@terminal_button_bg_color, 1.08), @terminal_button_bg_color, shade(@terminal_button_bg_color, 0.94));
+    box-shadow: inset 1px 0 shade(@terminal_bg_color, 1.1), inset -1px 0 shade(@terminal_bg_color, 1.01),
+                inset 0 1px shade(@terminal_bg_color, 1.1), inset 0 -1px shade(@terminal_bg_color, 1.1);
 }
 
 window.unity-terminal notebook header {
-    background-color: @dark_bg_color;
+    background-color: @terminal_dark_bg_color;
     background-image: none;
     border: none;
     box-shadow: none;
 }
 window.unity-terminal notebook header tab {
     padding: 3px 8px;
-    border: 1px solid shade(@dark_bg_color, 0.8);
+    border: 1px solid shade(@terminal_dark_bg_color, 0.8);
     border-bottom: none;
     border-radius: 3px 3px 0 0;
-    background-image: linear-gradient(to bottom, shade(@dark_bg_color, 0.92), shade(@dark_bg_color, 0.9) 60%, shade(@dark_bg_color, 0.85));
-    color: mix(@dark_fg_color, @dark_bg_color, 0.2);
-    box-shadow: inset 0 1px alpha(shade(@dark_bg_color, 1.26), 0.2);
+    background-image: linear-gradient(to bottom, shade(@terminal_dark_bg_color, 0.92), shade(@terminal_dark_bg_color, 0.9) 60%, shade(@terminal_dark_bg_color, 0.85));
+    color: mix(@terminal_dark_fg_color, @terminal_dark_bg_color, 0.2);
+    box-shadow: inset 0 1px alpha(shade(@terminal_dark_bg_color, 1.26), 0.2);
 }
 window.unity-terminal notebook header tab:checked {
-    background-image: linear-gradient(to bottom, shade(@dark_bg_color, 1.2), shade(@dark_bg_color, 1.12));
-    color: @dark_fg_color;
-    box-shadow: inset 0 1px shade(@dark_bg_color, 1.26);
+    background-image: linear-gradient(to bottom, shade(@terminal_dark_bg_color, 1.2), shade(@terminal_dark_bg_color, 1.12));
+    color: @terminal_dark_fg_color;
+    box-shadow: inset 0 1px shade(@terminal_dark_bg_color, 1.26);
 }
 window.unity-terminal notebook header tab button {
     padding: 0;
     min-width: 16px;
     min-height: 16px;
-    color: @dark_fg_color;
+    color: @terminal_dark_fg_color;
     background: none;
     border: none;
     box-shadow: none;
@@ -195,9 +199,8 @@ class Screen(Gtk.Box):
         terminal = self.terminal
         self.set_font(window.get_application().font)
         self.set_zoom(DEFAULT_ZOOM)
-        terminal.set_colors(rgba(FOREGROUND), rgba(BACKGROUND), [rgba(c) for c in PALETTE])
-        terminal.set_color_cursor(rgba(FOREGROUND))
-        terminal.set_color_cursor_foreground(rgba(BACKGROUND))
+        self.profile = window.get_application().profile
+        self.apply_colors()
         terminal.set_cursor_shape(Vte.CursorShape.BLOCK)
         terminal.set_cursor_blink_mode(Vte.CursorBlinkMode.SYSTEM)
         terminal.set_bold_is_bright(True)
@@ -281,6 +284,20 @@ class Screen(Gtk.Box):
     def cwd(self):
         uri = self.terminal.get_current_directory_uri()
         return Gio.File.new_for_uri(uri).get_path() if uri else None
+
+    def apply_colors(self):
+        app = self.window.get_application()
+        foreground, background = (app.theme_colors() if self.profile == "Desktop Theme"
+                                  else (rgba(FOREGROUND), rgba(BACKGROUND)))
+        self.terminal.set_colors(foreground, background, [rgba(c) for c in PALETTE])
+        self.terminal.set_color_cursor(foreground)
+        self.terminal.set_color_cursor_foreground(background)
+        style = app.theme_entry.get_style_context()
+        themed = self.profile == "Desktop Theme"
+        has_bg, selected_bg = style.lookup_color("selected_bg_color")
+        has_fg, selected_fg = style.lookup_color("selected_fg_color")
+        self.terminal.set_color_highlight(selected_bg if themed and has_bg else None)
+        self.terminal.set_color_highlight_foreground(selected_fg if themed and has_fg else None)
 
     def set_font(self, name):
         self.terminal.set_font(Pango.FontDescription.from_string(name))
@@ -386,9 +403,15 @@ class TerminalWindow(Gtk.ApplicationWindow):
         _, menu = self.submenu("_Terminal")
         profile = Gtk.MenuItem.new_with_mnemonic("Change _Profile")
         profiles = Gtk.Menu()
-        default = Gtk.RadioMenuItem.new_with_label(None, "Default")
-        default.set_active(True)
-        profiles.append(default)
+        self.profile_items = {}
+        self.syncing_profile = False
+        group = None
+        for name in ("Default", "Desktop Theme"):
+            item = Gtk.RadioMenuItem.new_with_label_from_widget(group, name)
+            group = item
+            self.profile_items[name] = item
+            item.connect("toggled", self.select_profile, name)
+            profiles.append(item)
         profile.set_submenu(profiles)
         menu.append(profile)
         self.item(menu, "_Set Title…", self.set_title_dialog)
@@ -481,9 +504,19 @@ class TerminalWindow(Gtk.ApplicationWindow):
         self.close_tab.set_sensitive(many)
         self.update_titles()
 
+    def select_profile(self, item, name):
+        if self.syncing_profile or not item.get_active() or self.current() is None:
+            return
+        self.current().profile = name
+        self.current().apply_colors()
+        self.get_application().save_profile(name)
+
     def on_switch(self):
         screen = self.current()
         if screen:
+            self.syncing_profile = True
+            self.profile_items[screen.profile].set_active(True)
+            self.syncing_profile = False
             screen.terminal.grab_focus()
             self.update_titles()
         return False
@@ -612,11 +645,50 @@ class Application(Gtk.Application):
     def __init__(self, argv):
         super().__init__(application_id=None, flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.argv = argv
+        self.profile_path = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "unity-quantal/terminal.json"
+        try:
+            self.profile = json.loads(self.profile_path.read_text()).get("profile", "Default")
+        except (OSError, ValueError, AttributeError):
+            self.profile = "Default"
+        if self.profile not in ("Default", "Desktop Theme"):
+            self.profile = "Default"
+        self.theme_entry = Gtk.Entry()
+        self.theme_entry.connect("style-updated", self.colors_changed)
+        Gtk.Settings.get_default().connect("notify::gtk-theme-name",
+                                           lambda *_: GLib.idle_add(self.colors_changed))
         self.settings = font_settings()
         self.font = FONT
         if self.settings:
             self.font = self.settings.get_string("monospace-font-name") or FONT
             self.settings.connect("changed::monospace-font-name", self.font_changed)
+            self.settings.connect("changed::gtk-theme", self.theme_changed)
+            self.theme_changed(self.settings, "gtk-theme")
+
+    def theme_changed(self, settings, key):
+        Gtk.Settings.get_default().set_property("gtk-theme-name", settings.get_string(key))
+
+    def save_profile(self, name):
+        self.profile = name
+        self.profile_path.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic replacement also keeps concurrent terminal launches readable.
+        with tempfile.NamedTemporaryFile(mode="w", dir=self.profile_path.parent, delete=False) as stream:
+            json.dump({"profile": name}, stream)
+            temporary = stream.name
+        os.replace(temporary, self.profile_path)
+
+    def theme_colors(self):
+        style = self.theme_entry.get_style_context()
+        found, background = style.lookup_color("base_color")
+        has_text, foreground = style.lookup_color("text_color")
+        return (foreground if has_text else style.get_color(Gtk.StateFlags.NORMAL),
+                background if found else rgba(BACKGROUND))
+
+    def colors_changed(self, *_args):
+        for window in self.get_windows():
+            if isinstance(window, TerminalWindow):
+                for screen in window.notebook.get_children():
+                    if screen.profile == "Desktop Theme":
+                        screen.apply_colors()
 
     def font_changed(self, settings, key):
         self.font = settings.get_string(key) or FONT

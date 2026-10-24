@@ -77,6 +77,31 @@ print(w.get_style_context().lookup_color('selected_bg_color'))
 color = subprocess.check_output([runtime, '/usr/bin/python2.7', '-c', probe], text=True)
 assert 'True' in color and 'blue=0.780392' in color, color
 print('PASS: wallpaper focus theme reaches original GTK: ' + color.strip())
+
+def check_selection_colors():
+    probe = """from gi.repository import Gtk
+widget = Gtk.DrawingArea()
+style = widget.get_style_context()
+selected = style.lookup_color('selected_bg_color')[1]
+for classes in [('rubberband',), ('nautilus-desktop', 'rubberband')]:
+ for name in classes: style.add_class(name)
+ style.invalidate()
+ border = style.get_border_color(Gtk.StateFlags.NORMAL)
+ fill = style.get_background_color(Gtk.StateFlags.NORMAL)
+ for color in (border, fill):
+  assert all(abs(getattr(color, c) - getattr(selected, c)) < .005 for c in ('red', 'green', 'blue')), (classes, color, selected)
+ assert abs(fill.alpha - .35) < .005, fill
+ for name in classes: style.remove_class(name)
+print('#%02x%02x%02x' % tuple(int(round(c * 255)) for c in (selected.red, selected.green, selected.blue)))
+"""
+    rgb = subprocess.check_output([runtime, '/usr/bin/python2.7', '-c', probe], text=True).strip()
+    schema = 'org.compiz.resize:/org/compiz/profiles/unity/plugins/resize/'
+    wait_for(lambda: setting('get', schema, 'border-color') == repr(rgb + '9f'))
+    assert setting('get', schema, 'fill-color') == repr(rgb + '19')
+    print('PASS: desktop/widget selection rectangles and resize outline/fill share theme color ' + rgb)
+
+check_selection_colors()
+
 # Brightness updates must rebuild both themes and icons, then restore the
 # exact default cache entry without changing the wallpaper or enable state.
 def set_brightness(value):
@@ -130,6 +155,7 @@ setting('set', 'org.gnome.desktop.background', 'picture-uri', (Path.home() / 'gr
 second = wait_for(lambda: (lambda name: name if 'Unity-Focus-' in name and name != first else None)(
     setting('get', 'org.gnome.desktop.interface', 'gtk-theme')))
 assert first != second
+check_selection_colors()
 wait_for(lambda: setting('get', 'org.gnome.desktop.wm.preferences', 'theme') == second)
 assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') != icon_name
 # Exercise both PNG loader boundaries without GTK, matching Compiz's process.
@@ -175,6 +201,7 @@ toggle(False)
 wait_for(lambda: setting('get', 'org.gnome.desktop.interface', 'gtk-theme') == "'Radiance'")
 assert setting('get', 'org.gnome.desktop.interface', 'icon-theme') == "'ubuntu-mono-dark'"
 wait_for(lambda: setting('get', 'org.gnome.desktop.wm.preferences', 'theme') == "'Radiance'")
+check_selection_colors()
 print('PASS: wallpaper updates, theme switching and theme/icon restoration')
 
 # Missing pictures restore the base rather than leaving stale wallpaper colors.

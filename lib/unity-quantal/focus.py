@@ -6,7 +6,7 @@ import re
 import subprocess
 import threading
 
-from gi.repository import Gio, GLib
+from gi.repository import Gio, GLib, Gtk
 from terminal_profile import DesktopThemeProfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +31,9 @@ def base_icons(name):
 class FocusColor(object):
     def __init__(self, enabled, brightness=100):
         self.terminal_profile = DesktopThemeProfile()
+        self.resize = Gio.Settings.new_with_path('org.compiz.resize', '/org/compiz/profiles/unity/plugins/resize/')
+        self.color_pending = None
+        self.colors_changed()
         self.enabled = enabled
         self.brightness = brightness
         self.serial = 0
@@ -38,12 +41,33 @@ class FocusColor(object):
         self.background = Gio.Settings.new('org.gnome.desktop.background')
         self.wm = Gio.Settings.new('org.gnome.desktop.wm.preferences')
         self.interface.connect('changed::gtk-theme', self.changed)
+        self.interface.connect('changed::gtk-theme', self.colors_changed)
         self.interface.connect('changed::icon-theme', self.changed)
         self.background.connect('changed', self.changed)
         self.wm.connect('changed::theme', self.changed)
         self.file_monitor = None
         self.applying = False
         self.changed()
+
+    def colors_changed(self, *_args):
+        if self.color_pending is None:
+            self.color_pending = GLib.timeout_add(300, self.apply_colors)
+
+    def apply_colors(self):
+        # This indicator has no realized window, so GTK 3.6 can retain its
+        # startup provider. Resolve the selected theme explicitly for the probe.
+        entry = Gtk.Entry()
+        style = entry.get_style_context()
+        provider = Gtk.CssProvider.get_named(self.interface.get_string('gtk-theme'), None)
+        style.add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        found, color = style.lookup_color('selected_bg_color')
+        if found:
+            rgb = '#%02x%02x%02x' % tuple(int(round(c * 255)) for c in (color.red, color.green, color.blue))
+            # Keep Quantal's original translucency for each resize mode.
+            self.resize.set_string('border-color', rgb + '9f')
+            self.resize.set_string('fill-color', rgb + '19')
+        self.color_pending = None
+        return False
 
     def configure(self, enabled, brightness):
         if self.enabled != enabled or self.brightness != brightness:
