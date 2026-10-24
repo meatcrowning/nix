@@ -3,7 +3,7 @@
 A GTK 3 / PyGObject app, unlike the Qt apps beside it: it is made for top's
 Unity 12.10 session, which themes host GTK apps with Ambiance Dark and the
 Ubuntu font, so it uses stock GTK widgets and draws the dial and
-spectrum/waterfall (views.py), plus the amber segmented RDS face (rdsview.py).
+spectrum/waterfall (views.py), plus the segmented RDS face (rdsview.py).
 The dongle and package are top-only
 (sys/hw/rtl-sdr.nix, home/prog/tuner.nix); there is no air branch.
 
@@ -32,9 +32,11 @@ the dongle. Retuning, mode changes, and receive sessions invalidate decoder
 results by generation. Do not persist received station text. Confirmed named
 FM bookmarks may supply fallback identity, explicitly labeled Bookmark rather
 than received RDS.
-The top controls and readouts share an amber car-stereo face (faceplate.py);
+The top controls and readouts share a car-stereo face (faceplate.py); lit
+segments take the GTK theme's selection colour and glow (faceplate.glow), and
 all its text uses the local fourteen-segment font and meters use discrete lit
-blocks. Regenerate segment.ttf with tools/build-segment-font.py (fontTools)
+blocks. The dial reads in MHz with only significant digits lit; one blank
+hover cell at each end keeps finer and coarser digits tunable. Regenerate segment.ttf with tools/build-segment-font.py (fontTools)
 when changing the rdsview.py geometry. Fontconfig registers it in-process only.
 The frequency and station text remain visible together, regardless of old Text
 preferences. HD selection is in the Radio menu. Unavailable, waiting, and

@@ -29,7 +29,7 @@ import gqrxfiles  # noqa: E402
 import radio  # noqa: E402
 import online  # noqa: E402
 import rtl  # noqa: E402
-from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView  # noqa: E402
+from views import COLOUR_MAPS, DISPLAY_DEFAULTS, FrequencyDial, SpectrumView, mhz_text  # noqa: E402
 from faceplate import SegmentMeter, SegmentScale, style_faceplate  # noqa: E402
 from rdsview import RdsDisplay  # noqa: E402
 
@@ -879,7 +879,7 @@ class TunerWindow(Gtk.ApplicationWindow):
 
     def _refresh_hd(self):
         data = self.hd_data
-        heading = "%.3f MHz  ·  HD%d" % (self.s["frequency"] / 1e6, self.radio.hd_program + 1)
+        heading = "%s MHz  ·  HD%d" % (mhz_text(self.s["frequency"]), self.radio.hd_program + 1)
         if data.get("station"):
             heading += "  ·  " + data["station"]
         if not self.radio.running:
@@ -901,7 +901,7 @@ class TunerWindow(Gtk.ApplicationWindow):
             self.online.poll(None, "")
             self._refresh_hd()
             return
-        heading = "%.3f MHz  ·  RDS" % (self.s["frequency"] / 1e6)
+        heading = "%s MHz  ·  RDS" % mhz_text(self.s["frequency"])
         data = self.rds_data
         if not self.radio.running:
             message = "Receiver stopped"
@@ -932,7 +932,7 @@ class TunerWindow(Gtk.ApplicationWindow):
             key = (self.radio.metadata_generation, self.s["frequency"], name)
             text, status = self.online.poll(key, name)
             origin = "Online" if text else "Bookmark"
-            heading = "%.3f MHz  ·  %s  ·  %s" % (self.s["frequency"] / 1e6, origin, name)
+            heading = "%s MHz  ·  %s  ·  %s" % (mhz_text(self.s["frequency"]), origin, name)
             if fresh and data.get("ps"):
                 heading += "  ·  RDS: " + data["ps"]
             message = text or name

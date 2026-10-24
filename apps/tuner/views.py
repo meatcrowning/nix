@@ -7,9 +7,16 @@ import cairo
 import numpy as np
 from gi.repository import Gdk, GObject, Gtk, Pango, PangoCairo
 
+import faceplate
 from rdsview import RdsDisplay
 
 ORANGE = (0.941, 0.467, 0.275)  # Ubuntu's selection orange
+
+
+def mhz_text(hz):
+    """A frequency as a car stereo shows it: 96.9, not 96.900000."""
+    text = ("%.6f" % (hz / 1e6)).rstrip("0")
+    return text + "0" if text.endswith(".") else text
 
 
 def _plasma_lut():
@@ -58,6 +65,7 @@ class FrequencyDial(Gtk.DrawingArea):
         self.value = 100000000
         self.hover = None
         self.boxes = []
+        self.reach = (7, 4)
         self.set_can_focus(True)
         self.add_events(Gdk.EventMask.SCROLL_MASK | Gdk.EventMask.SMOOTH_SCROLL_MASK
                         | Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.POINTER_MOTION_MASK
@@ -93,37 +101,38 @@ class FrequencyDial(Gtk.DrawingArea):
         layout.set_text("0", -1)
         digit_w, digit_h = layout.get_pixel_size()
         sep_w = digit_w * 0.45
-        unit = "Hz"
-        small = Pango.FontDescription("Tuner Segment")
-        small.set_absolute_size(alloc.height * 0.28 * Pango.SCALE)
-        total = self.DIGITS * digit_w + 3 * sep_w + digit_w * 1.6
+        unit_w = digit_w * 0.42
+        text = "%0*d" % (self.DIGITS, self.value)
+        lit = [p for p, ch in zip(range(self.DIGITS - 1, -1, -1), text) if ch != "0"]
+        # Read as MHz: only significant digits light, with one blank cell at
+        # each end that lights while hovered, so any finer digit stays tunable.
+        last = min(lit + [5])
+        self.reach = (min(max(lit + [6]) + 1, self.DIGITS - 1), max(last - 1, 0))
+        places = range(self.reach[0], self.reach[1] - 1, -1)
+        total = len(places) * digit_w + sep_w + digit_w * 0.3 + 3 * unit_w
         x = (alloc.width - total) / 2
         y = (alloc.height - digit_h) / 2
-        text = "%0*d" % (self.DIGITS, self.value)
-        leading = True
         self.boxes = []
-        for i, ch in enumerate(text):
-            place = self.DIGITS - 1 - i
-            if ch != "0" or place < 7:
-                leading = False
+        for place in places:
+            ch = text[self.DIGITS - 1 - place]
             if self.hover == place:
-                cr.set_source_rgba(*ORANGE, 0.25)
+                cr.set_source_rgba(*faceplate.LIT, 0.18)
                 cr.rectangle(x, 3, digit_w, alloc.height - 6)
                 cr.fill()
-            RdsDisplay._glyph(cr, " " if leading else ch, x + 3, y + 6,
-                              digit_w - 6, digit_h - 12)
+            blank = place in self.reach and ch == "0" and place not in (6, 5)
+            if not blank or self.hover == place:
+                RdsDisplay._glyph(cr, ch, x + 3, y + 6, digit_w - 6, digit_h - 12)
             self.boxes.append((x, x + digit_w, place))
             x += digit_w
-            if place in (9, 6, 3):
-                cr.set_source_rgba(1, .60, .16, 0.08 if leading else 0.8)
-                cr.arc(x + sep_w / 2, y + digit_h * 0.82, max(digit_w * 0.08, 1.5), 0, 2 * math.pi)
-                cr.fill()
+            if place == 6:
+                cr.arc(x + sep_w / 2, y + digit_h * 0.8, max(digit_w * 0.07, 1.5), 0, 2 * math.pi)
+                faceplate.glow(cr, 1, fill=True)
                 x += sep_w
-        layout.set_font_description(small)
-        layout.set_text(unit, -1)
-        cr.set_source_rgb(*ORANGE)
-        cr.move_to(x + digit_w * 0.3, y + digit_h * 0.55)
-        PangoCairo.show_layout(cr, layout)
+        x += digit_w * 0.3
+        unit_h = digit_h * 0.38
+        for ch in "MHZ":
+            RdsDisplay._glyph(cr, ch, x, y + digit_h - 6 - unit_h, unit_w - 3, unit_h)
+            x += unit_w
         return True
 
     def _place_at(self, x):
@@ -169,13 +178,14 @@ class FrequencyDial(Gtk.DrawingArea):
         return True
 
     def _key(self, widget, event):
-        place = self.hover if self.hover is not None else 3
+        place = self.hover if self.hover is not None else self.reach[1] + 1
         if event.keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
             self._emit(self.value + 10 ** place)
         elif event.keyval in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
             self._emit(self.value - 10 ** place)
         elif event.keyval in (Gdk.KEY_Left, Gdk.KEY_Right):
-            self._set_hover(min(self.DIGITS - 1, max(0, place + (1 if event.keyval == Gdk.KEY_Left else -1))))
+            place += 1 if event.keyval == Gdk.KEY_Left else -1
+            self._set_hover(min(self.reach[0], max(self.reach[1], place)))
         else:
             return False
         return True

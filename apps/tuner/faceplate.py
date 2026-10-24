@@ -1,7 +1,10 @@
 """A segmented receiver face, with native GTK keyboard and control behavior."""
 
+import base64
 import ctypes
 from pathlib import Path
+
+import cairo
 
 import gi
 
@@ -9,10 +12,15 @@ gi.require_version("PangoFc", "1.0")
 from gi.repository import Gtk, PangoCairo, PangoFc
 
 
-CSS = b"""
+# Lit segments take the GTK theme's selection colour (Ambiance's orange);
+# style_faceplate() refreshes it, and the theme setting re-runs that.
+LIT = (0.941, 0.467, 0.275)
+GHOST = (.13, .13, .13)
+
+CSS = """
 #tuner-face {
     background: #090a08;
-    color: #ff9929;
+    color: @lit;
     border: 2px solid #302c24;
     border-radius: 3px;
     padding: 8px;
@@ -21,12 +29,12 @@ CSS = b"""
     font-family: "Tuner Segment";
     font-size: 17px;
     font-weight: normal;
-    color: #ff9929;
-    text-shadow: none;
+    color: @lit;
+    text-shadow: 0 0 2px alpha(@lit, 0.85), 0 0 7px alpha(@lit, 0.45);
     -gtk-icon-shadow: none;
 }
-#tuner-face menu { background: #090a08; border: 1px solid #68451f; }
-#tuner-face menuitem:hover { background: #30200e; }
+#tuner-face menu { background: #090a08; border: 1px solid mix(@lit, #090a08, 0.6); }
+#tuner-face menuitem:hover { background: mix(@lit, #090a08, 0.8); }
 #tuner-face toolbar { background: transparent; border: none; box-shadow: none; }
 #tuner-face button, #tuner-face entry {
     background: transparent;
@@ -36,22 +44,66 @@ CSS = b"""
     padding: 5px 7px;
 }
 #tuner-face button:hover, #tuner-face button:focus, #tuner-face entry:focus {
-    border-bottom-color: #ff9929;
+    border-bottom-color: @lit;
 }
 #tuner-face button:checked, #tuner-face button:active {
-    background: #30200e;
-    border-bottom-color: #ffbb62;
+    background: mix(@lit, #090a08, 0.8);
+    border-bottom-color: @core;
 }
-#tuner-face button:checked *, #tuner-face button:active * { color: #ffcd80; }
-#tuner-face *:disabled { color: #735332; }
-#tuner-face entry selection { background: #68451f; color: #ffcd80; }
-#tuner-face separator { background: #30281b; min-width: 1px; }
+#tuner-face button:checked *, #tuner-face button:active * { color: @core; }
+#tuner-face *:disabled { color: mix(@lit, #090a08, 0.55); text-shadow: none; }
+#tuner-face entry selection { background: mix(@lit, #090a08, 0.6); color: @core; }
+#tuner-face separator { background: mix(@lit, #090a08, 0.82); min-width: 1px; }
 #tuner-face arrow {
     min-width: 12px;
     min-height: 10px;
-    -gtk-icon-source: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMicgaGVpZ2h0PScxMCc+PHBhdGggZD0nTTEgMkw2IDdMMTEgMicgZmlsbD0nbm9uZScgc3Ryb2tlPScjZmY5OTI5JyBzdHJva2Utd2lkdGg9JzInLz48L3N2Zz4=");
+    -gtk-icon-source: url("data:image/svg+xml;base64,@arrow");
 }
 """
+
+_provider = Gtk.CssProvider()
+
+
+def _hex(rgb):
+    return '#%02x%02x%02x' % tuple(round(c * 255) for c in rgb)
+
+
+def core():
+    """A lit segment's centre runs hotter (whiter) than its halo."""
+    return tuple(c + (1 - c) * .3 for c in LIT)
+
+
+def glow(cr, width, fill=False, alpha=1.0):
+    """Paint the current path as a lit segment: soft halo under a bright core."""
+    r, g, b = LIT
+    cap = cr.get_line_cap()
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    for spread, strength in ((3.4, .07), (2.0, .2)):
+        cr.set_line_width(width * spread)
+        cr.set_source_rgba(r, g, b, strength * alpha)
+        cr.stroke_preserve()
+    cr.set_line_cap(cap)
+    cr.set_line_width(width)
+    cr.set_source_rgba(*core(), alpha)
+    cr.fill() if fill else cr.stroke()
+
+
+def _restyle(widget):
+    global LIT
+    context = widget.get_style_context()
+    for name in ('theme_selected_bg_color', 'selected_bg_color'):
+        found, rgba = context.lookup_color(name)
+        if found:
+            LIT = (rgba.red, rgba.green, rgba.blue)
+            break
+    arrow = ("<svg xmlns='http://www.w3.org/2000/svg' width='12' height='10'>"
+             "<path d='M1 2L6 7L11 2' fill='none' stroke='%s' stroke-width='2'/></svg>"
+             % _hex(LIT))
+    css = (CSS.replace('@arrow', base64.b64encode(arrow.encode()).decode())
+           .replace('@lit', _hex(LIT)).replace('@core', _hex(core())))
+    _provider.load_from_data(css.encode())
+    widget.queue_draw()
+
 
 _font_loaded = False
 
@@ -68,10 +120,10 @@ def style_faceplate(widget):
             raise RuntimeError('Cannot load Tuner segment font')
         PangoFc.FontMap.config_changed(PangoCairo.FontMap.get_default())
         _font_loaded = True
-    provider = Gtk.CssProvider()
-    provider.load_from_data(CSS)
+    _restyle(widget)
     Gtk.StyleContext.add_provider_for_screen(
-        widget.get_screen(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        widget.get_screen(), _provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    widget.get_settings().connect('notify::gtk-theme-name', lambda *a: _restyle(widget))
 
 
 def _blocks(widget, cr, fraction, focused=False):
@@ -79,14 +131,17 @@ def _blocks(widget, cr, fraction, focused=False):
     count, gap, inset = 20, 3, 5
     cell = (width - 2 * inset) / count
     lit = round(max(0, min(1, fraction)) * count)
-    for index in range(count):
-        cr.set_source_rgb(*((1, .60, .16) if index < lit else (.13, .13, .13)))
+    cr.set_source_rgb(*GHOST)
+    for index in range(lit, count):
         cr.rectangle(inset + index * cell, height / 2 - 5, max(1, cell - gap), 10)
-        cr.fill()
+    cr.fill()
+    for index in range(lit):
+        cr.rectangle(inset + index * cell, height / 2 - 5, max(1, cell - gap), 10)
+    if lit:
+        glow(cr, 1.5, fill=True)
     if focused:
-        cr.set_source_rgb(1, .60, .16)
         cr.rectangle(inset, height / 2 + 9, width - 2 * inset, 1)
-        cr.fill()
+        glow(cr, 1, fill=True)
     return True
 
 

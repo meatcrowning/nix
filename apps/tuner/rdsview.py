@@ -1,9 +1,11 @@
-"""Amber fourteen-segment RDS face, drawn locally without a font dependency."""
+"""Fourteen-segment RDS face, drawn locally in the theme's selection colour."""
 
 import time
 import unicodedata
 
 from gi.repository import GLib, Gtk, Pango, PangoCairo
+
+from faceplate import GHOST, glow
 
 # a..h are the perimeter/middle bars; i..n are diagonals and centre uprights.
 SEGMENTS = (
@@ -104,9 +106,9 @@ class RdsDisplay(Gtk.DrawingArea):
         layout.set_ellipsize(Pango.EllipsizeMode.END)
         layout.set_width(max(w - 16, 1) * Pango.SCALE)
         layout.set_text(self.heading, -1)
-        cr.set_source_rgb(.72, .43, .12)
         cr.move_to(9, 2)
-        PangoCairo.show_layout(cr, layout)
+        PangoCairo.layout_path(cr, layout)
+        glow(cr, .6, fill=True, alpha=.8)
         _, title_h = layout.get_pixel_size()
         glyph_h = max(14, h - title_h - 10)
         glyph_w = glyph_h * .55
@@ -123,18 +125,25 @@ class RdsDisplay(Gtk.DrawingArea):
     @staticmethod
     def _glyph(cr, char, x, y, w, h):
         active = '' if char in '.:,' else GLYPHS.get(char, GLYPHS['?'])
-        cr.set_line_width(max(1.1, h * .065))
+        width = max(1.1, h * .065)
+        cr.set_line_width(width)
+        lit = []
+        cr.set_source_rgb(*GHOST)
         for index, (start, end) in enumerate(SEGMENTS):
-            lit = chr(ord('a') + index) in active
-            if lit:
-                cr.set_source_rgba(1, .60, .16, .95)
-            else:
-                cr.set_source_rgb(.13, .13, .13)
+            if chr(ord('a') + index) in active:
+                lit.append((start, end))
+                continue
             cr.move_to(x + start[0] * w, y + start[1] * h)
             cr.line_to(x + end[0] * w, y + end[1] * h)
             cr.stroke()
+        # Ghosts go down first so no unlit stroke in this cell covers a halo.
+        for start, end in lit:
+            cr.move_to(x + start[0] * w, y + start[1] * h)
+            cr.line_to(x + end[0] * w, y + end[1] * h)
+        if lit:
+            glow(cr, width)
         if char in '.:,':
-            cr.set_source_rgba(1, .60, .16, .95)
             for dy in ((.32, .72) if char == ':' else (.92,)):
+                cr.new_sub_path()
                 cr.arc(x + w * .5, y + h * dy, max(1, h * .045), 0, 6.284)
-                cr.fill()
+            glow(cr, 1, fill=True)

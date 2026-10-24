@@ -30,7 +30,8 @@ assert w.s['hd'] and w.hd_combo.get_visible()
 assert not w.rate_combo.get_sensitive() and not w.receiver_page.get_sensitive()
 assert w.rds_display.get_visible() and w.dial.get_mapped()
 assert w.rds_display.get_mapped() and w.dial.get_mapped()
-assert len(w.dial.boxes) == w.dial.DIGITS
+places = [box[2] for box in w.dial.boxes]
+assert places == list(range(places[0], places[-1] - 1, -1)) and 6 in places and 5 in places
 assert w.dial.boxes[0][0] >= 0
 assert w.dial.boxes[-1][1] < w.dial.get_allocated_width()
 assert not hasattr(w, 'rds_button') and not hasattr(w, 'hd_button')
@@ -61,6 +62,7 @@ state.update(program=1, title='HD2 SONG')
 w._hd_update(gen, state); assert 'HD2 SONG' in w.rds_display.text
 w.tune(102700000)
 assert w.dial.value == 102700000 and w.dial.get_mapped()
+settle(); assert [box[2] for box in w.dial.boxes] == [9, 8, 7, 6, 5, 4]
 assert w.radio.hd_program == 0 and w.hd_data == {}
 w._hd_update(gen, state); assert 'HD2 SONG' not in w.rds_display.text
 state.update(program=0, locked=False)
@@ -94,5 +96,13 @@ class Canvas:
     def __getattr__(self, name): return lambda *a: None
 c = Canvas(); RdsDisplay._glyph(c, ' ', 0, 0, 20, 40)
 assert c.colors and all(rgb == (.13, .13, .13) for rgb in c.colors)
+# Lit segments take the theme's selection colour; the readout drops dead zeros.
+import faceplate, views
+found, accent = w.get_style_context().lookup_color('theme_selected_bg_color')
+assert not found or faceplate.LIT == (accent.red, accent.green, accent.blue), faceplate.LIT
+c = Canvas(); RdsDisplay._glyph(c, '8', 0, 0, 20, 40)
+assert any(rgba[:3] == faceplate.LIT for rgba in c.colors)
+assert [views.mhz_text(f) for f in (96900000, 96000000, 1234567, 102710000)] == \
+    ['96.9', '96.0', '1.234567', '102.71']
 w.destroy(); settle()
 print('PASS HD controls, metadata isolation, subchannels, tune, loss, persistence, orderly restart, grey segments')
