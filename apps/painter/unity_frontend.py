@@ -565,19 +565,39 @@ class Window(Gtk.Window, ParameterForm):
             bus = Gio.bus_get_finish(result)
             if completion and self.is_active():
                 return
+            if not getattr(self, '_notification_subscription', None):
+                self._notification_subscription = bus.signal_subscribe(
+                    'org.freedesktop.Notifications', 'org.freedesktop.Notifications',
+                    None, '/org/freedesktop/Notifications', None,
+                    Gio.DBusSignalFlags.NONE, self.notification_action, None)
+                self._notification_ids = set()
+            hints = {'desktop-entry': GLib.Variant('s', 'painter')}
+            if completion:
+                hints['transient'] = GLib.Variant('b', True)
             bus.call('org.freedesktop.Notifications', '/org/freedesktop/Notifications',
                      'org.freedesktop.Notifications', 'Notify',
                      GLib.Variant('(susssasa{sv}i)',
-                                  ('Painter', 0, 'painter', 'Painter', text, [], {}, -1)),
+                                  ('Painter', 0, 'painter', 'Painter', text, ['default', 'Open Painter'], hints, -1)),
                      None, Gio.DBusCallFlags.NONE, 3000, None, self.notification_sent, text)
         except GLib.GError:
             self.show_message(text, False)
 
     def notification_sent(self, bus, result, text):
         try:
-            bus.call_finish(result)
+            self._notification_ids.add(bus.call_finish(result).unpack()[0])
         except GLib.GError:
             self.show_message(text, False)
+
+    def notification_action(self, bus, sender, path, interface, name, parameters, data=None):
+        if name not in ('ActionInvoked', 'NotificationClosed'):
+            return
+        notification_id, action = parameters.unpack()
+        if name == 'NotificationClosed':
+            self._notification_ids.discard(notification_id)
+            return
+        if notification_id in self._notification_ids and action == 'default':
+            self._notification_ids.discard(notification_id)
+            self.present()
 
     def show_message(self, text, error=False):
         self.info_label.set_text(text)

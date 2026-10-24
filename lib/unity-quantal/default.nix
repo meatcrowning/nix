@@ -36,6 +36,7 @@ let
       --panel "$out/usr/lib/control-center-1/panels/libbackground.so"
   '';
   viewer = callPackage ./viewer.nix { inherit runtime legacyGtkModule; };
+  notifyOsd = callPackage ./notify-osd.nix { inherit runtime; };
   panel = callPackage ./panel.nix { inherit runtime; };
   # Ambiance Dark for current GTK 3 applications, whose CSS the 12.10 theme
   # predates: Ubuntu 18.04's port of Ambiance, under the same palette and name.
@@ -265,7 +266,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     mkdir -p "$out/bin" "$out/libexec/unity-quantal" "$out/share/xsessions"
     cp session.py bridge.py screensaver.py integration.py isolated.py display.py cpufreq.py weather.py \
-      focus.py focus-theme.py file-actions.py mirror.py notifications.py sounds.py media.py indicators.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
+      focus.py focus-theme.py file-actions.py mirror.py notifications.py notification-settings.py sounds.py media.py indicators.py viewer-launch.py tweaks.json "$out/libexec/unity-quantal/"
     cp -r display-icons "$out/libexec/unity-quantal/"
     mkdir -p "$out/lib/gtk-3.0/modules"
     ln -s ${libcanberra-gtk3}/lib/gtk-3.0/modules/libcanberra-gtk3-module.so \
@@ -282,6 +283,7 @@ stdenvNoCC.mkDerivation {
       nativeFocusThemes = "${nativeTheme}";
       focusPython = "${python3.withPackages (ps: [ ps.pillow ])}/bin/python3";
       inherit runtime modernLibraries archivePath gtkTheme thumbnailers musicLibrary;
+      notifyOsd = "${notifyOsd}/bin/notify-osd";
       panel = "${panel}/bin/unity-panel-service";
       viewer = "${viewer}/bin/unity-image-viewer";
       scrollGrab = "${scrollGrab}/lib/scroll-grab.so";

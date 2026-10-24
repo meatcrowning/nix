@@ -1,9 +1,4 @@
-"""Chromium compatibility for Quantal's non-interactive native bubbles.
-
-Chromium refuses a server without the actions capability. Accept its action
-array, but deliberately present the passive Ubuntu bubble: no fabricated click
-or action signals. Notify OSD otherwise turns action requests into dialogs.
-"""
+"""Bridge native Unity bubbles, actions, sounds and transient-aware history."""
 import json
 import os
 from pathlib import Path
@@ -35,6 +30,7 @@ class Adapter:
     def __init__(self, upstream, native):
         self.upstream, self.native = upstream, native
         self.player = Player()
+        self.senders = {}
         self.history_path = Path(os.environ['UNITY_QUANTAL_SESSION_DIR']) / 'notification-history.json'
         self.history_registration = upstream.register_object('/org/unity_quantal/NotificationHistory',
             Gio.DBusNodeInfo.new_for_xml('<node><interface name="org.unity_quantal.NotificationHistory">'
@@ -51,7 +47,7 @@ class Adapter:
                                                          Gio.BusNameOwnerFlags.NONE, None, None)
         self.saver_subscription = upstream.signal_subscribe('org.gnome.ScreenSaver', 'org.gnome.ScreenSaver',
             'ActiveChanged', '/org/gnome/ScreenSaver', None, Gio.DBusSignalFlags.NONE, self.saver_changed)
-        self.subscription = native.signal_subscribe(NAME, NAME, 'NotificationClosed', OBJECT, None,
+        self.subscription = native.signal_subscribe(NAME, NAME, None, OBJECT, None,
                                                     Gio.DBusSignalFlags.NONE, self.closed)
 
     def saver_call(self, connection, sender, path, interface, method, parameters, invocation):
@@ -62,25 +58,31 @@ class Adapter:
         self.native.emit_signal(None, path, interface, name, parameters)
 
     def closed(self, connection, sender, path, interface, name, parameters):
-        self.upstream.emit_signal(None, OBJECT, NAME, name, parameters)
+        if name not in ('ActionInvoked', 'NotificationClosed'):
+            return
+        notification_id = parameters.unpack()[0]
+        destination = self.senders.get(notification_id)
+        if destination:
+            self.upstream.emit_signal(destination, OBJECT, NAME, name, parameters)
+        if name == 'NotificationClosed':
+            self.senders.pop(notification_id, None)
 
     def call(self, connection, sender, path, interface, method, parameters, invocation):
         sound = None
         history = None
         if method == 'Notify':
             # Retain variant-valued hints verbatim (not unpack/repack, which
-            # loses their D-Bus types). OSD expects passive notifications.
+            # loses their D-Bus types).
             children = [parameters.get_child_value(i) for i in range(8)]
             hints = children[6].unpack()
             if not hints.get('transient', False) and 'x-canonical-private-synchronous' not in hints:
                 history = (children[0].unpack(), children[3].unpack(), children[4].unpack())
             if not hints.get('suppress-sound', False):
                 sound = (hints.get('sound-name'), hints.get('sound-file'))
-            children[5] = GLib.Variant('as', [])
             children[7] = GLib.Variant('i', -1)
             parameters = GLib.Variant.new_tuple(*children)
         self.native.call(NAME, OBJECT, NAME, method, parameters, None,
-                         Gio.DBusCallFlags.NONE, 5000, None, self.replied, (method, invocation, sound, history))
+                         Gio.DBusCallFlags.NONE, 5000, None, self.replied, (method, invocation, sound, history, sender))
 
     def write_history(self, entries):
         temporary = self.history_path.with_suffix('.tmp')
@@ -137,6 +139,7 @@ class Adapter:
                 reply = GLib.Variant('(as)', (capabilities,))
             invocation.return_value(reply)
             if method == 'Notify':
+                self.senders[reply.unpack()[0]] = context[4]
                 if len(context) > 2 and context[2]:
                     self.notification_sound(context[2])
                 if len(context) > 3 and context[3]:

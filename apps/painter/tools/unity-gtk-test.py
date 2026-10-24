@@ -35,11 +35,14 @@ class Registrar(dbus.service.Object):
         return registrations
 registrar = Registrar(bus, '/com/canonical/AppMenu/Registrar')
 notifications = []
+notification_hints = []
 notification_owner = dbus.service.BusName('org.freedesktop.Notifications', bus)
 class Notifications(dbus.service.Object):
     @dbus.service.method('org.freedesktop.Notifications', in_signature='susssasa{sv}i', out_signature='u')
     def Notify(self, app, replaces, icon, summary, body, actions, hints, timeout):
         notifications.append(str(body))
+        notification_hints.append(dict(hints))
+        assert list(actions) == ["default", "Open Painter"], actions
         return 1
 notification_server = Notifications(bus, '/org/freedesktop/Notifications')
 window = Window(sys.argv[1])
@@ -229,6 +232,8 @@ def test():
             window.restore()
         elif step[0] == 2:
             assert notifications == ['Generation completed', 'Background completion'], notifications
+            assert notification_hints[-1].get('transient') == True
+            assert not notification_hints[0].get('transient', False)
             window.is_active = window.original_active
             assert window.values()['positive'] == 'restored prompt'
             assert window.values()['seed'] == 42
@@ -283,6 +288,8 @@ def test():
         elif step[0] == 4:
             copied_pixels(80, 60)
             assert notifications == ['Generation completed', 'Background completion'], notifications
+            assert notification_hints[-1].get('transient') == True
+            assert not notification_hints[0].get('transient', False)
             assert window.viewer.video
             assert window.picture.get_pixbuf() is not None
             assert window.viewer.natural_size == [96, 64]

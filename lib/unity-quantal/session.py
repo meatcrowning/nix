@@ -207,6 +207,14 @@ def prepare(directory, environment):
         + DISPLAY_COMMAND + " settings\n"
     )
 
+    (directory / "applications/unity-notifications.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Notifications\nIcon=preferences-system-notifications\n"
+        "Categories=Settings;PersonalSettings;X-GNOME-Settings-Panel;\n"
+        "X-GNOME-Settings-Panel=unity-notifications\nX-Unity-Original=true\n"
+        "OnlyShowIn=Unity;\nExec=/usr/local/bin/unity-host-launch -- "
+        + RUNTIME + " /usr/bin/python2.7 " + str(HERE / "notification-settings.py") + "\n"
+    )
+
     # Nautilus-Actions monitors its data directory, including in open windows.
     import importlib.util
     spec = importlib.util.spec_from_file_location("file_actions", HERE / "file-actions.py")
@@ -346,6 +354,7 @@ def runtime(arguments):
             command += ["--ro-bind", str(ROOT / name), "/" + name]
     command += ["--ro-bind", CONFIG["legacyGtkModule"],
                 "/usr/lib/x86_64-linux-gnu/gtk-3.0/modules/libcanberra-gtk3-module.so"]
+    command += ["--ro-bind", CONFIG["notifyOsd"], "/usr/lib/notify-osd/notify-osd"]
     command += ["--ro-bind", CONFIG["panel"], "/usr/lib/unity/unity-panel-service"]
     command += ["--ro-bind", "/nix", "/nix", "--proc", "/proc", "--dev-bind", "/dev", "/dev",
                 "--ro-bind", "/sys", "/sys", "--tmpfs", "/tmp", "--tmpfs", "/run",

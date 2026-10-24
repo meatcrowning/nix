@@ -2079,9 +2079,7 @@ class Painter(QObject):
     @Slot()
     def stopAndSave(self):
         def done(stopping, detail):
-            if stopping:
-                self.toast.emit("stopping after this step", False)
-            else:
+            if not stopping:
                 self.toast.emit("nothing sampling to stop" if not detail
                                 else f"stop failed: {detail}", True)
 
@@ -2373,7 +2371,7 @@ class Painter(QObject):
         exactly the case that should cancel it."""
         if self._onscreen():
             return
-        args = ["notify-send", "-a", "painter"]
+        args = ["notify-send", "-a", "painter", "-h", "boolean:transient:true"]
         if thumb:
             args += ["-h", "string:x-download-image:" + str(thumb)]
         if open_path and str(open_path) != str(thumb):
