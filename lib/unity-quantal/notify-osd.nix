@@ -13,6 +13,11 @@ in stdenv.mkDerivation {
     url = "https://old-releases.ubuntu.com/ubuntu/pool/main/n/notify-osd/notify-osd_0.9.34.orig.tar.gz";
     sha256 = "12080deeaa5e1e10b420117351c2bd5db3421b0d1efcab8ee8052c808c3aaa3c";
   };
+  # Match the ISO's 0ubuntu5 build, including Ubuntu's tint and shadow fixes.
+  patches = [ (fetchurl {
+    url = "https://old-releases.ubuntu.com/ubuntu/pool/main/n/notify-osd/notify-osd_0.9.34-0ubuntu5.diff.gz";
+    sha256 = "6dab3bd045210f60710974ddde7d2eb7f1d3c2889814275bda7ab2ff6bfaf212";
+  }) ];
   nativeBuildInputs = [ pkg-config python3 patchelf libarchive dbus-glib ];
   buildInputs = [ glib gtk3 atk at-spi2-core libX11 libwnck dbus-glib dbus pixman ];
   dontConfigure = true;

@@ -24,7 +24,7 @@ static gboolean interactive(Bubble *bubble)
 static void close_center(Bubble *bubble, double *x, double *y)
 {
     Defaults *d = bubble->defaults;
-    double shadow = EM2PIXELS(defaults_get_bubble_shadow_size(d), d);
+    double shadow = EM2PIXELS(get_shadow_size(bubble), d);
     *x = gtk_widget_get_allocated_width(GET_PRIVATE(bubble)->widget) - shadow - 14;
     *y = shadow + 14;
 }

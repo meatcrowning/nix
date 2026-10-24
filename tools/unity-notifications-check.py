@@ -66,6 +66,62 @@ def click(window, corner=False):
 # Wait for previous indicator-history probes to expire before measuring placement.
 xdo('mousemove', 1, 600)
 wait(lambda: not windows(), 'previous bubbles did not expire', timeout=35)
+# Compare the bubble paint with the actual ISO binary on a private second bus.
+# This uses only the namespace's Xvfb and scratch files, never the live screen.
+import tempfile
+with tempfile.TemporaryDirectory(dir=os.environ['XDG_RUNTIME_DIR']) as scratch:
+    scratch = Path(scratch)
+    address = 'unix:path=' + str(scratch / 'bus')
+    bus_config = scratch / 'bus.conf'
+    bus_config.write_text('<busconfig><type>session</type><listen>' + address + '</listen>'
+        '<auth>EXTERNAL</auth><policy context="default"><allow send_destination="*"/>'
+        '<allow receive_sender="*"/><allow own="*"/></policy></busconfig>')
+    private_bus = subprocess.Popen([config['dbus'], '--nofork', '--config-file=' + str(bus_config),
+                                    '--print-address=1'], stdout=subprocess.PIPE, text=True)
+    original = None
+    try:
+        assert private_bus.stdout.readline().strip().startswith(address)
+        native = Gio.DBusConnection.new_for_address_sync(address,
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
+        original = subprocess.Popen([str(package / 'bin/unity-quantal-runtime'),
+            config['runtime'] + '/usr/lib/notify-osd/notify-osd'],
+            env=dict(os.environ, DBUS_SESSION_BUS_ADDRESS=address))
+        wait(lambda: native.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus',
+            'org.freedesktop.DBus', 'NameHasOwner', GLib.Variant('(s)', (name,)), None,
+            Gio.DBusCallFlags.NONE, 3000, None).unpack()[0], 'original notification daemon not ready')
+        probe = notify('Style probe')
+        current_window = wait(lambda: windows(), 'no style probe')[0]
+        native.call_sync(name, path, name, 'Notify', GLib.Variant('(susssasa{sv}i)',
+            ('Probe', 0, '', 'Style probe', 'Isolated test', [], {}, -1)), None,
+            Gio.DBusCallFlags.NONE, 3000, None)
+        old_window = wait(lambda: list(set(windows()) - {current_window}), 'no original bubble')[0]
+        time.sleep(1)
+        current_size, old_size = geometry(current_window), geometry(old_window)
+        assert (current_size['WIDTH'], current_size['HEIGHT']) == (old_size['WIDTH'], old_size['HEIGHT'])
+        pixels = []
+        for label, window_id in [('current', current_window), ('original', old_window)]:
+            filename = str(scratch / (label + '.png'))
+            subprocess.run(['import', '-silent', '-window', window_id, filename], check=True)
+            # Exclude the requested corner close control; compare the rest of
+            # the native background, shadow, title and body byte for byte.
+            pixels.append(subprocess.check_output(['convert', filename, '-crop',
+                '%dx%d+0+0' % (current_size['WIDTH'] - 45, current_size['HEIGHT']),
+                '-depth', '8', 'rgba:-']))
+        assert pixels[0] == pixels[1], 'bubble rendering differs from the original Ubuntu package'
+        call('CloseNotification', GLib.Variant('(u)', (probe,)))
+        native.close_sync(None)
+    finally:
+        for child in (original, private_bus):
+            if child is not None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait()
+wait(lambda: not windows(), 'style probe remained visible')
+print('PASS: bubble paint matches the original Ubuntu binary outside the close control', flush=True)
+
 first = notify('Open probe')
 window = wait(lambda: windows(), 'no notification window')[0]
 g = geometry(window)
