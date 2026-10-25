@@ -10,10 +10,12 @@ class TokenMarks(object):
         self.view, self.count, self.send = view, count, send
         self.region = region
         self.hovered = None
+        self.picking = False
         if hover:
             view.add_events(Gdk.EventMask.POINTER_MOTION_MASK)
             view.connect("motion-notify-event", self.hover)
             view.connect("leave-notify-event", self.leave)
+            view.connect("button-press-event", self.pick)
         self.identity = 'gtk-tokens-%s' % id(self)
         self.active, self.ready, self.timer = False, False, None
         self.boundaries = []
@@ -61,6 +63,18 @@ class TokenMarks(object):
         self.send('heatmap_hover_end', owner='region:' + self.region() if self.region else 'prompt')
         return False
 
+    def pick(self, view, event):
+        if not self.picking or event.button != 1 or not self.marked:
+            return False
+        x, y = view.window_to_buffer_coords(Gtk.TextWindowType.TEXT, int(event.x), int(event.y))
+        result = view.get_iter_at_location(x, y)
+        iterator = result[-1] if isinstance(result, tuple) else result
+        text = self.text()
+        position = iterator.get_offset()
+        self.send('heatmap_pick', text=text, position=len(text[:position].encode('utf-16-le')) // 2,
+                  region=self.region() if self.region else '')
+        return True
+
     def hover(self, view, event):
         if not self.marked:
             return False
@@ -103,6 +117,7 @@ class TokenMarks(object):
         return False
 
     def update(self, state):
+        self.picking = bool(state.get('heatmap', {}).get('picking'))
         active = bool(state.get('flags', {}).get('layoutSupport'))
         if self.region:
             active = active and bool(self.region())

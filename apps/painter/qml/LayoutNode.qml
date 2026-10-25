@@ -535,6 +535,11 @@ Item {
                             color: textEdit.tokenStyle.separator
                         }
                     }
+                    TapHandler {
+                        enabled: node.spec.kind === "prompt" && App.inspection.picking
+                        acceptedButtons: Qt.LeftButton
+                        onTapped: App.inspection.pickToken(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
+                    }
                     HoverHandler {
                         enabled: node.spec.kind === "prompt"
                         onHoveredChanged: {

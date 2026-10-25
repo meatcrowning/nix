@@ -177,6 +177,12 @@ class Window(Gtk.Window, ParameterForm):
         self.heatmap_picker.set_no_show_all(True)
         self.heatmap_picker.add(self.heatmap_tokens)
         toolbar.insert(self.heatmap_picker, -1)
+        self.heatmap_grid = Gtk.ToolButton()
+        self.heatmap_grid.set_label('Grid comparison')
+        self.heatmap_grid.set_is_important(True)
+        self.heatmap_grid.set_no_show_all(True)
+        self.heatmap_grid.connect('clicked', lambda *_: self.send('heatmap_grid'))
+        toolbar.insert(self.heatmap_grid, -1)
         outer.pack_start(toolbar, False, False, 0)
         self.info = Gtk.InfoBar()
         self.info.set_no_show_all(True)
@@ -412,6 +418,7 @@ class Window(Gtk.Window, ParameterForm):
         self.heatmap_open = not self.heatmap_open
         self.send('heatmap_viewing', viewing=self.heatmap_open)
         self.heatmap_picker.set_visible(self.heatmap_open)
+        self.heatmap_grid.set_visible(self.heatmap_open)
         self.syncing_heatmap_toggle = True
         for widget in self.actions.get('heatmap', []):
             widget.set_active(self.heatmap_open)
@@ -426,6 +433,9 @@ class Window(Gtk.Window, ParameterForm):
 
     def update_heatmap(self):
         heatmap = self.state.get('heatmap', {})
+        self.heatmap_grid.set_label(heatmap.get('gridLabel', 'Grid comparison'))
+        self.heatmap_grid.set_tooltip_text(heatmap.get('gridStatus', ''))
+        self.heatmap_grid.set_sensitive(bool(heatmap.get('available')) and not heatmap.get('exporting'))
         labels = ['All tokens'] + [t['label'] for t in heatmap.get('tokens', [])]
         self.syncing_heatmap = True
         if labels != self.heatmap_labels:
@@ -455,9 +465,11 @@ class Window(Gtk.Window, ParameterForm):
     def receive(self, op, reply):
         if self.closing:
             return False
-        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing'):
+        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick'):
             if reply.get('ok') and reply.get('state', {}).get('heatmap'):
                 self.state['heatmap'] = reply['state']['heatmap']
+                for marks in self.token_marks:
+                    marks.picking = bool(self.state['heatmap'].get('picking'))
                 self.update_heatmap()
             return False
         if op == 'moss_tokenize':

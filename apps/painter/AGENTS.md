@@ -177,6 +177,11 @@ positive-prompt hovers share the selected token. Entry defaults to All tokens:
 mean the saved visible-token scores before a single 5–95% contrast stretch and
 thermal colour mapping; stored per-token normalization cannot recover raw model
 activity. Hover temporarily shows one token, then restores the dropdown choice.
+Grid comparison arms two prompt/region clicks, validates each against saved tokens,
+and exports a labeled 2×2 PNG to the platform Pictures directory in a worker.
+Original/all-token panels precede the two picked maps; source resolution is kept.
+Output changes or leaving heatmap mode cancel unfinished picks. `moss_grid.py`
+uses the viewer's mask renderer; exports never alter the source or run inference.
 Compiled layouts map scene-caption
 positions through JSON escaping to saved token offsets. Mismatched drafts never drive
 saved maps. Heatmap mode leaves history accessible and survives output changes.

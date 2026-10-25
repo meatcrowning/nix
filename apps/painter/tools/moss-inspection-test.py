@@ -132,6 +132,21 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         if ctl.inspection.overlay: break
     assert ctl.inspection.overlay
     assert ctl.inspection.selected == -1
+    from PySide6.QtCore import QPointF, QPoint
+    from PySide6.QtTest import QTest
+    if combo:
+        from PySide6.QtWidgets import QPushButton
+        grid_button = keep[-1].window.findChild(QPushButton, 'heatmapGrid')
+        assert grid_button.isVisible()
+        grid_button.click()
+    else:
+        ctl.inspection.toggleGrid()
+    click_point = editor.mapToItem(win.contentItem(), QPointF(12, 8))
+    QTest.mouseClick(keep[-1].view if combo else win, Qt.LeftButton, Qt.NoModifier,
+                     QPoint(round(click_point.x()), round(click_point.y())))
+    assert ctl.inspection._picks == [0], 'main prompt click did not pick token'
+    ctl.inspection.toggleGrid()
+    ctl.inspection.select(-1)
     aggregate_key = ctl.inspection.mask.cacheKey()
     ctl.inspection.hoverPrompt('red sphere', 5)
     assert ctl.inspection.selected == 1
@@ -300,6 +315,53 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     raster = capture.image()
     painted = {raster.pixelColor(x, y).name() for y in range(raster.height()) for x in range(raster.width())}
     assert set(u.prop(region_field, 'tokenStyle')['bands']) <= painted, 'region bands hidden by native TextArea background'
+    # Export only after two valid clicks; use a scratch Pictures destination.
+    from unittest.mock import patch
+    from PySide6.QtCore import QStandardPaths
+    pictures = Path(tmp) / 'pictures'
+    with patch.object(QStandardPaths, 'writableLocation', return_value=str(pictures)):
+        ctl.inspection.toggleGrid()
+        assert ctl.inspection.picking and '1/2' in ctl.inspection.gridLabel
+        ctl.inspection.pickToken('edited draft', 2, region['id'])
+        assert ctl.inspection._picks == []
+        QTest.mouseClick(keep[-1].view if combo else win, Qt.LeftButton, Qt.NoModifier,
+                         QPoint(round(point.x()), round(point.y())))
+        u.spin(50)
+        assert len(ctl.inspection._picks) == 1 and '2/2' in ctl.inspection.gridLabel
+        assert not pictures.exists()
+        ctl.inspection.pickToken('red sphere', 2, 'first')
+        for _ in range(200):
+            u.spin(10)
+            if not ctl.inspection.exporting: break
+        assert ctl.inspection.gridStatus.startswith('Saved '), ctl.inspection.gridStatus
+        exported = list(pictures.glob('*.png'))
+        assert len(exported) == 1
+        grid = QImage(str(exported[0]))
+        assert not grid.isNull()
+        assert grid.text('Description').splitlines() == [
+            'Original', 'All tokens · relative association', 'Token 2 · red sphere', 'Token 1 · red sphere']
+        # Original panel is unmodified; the thermal panel differs.
+        image_y = (grid.height() - 36) // 2 - original.height() + 16
+        assert grid.pixelColor(16, image_y) == original.pixelColor(4, 4)
+        assert grid.pixelColor(60, image_y) != original.pixelColor(4, 4)
+        with patch('moss_grid.save_grid', side_effect=OSError('disk unavailable')):
+            ctl.inspection.toggleGrid()
+            ctl.inspection.pickToken('red sphere', 2, 'first')
+            ctl.inspection.pickToken('red sphere', 2, region['id'])
+            for _ in range(200):
+                u.spin(10)
+                if not ctl.inspection.exporting: break
+            assert ctl.inspection.gridStatus == 'Grid export failed: disk unavailable'
+            assert ctl.inspection.gridLabel == 'Retry grid comparison'
+        ctl.inspection.toggleGrid()
+        ctl.inspection.pickToken('red sphere', 2, 'first')
+        ctl.inspection.setViewing(False)
+        assert not ctl.inspection.picking
+        ctl.inspection.setViewing(True)
+        ctl.inspection.toggleGrid()
+        ctl.inspection.load(str(output))
+        assert not ctl.inspection.picking
+    print('PASS two-click grid, stale draft rejection, labels, pixels and cancellation')
     assert not u.WARNINGS, u.WARNINGS
     ctl.inspection.close()
     print('PASS PNG persistence, unchanged image pixels, viewer maps and selection invalidation')

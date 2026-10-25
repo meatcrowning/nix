@@ -96,6 +96,16 @@ def test():
             assert buf.get_iter_at_offset(1).has_tag(marks.tags[0])
             assert buf.get_iter_at_offset(4).has_tag(marks.tags[1])
             assert marks.tags[0].get_property('background-gdk') != marks.tags[1].get_property('background-gdk')
+            class PickView(object):
+                def window_to_buffer_coords(self, *args): return (0, 0)
+                def get_iter_at_location(self, *args): return buf.get_iter_at_offset(4)
+            class PickEvent(object):
+                button, x, y = 1, 0, 0
+            marks.picking = True
+            assert marks.pick(PickView(), PickEvent())
+            assert sent[-1] == (('heatmap_pick',), dict(text='red cube', position=4, region=''))
+            marks.picking = False
+            assert not marks.pick(PickView(), PickEvent())
             token_view.get_buffer().set_text('red sphere')
             marks.update(token_state)
             assert not marks.boundaries
@@ -113,10 +123,19 @@ def test():
             assert window.heatmap_picker.get_visible() and window.history_scroll.get_visible()
             assert isinstance(window.heatmap_picker.get_parent(), Gtk.Toolbar)
             assert window.heatmap_tokens.get_active() == 0
+            assert window.heatmap_grid.get_visible()
+            window.heatmap_grid.emit('clicked')
+            assert requests[-1][0] == 'heatmap_grid'
+            window.receive('heatmap_grid', dict(ok=True, state=dict(heatmap=dict(
+                window.state['heatmap'], picking=True, gridLabel=u'Pick token 1/2 · Cancel'))))
+            assert all(m.picking for m in window.token_marks)
+            grid_label = window.heatmap_grid.get_label()
+            if isinstance(grid_label, bytes): grid_label = grid_label.decode('utf-8')
+            assert grid_label == u'Pick token 1/2 · Cancel'
             window.heatmap_tokens.set_active(1)
             assert requests[-1][0] == 'heatmap_select' and requests[-1][1]['index'] == 0
             window.toggle_heatmap()
-            assert not window.heatmap_picker.get_visible()
+            assert not window.heatmap_picker.get_visible() and not window.heatmap_grid.get_visible()
             window.send = send
             if heatmap_state is None: window.state.pop('heatmap', None)
             else: window.state['heatmap'] = heatmap_state

@@ -17,6 +17,7 @@ class MossInspect(QObject):
     tokenized = Signal(str, str, 'QVariantMap')
     changed = Signal()
     _loaded = Signal(int, object)
+    _exported = Signal(str)
 
     def __init__(self, client, parent=None):
         super().__init__(parent)
@@ -31,11 +32,15 @@ class MossInspect(QObject):
         self._chosen = -1
         self._hover_owner = ''
         self._viewing = False
+        self._picks = None
+        self._exporting = False
+        self._grid_status = ''
         self._future = None
         self._masks = OrderedDict()
         self.mask = QImage()
         self._packet = None
         self._loaded.connect(self._accept)
+        self._exported.connect(self._export_done)
         QCoreApplication.instance().aboutToQuit.connect(self.close)
 
     def close(self):
@@ -89,8 +94,78 @@ class MossInspect(QObject):
     @Slot(bool)
     def setViewing(self, viewing):
         self._viewing = viewing
+        if not viewing:
+            self._picks = None
+            self.changed.emit()
         if viewing and self.available:
             self.select(-1)
+
+    @Property(bool, notify=changed)
+    def picking(self):
+        return self._picks is not None
+
+    @Property(bool, notify=changed)
+    def exporting(self):
+        return self._exporting
+
+    @Property(str, notify=changed)
+    def gridLabel(self):
+        if self._exporting:
+            return 'Saving grid…'
+        if self.picking:
+            return 'Pick token %d/2 · Cancel' % (len(self._picks) + 1)
+        if self._grid_status.startswith('Saved '):
+            return 'Grid saved'
+        if self._grid_status:
+            return 'Retry grid comparison'
+        return 'Grid comparison'
+
+    @Property(str, notify=changed)
+    def gridStatus(self):
+        return self._grid_status or 'Click two prompt tokens to save a labeled comparison in Pictures.'
+
+    @Slot()
+    def toggleGrid(self):
+        if self._exporting or not self._viewing or not self.available:
+            return
+        self._picks = None if self.picking else []
+        self._grid_status = ''
+        self.changed.emit()
+
+    @Slot(str, int, str)
+    def pickToken(self, text, position, identity):
+        if not self.picking or not self._viewing:
+            return
+        self._hover_owner = ''
+        if identity:
+            self.hoverRegion(text, position, identity)
+        else:
+            self.hoverPrompt(text, position)
+        # Resolve this click against the saved prompt, never a stale hover.
+        if not self._hover_owner:
+            return
+        self._picks.append(self._selected)
+        if len(self._picks) == 2:
+            from PySide6.QtCore import QStandardPaths
+            from moss_grid import save_grid
+            folder = QStandardPaths.writableLocation(QStandardPaths.PicturesLocation)
+            path, data = self._path, self._data
+            tokens = [dict(self._tokens[i]) for i in self._picks]
+            self._picks = None
+            self._exporting = True
+            def export():
+                try:
+                    result = 'Saved ' + str(save_grid(path, data, tokens, folder))
+                except Exception as exc:
+                    result = 'Grid export failed: ' + str(exc)
+                self._exported.emit(result)
+            self._pool.submit(export)
+        self.changed.emit()
+
+    def _export_done(self, result):
+        self._exporting = False
+        self._grid_status = result
+        self.changed.emit()
 
     @Slot()
     @Slot(str)
@@ -132,7 +207,7 @@ class MossInspect(QObject):
                 break
 
     def bind_toolbar(self, shell, root):
-        from PySide6.QtWidgets import QComboBox
+        from PySide6.QtWidgets import QComboBox, QPushButton
         combo = QComboBox(shell.window)
         combo.setObjectName('heatmapTokens')
         combo.setAccessibleName('Prompt token heatmap')
@@ -141,6 +216,10 @@ class MossInspect(QObject):
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.activated.connect(lambda index: self.select(index - 1))
         combo.setToolTip('All tokens: mean saved association scores, with relative thermal contrast. Blue is low; red is high.')
+        grid = QPushButton('Grid comparison', shell.window)
+        grid.setObjectName('heatmapGrid')
+        grid.setCheckable(True)
+        grid.clicked.connect(self.toggleGrid)
         labels = []
         def refresh():
             current = [token['label'] for token in self.choices]
@@ -153,7 +232,13 @@ class MossInspect(QObject):
             combo.blockSignals(False)
             combo.setVisible(bool(root.property('showHeatmap')))
             combo.setEnabled(self.available)
+            grid.setVisible(bool(root.property('showHeatmap')))
+            grid.setEnabled(self.available and not self.exporting)
+            grid.setChecked(self.picking)
+            grid.setText(self.gridLabel)
+            grid.setToolTip(self.gridStatus)
         shell.toolbar_widget('main', combo)
+        shell.toolbar_widget('main', grid)
         self.changed.connect(refresh)
         root.showHeatmapChanged.connect(refresh)
         refresh()
@@ -172,6 +257,7 @@ class MossInspect(QObject):
         if self._closed:
             return
         path = QUrl(path).toLocalFile() if path.startswith('file:') else path
+        self._picks = None
         self._generation += 1
         serial = self._generation
         self._masks.clear()
@@ -236,11 +322,7 @@ class MossInspect(QObject):
         token = self._tokens[index]['index'] if index >= 0 else -1
         mask = self._masks.pop(token, None)
         if mask is None:
-            w, h = doc['width'], doc['height']
-            values = pixels[token * w * h:(token + 1) * w * h] if token >= 0 else doc['_aggregate']
-            table = THERMAL if token >= 0 else THERMAL_ALL
-            rgba = b''.join(table[value] for value in values)
-            mask = QImage(rgba, w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
+            mask = token_mask(doc, pixels, token)
         self._masks[token] = mask
         # At most 1 MiB for 64x64 maps; no full-resolution image copies.
         while len(self._masks) > 64:
@@ -276,6 +358,14 @@ def _thermal(value, all_tokens=False):
 
 THERMAL = tuple(_thermal(value) for value in range(256))
 THERMAL_ALL = tuple(_thermal(value, True) for value in range(256))
+
+
+def token_mask(doc, pixels, token):
+    w, h = doc['width'], doc['height']
+    values = pixels[token * w * h:(token + 1) * w * h] if token >= 0 else doc['_aggregate']
+    table = THERMAL if token >= 0 else THERMAL_ALL
+    rgba = b''.join(table[value] for value in values)
+    return QImage(rgba, w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
 
 
 class HeatmapLayer(QQuickPaintedItem):

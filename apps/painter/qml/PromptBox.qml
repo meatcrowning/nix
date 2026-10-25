@@ -506,12 +506,11 @@ Rectangle {
                 e.accepted = true
             }
 
-            // §7.1: everything selectable is right-clickable. Left-drag
-            // selection stays Qt's (`selectByMouse`); this takes the right
-            // button only, so nothing else changes.
+            // Left clicks normally remain with the editor. Grid selection
+            // temporarily captures them; right clicks retain the context menu.
             MouseArea {
                 anchors.fill: parent
-                acceptedButtons: Qt.RightButton
+                acceptedButtons: Qt.RightButton | ((!box.negative && App.inspection && App.inspection.picking) ? Qt.LeftButton : Qt.NoButton)
                 hoverEnabled: box.tokenMarksReady && !box.negative
                 onExited: if (!box.negative && typeof App.inspection !== "undefined" && App.inspection) App.inspection.endHover("prompt")
                 onPositionChanged: function(m) {
@@ -519,6 +518,10 @@ Rectangle {
                         App.inspection.hoverPrompt(input.text, input.positionAt(m.x, m.y))
                 }
                 onPressed: function (m) {
+                    if (m.button === Qt.LeftButton) {
+                        App.inspection.pickToken(input.text, input.positionAt(m.x, m.y), "")
+                        return
+                    }
                     // A right-click puts the keyboard in this box, exactly as a
                     // left-click does. The menu takes the focus while it is open
                     // and gives it back to whatever held it (`CtxMenu`), so

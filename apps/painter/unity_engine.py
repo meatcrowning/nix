@@ -313,6 +313,8 @@ class Engine:
         inspection = self.ctl.inspection
         return dict(path=self.view_path, available=inspection.available,
                     tokens=inspection.tokens, overlay=inspection.overlay, selected=inspection.selected,
+                    picking=inspection.picking, exporting=inspection.exporting,
+                    gridLabel=inspection.gridLabel, gridStatus=inspection.gridStatus,
                     mask=inspection.mask_packet())
 
     def dispatch(self, request):
@@ -324,6 +326,12 @@ class Engine:
                 raise ValueError('Prompt is too long')
             c.inspection.tokenize(identity, text)
             return {}
+        if op == 'heatmap_grid':
+            c.inspection.toggleGrid()
+            return dict(heatmap=self.heatmap_state())
+        if op == 'heatmap_pick':
+            c.inspection.pickToken(request['text'], int(request['position']), request.get('region', ''))
+            return dict(heatmap=self.heatmap_state())
         if op == 'heatmap_viewing':
             c.inspection.setViewing(bool(request.get('viewing')))
             return dict(heatmap=self.heatmap_state())

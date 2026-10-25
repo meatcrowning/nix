@@ -23,5 +23,14 @@ Item {
             ToolTip.text: "All tokens: mean saved association scores, with relative thermal contrast. Blue is low; red is high."
             Accessible.name: "Prompt token heatmap"
         }
+        Button {
+            text: pane.service ? pane.service.gridLabel : "Grid comparison"
+            enabled: pane.service && pane.service.available && !pane.service.exporting
+            checkable: true
+            checked: pane.service && pane.service.picking
+            onClicked: pane.service.toggleGrid()
+            ToolTip.visible: hovered
+            ToolTip.text: pane.service ? pane.service.gridStatus : ""
+        }
     }
 }
