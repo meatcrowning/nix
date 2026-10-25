@@ -1,6 +1,7 @@
 """Relative spatial rankings from saved maps, excluding English function words."""
 import math
 import re
+import json
 import unicodedata
 from difflib import SequenceMatcher
 
@@ -49,13 +50,48 @@ def word_label(token):
                             ', '.join('[%s]' % piece.replace('\n', '↵') for piece in pieces))
 
 
+def descriptive_spans(prompt):
+    """Keep layout prose values, never JSON keys, region types or coordinates."""
+    try:
+        layout = json.loads(prompt)
+    except (ValueError, TypeError):
+        return [(0, len(prompt))]
+    if not (isinstance(layout, dict) and isinstance(layout.get('summary'), dict)
+            and isinstance(layout.get('items'), list)):
+        return [(0, len(prompt))]
+    from moss_data import json_value_span
+    spans = []
+    def collect(value, path):
+        if isinstance(value, str):
+            start, end = json_value_span(prompt, path)
+            spans.append((start+1, end-1))
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                collect(item, path+(i,))
+    for key in ('caption', 'meta', 'palette'):
+        if key in layout['summary']:
+            collect(layout['summary'][key], ('summary', key))
+    for i, item in enumerate(layout['items']):
+        if isinstance(item, dict):
+            for key in ('caption', 'text', 'tags', 'palette'):
+                if key in item:
+                    collect(item[key], ('items', i, key))
+    return spans
+
+
 def content_tokens(document):
-    words = [(m.start(), m.end(), m.group().casefold()) for m in WORD.finditer(document.get('prompt', ''))]
+    prompt = document.get('prompt', '')
+    spans = descriptive_spans(prompt)
+    layout = spans != [(0, len(prompt))]
+    words = [(m.start(), m.end(), m.group().casefold()) for m in WORD.finditer(prompt)
+             if any(a < m.end() and b > m.start() for a, b in spans)]
     result = []
     for token in document['tokens']:
         if not token['visible'] or not WORD.search(token['text']):
             continue
         start, end = token.get('start', -1), token.get('end', -1)
+        if layout and not any(a < end and b > start for a, b in spans):
+            continue
         matched = [word for a, b, word in words if a < end and b > start] if start >= 0 else []
         if not matched:
             matched = [m.group().casefold() for m in WORD.finditer(token['text'])]

@@ -155,6 +155,7 @@ def save_grid(source, data, tokens, folder):
         words=words[0]['tokens'], method='Mean of saved normalized token planes per word occurrence; '
         'original all-token reference retained. No additional per-word contrast stretch.'), ensure_ascii=False))
     ranking['method'] = ('Saved normalized associations, not absolute activity. English function words and punctuation excluded; '
+                         'layout rankings use descriptive string values only, excluding structural fields and coordinates; '
                          'token pieces averaged per word occurrence before ranking; '
                          'up to 7x7 neighborhood means, centers separated by up to 12 cells; '
                          'area labels maximize eligible-token mean in that neighborhood; '

@@ -54,6 +54,20 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     assert lookup[0] == lookup[1] == lookup[2] and lookup[3] != lookup[0]
     assert moss_rank.word_label(lookup[0]) == 'ramshackle - tokens: [ram], [sh], [ackle]'
     assert moss_rank.word_label(lookup[4]) == 'warehouse - token: [warehouse]'
+    # Numeric prose is meaningful; layout coordinates and JSON vocabulary are not.
+    prose = json.dumps(dict(summary=dict(caption='Route 517 café', meta=['cinematic'], palette=['blue']),
+                            items=[dict(label='character', caption='A "flipped" visor',
+                                        bbox=[-544, 0, 517, 90], tags=['metal'])]), ensure_ascii=False)
+    layout_tokens = [dict(index=i, text=m.group(), start=m.start(), end=m.end(), visible=True)
+                     for i, m in enumerate(moss_rank.WORD.finditer(prose))]
+    layout_maps = dict(width=2, height=1, prompt=prose, tokens=layout_tokens)
+    eligible = moss_rank.content_tokens(layout_maps)
+    assert [t['text'] for t in eligible] == ['Route', '517', 'café', 'cinematic', 'blue', 'flipped', 'visor', 'metal']
+    indices = {t['index'] for t in eligible}
+    cold = bytes(v for t in layout_tokens for v in ([255, 0] if t['index'] in indices else [0, 0]))
+    hot = bytes(v for t in layout_tokens for v in ([255, 0] if t['index'] in indices else [255, 255]))
+    assert moss_rank.rank(layout_maps, cold) == moss_rank.rank(layout_maps, hot)
+    assert moss_rank.content_tokens(dict(prompt='544', tokens=[dict(index=0, text='544', start=0, end=3, visible=True)]))
     # Repeated occurrences, split pieces and plurals must not crowd out distinct words.
     rank_words = ['flower', 'FLOWER', 'flowers', 'flower', 'orange', 'oranges', 'blue', 'green']
     rank_prompt = ' '.join(rank_words)

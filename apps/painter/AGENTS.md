@@ -188,6 +188,10 @@ The all-token reference and interactive viewer retain their token-based maps.
 The third column ranks up to four hot neighborhoods and focused tokens.
 `moss_rank.py` excludes punctuation and English function words using saved word
 spans (retaining content-word subpieces, labeled with their containing word).
+For compiled layouts, eligible maps must overlap descriptive string values:
+summary caption/meta/palette and item caption/text/tags/palette. JSON field names,
+region types, coordinates and other structural values are excluded from automatic
+rankings and nearby-token lists; ordinary prose retains meaningful numeric text.
 Hot-area labels maximize eligible-token
 mean within each neighborhood; focus ranks weighted RMS spread. Both panels
 deduplicate containing words, plurals and close spelling variants;
