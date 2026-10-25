@@ -140,7 +140,10 @@ def missing_reason(path):
 
 def missing_file(game):
     """The first file the game needs that isn't there, including absolute args."""
-    for path in [game["path"], *game.get("args", [])]:
+    paths = [game["path"], *game.get("args", [])]
+    if game["runner"] == "proton" and game.get("protonPath"):
+        paths.append(str(Path(game["protonPath"]) / "proton"))
+    for path in paths:
         if path.startswith("/") and not Path(path).exists():
             return path
     return None
@@ -174,7 +177,8 @@ def run(slug, mode=None):
     if game["runner"] == "proton":
         prefix = PREFIXES / slug
         prefix.mkdir(parents=True, exist_ok=True)
-        env.update(WINEPREFIX=str(prefix), PROTONPATH=str(PROTON),
+        # Some games need codecs shipped by a different Proton distribution.
+        env.update(WINEPREFIX=str(prefix), PROTONPATH=str(game.get("protonPath", PROTON)),
                    GAMEID="umu-default", STORE="none")
         import_registry(game, prefix, env)
         # umu sees start.exe as the executable; keep the actual game directory
