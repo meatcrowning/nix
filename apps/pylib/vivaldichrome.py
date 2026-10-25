@@ -264,7 +264,6 @@ def sidebar_bookmarks_css() -> str:
 }
 #browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField):has(.bookmark-bar) .toolbar-tabbar-before {
   anchor-name: --sidebar-address-toolbar;
-  margin-bottom: var(--sidebar-bookmarks-height);
 }
 #browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField) .bookmark-bar {
   position: absolute;
@@ -273,12 +272,44 @@ def sidebar_bookmarks_css() -> str:
   left: anchor(left);
   width: anchor-size(width);
   height: var(--sidebar-bookmarks-height);
+  anchor-name: --sidebar-bookmarks;
+  resize: vertical;
+  min-height: 60px;
+  max-height: 55vh;
+  border-bottom: 1px solid var(--colorBorder);
   margin: 0;
-  padding: 0;
+  padding: 0 0 16px;
   overflow: auto;
   overflow-x: hidden;
   container-type: inline-size;
   z-index: 2;
+}
+#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField) .bookmark-bar::-webkit-resizer {
+  background: repeating-linear-gradient(135deg, transparent 0 3px, var(--colorFgFaded) 3px 4px, transparent 4px 6px);
+  border: 3px solid var(--colorBg);
+  cursor: ns-resize;
+}
+/* The bookmark bar lives outside the tab container: use the viewport as
+   their shared containing block. Override Vivaldi's inline tab-height cap
+   so its ResizeObserver sees the space left by the user's resize. */
+#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField):has(.bookmark-bar) #tabs-container > .resize {
+  position: fixed;
+  position-anchor: --sidebar-bookmarks;
+  top: anchor(bottom);
+  left: anchor(left);
+  width: anchor-size(width);
+  bottom: anchor(--sidebar-tab-actions top);
+  height: auto !important;
+  max-height: none !important;
+  flex: none;
+}
+#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField):has(.bookmark-bar) .toolbar-tabbar-after {
+  margin-top: auto;
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  min-height: 37px;
+  anchor-name: --sidebar-tab-actions;
 }
 #browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField) .bookmark-bar .observer {
   flex: none;
