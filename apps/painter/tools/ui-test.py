@@ -5701,6 +5701,13 @@ def test_sidebar(win, ctl, tmp, shell=None):
         spin(120)
         check("coordinate fields respond to actual sidebar width " + str(ratio),
               fields.isVisible() == shown, (pane.width(), fields.width(), fields.isVisible()))
+        toolbar = by_name("layoutToolbar")
+        controls = [it for it in toolbar.childItems() if it.isVisible() and it.width() > 0]
+        check("region toolbar controls stay within the sidebar " + str(ratio),
+              bool(controls) and all(it.x() >= 0 and it.x() + it.width() <= toolbar.width() + 1
+                                     and it.y() + it.height() <= toolbar.height() + 1
+                                     for it in controls),
+              (toolbar.width(), toolbar.height()))
     ui = ctl.layoutEditor.editor
     def node_item(spec):
         return next(it for it in walk(editor) if it.property("spec") == spec)

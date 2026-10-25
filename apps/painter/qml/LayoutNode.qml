@@ -19,7 +19,8 @@ Item {
         anchors.fill: parent
         sourceComponent: {
             switch (node.spec.kind) {
-            case "row": case "toolbar": return rowComponent
+            case "row": return rowComponent
+            case "toolbar": return toolbarComponent
             case "compact": return compactComponent
             case "spacer": return spacerComponent
             case "column": case "page": case "inspector": return columnComponent
@@ -55,6 +56,38 @@ Item {
                         Layout.preferredHeight: item ? item.implicitHeight : 0
                         Layout.fillHeight: true
                     }
+                }
+            }
+        }
+    }
+    Component {
+        id: toolbarComponent
+        Flow {
+            id: toolbar
+            objectName: "layoutToolbar"
+            spacing: 2
+            // Coordinates are optional; actions wrap instead of forcing the
+            // sidebar wider than the space the user has given it.
+            readonly property real requestedWidth: {
+                var total = 0, count = 0
+                for (var i = 0; i < toolbarItems.count; ++i) {
+                    var child = toolbarItems.itemAt(i)
+                    if (!child || !child.modelData.shown || child.modelData.kind === "spacer") continue
+                    total += child.item ? child.item.implicitWidth : 0
+                    count++
+                }
+                return total + Math.max(0, count - 1) * spacing
+            }
+            Repeater {
+                id: toolbarItems
+                model: node.spec.nodes
+                Loader {
+                    required property QtObject modelData
+                    visible: modelData.shown && modelData.kind !== "spacer"
+                        && (modelData.kind !== "compact" || toolbar.width >= toolbar.requestedWidth)
+                    width: Math.min(toolbar.width, item ? item.implicitWidth : 0)
+                    height: item ? item.implicitHeight : 0
+                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
                 }
             }
         }
