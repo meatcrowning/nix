@@ -54,6 +54,14 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     assert lookup[0] == lookup[1] == lookup[2] and lookup[3] != lookup[0]
     assert moss_rank.word_label(lookup[0]) == 'ramshackle - tokens: [ram], [sh], [ackle]'
     assert moss_rank.word_label(lookup[4]) == 'warehouse - token: [warehouse]'
+    list_doc = dict(width=4, height=1, prompt='alpha beta gamma flat and', tokens=[
+        dict(index=i, text=word, visible=True) for i, word in enumerate(['alpha', 'beta', 'gamma', 'flat', 'and'])])
+    list_pixels = bytes([0,64,128,255, 0,32,64,127, 255,191,127,0, 128,128,128,128, 255,255,255,255])
+    all_words, related = moss_rank.association_lists(list_doc, list_pixels, [list_doc['tokens'][0]], bytes([0,0,0,255]))
+    assert [t['token']['text'] for t in all_words] == ['alpha', 'flat', 'beta', 'gamma']
+    assert all_words[0]['percentage'] == 100 and all_words[-1]['percentage'] == 0
+    assert [t['token']['text'] for t in related[0]] == ['beta']
+    assert 99 < related[0][0]['percentage'] <= 100
     # Numeric prose is meaningful; layout coordinates and JSON vocabulary are not.
     prose = json.dumps(dict(summary=dict(caption='Route 517 café', meta=['cinematic'], palette=['blue']),
                             items=[dict(label='character', caption='A "flipped" visor',
@@ -529,6 +537,12 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
             'red sphere - token: [red sphere]', 'red sphere - token: [red sphere]', 'Most focused tokens']
         assert len(json.loads(grid.text('PainterWordGrouping'))['selected']) == 2
         assert grid.text('PainterComparisonPrompt') == json.loads(compiled)['summary']['caption']
+        expanded = json.loads(grid.text('PainterExpandedLists'))
+        assert all(len(expanded[str(i)]['lines']) == 2 for i in range(1, 6))
+        panel_ranks = json.loads(grid.text('PainterRanking'))
+        for i, key in ((2, 'areas'), (5, 'focused')):
+            assert all(not moss_rank.duplicate_token(t['token'], panel_ranks[key]) for t in expanded[str(i)]['entries'])
+            assert all(0 <= t['percentage'] <= 100 for t in panel_ranks[key])
         # Original panel is unmodified; the thermal panel differs.
         title_height = int(grid.text('PainterTitleHeight'))
         assert grid.text('Title') == 'saved-moss — token association heatmaps'

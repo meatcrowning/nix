@@ -123,8 +123,8 @@ def duplicate_token(token, selected):
     return False
 
 
-def rank(document, pixels):
-    """Return separated hot neighborhoods and up to four compact token maps."""
+def rank(document, pixels, limit=4):
+    """Return unique spatial rankings; None keeps all entries for fitted headers."""
     w, h = document['width'], document['height']
     area = w * h
     tokens = content_tokens(document)
@@ -150,9 +150,10 @@ def rank(document, pixels):
         # Skip the neighborhood rather than mislabel it with a weaker runner-up.
         if duplicate_token(tokens[best], hot):
             continue
+        association = sum(planes[best][i] for i in cells) / (255*len(cells))
         hot.append(dict(score=score, x=x, y=y, side=side, token=dict(tokens[best]),
-                        association=sum(planes[best][i] for i in cells) / (255*len(cells))))
-        if len(hot) == 4:
+                        association=association, percentage=association*100))
+        if limit is not None and len(hot) == limit:
             break
     focused = []
     for token, plane in zip(tokens, planes):
@@ -163,12 +164,51 @@ def rank(document, pixels):
         x = sum(v*(i % w) for i, v in enumerate(weights)) / total
         y = sum(v*(i // w) for i, v in enumerate(weights)) / total
         spread = math.sqrt(sum(v*((i % w-x)**2 + (i // w-y)**2) for i, v in enumerate(weights)) / total)
-        focused.append(dict(radius=spread, x=x, y=y, token=dict(token)))
+        focused.append(dict(radius=spread, x=x, y=y, token=dict(token),
+                            percentage=spread/math.hypot(w, h)*100))
     focused.sort(key=lambda item: (item['radius'], item['token']['index']))
     unique = []
     for item in focused:
         if not duplicate_token(item['token'], unique):
             unique.append(item)
-            if len(unique) == 4:
+            if limit is not None and len(unique) == limit:
                 break
     return dict(areas=hot, focused=unique)
+
+
+def unique_entries(entries, exclude=()):
+    selected, result = list(exclude), []
+    for entry in entries:
+        if not duplicate_token(entry['token'], selected):
+            result.append(entry)
+            selected.append(entry)
+    return result
+
+
+def association_lists(document, pixels, selected, aggregate):
+    """Rank eligible words by combined-map strength and selected-map correlation."""
+    area = document['width'] * document['height']
+    tokens = content_tokens(document)
+    planes = {t['index']: pixels[t['index']*area:(t['index']+1)*area] for t in tokens}
+    weight = sum(aggregate)
+    all_tokens = [dict(token=t, percentage=sum(a*b for a, b in zip(planes[t['index']], aggregate)) /
+                       (255*weight)*100 if weight else 0) for t in tokens]
+    all_tokens.sort(key=lambda item: (-item['percentage'], item['token']['index']))
+    related = []
+    for choice in selected:
+        plane = pixels[choice['index']*area:(choice['index']+1)*area]
+        mean = sum(plane)/area
+        centered = [v-mean for v in plane]
+        norm = math.sqrt(sum(v*v for v in centered))
+        entries = []
+        for token in tokens:
+            candidate = planes[token['index']]
+            mean = sum(candidate)/area
+            values = [v-mean for v in candidate]
+            denominator = norm*math.sqrt(sum(v*v for v in values))
+            score = sum(a*b for a, b in zip(centered, values))/denominator if denominator else 0
+            if score > 0:
+                entries.append(dict(token=token, percentage=min(100, score*100)))
+        entries.sort(key=lambda item: (-item['percentage'], item['token']['index']))
+        related.append(unique_entries(entries, [dict(token=choice)]))
+    return unique_entries(all_tokens), related

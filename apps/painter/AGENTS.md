@@ -183,6 +183,13 @@ Original/all-token panels precede the two picked maps; source resolution is kept
 A title row uses the saved output’s model name and “token association heatmaps.”
 The Original output header includes two smaller truncated lines of the saved scene
 prompt; its full text is retained in `PainterComparisonPrompt` PNG metadata.
+Other headers fit two small lines of scored eligible words. Ranked headers omit
+words annotated on their panel; selected-map headers rank positive Pearson spatial
+correlation, and All tokens ranks word-map means weighted by its displayed aggregate.
+Area labels show local association percentages; focused labels show RMS radius as
+a percentage of map diagonal (lower is tighter). Over-image percentages use half
+the word-label font size. `PainterExpandedLists` records displayed entries and score
+definitions; these are relative map measurements, not probabilities or semantic similarity.
 Exports average saved token planes per word occurrence for picked maps and both
 ranked panels. Picked headers list the word and its pieces with singular “token”
 or plural “tokens”; `PainterWordGrouping` preserves source indices and offsets.

@@ -78,20 +78,59 @@ def ranked_masks(data, ranking):
     return hot, focus
 
 
+def ranked_header(painter, rect, label, entries, font, padding):
+    """Fit complete scored words in two small lines beside the panel title."""
+    metrics = QFontMetrics(font)
+    painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft,
+                     metrics.elidedText(label, Qt.ElideRight, max(0, rect.width())))
+    remaining = rect.adjusted(metrics.horizontalAdvance(label)+padding, 0, 0, 0)
+    small = QFont(font)
+    small.setPixelSize(max(10, round(font.pixelSize()*.55)))
+    metrics = QFontMetrics(small)
+    lines, shown, line = ['', ''], [], 0
+    for entry in entries:
+        text = '%s %.1f%%' % (entry['token']['text'], entry['percentage'])
+        proposed = (lines[line]+' · ' if lines[line] else '')+text
+        if metrics.horizontalAdvance(proposed) > remaining.width():
+            line += 1
+            if line >= 2:
+                break
+            proposed = text
+        if metrics.horizontalAdvance(proposed) > remaining.width():
+            break
+        lines[line] = proposed
+        shown.append(entry)
+    painter.save()
+    painter.setFont(small)
+    y = remaining.y()+(remaining.height()-2*metrics.height())//2
+    for text in lines:
+        painter.drawText(QRect(remaining.x(), y, max(0, remaining.width()), metrics.height()),
+                         Qt.AlignVCenter | Qt.AlignLeft, text)
+        y += metrics.height()
+    painter.restore()
+    return dict(title=label, lines=lines, entries=shown)
+
+
 def annotations(painter, rect, ranking, doc, font, padding, focused=False):
-    """Token labels only; ranking methodology stays in PNG metadata."""
+    """Word labels with half-size percentages; methods stay in PNG metadata."""
     painter.save()
     painter.setClipRect(rect)
     small = QFont(font)
     small.setPixelSize(max(12, round(font.pixelSize() * .8)))
     painter.setFont(small)
     metrics = QFontMetrics(small)
+    percent_font = QFont(small)
+    percent_font.setPixelSize(max(1, round(small.pixelSize()*.5)))
+    percent_metrics = QFontMetrics(percent_font)
     for i, item in enumerate(ranking):
         color = QColor(COLORS[i])
         cx = rect.x() + (item['x'] + .5) * rect.width() / doc['width']
         cy = rect.y() + (item['y'] + .5) * rect.height() / doc['height']
         label = item['token'].get('display', item['token']['text'].strip().replace('\n', '↵'))
-        label_width = min(rect.width() - 2*padding, metrics.horizontalAdvance(label) + padding*2)
+        percent = '%.1f%%' % item['percentage']
+        percent_width = percent_metrics.horizontalAdvance(percent)
+        space = metrics.horizontalAdvance(' ')
+        label_width = min(rect.width() - 2*padding, metrics.horizontalAdvance(label) + space + percent_width + padding*2)
         label_height = metrics.height() + padding
         painter.setPen(QPen(color, max(2, rect.width()/450)))
         painter.setBrush(Qt.NoBrush)
@@ -110,8 +149,12 @@ def annotations(painter, rect, ranking, doc, font, padding, focused=False):
             box = QRect(bx, by, label_width, label_height)
         painter.fillRect(box, QColor('#e615191f'))
         painter.setPen(color)
-        painter.drawText(box.adjusted(padding//2, 0, -padding//2, 0), Qt.AlignVCenter | Qt.AlignLeft,
-                         metrics.elidedText(label, Qt.ElideRight, max(0, label_width-padding)))
+        label = metrics.elidedText(label, Qt.ElideRight, max(0, label_width-padding-space-percent_width))
+        baseline = box.y()+(box.height()-metrics.height())/2+metrics.ascent()
+        painter.setFont(small)
+        painter.drawText(QPointF(box.x()+padding//2, baseline), label)
+        painter.setFont(percent_font)
+        painter.drawText(QPointF(box.x()+padding//2+metrics.horizontalAdvance(label)+space, baseline), percent)
     painter.restore()
 
 
@@ -160,7 +203,13 @@ def save_grid(source, data, tokens, folder):
     gap = padding
     words, lookup = moss_rank.word_maps(*data)
     selected = [lookup[token['index']] for token in tokens]
-    ranking = moss_rank.rank(*words)
+    full_ranking = moss_rank.rank(*words, limit=None)
+    ranking = {key: items[:4] for key, items in full_ranking.items()}
+    all_tokens, related = moss_rank.association_lists(*words, selected, data[0]['_aggregate'])
+    lists = {1: all_tokens, 2: moss_rank.unique_entries(full_ranking['areas'], ranking['areas']),
+             3: related[0], 4: related[1],
+             5: moss_rank.unique_entries(full_ranking['focused'], ranking['focused'])}
+    expanded = {}
     hot, focus = ranked_masks(words, ranking)
     canvas = QImage(width * 3 + gap * 4, (height + header) * 2 + gap * 3, QImage.Format_RGB32)
     if canvas.isNull():
@@ -183,8 +232,7 @@ def save_grid(source, data, tokens, folder):
             if i == 0:
                 original_header(painter, heading, scene_prompt(data[0]), font, padding)
             else:
-                painter.drawText(heading, Qt.AlignVCenter | Qt.AlignLeft,
-                                 metrics.elidedText(label, Qt.ElideRight, max(0, width - padding * 2)))
+                expanded[str(i)] = ranked_header(painter, heading, label, lists[i], font, padding)
             rect = QRect(x, y + header, width, height)
             painter.drawImage(rect, original)
             if not mask.isNull():
@@ -200,6 +248,12 @@ def save_grid(source, data, tokens, folder):
     # Keep full labels, token identities, scores and methods off the artwork.
     canvas.setText('Description', '\n'.join(labels))
     canvas.setText('PainterComparisonPrompt', scene_prompt(data[0]))
+    expanded['method'] = ('Eligible whole words; duplicate and close variants omitted. Ranked headers exclude words '
+        'annotated on their panel. Area percentages: local mean saved normalized association. Focus percentages: '
+        'weighted RMS radius divided by map diagonal; lower is more focused. Related percentages: positive Pearson '
+        'spatial correlation, not semantic or causal relatedness. All-token percentages: word-map mean weighted '
+        'by displayed all-token map intensity. Not confidence or absolute activity. Two lines of complete entries.')
+    canvas.setText('PainterExpandedLists', json.dumps(expanded, ensure_ascii=False))
     canvas.setText('PainterWordGrouping', json.dumps(dict(source=str(source), selected=selected,
         words=words[0]['tokens'], method='Mean of saved normalized token planes per word occurrence; '
         'original all-token reference retained. No additional per-word contrast stretch.'), ensure_ascii=False))
