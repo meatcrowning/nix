@@ -178,7 +178,7 @@ in
           {
             name = "org.kde.plasma.kickoff";
             config.General = {
-              icon = "launcher-kde-symbolic";
+              icon = "start-here-kde";
               systemFavorites = "suspend,hibernate,reboot,shutdown";
             };
           }

@@ -1,7 +1,6 @@
-// Kickoff itself has no popup-position setting. On this desktop its panel
-// anchor is (0, 22), which is inside the left 42px panel. Plasma exposes this
-// as its only PopupMenu surface at that exact top-left anchor. Keep the popup
-// at its client-selected size and move only its frame into the usable area.
+// Kickoff has no popup-position setting. Its top-left panel anchor can be
+// above or inside the left panel. Keep its client-selected size and move
+// only the frame clear of both panels, including the top-edge shadow.
 
 const TOP_PANEL_HEIGHT = 22;
 const LEFT_PANEL_WIDTH = 42;
@@ -10,10 +9,10 @@ const POPUP_MENU = 18;
 
 function moveKickoffPopup(window) {
     const frame = window.frameGeometry;
-    if (window.resourceClass !== "org.kde.plasmashell"
+    if (!["plasmashell", "org.kde.plasmashell"].includes(window.resourceClass)
         || window.windowType !== POPUP_MENU
         || (frame.x !== 0 && frame.x !== LEFT_PANEL_WIDTH)
-        || frame.y !== TOP_PANEL_HEIGHT) {
+        || frame.y < 0 || frame.y >= TOP_PANEL_HEIGHT + TOP_PANEL_GAP) {
         return;
     }
 
