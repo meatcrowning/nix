@@ -6,6 +6,10 @@ import "../../qmlcommon"
 Rectangle {
     id: box
     property var tokenBoundaries: []
+    property bool tokenMarksReady: false
+    readonly property var tokenStyle: typeof App.inspection !== "undefined" && App.inspection
+        ? App.inspection.tokenStyle(input.color.toString(), box.color.toString(), input.selectionColor.toString())
+        : ({bands: [], separator: "transparent"})
     property string placeholder: ""
     property bool negative: false
     property bool pillMode: false
@@ -372,6 +376,13 @@ Rectangle {
             // editable text item, so this one surface leads at Qt's rounded
             // 16px rather than kitty's 15px cell; that is an accepted loss and
             // NOT an invitation to re-add these two lines.
+            TokenBands {
+                editor: input
+                viewport: flick
+                boundaries: box.tokenBoundaries
+                colours: box.tokenStyle.bands
+                marked: box.tokenMarksReady
+            }
             Repeater {
                 model: box.tokenBoundaries
                 Rectangle {
@@ -385,8 +396,7 @@ Rectangle {
                     y: mark.y + 2
                     width: 1
                     height: Math.max(1, mark.height - 4)
-                    color: Theme.textDim
-                    opacity: 0.45
+                    color: box.tokenStyle.separator
                 }
             }
             selectByMouse: true
@@ -502,6 +512,11 @@ Rectangle {
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.RightButton
+                hoverEnabled: box.tokenMarksReady && !box.negative
+                onPositionChanged: function(m) {
+                    if (containsMouse && !box.negative && typeof App.inspection !== "undefined" && App.inspection)
+                        App.inspection.hoverPrompt(input.text, input.positionAt(m.x, m.y))
+                }
                 onPressed: function (m) {
                     // A right-click puts the keyboard in this box, exactly as a
                     // left-click does. The menu takes the focus while it is open

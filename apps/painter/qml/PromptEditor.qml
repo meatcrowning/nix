@@ -78,6 +78,7 @@ Panel {
     PromptBox {
         id: positive
         tokenBoundaries: positiveTokens.boundaries
+        tokenMarksReady: positiveTokens.count >= 0
         width: parent.width
         // Completion can assist mixed prose/tag prompts without changing
         // the family's generation-time text transform.
@@ -115,6 +116,7 @@ Panel {
     PromptBox {
         id: negative
         tokenBoundaries: negativeTokens.boundaries
+        tokenMarksReady: negativeTokens.count >= 0
         width: parent.width
         // The negative is tags too — `lowres, worst quality` — so it completes
         // on the same families the positive does.

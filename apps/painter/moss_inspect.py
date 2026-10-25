@@ -27,6 +27,8 @@ class MossInspect(QObject):
         self._data = None
         self._path = self._overlay = self._error = ''
         self._tokens = []
+        self._selected = -1
+        self._viewing = False
         self._future = None
         self._cache = tempfile.TemporaryDirectory(prefix='painter-heatmaps-')
         self._loaded.connect(self._accept)
@@ -37,6 +39,11 @@ class MossInspect(QObject):
         self._closed = True
         self._pool.shutdown(wait=True, cancel_futures=True)
         self._cache.cleanup()
+
+    @Slot(str, str, str, result='QVariantMap')
+    def tokenStyle(self, text, background, selection):
+        from token_style import colours
+        return colours(*(QColor(value).getRgb()[:3] for value in (text, background, selection)))
 
     @Slot(str, str)
     def tokenize(self, identity, text):
@@ -68,6 +75,59 @@ class MossInspect(QObject):
     def tokens(self):
         return self._tokens
 
+    @Property(int, notify=changed)
+    def selected(self):
+        return self._selected
+
+    @Slot(bool)
+    def setViewing(self, viewing):
+        self._viewing = viewing
+        if viewing and self.available and self._selected < 0:
+            self.select(0)
+
+    @Slot(str, int)
+    def hoverPrompt(self, text, position):
+        # QML offsets are UTF-16. GTK converts its character offsets before
+        # sending them. Never apply current draft positions to another prompt.
+        if not self._viewing or not self._data:
+            return
+        saved = self._data[0].get('prompt', '')
+        if text.strip() != saved.strip():
+            return
+        position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
+        position += (len(saved) - len(saved.lstrip())) - (len(text) - len(text.lstrip()))
+        for index, token in enumerate(self._tokens):
+            if token.get('start', -1) <= position < token.get('end', -1):
+                self.select(index)
+                break
+
+    def bind_toolbar(self, shell, root):
+        from PySide6.QtWidgets import QComboBox
+        combo = QComboBox(shell.window)
+        combo.setObjectName('heatmapTokens')
+        combo.setAccessibleName('Prompt token heatmap')
+        combo.setMinimumContentsLength(12)
+        combo.setMaximumWidth(260)
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.activated.connect(self.select)
+        labels = []
+        def refresh():
+            current = [token['label'] for token in self.tokens]
+            combo.blockSignals(True)
+            if current != labels:
+                combo.clear()
+                combo.addItems(current)
+                labels[:] = current
+            combo.setCurrentIndex(self.selected)
+            combo.blockSignals(False)
+            combo.setVisible(bool(root.property('showHeatmap')))
+            combo.setEnabled(self.available)
+        shell.toolbar_widget('main', combo)
+        self.changed.connect(refresh)
+        root.showHeatmapChanged.connect(refresh)
+        refresh()
+        return combo
+
     @Property(str, notify=changed)
     def overlay(self):
         return QUrl.fromLocalFile(self._overlay).toString() if self._overlay else ''
@@ -87,6 +147,7 @@ class MossInspect(QObject):
         if self._overlay:
             Path(self._overlay).unlink(missing_ok=True)
         self._path, self._data, self._tokens, self._overlay, self._error = path, None, [], '', ''
+        self._selected = -1
         self.changed.emit()
         if self._future:
             self._future.cancel()
@@ -107,9 +168,12 @@ class MossInspect(QObject):
             self._error = value
         elif value:
             self._data = value
-            self._tokens = [dict(t, label='%d · %s' % (t['index'] + 1, t['text'].replace('\n', '↵')))
-                            for t in value[0]['tokens'] if t['visible']]
+            visible = [t for t in value[0]['tokens'] if t['visible']]
+            self._tokens = [dict(t, label='%d · %s' % (i + 1, t['text'].replace('\n', '↵')))
+                            for i, t in enumerate(visible)]
         self.changed.emit()
+        if self._viewing and self.available:
+            self.select(0)
 
     @Slot(int)
     def select(self, index):
@@ -117,6 +181,10 @@ class MossInspect(QObject):
             return
         if not self._data or not (0 <= index < len(self._tokens)):
             return
+        if index == self._selected:
+            return
+        self._selected = index
+        self.changed.emit()
         self._render_serial += 1
         serial = self._render_serial
         doc, pixels = self._data

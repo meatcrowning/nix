@@ -86,7 +86,7 @@ Column {
         PixelText {
             objectName: writer.scope + "TokenCount"
             visible: writer.tokenProbe !== null && writer.tokenProbe.active
-            text: writer.tokenProbe && writer.tokenProbe.count >= 0 ? writer.tokenProbe.count + " tokens" : "— tokens"
+            text: writer.tokenProbe && writer.tokenProbe.count >= 0 ? writer.tokenProbe.count + " tok" : "— tok"
             ToolTip.visible: tokenHover.containsMouse
             ToolTip.text: writer.tokenProbe ? writer.tokenProbe.tip : ""
             MouseArea { id: tokenHover; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }

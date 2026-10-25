@@ -168,6 +168,14 @@ class Window(Gtk.Window, ParameterForm):
                 button.set_tooltip_text('Stop after this step and decode; right-click for Hard stop')
             toolbar.insert(button, -1)
             self.actions.setdefault(key, []).append(button)
+        self.heatmap_open = False
+        self.heatmap_tokens = Gtk.ComboBoxText()
+        self.heatmap_tokens.connect('changed', self.select_heatmap)
+        self.heatmap_tokens.get_accessible().set_name('Prompt token heatmap')
+        self.heatmap_picker = Gtk.ToolItem()
+        self.heatmap_picker.set_no_show_all(True)
+        self.heatmap_picker.add(self.heatmap_tokens)
+        toolbar.insert(self.heatmap_picker, -1)
         outer.pack_start(toolbar, False, False, 0)
         self.info = Gtk.InfoBar()
         self.info.set_no_show_all(True)
@@ -229,16 +237,9 @@ class Window(Gtk.Window, ParameterForm):
         self.pages.connect_after('switch-page', self.page_switched)
         self.viewer = ImageView(self.message, lambda: self.send('playback'))
         self.viewer.events.connect('button-press-event', self.preview_menu)
-        self.heatmap_open = False
         self.heatmap_key = None
-        self.heatmap_row = Gtk.Box(spacing=6)
-        self.heatmap_row.set_no_show_all(True)
-        self.heatmap_row.pack_start(label('Token associations · experimental'), False, False, 0)
-        self.heatmap_tokens = Gtk.ComboBoxText()
-        self.heatmap_tokens.connect('changed', self.select_heatmap)
-        self.heatmap_row.pack_start(self.heatmap_tokens, True, True, 0)
-        self.viewer.pack_start(self.heatmap_row, False, False, 0)
-        self.viewer.reorder_child(self.heatmap_row, 0)
+        self.heatmap_labels = []
+        self.syncing_heatmap = False
         self.picture = self.viewer.picture
         self.preview_box.pack_start(self.viewer, True, True, 0)
         self.history_tally = 'Loading outputs…'
@@ -405,29 +406,53 @@ class Window(Gtk.Window, ParameterForm):
         return False
 
     def toggle_heatmap(self):
+        if getattr(self, 'syncing_heatmap_toggle', False):
+            return
         self.heatmap_open = not self.heatmap_open
-        self.heatmap_row.set_visible(self.heatmap_open)
+        self.send('heatmap_viewing', viewing=self.heatmap_open)
+        self.heatmap_picker.set_visible(self.heatmap_open)
+        self.syncing_heatmap_toggle = True
         for widget in self.actions.get('heatmap', []):
             widget.set_active(self.heatmap_open)
+        self.syncing_heatmap_toggle = False
         if self.heatmap_open:
-            self.heatmap_row.show_all()
-            self.heatmap_tokens.remove_all()
-            for token in self.state.get('heatmap', {}).get('tokens', []):
-                self.heatmap_tokens.append_text(token['label'])
-            self.heatmap_tokens.set_active(0)
+            self.heatmap_picker.show_all()
+            self.browse()  # the same viewer, with its history grid available
+            self.update_heatmap()
         else:
             self.heatmap_key = None
-            self.viewer.load(self.selection, self.state.get('media', {}).get('before', ''))
+            row = self.selection_row or {}
+            self.viewer.load('' if row.get('live') or row.get('is_video') else self.selection,
+                             self.state.get('media', {}).get('before', ''),
+                             video=bool(row.get('is_video') and not row.get('live')))
+
+    def update_heatmap(self):
+        heatmap = self.state.get('heatmap', {})
+        labels = [t['label'] for t in heatmap.get('tokens', [])]
+        self.syncing_heatmap = True
+        if labels != self.heatmap_labels:
+            self.heatmap_tokens.remove_all()
+            for text in labels:
+                self.heatmap_tokens.append_text(text)
+            self.heatmap_labels = labels
+        self.heatmap_tokens.set_active(heatmap.get('selected', -1))
+        self.heatmap_tokens.set_sensitive(bool(heatmap.get('available')) and heatmap.get('path') == self.selection)
+        self.syncing_heatmap = False
+        overlay = heatmap.get('overlay', '')
+        if (self.heatmap_open and heatmap.get('path') == self.selection
+                and overlay and overlay != self.heatmap_key):
+            self.heatmap_key = overlay
+            self.viewer.load(local_path(overlay))
 
     def select_heatmap(self, *_):
         index = self.heatmap_tokens.get_active()
-        if self.heatmap_open and index >= 0:
+        if self.heatmap_open and not self.syncing_heatmap and index >= 0:
             self.send('heatmap_select', path=self.selection, index=index)
 
     def receive(self, op, reply):
         if self.closing:
             return False
-        if op in ('moss_tokenize', 'heatmap_select'):
+        if op in ('moss_tokenize', 'heatmap_select', 'heatmap_hover', 'heatmap_viewing'):
             return False
         if op == 'compare_params':
             if reply.get('ok'):
@@ -474,12 +499,7 @@ class Window(Gtk.Window, ParameterForm):
         self.apply_parameter_state(state, old)
         for marks in self.token_marks:
             marks.update(state)
-        heatmap = state.get('heatmap', {})
-        overlay = heatmap.get('overlay', '')
-        if (self.heatmap_open and heatmap.get('path') == self.selection
-                and overlay and overlay != self.heatmap_key):
-            self.heatmap_key = overlay
-            self.viewer.load(local_path(overlay))
+        self.update_heatmap()
         if not self.heights_loaded:
             self.sampling.set_expanded(state.get('samplingExpanded', True))
             self.browse_pane.set_position(state['previewWidth'])
@@ -528,7 +548,9 @@ class Window(Gtk.Window, ParameterForm):
 
 
     def receive_media(self, media):
-        if self.heatmap_open:
+        heatmap = self.state.get('heatmap', {})
+        if (self.heatmap_open and heatmap.get('available')
+                and heatmap.get('path') == self.selection):
             return
         if media['path'] == self.selection:
             if media['before'] and self.viewer.path and self.viewer.path[1] != media['before']:
@@ -565,7 +587,7 @@ class Window(Gtk.Window, ParameterForm):
                 enabled = enabled and bool(self.state.get('busy') or self.state.get('queue'))
             elif key == 'heatmap':
                 heatmap = self.state.get('heatmap', {})
-                enabled = enabled and heatmap.get('available', False) and heatmap.get('path') == self.selection
+                enabled = self.heatmap_open or (enabled and heatmap.get('available', False) and heatmap.get('path') == self.selection)
             elif key == 'compare_params':
                 enabled = self.compare_open or (enabled and bool(self.selection and not self.selection.startswith('live://')))
             elif key in ('restore', 'open', 'preview', 'zoom_in', 'zoom_out', 'fit', 'actual', 'older', 'newer'):
@@ -828,8 +850,7 @@ class Window(Gtk.Window, ParameterForm):
         items = self.gallery.get_selected_items()
         path = self.tiles[items[0]][2] if items else ''
         if path != self.selection:
-            if self.heatmap_open:
-                self.toggle_heatmap()
+            self.heatmap_key = None
             self.selection = path
             self.frame_tick = ''
             row = self.selection_row = next((r for r in self.state['gallery'] if r['path'] == path), {})

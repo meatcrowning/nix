@@ -91,7 +91,7 @@ class ParameterForm(object):
             count = label("")
             header.pack_end(count, False, False, 0)
             from moss_gtk import TokenMarks
-            self.token_marks.append(TokenMarks(text, count, self.send))
+            self.token_marks.append(TokenMarks(text, count, self.send, hover=key == 'positive'))
             box.pack_start(editor, False, False, 0)
             params.pack_start(box, False, False, 0)
             self.controls[key] = text

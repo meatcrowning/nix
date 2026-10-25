@@ -318,6 +318,12 @@ class Engine:
                 raise ValueError('Prompt is too long')
             c.inspection.tokenize(identity, text)
             return {}
+        if op == 'heatmap_viewing':
+            c.inspection.setViewing(bool(request.get('viewing')))
+            return {}
+        if op == 'heatmap_hover':
+            c.inspection.hoverPrompt(request['text'], int(request['position']))
+            return {}
         if op == 'heatmap_select':
             if request.get('path') == self.view_path:
                 c.inspection.select(int(request['index']))
@@ -498,7 +504,7 @@ class Engine:
                     media=self.media(request), replacement=self.replacement,
                     tokenResults=self.token_results,
                     heatmap=dict(path=self.view_path, available=c.inspection.available,
-                                 tokens=c.inspection.tokens, overlay=c.inspection.overlay),
+                                 tokens=c.inspection.tokens, overlay=c.inspection.overlay, selected=c.inspection.selected),
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,
                     queue=c.queue, elapsed=c.elapsed, rate=c.rate, messages=messages,

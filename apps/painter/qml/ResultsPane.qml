@@ -7,7 +7,8 @@ Item {
 
     property Item app
     readonly property bool plasma: app ? app.plasma : false
-    readonly property bool sideBySide: plasma && preview.open
+    readonly property bool heatmap: app ? app.showHeatmap : false
+    readonly property bool sideBySide: (plasma && preview.open) || heatmap
     readonly property int inset: root.width < 320 ? 4 : 10
     property real historyWidth: Prefs.get("plasma.historyWidth") > 0
                                 ? Prefs.get("plasma.historyWidth") : 300
@@ -94,7 +95,7 @@ Item {
     OutputView {
         id: outputView
         anchors.left: parent.left
-        anchors.right: parent.right
+        anchors.right: root.heatmap ? historyDivider.left : parent.right
         anchors.top: preview.visible ? preview.bottom : parent.top
         anchors.bottom: parent.bottom
         anchors.margins: root.width < 320 ? 4 : 10
@@ -104,6 +105,15 @@ Item {
         isVideo: root.viewIsVideo
         compare: root.app ? root.app.showCompare : true
         onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
+    }
+
+    HeatmapPane {
+        parent: root.inView ? outputView : preview
+        anchors.fill: parent
+        visible: root.heatmap && service !== null && service.available
+        service: root.app ? root.app.inspection : null
+        nativeToolbar: root.plasma
+        onToggled: root.app.showHeatmap = !root.app.showHeatmap
     }
 
     MouseArea {
@@ -134,7 +144,7 @@ Item {
 
     GalleryView {
         id: galleryView
-        visible: !root.inView
+        visible: !root.inView || root.heatmap
         // 0 = automatic, the width-driven default; see Root's `gridColumns`.
         columns: root.app ? root.app.gridColumns : 0
         anchors.left: root.sideBySide ? historyDivider.right : parent.left

@@ -628,24 +628,14 @@ Item {
     readonly property string inspectionPath: root.inView ? root.selOne
         : (results.preview.open && !results.preview.showLive ? results.preview.source : "")
     property bool showHeatmap: false
-    onShowHeatmapChanged: pushButtons()
-    onInspectionPathChanged: {
-        showHeatmap = false
-        if (inspection) inspection.load(inspectionPath)
+    onShowHeatmapChanged: {
+        if (inspection) inspection.setViewing(showHeatmap)
+        pushButtons()
     }
+    onInspectionPathChanged: if (inspection) inspection.load(inspectionPath)
     Connections {
         target: root.inspection
         function onChanged() { root.pushButtons() }
-    }
-    HeatmapPane {
-        visible: root.showHeatmap && root.inspection !== null && root.inspection.available
-        z: 31
-        x: results.x
-        y: results.y
-        width: results.width
-        height: results.height
-        service: root.inspection
-        onClosed: root.showHeatmap = false
     }
 
     property bool showParameterCompare: false
@@ -857,7 +847,7 @@ Item {
           checkable: true, state: root.showParameterCompare ? 1 : root.selOne !== "" ? 0 : 2 },
         { id: "heatmap", label: "map", tip: "Token Heatmap", menu: "view",
           icon: "view-preview", bar: true, barText: "Heatmap", tb: true, checkable: true,
-          state: root.inspection && root.inspection.available ? (root.showHeatmap ? 1 : 0) : 2 },
+          state: root.showHeatmap ? 1 : root.inspection && root.inspection.available ? 0 : 2 },
         { id: "injprompt", tip: "Reuse Prompt", menu: "edit",
           state: root.selParams ? 0 : 2 },
         { id: "injparams", tip: "Reuse Parameters", menu: "edit",

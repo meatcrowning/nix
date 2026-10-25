@@ -3118,6 +3118,7 @@ def main():
         # The filter field at the right-hand end of the toolbar, where every KDE
         # program keeps one. It filters the gallery by filename and prompt.
         # Keep the four primary actions at the left of a full-width toolbar.
+        ctl.inspection.bind_toolbar(shell, shell.root)
         shell.toolbar_search(ctl.gallery.setFilter, placeholder="Filter outputs")
         # The window is how the controller knows whether he is watching: a batch
         # that finishes behind a rolled-up or unfocused painter says so with a
