@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import "../../qmlcommon"
 
 // Shared results scene: Plasma places history beside the preview.
@@ -116,7 +115,8 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         width: 8
-        cursorShape: Qt.SizeHorCursor
+        hoverEnabled: true
+        cursorShape: Qt.SplitHCursor
         preventStealing: true
         property real startX: 0
         property real startWidth: 0
@@ -130,35 +130,6 @@ Item {
                     startWidth - (mapToItem(root, m.x, m.y).x - startX)))
         }
         onReleased: Prefs.set("plasma.historyWidth", root.historyWidth)
-        Rectangle {
-            anchors.centerIn: parent
-            width: 1
-            height: parent.height
-            color: Theme.dim
-        }
-    }
-
-    Row {
-        id: historyControls
-        visible: root.plasma && !root.inView
-        anchors.left: galleryView.left
-        anchors.right: galleryView.right
-        anchors.top: parent.top
-        spacing: 6
-        height: visible ? columnPicker.implicitHeight : 0
-        Label {
-            id: columnsLabel
-            text: "Columns:"
-            anchors.verticalCenter: parent.verticalCenter
-        }
-        ComboBox {
-            id: columnPicker
-            objectName: "historyColumns"
-            width: Math.max(0, parent.width - columnsLabel.width - parent.spacing)
-            model: ["Automatic", "1", "2", "3", "4", "5", "6"]
-            currentIndex: root.app ? root.app.gridColumns : 0
-            onActivated: function(index) { if (root.app) root.app.gridColumns = index }
-        }
     }
 
     GalleryView {
@@ -168,14 +139,14 @@ Item {
         columns: root.app ? root.app.gridColumns : 0
         anchors.left: root.sideBySide ? historyDivider.right : parent.left
         anchors.right: parent.right
-        anchors.top: root.plasma ? historyControls.bottom : (preview.visible ? preview.bottom : parent.top)
+        anchors.top: !root.sideBySide && preview.visible ? preview.bottom : parent.top
         anchors.bottom: parent.bottom
         anchors.margins: root.inset
         anchors.leftMargin: root.sideBySide ? 0 : root.inset
         // FLUSH WITH THE CHROME when there is no preview above it: the grid's
         // own top gap read as a band of nothing between the toolbar and the
         // outputs, and there is nothing for it to separate.
-        anchors.topMargin: root.plasma || preview.visible ? 8 : 0
+        anchors.topMargin: !root.sideBySide && preview.visible ? 8 : 0
         // ...and flush with the status bar at the other end. The hint line sits
         // at the bottom of this view (GalleryView), so a margin under it is a
         // band of view background with nothing in it.

@@ -5821,14 +5821,13 @@ def test_sidebar(win, ctl, tmp, shell=None):
         check("narrow view clears the full-width toolbar", toolbar_fits())
 
 
-def test_history_layout(win, ctl, tmp):
+def test_history_layout(win, ctl, tmp, shell):
     from PySide6.QtCore import Q_ARG
     from PySide6.QtQml import qmlContext
     content = win.contentItem()
     results = find(content, "ResultsPane")
     preview = find(content, "PreviewPane")
     gallery = find(content, "GalleryView")
-    picker = next(it for it in walk(content) if it.objectName() == "historyColumns")
     divider = next(it for it in walk(content) if it.objectName() == "historySplitHandle")
     prefs = qmlContext(APP).contextProperty("Prefs")
     APP.setProperty("showPreview", True)
@@ -5836,15 +5835,21 @@ def test_history_layout(win, ctl, tmp):
     check("Plasma history sits to the right of the full-height preview",
           gallery.x() > preview.x() + preview.width()
           and abs(preview.height() - results.height() + 10) < 2)
-    check("history exposes native columns control", picker.isVisible())
-    picker.metaObject().invokeMethod(picker, "activated", Q_ARG("int", 3))
+    check("history starts at the top without an inline column control",
+          gallery.y() == 0 and not any(it.objectName() == "historyColumns" for it in walk(content)))
+    menu_actions = shell.window.menuBar().actions()
+    menu = next(action.menu() for action in menu_actions
+                if action.text().replace("&", "") == "View")
+    check("column count is exposed in the native View menu",
+          shell._actions["cols3"] in menu.actions())
+    shell._actions["cols3"].trigger()
     spin(100)
     grid = find(gallery, "KineticGridView")
-    check("column picker changes and saves the grid count",
+    check("native menu changes and saves the grid count",
           prop(grid, "cols") == 3 and prefs.get("gridColumns") == 3)
     APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "cols2"))
     spin(100)
-    check("menu column changes reach the picker", prop(picker, "currentIndex") == 2)
+    check("menu reflects column changes", shell._actions["cols2"].isChecked())
     before = gallery.width()
     drag(win, divider, 4, 100, 44, 100)
     spin(100)
@@ -5858,11 +5863,11 @@ def test_history_layout(win, ctl, tmp):
     APP.setProperty("showPreview", True)
     APP.setProperty("inView", True)
     spin(100)
-    check("View hides history and its controls",
-          not gallery.isVisible() and not picker.isVisible() and not divider.isVisible())
+    check("View hides history and its divider",
+          not gallery.isVisible() and not divider.isVisible())
     APP.setProperty("inView", False)
     spin(100)
-    check("Browse restores the side-by-side history", divider.isVisible() and picker.isVisible())
+    check("Browse restores the side-by-side history", divider.isVisible() and gallery.isVisible())
 
 
 def main():
@@ -5882,7 +5887,7 @@ def main():
                 "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history"):
         print("== %s ==" % only)
         if only == "history":
-            test_history_layout(win, ctl, tmp)
+            test_history_layout(win, ctl, tmp, keep[-1])
         elif only == "sidebar":
             test_sidebar(win, ctl, tmp, keep[-1] if os.environ.get("PAINTER_UI_NATIVE") == "1" else None)
         elif only == "gallery":
