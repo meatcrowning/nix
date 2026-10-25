@@ -5821,6 +5821,50 @@ def test_sidebar(win, ctl, tmp, shell=None):
         check("narrow view clears the full-width toolbar", toolbar_fits())
 
 
+def test_history_layout(win, ctl, tmp):
+    from PySide6.QtCore import Q_ARG
+    from PySide6.QtQml import qmlContext
+    content = win.contentItem()
+    results = find(content, "ResultsPane")
+    preview = find(content, "PreviewPane")
+    gallery = find(content, "GalleryView")
+    picker = next(it for it in walk(content) if it.objectName() == "historyColumns")
+    divider = next(it for it in walk(content) if it.objectName() == "historySplitHandle")
+    prefs = qmlContext(APP).contextProperty("Prefs")
+    APP.setProperty("showPreview", True)
+    spin(100)
+    check("Plasma history sits to the right of the full-height preview",
+          gallery.x() > preview.x() + preview.width()
+          and abs(preview.height() - results.height() + 10) < 2)
+    check("history exposes native columns control", picker.isVisible())
+    picker.metaObject().invokeMethod(picker, "activated", Q_ARG("int", 3))
+    spin(100)
+    grid = find(gallery, "KineticGridView")
+    check("column picker changes and saves the grid count",
+          prop(grid, "cols") == 3 and prefs.get("gridColumns") == 3)
+    APP.metaObject().invokeMethod(APP, "tbAction", Q_ARG("QVariant", "cols2"))
+    spin(100)
+    check("menu column changes reach the picker", prop(picker, "currentIndex") == 2)
+    before = gallery.width()
+    drag(win, divider, 4, 100, 44, 100)
+    spin(100)
+    check("divider resizes history and remembers its width",
+          abs(gallery.width() - before + 40) < 3
+          and prefs.get("plasma.historyWidth") == prop(results, "historyWidth"))
+    APP.setProperty("showPreview", False)
+    spin(100)
+    check("hiding preview gives history the full width",
+          gallery.width() == results.width() - 20 and not divider.isVisible())
+    APP.setProperty("showPreview", True)
+    APP.setProperty("inView", True)
+    spin(100)
+    check("View hides history and its controls",
+          not gallery.isVisible() and not picker.isVisible() and not divider.isVisible())
+    APP.setProperty("inView", False)
+    spin(100)
+    check("Browse restores the side-by-side history", divider.isVisible() and picker.isVisible())
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -5835,9 +5879,11 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar"):
+                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history"):
         print("== %s ==" % only)
-        if only == "sidebar":
+        if only == "history":
+            test_history_layout(win, ctl, tmp)
+        elif only == "sidebar":
             test_sidebar(win, ctl, tmp, keep[-1] if os.environ.get("PAINTER_UI_NATIVE") == "1" else None)
         elif only == "gallery":
             test_thumb_cache(win, ctl, tmp)

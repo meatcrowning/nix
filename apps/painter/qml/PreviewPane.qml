@@ -29,6 +29,7 @@ Item {
     id: pane
 
     property bool open: false
+    property bool resizable: true
     //: A finished result, double-clicked: open it in the single-output view.
     //: Only when this pane is showing an OUTPUT — a live sampler frame is not
     //: a file and there is nothing to open.
@@ -503,6 +504,7 @@ Item {
     // pixel of the drag.
     Rectangle {
         id: grip
+        visible: pane.resizable
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom

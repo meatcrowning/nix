@@ -1,17 +1,19 @@
 import QtQuick
+import QtQuick.Controls
 import "../../qmlcommon"
 
-// The results side: the live preview viewport above the history grid.
-//
-// Split out of `Root.qml` for the same reason `ParamsPane.qml` was — under
-// Plasma this is the QMainWindow's central widget while the parameters sit in
-// a dock beside it, which makes them two scenes. Read that file's header for
-// why each pane declares `id: root` and forwards to `app` rather than relying
-// on QML resolving ids up the creation-context chain.
+// Shared results scene: Plasma places history beside the preview.
 Item {
     id: root
 
     property Item app
+    readonly property bool plasma: app ? app.plasma : false
+    readonly property bool sideBySide: plasma && preview.open
+    readonly property int inset: root.width < 320 ? 4 : 10
+    property real historyWidth: Prefs.get("plasma.historyWidth") > 0
+                                ? Prefs.get("plasma.historyWidth") : 300
+    readonly property real historySize: Math.min(Math.max(120, historyWidth),
+                                                 Math.max(0, (width - 2 * inset) * 0.65))
 
     readonly property color fgAccent: app ? app.fgAccent : Theme.accent
     readonly property bool winActive: app ? app.winActive : true
@@ -73,8 +75,10 @@ Item {
         // set has no single thing to draw, and neither has none.
         selPath: galleryView.selection.length === 1 ? galleryView.selection[0] : ""
         anchors.left: parent.left
-        anchors.right: parent.right
+        anchors.right: root.sideBySide ? historyDivider.left : parent.right
         anchors.top: parent.top
+        anchors.bottom: root.sideBySide ? parent.bottom : undefined
+        resizable: !root.sideBySide
         anchors.margins: root.width < 320 ? 4 : 10
         anchors.bottomMargin: 0
         // The live viewport is a browsing affordance: in View the whole pane is
@@ -103,20 +107,75 @@ Item {
         onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
     }
 
+    MouseArea {
+        id: historyDivider
+        objectName: "historySplitHandle"
+        visible: root.sideBySide
+        anchors.right: parent.right
+        anchors.rightMargin: root.inset + root.historySize
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: 8
+        cursorShape: Qt.SizeHorCursor
+        preventStealing: true
+        property real startX: 0
+        property real startWidth: 0
+        onPressed: function(m) {
+            startX = mapToItem(root, m.x, m.y).x
+            startWidth = root.historySize
+        }
+        onPositionChanged: function(m) {
+            if (pressed)
+                root.historyWidth = Math.max(120, Math.min((root.width - 2 * root.inset) * 0.65,
+                    startWidth - (mapToItem(root, m.x, m.y).x - startX)))
+        }
+        onReleased: Prefs.set("plasma.historyWidth", root.historyWidth)
+        Rectangle {
+            anchors.centerIn: parent
+            width: 1
+            height: parent.height
+            color: Theme.dim
+        }
+    }
+
+    Row {
+        id: historyControls
+        visible: root.plasma && !root.inView
+        anchors.left: galleryView.left
+        anchors.right: galleryView.right
+        anchors.top: parent.top
+        spacing: 6
+        height: visible ? columnPicker.implicitHeight : 0
+        Label {
+            id: columnsLabel
+            text: "Columns:"
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        ComboBox {
+            id: columnPicker
+            objectName: "historyColumns"
+            width: Math.max(0, parent.width - columnsLabel.width - parent.spacing)
+            model: ["Automatic", "1", "2", "3", "4", "5", "6"]
+            currentIndex: root.app ? root.app.gridColumns : 0
+            onActivated: function(index) { if (root.app) root.app.gridColumns = index }
+        }
+    }
+
     GalleryView {
         id: galleryView
         visible: !root.inView
         // 0 = automatic, the width-driven default; see Root's `gridColumns`.
         columns: root.app ? root.app.gridColumns : 0
-        anchors.left: parent.left
+        anchors.left: root.sideBySide ? historyDivider.right : parent.left
         anchors.right: parent.right
-        anchors.top: preview.visible ? preview.bottom : parent.top
+        anchors.top: root.plasma ? historyControls.bottom : (preview.visible ? preview.bottom : parent.top)
         anchors.bottom: parent.bottom
-        anchors.margins: root.width < 320 ? 4 : 10
+        anchors.margins: root.inset
+        anchors.leftMargin: root.sideBySide ? 0 : root.inset
         // FLUSH WITH THE CHROME when there is no preview above it: the grid's
         // own top gap read as a band of nothing between the toolbar and the
         // outputs, and there is nothing for it to separate.
-        anchors.topMargin: preview.visible ? 8 : 0
+        anchors.topMargin: root.plasma || preview.visible ? 8 : 0
         // ...and flush with the status bar at the other end. The hint line sits
         // at the bottom of this view (GalleryView), so a margin under it is a
         // band of view background with nothing in it.
