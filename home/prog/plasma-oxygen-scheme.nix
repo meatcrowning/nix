@@ -77,6 +77,9 @@ let
       mkdir -p $out
       cp -r ${pkgs.kdePackages.plasma-desktop}/share/plasma/shells/org.kde.plasma.desktop/. $out/
       chmod -R u+w $out
+      # Kickoff rounds its icon down inside the narrow panel's content area.
+      # Scale only its compact button, preserving the selected Oxygen artwork.
+      perl -0pi -e 's/(    property Item compactRepresentation\n)/$1\n    Binding {\n        target: root.compactRepresentation\n        property: "scale"\n        value: 1.25\n        when: root.compactRepresentation !== null \&\& root.location === PlasmaCore.Types.LeftEdge \&\& Plasmoid.pluginName === "org.kde.plasma.kickoff"\n        restoreMode: Binding.RestoreBindingOrValue\n    }\n/' $out/contents/applet/CompactApplet.qml
       panel_qml=$out/contents/views/Panel.qml
       perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 0/s' $panel_qml
       perl -0pi -e 's/(id: translucentItem\n)/$1        opacity: containment?.plasmoid?.location === PlasmaCore.Types.LeftEdge ? 0 : 1\n/' $panel_qml
