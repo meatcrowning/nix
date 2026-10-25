@@ -16,17 +16,16 @@
 
     Image {
         // This is a crop of ONE screen-sized, real Oxygen window background.
-        // Both panels therefore take their pixels from the same field: where
-        // they meet, the tint and gradient continue without a seam. Keep it
-        // fully present instead of tying it to Plasma's adaptive opacity: the
-        // opaque/fullscreen face is the intended panel face at every time.
+        // The left launcher uses a light tint over compositor blur, like
+        // Unity. The top panel retains the opaque Oxygen surface. Neither
+        // changes its tint when a window touches the panel.
         //
         // Keep this at the default z.  Plasma creates the containment (the
         // applets) after this root component, so it remains behind every icon
         // and label while replacing the invisible opaque FrameSvg above.
         id: unifiedPanelSurface
         visible: root.floatingness === 0
-        opacity: 1
+        opacity: containment?.plasmoid?.location === PlasmaCore.Types.LeftEdge ? 0.35 : 1
         anchors.fill: floatingTranslucentItem
         source: "file:///home/lam/.local/state/plasma-panel-surface.png?generation="
                 + panelSurfaceGeneration.count

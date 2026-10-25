@@ -68,15 +68,9 @@ let
     # restart rate-limit.
     exec ${panel-surface-renderer}/bin/plasma-panel-surface-renderer
   '';
-  # Plasma's FrameSvg tiles its five-pixel centre.  That works for a texture,
-  # but cannot represent one gradient shared by a horizontal panel.  Overlay
-  # both panels with a real screen-space surface. It stays fully opaque rather
-  # than following Plasma's adaptive panel transition, so the fullscreen
-  # Oxygen gradient is the stable face at all times. Nothing else may key off
-  # panelOpacity either: a bevel or shadow that appears only once a window
-  # touches the panel makes the panel change face on maximise and draws a seam
-  # against the maximised window. Retain the FrameSvg because PanelView reads
-  # its mask and margins in C++.
+  # FrameSvg tiles cannot represent the screen-space Oxygen gradient. Keep
+  # their masks/margins for PanelView, but let the surface supply the fill:
+  # opaque at the top, translucent over KWin blur on the left.
   panel-gradient-view = pkgs.runCommand "plasma-panel-gradient-view"
     { nativeBuildInputs = [ pkgs.perl ]; }
     ''
@@ -85,6 +79,7 @@ let
       chmod -R u+w $out
       panel_qml=$out/contents/views/Panel.qml
       perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 0/s' $panel_qml
+      perl -0pi -e 's/(id: translucentItem\n)/$1        opacity: containment?.plasmoid?.location === PlasmaCore.Types.LeftEdge ? 0 : 1\n/' $panel_qml
       perl -0pi -e 's|(import QtQml\n)|$1import Qt.labs.folderlistmodel\n|' $panel_qml
       awk -v surface=${./plasma-panel-gradient-files/Surface.qmlfrag} '
         /^    Keys.onEscapePressed: \{$/ {

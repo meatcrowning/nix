@@ -180,7 +180,7 @@ in
         location = "left";
         height = 42;
         floating = false;
-        opacity = "opaque";
+        opacity = "translucent";
         widgets = [
           {
             name = "org.kde.plasma.icontasks";
@@ -413,10 +413,8 @@ in
       };
       kwinrc.Desktops.Number = 1;
       kwinrc.Desktops.Rows = 1;
-      # The generated Oxygen Plasma theme makes popup bodies opaque; blur would
-      # reintroduce glass behind their gradient and make the hosts compositor-
-      # dependent again.
-      kwinrc.Plugins.blurEnabled = false;
+      # The translucent left launcher needs compositor blur on both hosts.
+      kwinrc.Plugins.blurEnabled = true;
       kwinrc.Tiling.padding = 4;
       kwinrc.Xwayland.Scale = if host == "air" then 2 else 1;
       plasma-localerc.Formats.LANG = "en_US.UTF-8";
