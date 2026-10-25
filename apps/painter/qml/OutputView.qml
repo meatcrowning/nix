@@ -173,6 +173,7 @@ Item {
                 hoverEnabled: view.heatmap
                 onExited: explore.leave()
                 property bool panning: false
+                property bool moved: false
                 property real lastX: 0
                 property real lastY: 0
                 WheelNotch { id: notch }
@@ -186,6 +187,7 @@ Item {
                 onPressed: function (m) {
                     if (m.button !== Qt.LeftButton) return
                     panning = true
+                    moved = false
                     lastX = m.x
                     lastY = m.y
                 }
@@ -193,12 +195,14 @@ Item {
                 onCanceled: panning = false
                 onPositionChanged: function (m) {
                     if (!panning) { explore.track(this, m.x, m.y); return }
+                    if (Math.abs(m.x-lastX) + Math.abs(m.y-lastY) > 3) moved = true
                     flick.contentX = Math.max(0, Math.min(
                         flick.contentWidth - flick.width, flick.contentX - (m.x - lastX)))
                     flick.contentY = Math.max(0, Math.min(
                         flick.contentHeight - flick.height, flick.contentY - (m.y - lastY)))
                 }
                 onClicked: function (m) {
+                    if (m.button === Qt.LeftButton && !moved) explore.hold(this, m.x, m.y)
                     if (m.button !== Qt.RightButton) return
                     var pt = mapToItem(null, m.x, m.y)
                     view.menuRequested(pt.x, pt.y, [

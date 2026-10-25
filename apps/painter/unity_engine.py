@@ -317,7 +317,7 @@ class Engine:
             prompts += [(r.get('id', ''), r.get('caption', '')) for r in self.settings.get('moss_layout', {}).get('items', [])]
             for identity, text in prompts:
                 highlights[identity] = dict(text=text, ranges=inspection.highlightedRanges(text, identity))
-        return dict(path=self.view_path, available=inspection.available, nearby=inspection.nearby, highlights=highlights, exploring=inspection.exploring,
+        return dict(path=self.view_path, available=inspection.available, nearby=inspection.nearby, highlights=highlights, exploring=inspection.exploring, imageHeld=inspection.imageHeld,
                     tokens=inspection.tokens, overlay=inspection.overlay, selected=inspection.selected,
                     picking=inspection.picking, exporting=inspection.exporting,
                     gridLabel=inspection.gridLabel, gridStatus=inspection.gridStatus,
@@ -332,9 +332,13 @@ class Engine:
                 raise ValueError('Prompt is too long')
             c.inspection.tokenize(identity, text)
             return {}
-        if op in ('heatmap_image', 'heatmap_image_end', 'heatmap_nearby'):
+        if op in ('heatmap_image', 'heatmap_image_end', 'heatmap_nearby', 'heatmap_hold', 'heatmap_release'):
             if request.get('path') == self.view_path:
-                if op == 'heatmap_image':
+                if op == 'heatmap_hold':
+                    c.inspection.holdImage(float(request['x']), float(request['y']))
+                elif op == 'heatmap_release':
+                    c.inspection.releaseImage()
+                elif op == 'heatmap_image':
                     c.inspection.hoverImage(float(request['x']), float(request['y']))
                 elif op == 'heatmap_image_end':
                     c.inspection.leaveImage()

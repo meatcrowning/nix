@@ -44,6 +44,24 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     # Neighborhood ranking uses the saved content maps, with no wrapper/stopwords.
     from moss_inspect import MossInspect
     import moss_rank
+    # Repeated occurrences, split pieces and plurals must not crowd out distinct words.
+    rank_words = ['flower', 'FLOWER', 'flowers', 'flower', 'orange', 'oranges', 'blue', 'green']
+    rank_prompt = ' '.join(rank_words)
+    rank_tokens, rank_pixels, offset = [], [], 0
+    for index, word in enumerate(rank_words):
+        rank_tokens.append(dict(index=index, text=word if index != 3 else 'ower',
+                                start=offset+(2 if index == 3 else 0), end=offset+len(word), visible=True))
+        offset += len(word)+1
+        cx, cy = 4+(index % 4)*9, 4+(index // 4)*12
+        rank_pixels.extend(255 if abs(x-cx) <= 3 and abs(y-cy) <= 3 else 0
+                           for y in range(24) for x in range(40))
+    ranked = moss_rank.rank(dict(width=40, height=24, prompt=rank_prompt, tokens=rank_tokens), bytes(rank_pixels))
+    for group in ('areas', 'focused'):
+        assert len(ranked[group]) == 4, ranked
+        for i, item in enumerate(ranked[group]):
+            assert not moss_rank.duplicate_token(item['token'], ranked[group][:i]), ranked
+    assert moss_rank.duplicate_token({'text': 'colour'}, [{'token': {'text': 'color'}}])
+    assert not moss_rank.duplicate_token({'text': 'red'}, [{'token': {'text': 'bed'}}])
     scout = MossInspect(None)
     words = ['with', 'red', 'blue', 'green', 'gold', 'silver']
     prompt = ' '.join(words)
@@ -66,6 +84,14 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     assert [t['text'] for t in scout.nearby] == ['silver', 'gold', 'green', 'blue']
     scout.hoverImage(0, 0)
     assert scout.mask.cacheKey() == left_key
+    scout.holdImage(0, 0)
+    assert scout.imageHeld
+    held_choices = [t['choice'] for t in scout.nearby]
+    scout.hoverImage(.99, .99)
+    scout.leaveImage()
+    assert scout.imageHeld and [t['choice'] for t in scout.nearby] == held_choices
+    scout.releaseImage()
+    assert not scout.imageHeld and not scout.nearby
     scout.hoverImage(1, .5)
     assert not scout.nearby and not scout.exploring
     scout.close()
@@ -271,6 +297,11 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     QTest.mouseMove(keep[-1].view if combo else win, QPoint(round(pp.x()), round(pp.y())))
     u.spin(100)
     assert ctl.inspection.nearby and ctl.inspection._image_cell == (0, 0), 'zoomed/panned preview hover coordinates are wrong'
+    QTest.mouseClick(keep[-1].view if combo else win, Qt.LeftButton, Qt.NoModifier, QPoint(round(pp.x()), round(pp.y())))
+    assert ctl.inspection.imageHeld, 'preview click did not hold the area'
+    ctl.inspection.hoverImage(.9, .9)
+    assert ctl.inspection._image_cell == (0, 0)
+    ctl.inspection.releaseImage()
     ctl.inspection.leaveImage()
     preview.setProperty('zoom', 1)
     preview.setProperty('panX', 0)
@@ -354,7 +385,7 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     chunk = struct.pack('>I',len(packet))+moss_data.CHUNK+packet+struct.pack('>I',zlib.crc32(moss_data.CHUNK+packet))
     regions = [dict(id='disabled', caption='unused', enabled=False), dict(id='first', caption='red sphere'), dict(id=region['id'], caption='red sphere')]
     region_output = Path(tmp)/'regions.png'
-    region_output.write_bytes(pngmeta.upsert_text(plain[:-12]+chunk+plain[-12:], {'painter':json.dumps(dict(moss_layout=dict(items=regions)))}))
+    region_output.write_bytes(pngmeta.upsert_text(plain[:-12]+chunk+plain[-12:], {'painter':json.dumps(dict(model='saved-moss.safetensors', moss_layout=dict(items=regions)))}))
     gallery.setProperty('selection',[str(region_output)])
     root.setProperty('showHeatmap',True)
     for _ in range(100):
@@ -411,7 +442,14 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         u.spin(50)
         assert len(ctl.inspection._picks) == 1 and '2/2' in ctl.inspection.gridLabel
         assert not pictures.exists()
-        ctl.inspection.pickToken('red sphere', 2, 'first')
+        ctl.inspection.hoverImage(.5, .5)
+        ctl.inspection.chooseNearby(0)
+        assert len(ctl.inspection._picks) == 1  # An unheld list cannot fill a grid slot.
+        ctl.inspection.holdImage(.5, .5)
+        ctl.inspection.leaveImage()
+        assert ctl.inspection.imageHeld
+        ctl.inspection.chooseNearby(0)
+        assert not ctl.inspection.imageHeld and not ctl.inspection.picking
         for _ in range(200):
             u.spin(10)
             if not ctl.inspection.exporting: break
@@ -426,9 +464,22 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
             'Original', 'All tokens · relative association', 'Hottest areas',
             'Token 2 · red sphere', 'Token 1 · red sphere', 'Most focused tokens']
         # Original panel is unmodified; the thermal panel differs.
-        image_y = (grid.height() - 36) // 2 - original.height() + 16
+        title_height = int(grid.text('PainterTitleHeight'))
+        assert grid.text('Title') == 'saved-moss — token association heatmaps'
+        image_y = title_height + (grid.height() - title_height - 36) // 2 - original.height() + 16
         assert grid.pixelColor(16, image_y) == original.pixelColor(4, 4)
         assert grid.pixelColor(60, image_y) != original.pixelColor(4, 4)
+        ctl.inspection.toggleGrid()
+        for choice in (0, 1):
+            ctl.inspection.holdImage(.5, .5)
+            ctl.inspection.pickToken('edited draft', 2, region['id'])
+            assert ctl.inspection.imageHeld  # Invalid draft clicks cannot release a held list.
+            ctl.inspection.chooseNearby(choice)
+        for _ in range(200):
+            u.spin(10)
+            if not ctl.inspection.exporting: break
+        assert ctl.inspection.gridStatus.startswith('Saved ')
+        assert len(list(pictures.glob('*.png'))) == 2
         with patch('moss_grid.save_grid', side_effect=OSError('disk unavailable')):
             ctl.inspection.toggleGrid()
             ctl.inspection.pickToken('red sphere', 2, 'first')

@@ -436,6 +436,7 @@ Item {
                     viewMa.panning = false
                 }
                 onClicked: function (m) {
+                    if (m.button === Qt.LeftButton) explore.hold(viewMa, m.x, m.y)
                     if (m.button === Qt.RightButton) {
                         if (pane.source === "" || pane.showLive || pane.sourceIsVideo) return
                         var pt = mapToItem(null, m.x, m.y)
@@ -450,7 +451,7 @@ Item {
                             ? player.pause() : player.play()
                 }
                 onDoubleClicked: function (m) {
-                    if (m.button === Qt.LeftButton && pane.source !== "")
+                    if (m.button === Qt.LeftButton && pane.source !== "" && !App.inspection.picking)
                         pane.openRequested(pane.source)
                 }
             }

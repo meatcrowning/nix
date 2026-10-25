@@ -34,6 +34,7 @@ class MossInspect(QObject):
         self._hover_owner = ''
         self._nearby = []
         self._image_cell = None
+        self._image_held = False
         self._exploring = False
         self._positions = OrderedDict()
         self._viewing = False
@@ -101,6 +102,7 @@ class MossInspect(QObject):
         self._viewing = viewing
         if not viewing:
             self._picks = None
+            self._image_held = False
             self.leaveImage()
             self.changed.emit()
         if viewing and self.available:
@@ -114,9 +116,23 @@ class MossInspect(QObject):
     def nearby(self):
         return self._nearby
 
+    @Property(bool, notify=changed)
+    def imageHeld(self):
+        return self._image_held
+
+    @Slot(float, float)
+    def holdImage(self, x, y):
+        if not self._viewing or not self.available or not (0 <= x < 1 and 0 <= y < 1):
+            return
+        self._image_held = False
+        self._image_cell = None
+        self.hoverImage(x, y)
+        self._image_held = bool(self._nearby)
+        self.changed.emit()
+
     @Slot(float, float)
     def hoverImage(self, x, y):
-        if not self._viewing or not self.available or not math.isfinite(x + y):
+        if self._image_held or not self._viewing or not self.available or not math.isfinite(x + y):
             return
         if not (0 <= x < 1 and 0 <= y < 1):
             self.leaveImage()
@@ -164,7 +180,14 @@ class MossInspect(QObject):
         self.changed.emit()
 
     @Slot()
+    def releaseImage(self):
+        self._image_held = False
+        self.leaveImage()
+
+    @Slot()
     def leaveImage(self):
+        if self._image_held:
+            return
         had_nearby = bool(self._nearby)
         self._nearby = []
         self._image_cell = None
@@ -176,8 +199,16 @@ class MossInspect(QObject):
 
     @Slot(int)
     def chooseNearby(self, index):
+        if self.picking and not self._image_held:
+            return
         if any(t['choice'] == index for t in self._nearby):
+            self._image_held = False
             self.select(index)
+            self._nearby = []
+            self._image_cell = None
+            if self.picking:
+                self._record_pick(index)
+            self.changed.emit()
 
     @Slot(str, str, result='QVariantList')
     def highlightedRanges(self, text, identity):
@@ -237,12 +268,14 @@ class MossInspect(QObject):
 
     @Property(str, notify=changed)
     def gridStatus(self):
-        return self._grid_status or 'Click two prompt tokens to save a labeled comparison in Pictures.'
+        return self._grid_status or 'Choose two prompt tokens, or click the image to hold an area and choose a token from its list.'
 
     @Slot()
     def toggleGrid(self):
         if self._exporting or not self._viewing or not self.available:
             return
+        self._image_held = False
+        self.leaveImage()
         self._picks = None if self.picking else []
         self._grid_status = ''
         self.changed.emit()
@@ -251,6 +284,8 @@ class MossInspect(QObject):
     def pickToken(self, text, position, identity):
         if not self.picking or not self._viewing:
             return
+        held, owner = self._image_held, self._hover_owner
+        self._image_held = False
         self._hover_owner = ''
         if identity:
             self.hoverRegion(text, position, identity)
@@ -258,8 +293,12 @@ class MossInspect(QObject):
             self.hoverPrompt(text, position)
         # Resolve this click against the saved prompt, never a stale hover.
         if not self._hover_owner:
+            self._image_held, self._hover_owner = held, owner
             return
-        self._picks.append(self._selected)
+        self._record_pick(self._selected)
+
+    def _record_pick(self, index):
+        self._picks.append(index)
         if len(self._picks) == 2:
             from PySide6.QtCore import QStandardPaths
             from moss_grid import save_grid
@@ -313,7 +352,7 @@ class MossInspect(QObject):
                 break
 
     def _select_position(self, position, owner):
-        if position is None:
+        if self._image_held or position is None:
             return
         for index, token in enumerate(self._tokens):
             if token.get('start', -1) <= position < token.get('end', -1):
@@ -380,6 +419,7 @@ class MossInspect(QObject):
         self._nearby = []
         self._positions.clear()
         self._image_cell = None
+        self._image_held = False
         self._exploring = False
         self._generation += 1
         serial = self._generation
@@ -431,6 +471,7 @@ class MossInspect(QObject):
     @Slot(int)
     def select(self, index):
         if -1 <= index < len(self._tokens):
+            self._image_held = False
             self._hover_owner = ''
             self._chosen = index
             self._show(index)

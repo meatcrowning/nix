@@ -10,7 +10,7 @@ Item {
     property real nextX: 0
     property real nextY: 0
     function track(area, x, y) {
-        if (!active || !service || !service.available) return
+        if (!active || !service || !service.available || service.imageHeld) return
         var pt = area.mapToItem(imageItem, x, y)
         if (pt.x < 0 || pt.y < 0 || pt.x >= imageItem.width || pt.y >= imageItem.height) {
             leave(); return
@@ -19,6 +19,12 @@ Item {
         nextX = pt.x / imageItem.width
         nextY = pt.y / imageItem.height
         if (!sample.running) sample.start()
+    }
+    function hold(area, x, y) {
+        if (!active || !service || !service.available) return
+        sample.stop(); leaveTimer.stop()
+        var pt = area.mapToItem(imageItem, x, y)
+        service.holdImage(pt.x / imageItem.width, pt.y / imageItem.height)
     }
     function leave() {
         sample.stop()
@@ -48,13 +54,23 @@ Item {
         ColumnLayout {
             anchors.fill: parent
             spacing: 2
-            Label { text: "Nearby tokens"; Layout.fillWidth: true }
+            Label {
+                text: explorer.service.imageHeld ? "Held area · choose a token"
+                      : explorer.service.picking ? "Click image to hold tokens" : "Nearby tokens"
+                Layout.fillWidth: true
+            }
+            ToolButton {
+                text: "Resume hover"
+                visible: explorer.service.imageHeld
+                onClicked: explorer.service.releaseImage()
+            }
             Repeater {
                 model: explorer.service ? explorer.service.nearby : []
                 Button {
                     required property var modelData
                     objectName: "nearbyTokenChoice"
                     Layout.fillWidth: true
+                    enabled: !explorer.service.picking || explorer.service.imageHeld
                     text: modelData.label + "  ·  " + Math.round(modelData.score * 100) + "%"
                     onClicked: explorer.service.chooseNearby(modelData.choice)
                 }

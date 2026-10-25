@@ -437,7 +437,7 @@ class Window(Gtk.Window, ParameterForm):
     def update_heatmap(self):
         heatmap = self.state.get('heatmap', {})
         self.viewer.explore_enabled = self.heatmap_open and bool(heatmap.get('available')) and heatmap.get('path') == self.selection
-        self.viewer.update_nearby(heatmap.get('nearby', []))
+        self.viewer.update_nearby(heatmap.get('nearby', []), heatmap.get('imageHeld', False), heatmap.get('picking', False))
         self.heatmap_grid.set_label(heatmap.get('gridLabel', 'Grid comparison'))
         self.heatmap_grid.set_tooltip_text(heatmap.get('gridStatus', ''))
         self.heatmap_grid.set_sensitive(bool(heatmap.get('available')) and not heatmap.get('exporting'))
@@ -470,7 +470,7 @@ class Window(Gtk.Window, ParameterForm):
     def receive(self, op, reply):
         if self.closing:
             return False
-        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick', 'heatmap_image', 'heatmap_image_end', 'heatmap_nearby'):
+        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick', 'heatmap_image', 'heatmap_image_end', 'heatmap_nearby', 'heatmap_hold', 'heatmap_release'):
             if reply.get('ok') and reply.get('state', {}).get('heatmap'):
                 self.state['heatmap'] = reply['state']['heatmap']
                 for marks in self.token_marks:

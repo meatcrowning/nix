@@ -1,6 +1,8 @@
 """Relative spatial rankings from saved maps, excluding English function words."""
 import math
 import re
+import unicodedata
+from difflib import SequenceMatcher
 
 # Use full words in the saved prompt so subword pieces of content words survive.
 # This is a lexical heuristic, not a claim that these tokens have no model effect.
@@ -26,8 +28,28 @@ def content_tokens(document):
             display = token['text'].strip().replace('\n', '↵')
             if len(matched) == 1 and display.casefold() != matched[0]:
                 display = '%s [%s]' % (matched[0], display)
-            result.append(dict(token, display=display))
+            identity = ' '.join(word for word in matched if word not in STOP_WORDS)
+            result.append(dict(token, display=display, identity=identity))
     return result
+
+
+def duplicate_token(token, selected):
+    """Collapse repeated words/subpieces and conservative spelling variants."""
+    def key(item):
+        word = unicodedata.normalize('NFKC', item.get('identity', item['text'])).casefold()
+        word = ''.join(c for c in word if c.isalnum())
+        if word.endswith('ies') and len(word) > 4:
+            word = word[:-3] + 'y'
+        elif word.endswith('s') and not word.endswith(('ss', 'us', 'is')) and len(word) > 3:
+            word = word[:-1]
+        return word
+    word = key(token)
+    for other in selected:
+        previous = key(other['token'])
+        if word == previous or (min(len(word), len(previous)) >= 5 and
+                                SequenceMatcher(None, word, previous).ratio() >= .88):
+            return True
+    return False
 
 
 def rank(document, pixels):
@@ -54,6 +76,9 @@ def rank(document, pixels):
         if any(math.hypot(x-a['x'], y-a['y']) < separation for a in hot):
             continue
         best = max(range(len(tokens)), key=lambda k: sum(planes[k][i] for i in cells))
+        # Skip the neighborhood rather than mislabel it with a weaker runner-up.
+        if duplicate_token(tokens[best], hot):
+            continue
         hot.append(dict(score=score, x=x, y=y, side=side, token=dict(tokens[best]),
                         association=sum(planes[best][i] for i in cells) / (255*len(cells))))
         if len(hot) == 4:
@@ -69,4 +94,10 @@ def rank(document, pixels):
         spread = math.sqrt(sum(v*((i % w-x)**2 + (i // w-y)**2) for i, v in enumerate(weights)) / total)
         focused.append(dict(radius=spread, x=x, y=y, token=dict(token)))
     focused.sort(key=lambda item: (item['radius'], item['token']['index']))
-    return dict(areas=hot, focused=focused[:4])
+    unique = []
+    for item in focused:
+        if not duplicate_token(item['token'], unique):
+            unique.append(item)
+            if len(unique) == 4:
+                break
+    return dict(areas=hot, focused=unique)

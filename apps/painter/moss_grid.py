@@ -70,6 +70,35 @@ def annotations(painter, rect, ranking, doc, font, padding, focused=False):
     painter.restore()
 
 
+def add_title(image, model):
+    """Prepend a single title row, preserving every existing comparison pixel."""
+    title = '%s — token association heatmaps' % (Path(model).stem if model else 'Unknown model')
+    font = QFont('sans-serif')
+    font.setPixelSize(max(16, min(72, image.width() // 65)))
+    font.setBold(True)
+    padding = max(12, image.width() // 150)
+    metrics = QFontMetrics(font)
+    while metrics.horizontalAdvance(title) > image.width()-padding*2 and font.pixelSize() > 8:
+        font.setPixelSize(font.pixelSize()-1)
+        metrics = QFontMetrics(font)
+    height = metrics.height() + padding*2
+    result = QImage(image.width(), image.height()+height, QImage.Format_RGB32)
+    if result.isNull():
+        raise ValueError('Not enough memory for the comparison title')
+    result.fill(QColor('#15191f'))
+    painter = QPainter(result)
+    painter.drawImage(0, height, image)
+    painter.setFont(font)
+    painter.setPen(QColor('#f4f5f7'))
+    painter.drawText(QRect(padding, 0, image.width()-padding*2, height), Qt.AlignVCenter | Qt.AlignLeft, title)
+    painter.end()
+    for key in image.textKeys():
+        result.setText(key, image.text(key))
+    result.setText('Title', title)
+    result.setText('PainterTitleHeight', str(height))
+    return result
+
+
 def save_grid(source, data, tokens, folder):
     from moss_inspect import token_mask
     original = QImage(source)
@@ -123,8 +152,16 @@ def save_grid(source, data, tokens, folder):
     ranking['method'] = ('Saved normalized associations, not absolute activity. English function words and punctuation excluded; '
                          'up to 7x7 neighborhood means, centers separated by up to 12 cells; '
                          'area labels maximize eligible-token mean in that neighborhood; '
+                         'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
                          'focus minimizes RMS radius weighted by max(score-.70,0)^2. Up to four per panel.')
     canvas.setText('PainterRanking', json.dumps(ranking, ensure_ascii=False))
+    import pngmeta
+    try:
+        metadata = json.loads(pngmeta.read_text_path(source).get('painter', '{}'))
+        model = metadata.get('model', '')
+    except (ValueError, TypeError, AttributeError):
+        model = ''
+    canvas = add_title(canvas, model)
     destination = Path(folder)
     destination.mkdir(parents=True, exist_ok=True)
     path = destination / ('painter-heatmap-%s-%s.png' % (datetime.now().strftime('%Y%m%d-%H%M%S'), uuid4().hex[:8]))

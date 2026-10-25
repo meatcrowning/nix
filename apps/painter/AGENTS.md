@@ -180,11 +180,14 @@ activity. Hover temporarily shows one token, then restores the dropdown choice.
 Grid comparison arms two prompt/region clicks, validates each against saved tokens,
 and exports a labeled 3×2 PNG to the platform Pictures directory in a worker.
 Original/all-token panels precede the two picked maps; source resolution is kept.
+A title row uses the saved output’s model name and “token association heatmaps.”
 The third column ranks up to four hot neighborhoods and focused tokens.
 `moss_rank.py` excludes punctuation and English function words using saved word
 spans (retaining content-word subpieces, labeled with their containing word).
 Hot-area labels maximize eligible-token
-mean within each neighborhood; focus ranks weighted RMS spread. These are
+mean within each neighborhood; focus ranks weighted RMS spread. Both panels
+deduplicate containing words, plurals and close spelling variants;
+duplicate hot-area winners are skipped, never relabeled with weaker tokens. These are
 relative saved-map scores, not absolute activity. Ranking methods and full token
 identities live in PNG metadata; panels show titles and token labels only.
 Output changes or leaving heatmap mode cancel unfinished picks. `moss_grid.py`
@@ -199,7 +202,10 @@ Image-hover exploration in both preview/view maps the pointer through fit/zoom/p
 and samples at most every 40 ms. Rank eligible tokens by a 3×3 saved-map neighborhood;
 show the top four in an interactive tooltip and their mean thermal map. Reuse
 combined masks by token set within the same 64-entry cache. Tooltip clicks select
-one token; leaving restores the dropdown choice. Prompt/region highlights use
+one token; leaving restores the dropdown choice. Clicking the image holds its
+area/list until a token is chosen or Resume hover is pressed. During grid selection,
+a held-list choice fills the next comparison slot, then releases the hold; prompt
+clicks remain an alternative. Leaving heatmap mode or changing outputs clears holds. Prompt/region highlights use
 saved offsets (UTF-16 in Qt), reject mismatched drafts, and never alter text/undo. GTK receives small
 mask PNGs in immediate socket replies and composites them over its decoded image.
 Region prompt boxes share the debounce, count and decorations. Region hover uses

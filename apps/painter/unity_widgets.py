@@ -268,6 +268,7 @@ class ImageView(Gtk.Box):
         self.original = self.before = None
         self.heatmap = None
         self.explore_enabled = False
+        self.image_held = False
         self.explore_send = lambda *a, **kw: None
         self.explore_timer = self.explore_leave = None
         self.explore_point = None
@@ -325,7 +326,12 @@ class ImageView(Gtk.Box):
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         column.set_border_width(6)
         frame.add(column)
-        column.pack_start(Gtk.Label(label='Nearby tokens'), False, False, 0)
+        self.nearby_title = Gtk.Label(label='Nearby tokens')
+        column.pack_start(self.nearby_title, False, False, 0)
+        self.nearby_release = Gtk.Button(label='Resume hover')
+        self.nearby_release.set_no_show_all(True)
+        self.nearby_release.connect('clicked', lambda *_: self.explore_send('heatmap_release'))
+        column.pack_start(self.nearby_release, False, False, 0)
         self.nearby_buttons = []
         for i in range(4):
             button = Gtk.Button()
@@ -466,17 +472,30 @@ class ImageView(Gtk.Box):
             self.explore_leave = GLib.timeout_add(200, leave)
         return False
 
-    def update_nearby(self, tokens):
+    def update_nearby(self, tokens, held=False, picking=False):
+        self.image_held = held
+        self.nearby_title.set_text('Held area · choose a token' if held else
+                                   'Click image to hold tokens' if picking else 'Nearby tokens')
+        self.nearby_release.set_visible(held)
         self.nearby_panel.set_visible(bool(tokens) and self.explore_enabled)
         for i, button in enumerate(self.nearby_buttons):
             button.set_visible(i < len(tokens))
+            button.set_sensitive(not picking or held)
             if i < len(tokens):
                 token = tokens[i]
                 button.token_choice = token['choice']
                 button.set_label(u'%s · %d%%' % (token['label'], round(token['score'] * 100)))
 
-    def explore_motion(self, event):
+    def hold_explore(self, event):
         if not self.explore_enabled or self.original is None or self.video or self.before is not None:
+            return
+        self.destroy_explore()
+        self.explore_send('heatmap_hold',
+            x=(event.x + self.visible_origin[0] - self.image_origin[0]) / float(self.scale*self.original.get_width()),
+            y=(event.y + self.visible_origin[1] - self.image_origin[1]) / float(self.scale*self.original.get_height()))
+
+    def explore_motion(self, event):
+        if self.image_held or not self.explore_enabled or self.original is None or self.video or self.before is not None:
             return
         if self.explore_leave:
             GLib.source_remove(self.explore_leave)
@@ -625,10 +644,13 @@ class ImageView(Gtk.Box):
 
     def release(self, widget, event):
         if event.button == 1 and self.drag:
+            clicked = abs(event.x_root-self.drag[0]) + abs(event.y_root-self.drag[1]) <= 3
             self.motion(widget, event)
             self.drag = None
             widget.grab_remove()
             if self.video:
                 self.playback()
+            elif clicked:
+                self.hold_explore(event)
             return True
         return False
