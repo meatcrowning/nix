@@ -1,7 +1,11 @@
 """Experimental sampler node; load ONLY in an isolated ComfyUI test backend.
 
-Captures positive-branch attention at five MOSS layers, without installing a
-Painter feature. Outputs NPZ maps and timing/hash JSON beside scratch images.
+Captures positive-branch attention or existing attention-output similarities.
+This is not full ConceptAttention: it adds no separate concept tokens. Load in
+a scratch backend and replace KSampler with MossAttentionExperiment, passing
+the same prompt text/CLIP plus comma-separated words, layers and a step stride.
+Outputs NPZ maps and timing/hash JSON beside scratch images; bands are thirds
+of the positive forward-call sequence. This installs no Painter feature.
 """
 import hashlib
 import json
@@ -24,12 +28,16 @@ class MossAttentionExperiment(nodes.KSampler):
                                 text=('STRING',), words=('STRING',),
                                 capture=('BOOLEAN', {'default': True}),
                                 label=('STRING', {'default': 'experiment'}))
+        spec['optional'] = dict(method=(['raw', 'output'],),
+                                layers=('STRING', {'default': '4,12,20,28,36'}),
+                                stride=('INT', {'default': 1, 'min': 1, 'max': 30}))
         return spec
 
     FUNCTION = 'run'
     CATEGORY = 'testing'
 
-    def run(self, clip, text, words, capture, label, **inputs):
+    def run(self, clip, text, words, capture, label, method="raw",
+            layers="4,12,20,28,36", stride=1, **inputs):
         if not re.fullmatch(r'[a-zA-Z0-9_-]+', label):
             raise ValueError('Use a plain experiment label')
         tokenizer = clip.tokenizer.qwen35_9b.tokenizer
@@ -47,46 +55,70 @@ class MossAttentionExperiment(nodes.KSampler):
             spans[word] = list(range(matches[0], matches[0] + len(needle)))
         model = inputs['model'].clone()
         sums, counts, state = {}, {}, {}
-        capture_seconds = 0.0
+        capture_events = []
+        selected_layers = {int(i) for i in layers.split(",")}
+        state["step"] = -1
+        steps = inputs["steps"]
 
         def forward(executor, x, timestep, context, transformer_options={}, **kw):
             state['shape'] = x.shape[-2:]
-            state['band'] = min(2, int(float(timestep[0]) * 3))
+            if 0 in transformer_options.get('cond_or_uncond', []):
+                state['step'] += 1
+            # Step bands avoid a device-to-host synchronization per forward.
+            state['band'] = min(2, state['step'] * 3 // steps)
             return executor(x, timestep, context, transformer_options, **kw)
 
+        def accumulate(key, maps):
+            if key not in sums:
+                sums[key] = maps.clone()
+                counts[key] = 1
+            else:
+                sums[key].add_(maps)
+                counts[key] += 1
+
         def observe(original, q, k, v, heads, **kw):
-            nonlocal capture_seconds
             options = kw.get('transformer_options', {})
             layer = options.get('block_index')
             branches = options.get('cond_or_uncond', [])
-            if layer in (4, 12, 20, 28, 36) and 0 in branches:
-                torch.cuda.synchronize()
-                started = time.perf_counter()
-                h, w = state['shape']
-                n = h * w
-                assert q.shape[1] == n + len(ids), (q.shape, n, len(ids))
-                assert q.shape[0] == len(branches), 'experiment requires batch size 1'
-                b = branches.index(0)
+            selected = (layer in selected_layers and 0 in branches
+                        and state['step'] % stride == 0)
+            if not selected:
+                return original(q, k, v, heads, **kw)
+            h, w = state['shape']
+            n = h * w
+            assert q.shape[1] == n + len(ids), (q.shape, n, len(ids))
+            assert q.shape[0] == len(branches), 'experiment requires batch size 1'
+            b = branches.index(0)
+            key = f'layer{layer}_band{state["band"]}'
+            out = None
+            if method == 'output':
+                out = original(q, k, v, heads, **kw)
+            start, end = (torch.cuda.Event(enable_timing=True) for _ in range(2))
+            start.record()
+            if method == 'raw':
                 d = q.shape[-1] // heads
                 qh = q[b].reshape(-1, heads, d).transpose(0, 1).float()
                 kh = k[b].reshape(-1, heads, d).transpose(0, 1).float()
                 chunks = []
-                for start in range(0, n, 128):
-                    probs = (qh[:, start:min(n, start + 128)] @ kh.transpose(-1, -2) / d**0.5).softmax(-1)
+                for offset in range(0, n, 128):
+                    probs = (qh[:, offset:min(n, offset + 128)] @ kh.transpose(-1, -2) / d**0.5).softmax(-1)
                     text_probs = probs[..., n:].mean(0)
                     chunks.append(torch.stack([text_probs[:, indices].sum(-1)
                                                for indices in spans.values()]))
-                maps = torch.cat(chunks, dim=1).reshape(len(spans), h, w).cpu().numpy()
-                key = f'layer{layer}_band{state["band"]}'
-                if key not in sums:
-                    sums[key] = maps.copy()
-                    counts[key] = 1
-                else:
-                    sums[key] += maps
-                    counts[key] += 1
-                torch.cuda.synchronize()
-                capture_seconds += time.perf_counter() - started
-            return original(q, k, v, heads, **kw)
+                maps = torch.cat(chunks, dim=1).reshape(len(spans), h, w)
+                accumulate(key, maps)
+            else:
+                features = out[b].float()
+                image_features = features[:n]
+                concepts = torch.stack([features[[n + i for i in indices]].mean(0)
+                                        for indices in spans.values()])
+                dot = concepts @ image_features.T
+                cosine = torch.nn.functional.normalize(concepts, dim=-1) @ torch.nn.functional.normalize(image_features, dim=-1).T
+                accumulate('dot_' + key, dot.reshape(len(spans), h, w))
+                accumulate('cosine_' + key, cosine.reshape(len(spans), h, w))
+            end.record()
+            capture_events.append((start, end))
+            return out if out is not None else original(q, k, v, heads, **kw)
 
         if capture:
             model.add_wrapper_with_key(WrappersMP.DIFFUSION_MODEL, 'moss_probe', forward)
@@ -100,9 +132,11 @@ class MossAttentionExperiment(nodes.KSampler):
         elapsed = time.perf_counter() - started
         latent = result[0]['samples'].detach().cpu().contiguous()
         root = Path(folder_paths.get_output_directory())
-        np.savez_compressed(root / (label + '.npz'), **{k: sums[k] / counts[k] for k in sums})
+        np.savez_compressed(root / (label + '.npz'), **{k: (sums[k] / counts[k]).cpu().numpy() for k in sums})
         report = dict(label=label, prompt=text, spans=spans, counts=counts,
-                      sampler_seconds=elapsed, capture_seconds=capture_seconds,
+                      sampler_seconds=elapsed, method=method, layers=sorted(selected_layers),
+                      band_definition="positive forward-call thirds",
+                      stride=stride, capture_cuda_seconds=sum(a.elapsed_time(b) for a, b in capture_events) / 1000,
                       peak_allocated_bytes=torch.cuda.max_memory_allocated(),
                       latent_sha256=hashlib.sha256(latent.view(torch.uint8).numpy().tobytes()).hexdigest())
         (root / (label + '.json')).write_text(json.dumps(report, indent=2))
