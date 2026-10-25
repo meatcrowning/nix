@@ -94,6 +94,21 @@ class MossInspect(QObject):
         saved = self._data[0].get('prompt', '')
         position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
         position = moss_data.prompt_position(saved, text, position)
+        self._select_position(position)
+
+    @Slot(str, int, str)
+    def hoverRegion(self, text, position, identity):
+        if not self._viewing or not self._data or not identity:
+            return
+        doc = self._data[0]
+        regions = doc.get('_regions', [])
+        for index, region in enumerate(regions):
+            if region.get('id') == identity and region.get('caption', '').strip() == text.strip():
+                position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
+                self._select_position(moss_data.prompt_position(doc.get('prompt', ''), text, position, index))
+                break
+
+    def _select_position(self, position):
         if position is None:
             return
         for index, token in enumerate(self._tokens):
@@ -156,6 +171,14 @@ class MossInspect(QObject):
         def read():
             try:
                 value = moss_data.read(path)
+                if value:
+                    import pngmeta
+                    try:
+                        params = json.loads(pngmeta.read_text_path(path).get('painter', '{}'))
+                        value[0]['_regions'] = [r for r in params.get('moss_layout', {}).get('items', [])
+                                                if r.get('enabled', True)]
+                    except (ValueError, TypeError, AttributeError):
+                        value[0]['_regions'] = []
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 value = str(exc)
             self._loaded.emit(serial, value)

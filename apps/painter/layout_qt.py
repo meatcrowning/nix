@@ -154,6 +154,7 @@ class Toolkit(QObject):
     def button_checked(self, button, checked): self.set(button, checked)
     def column(self, parent): return Node('inspector', parent=parent)
     def label(self, parent, text): return Node('label', text, parent)
+    def token_count(self, parent): return Node('tokencount', parent=parent)
     def set_label(self, node, text):
         if node._title != text:
             node._title = text
@@ -211,15 +212,19 @@ class Toolkit(QObject):
 
 class Bridge(QObject):
     edited = Signal(str, 'QVariantMap')
+    regionChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.model_name = ''
         self.toolkit = Toolkit()
         self.editor = LayoutUI(self.toolkit, M.fresh(), self.publish)
+        self.toolkit.repaint.connect(self.regionChanged)
 
     root = Property(QObject, lambda s: s.toolkit.root, constant=True)
     toolkitObject = Property(QObject, lambda s: s.toolkit, constant=True)
+    regionPrompt = Property(str, lambda s: (s.editor.row() or {}).get('caption', ''), notify=regionChanged)
+    regionIdentity = Property(str, lambda s: (s.editor.row() or {}).get('id', ''), notify=regionChanged)
 
     def publish(self, doc):
         if self.model_name: self.edited.emit(self.model_name, doc)

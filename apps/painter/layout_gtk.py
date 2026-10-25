@@ -44,6 +44,9 @@ class Toolkit(object):
     def tag_context(self):
         return self.window.state.get('model', '') if self.alive else None
 
+    def token_count(self, parent):
+        return self.label(parent, '')
+
     def generate_tags(self, request, callback):
         self.window.generate_tags(request, callback)
 
@@ -575,6 +578,13 @@ class Toolkit(object):
 def open_editor(parent, doc, accepted, owner=None):
     toolkit = Toolkit(parent, owner)
     editor = LayoutUI(toolkit, doc, accepted)
+    from moss_gtk import TokenMarks
+    marks = TokenMarks(editor.fields['item.caption'][1], editor.prompt_token_count,
+                       toolkit.window.send, hover=True,
+                       region=lambda: (editor.row() or {}).get('id', ''))
+    toolkit.window.token_marks.append(marks)
+    toolkit.root.connect('destroy', lambda *_: toolkit.window.token_marks.remove(marks)
+                         if marks in toolkit.window.token_marks else None)
     for key, field in editor.fields.items():
         if key.startswith(('item.', 'type.', 'box.')):
             field[1]._text_history_scope = lambda: (toolkit.window.state.get('model'), tuple(editor.model.selected))

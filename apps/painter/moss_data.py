@@ -8,11 +8,58 @@ CHUNK = b'paHm'
 LIMIT = 24 * 1024 * 1024
 
 
-def prompt_position(saved, text, position):
+def json_value_span(source, path):
+    """Locate a JSON value without losing offsets to escaping or repeated text."""
+    decoder = json.JSONDecoder()
+    def skip(i):
+        while i < len(source) and source[i].isspace(): i += 1
+        return i
+    def descend(i, keys):
+        i = skip(i)
+        if not keys:
+            _, end = decoder.raw_decode(source, i)
+            return i, end
+        key, rest = keys[0], keys[1:]
+        if source[i] == '{':
+            i = skip(i + 1)
+            while source[i] != '}':
+                name, end = decoder.raw_decode(source, i)
+                i = skip(end)
+                if source[i] != ':': raise ValueError('Missing colon')
+                i = skip(i + 1)
+                if name == key: return descend(i, rest)
+                _, i = decoder.raw_decode(source, i)
+                i = skip(i)
+                if source[i] != ',': break
+                i = skip(i + 1)
+        elif source[i] == '[' and isinstance(key, int) and key >= 0:
+            i = skip(i + 1)
+            for index in range(key + 1):
+                if index == key: return descend(i, rest)
+                _, i = decoder.raw_decode(source, i)
+                i = skip(i)
+                if source[i] != ',': break
+                i = skip(i + 1)
+        raise ValueError('Missing JSON field')
+    return descend(0, path)
+
+
+def prompt_position(saved, text, position, region_index=None):
     """Map an editor character to plain conditioning or a compiled scene caption."""
     caption, offset = saved, 0
     literal = None
-    if text.strip() != saved.strip():
+    if region_index is not None:
+        try:
+            offset, end = json_value_span(saved, ('items', region_index, 'caption'))
+            literal = saved[offset:end]
+            caption = json.loads(literal)
+        except (ValueError, IndexError):
+            return None
+        # The caller checks the saved region's original caption. Compilation
+        # may append typography instructions after that exact caption.
+        if not isinstance(caption, str) or not caption.startswith(text.strip()):
+            return None
+    elif text.strip() != saved.strip():
         # Layout compilation puts the prompt box in summary.caption. Anchor to
         # that field, never a substring which could also occur in a region.
         match = re.match(r'\s*\{\s*"summary"\s*:\s*\{\s*"caption"\s*:\s*', saved)

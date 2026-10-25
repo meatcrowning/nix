@@ -176,6 +176,10 @@ without maps cannot display a heatmap. The toolbar token picker and matching
 positive-prompt hovers share the selected token; compiled layouts map scene-caption
 positions through JSON escaping to saved token offsets. Mismatched drafts never drive
 saved maps. Heatmap mode leaves history accessible and survives output changes.
+Region prompt boxes share the debounce, count and decorations. Region hover uses
+IDs in saved `painter.moss_layout` metadata, skipping disabled regions when mapping
+to compiled `items`; duplicate captions and current reordering never choose a map
+by text alone. Old outputs without saved region IDs retain the dropdown picker.
 Maps are experimental associations, not causal
 word attribution; never infer maps for old images from a current prompt.
 Verify with `tools/moss-inspection-test.py` offscreen, `tools/moss-test.py`, and

@@ -10,6 +10,7 @@ Item {
     id: node
     required property QtObject spec
     required property QtObject bridge
+    property var tokenProbe: null
     visible: spec.shown
     enabled: spec.enabled
     implicitWidth: content.item ? content.item.implicitWidth : 0
@@ -26,6 +27,7 @@ Item {
             case "column": case "page": case "inspector": return columnComponent
             case "button": return buttonComponent
             case "label": return labelComponent
+            case "tokencount": return tokenCountComponent
             case "menu": return menuComponent
             case "tabs": return tabsComponent
             case "list": return listComponent
@@ -35,6 +37,17 @@ Item {
         }
     }
     Component { id: spacerComponent; Item { implicitWidth: 0; implicitHeight: 0 } }
+    Component {
+        id: tokenCountComponent
+        Label {
+            objectName: "regionTokenCount"
+            visible: node.tokenProbe && node.tokenProbe.active
+            text: node.tokenProbe && node.tokenProbe.count >= 0 ? node.tokenProbe.count + " tok" : "— tok"
+            ToolTip.visible: countHover.containsMouse
+            ToolTip.text: node.tokenProbe ? node.tokenProbe.tip : ""
+            MouseArea { id: countHover; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+        }
+    }
     Component {
         id: compactComponent
         Item {
@@ -51,7 +64,7 @@ Item {
                     model: node.spec.nodes
                     Loader {
                         required property QtObject modelData
-                        Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
+                        Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge, tokenProbe: node.tokenProbe})
                         Layout.preferredWidth: item ? item.implicitWidth : 0
                         Layout.preferredHeight: item ? item.implicitHeight : 0
                         Layout.fillHeight: true
@@ -87,7 +100,7 @@ Item {
                         && (modelData.kind !== "compact" || toolbar.width >= toolbar.requestedWidth)
                     width: Math.min(toolbar.width, item ? item.implicitWidth : 0)
                     height: item ? item.implicitHeight : 0
-                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
+                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge, tokenProbe: node.tokenProbe})
                 }
             }
         }
@@ -122,7 +135,7 @@ Item {
                     required property QtObject modelData
                     Layout.preferredHeight: item ? item.implicitHeight : 0
                     visible: modelData.shown && (modelData.kind !== "compact" || rowLayout.coordinatesFit)
-                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
+                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge, tokenProbe: node.tokenProbe})
                     Layout.fillWidth: modelData.expand
                     Layout.fillHeight: node.spec.kind === "toolbar" || modelData.expand || modelData.kind === "inspector"
                     Layout.preferredWidth: modelData.kind === "inspector" ? 300 : (item ? item.implicitWidth : 0)
@@ -149,7 +162,7 @@ Item {
                     required property QtObject modelData
                     Layout.preferredHeight: item ? item.implicitHeight : 0
                     visible: modelData.shown
-                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge})
+                    Component.onCompleted: setSource(Qt.resolvedUrl("LayoutNode.qml"), {spec: modelData, bridge: node.bridge, tokenProbe: node.tokenProbe})
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     Layout.fillHeight: modelData.expand
@@ -487,6 +500,8 @@ Item {
                 ScrollBar.horizontal: ScrollBar { id: textHBar; policy: node.spec.title === "Exact wording" ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
                 TextArea {
                     id: textEdit
+                    readonly property bool tokenReady: node.spec.kind === "prompt" && node.tokenProbe && node.tokenProbe.count >= 0
+                    readonly property var tokenStyle: App.inspection.tokenStyle(color.toString(), palette.base.toString(), selectionColor.toString())
                     objectName: "layoutField_" + node.spec.title
                     width: textViewport.width - textBar.barW
                     height: Math.max(implicitHeight, textViewport.height - (textHBar.visible ? textHBar.height : 0))
@@ -499,6 +514,32 @@ Item {
                             event.accepted = PromptWeight.adjust(textEdit, event.key === Qt.Key_Up ? 0.1 : -0.1)
                     }
                     onTextChanged: if (text !== node.spec.value) node.spec.edit(text)
+                    TokenBands {
+                        editor: textEdit
+                        viewport: textViewport
+                        boundaries: node.tokenProbe ? node.tokenProbe.boundaries : []
+                        colours: textEdit.tokenStyle.bands
+                        marked: textEdit.tokenReady
+                        z: -0.5
+                    }
+                    Repeater {
+                        model: textEdit.tokenReady ? node.tokenProbe.boundaries : []
+                        Rectangle {
+                            required property int modelData
+                            readonly property rect mark: {
+                                textEdit.text; textEdit.width; textEdit.font
+                                return textEdit.positionToRectangle(modelData)
+                            }
+                            x: mark.x - 1; y: mark.y + 2
+                            width: 1; height: Math.max(1, mark.height - 4)
+                            color: textEdit.tokenStyle.separator
+                        }
+                    }
+                    HoverHandler {
+                        enabled: node.spec.kind === "prompt"
+                        onPointChanged: if (hovered)
+                            App.inspection.hoverRegion(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
+                    }
                 }
                 Spelling { target: textEdit; viewport: textViewport }
             }

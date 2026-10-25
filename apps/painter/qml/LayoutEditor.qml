@@ -31,7 +31,13 @@ Control {
     onGenerationChanged: sync()
     Component.onCompleted: sync()
     Connections { target: App; function onModelChanged() { editor.sync() } }
-    LayoutNode { id: tree; anchors.fill: parent; anchors.margins: 6; spec: editor.bridge.root; bridge: editor.bridge }
+    TokenProbe {
+        id: regionTokens
+        objectName: "regionTokenProbe"
+        text: editor.bridge.regionPrompt
+        active: App.layoutSupport && editor.bridge.regionIdentity !== ""
+    }
+    LayoutNode { id: tree; anchors.fill: parent; anchors.margins: 6; spec: editor.bridge.root; bridge: editor.bridge; tokenProbe: regionTokens }
     Connections { target: editor.bridge.toolkitObject; function onReferenceRequested() { reference.open() } }
     FileDialog {
         id: reference

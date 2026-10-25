@@ -322,7 +322,10 @@ class Engine:
             c.inspection.setViewing(bool(request.get('viewing')))
             return {}
         if op == 'heatmap_hover':
-            c.inspection.hoverPrompt(request['text'], int(request['position']))
+            if request.get('region'):
+                c.inspection.hoverRegion(request['text'], int(request['position']), request['region'])
+            else:
+                c.inspection.hoverPrompt(request['text'], int(request['position']))
             return {}
         if op == 'heatmap_select':
             if request.get('path') == self.view_path:

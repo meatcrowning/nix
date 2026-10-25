@@ -71,6 +71,8 @@ class LayoutUI(object):
         u.set(self.prompt_tokens, 128)
         self.prompt_auto = u.button(self.prompt_header, 'Write', lambda: self.auto_tags('prompt'))
         self.prompt_revert = u.button(self.prompt_header, 'Undo', self.undo_prompt)
+        u.spacer(self.prompt_header)
+        self.prompt_token_count = u.token_count(self.prompt_header)
         self.add(region, 'item.caption', 'Prompt', 'prompt')
         self.add(region, 'item.text', 'Exact wording', 'text')
         self.lettering_row = u.row(region)

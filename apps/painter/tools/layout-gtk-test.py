@@ -331,6 +331,16 @@ def run(parent):
         buf.set_text(saved_text)
     print('PASS: main, negative and region weight shortcuts, 0.1 steps, selection, Unicode and undo')
     u.set(e.fields['item.caption'], 'A fox in the snowy forest')
+    marks = next(m for m in parent.token_marks if m.view is e.fields['item.caption'][1])
+    state = dict(flags=dict(layoutSupport=True), ready=True, tokenResults={})
+    marks.update(state)
+    marks.request = marks.text()
+    state['tokenResults'][marks.identity] = dict(text=marks.text(), result=dict(count=16, template_tokens=10, boundaries=[1, 5, 8]))
+    marks.update(state)
+    assert e.prompt_token_count.get_text() == '6 tok'
+    assert marks.region() == e.row()['id']
+    assert marks.view.get_buffer().get_iter_at_offset(2).has_tag(marks.tags[1])
+    print('PASS: GTK region token count, background bands and hover identity')
     u.set(e.tag_count, 3)
     e.tag_auto.clicked()
     assert e.tag_busy and not e.tag_auto.get_sensitive()

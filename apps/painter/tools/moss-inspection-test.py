@@ -175,6 +175,79 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     u.spin(50)
     assert root.property('showHeatmap') and not ctl.inspection.available
     root.setProperty('showHeatmap', False)
+    spec = importlib.util.spec_from_file_location('moss_checks', Path(__file__).with_name('moss-test.py'))
+    checks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checks)
+    checks.models(Path(os.environ['PAINTER_MODELS']))
+    ctl.setMode('')
+    ctl.rescan()
+    u.spin(150)
+    ctl.selectModelByName('moss-base-int8.safetensors')
+    u.spin(150)
+    layout = ctl.layoutEditor.editor
+    region = layout.model.add()
+    region['caption'] = 'red sphere'
+    layout.refresh()
+    region_probe = next(o for o in u.walk(win.contentItem()) if o.objectName() == 'regionTokenProbe')
+    region_probe.setProperty('service', service)
+    u.spin(400)
+    assert region_probe.property('active') and service.calls[-1][1] == 'red sphere'
+    service.tokenized.emit(*service.calls[-1], dict(count=12, template_tokens=10, utf16_boundaries=[3]))
+    u.spin(50)
+    region_count = next(o for o in u.walk(win.contentItem()) if o.objectName() == 'regionTokenCount')
+    region_field = next(o for o in u.walk(win.contentItem()) if o.objectName() == 'layoutField_Prompt')
+    assert region_count.property('text') == '2 tok'
+    assert region_field.property('tokenReady')
+    band = next(o for o in u.walk(region_field) if o.objectName() == 'tokenBands')
+    assert band.property('marked')
+    region_field.forceActiveFocus()
+    region_field.setProperty('cursorPosition', 10)
+    u.key(win, Qt.Key_X, Qt.NoModifier, 'x')
+    u.key(win, Qt.Key_Z, Qt.ControlModifier)
+    assert region_field.property('text') == 'red sphere'
+    # Duplicate captions must select by saved identity, including disabled rows.
+    compiled = json.dumps(dict(summary=dict(caption='scene'), items=[dict(caption='red sphere'), dict(caption='red sphere')]), separators=(',', ':'))
+    spans = [moss_data.json_value_span(compiled, ('items', i, 'caption')) for i in range(2)]
+    region_doc = dict(doc, prompt=compiled, tokens=[dict(index=i, text='red sphere', visible=True, start=a+1, end=b-1) for i,(a,b) in enumerate(spans)])
+    packet = moss_data.encode(region_doc, bytes([0,255,0,255,255,0,255,0]))
+    chunk = struct.pack('>I',len(packet))+moss_data.CHUNK+packet+struct.pack('>I',zlib.crc32(moss_data.CHUNK+packet))
+    regions = [dict(id='disabled', caption='unused', enabled=False), dict(id='first', caption='red sphere'), dict(id=region['id'], caption='red sphere')]
+    region_output = Path(tmp)/'regions.png'
+    region_output.write_bytes(pngmeta.upsert_text(plain[:-12]+chunk+plain[-12:], {'painter':json.dumps(dict(moss_layout=dict(items=regions)))}))
+    gallery.setProperty('selection',[str(region_output)])
+    root.setProperty('showHeatmap',True)
+    for _ in range(100):
+        u.spin(10)
+        if ctl.inspection.available and ctl.inspection.overlay: break
+    ctl.inspection.hoverRegion('red sphere', 5, region['id'])
+    assert ctl.inspection.selected == 1
+    ctl.inspection.hoverRegion('red sphere', 5, 'first')
+    assert ctl.inspection.selected == 0
+    ctl.inspection.hoverRegion('edited draft', 5, region['id'])
+    ctl.inspection.hoverRegion('red sphere', 5, 'unknown')
+    assert ctl.inspection.selected == 0
+    print('PASS region count, decorations, native undo and saved region hover identity')
+    # Exercise the actual region hover handler, not only the inspection slot.
+    from PySide6.QtCore import QPointF, QPoint
+    from PySide6.QtTest import QTest
+    scroller = next(o for o in u.walk(win.contentItem()) if o.objectName() == 'parameterScroll')
+    field_y = region_field.mapToItem(scroller, QPointF()).y() + scroller.property('contentY')
+    scroller.setProperty('contentY', max(0, field_y - 50))
+    u.spin(50)
+    point = region_field.mapToItem(win.contentItem(), QPointF(region_field.property('leftPadding') + 12, region_field.property('topPadding') + 8))
+    QTest.mouseMove(getattr(win, 'keyTarget', win), QPoint(round(point.x()), round(point.y())))
+    u.spin(100)
+    assert ctl.inspection.selected == 1, 'region hover did not reach saved token selection'
+    u.spin(400)
+    service.tokenized.emit(region_probe.property('request'), 'red sphere', dict(count=12, template_tokens=10, utf16_boundaries=[3]))
+    u.spin(50)
+    capture = region_field.grabToImage()
+    for _ in range(50):
+        u.spin(10)
+        if not capture.image().isNull(): break
+    raster = capture.image()
+    painted = {raster.pixelColor(x, y).name() for y in range(raster.height()) for x in range(raster.width())}
+    assert set(u.prop(region_field, 'tokenStyle')['bands']) <= painted, 'region bands hidden by native TextArea background'
     assert not u.WARNINGS, u.WARNINGS
     ctl.inspection.close()
     print('PASS PNG persistence, unchanged image pixels, viewer maps and selection invalidation')

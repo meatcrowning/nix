@@ -6,8 +6,9 @@ from token_style import colours
 
 
 class TokenMarks(object):
-    def __init__(self, view, count, send, hover=False):
+    def __init__(self, view, count, send, hover=False, region=None):
         self.view, self.count, self.send = view, count, send
+        self.region = region
         self.hovered = None
         if hover:
             view.add_events(Gdk.EventMask.POINTER_MOTION_MASK)
@@ -70,7 +71,8 @@ class TokenMarks(object):
         if token != self.hovered:
             self.hovered = token
             text = self.text()
-            self.send('heatmap_hover', text=text, position=len(text[:position].encode('utf-16-le')) // 2)
+            self.send('heatmap_hover', text=text, position=len(text[:position].encode('utf-16-le')) // 2,
+                      region=self.region() if self.region else '')
         return False
 
     def text(self):
@@ -101,6 +103,8 @@ class TokenMarks(object):
 
     def update(self, state):
         active = bool(state.get('flags', {}).get('layoutSupport'))
+        if self.region:
+            active = active and bool(self.region())
         ready = bool(state.get('ready'))
         self.count.set_visible(active)
         if (active, ready) != (self.active, self.ready):
