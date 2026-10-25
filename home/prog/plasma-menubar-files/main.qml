@@ -339,9 +339,10 @@ PlasmoidItem {
             return [];
         }
 
+        // The bridge tracks the active browser window and validates its ID
+        // when dispatching actions. Titles arrive independently from KWin and
+        // Vivaldi during navigation, so they cannot gate menu availability.
         if (root.shown && root.shown.appId.toLowerCase().includes("vivaldi")
-                && (root.shown.title === Plasmoid.browserTitle
-                    || root.shown.title === Plasmoid.browserTitle + " - Vivaldi")
                 && root.browserCategoryNames !== "[]") {
             return JSON.parse(root.browserCategoryNames).map((label, index) => ({
                 title: label,
