@@ -8,6 +8,7 @@ colour scheme instead of the theme's own.
 """
 import json, os, shutil, sys, glob
 import oxyscheme
+import taskframes
 
 # Breeze deliberately leaves these baked -- they are illustrations, not chrome.
 # branding.svgz is the only multi-hue raster in the theme (the KDE logo).
@@ -42,15 +43,9 @@ def main(src, out):
         for k, v in stats.items():
             totals[k] = totals.get(k, 0) + v
 
-    # IconTasks asks its theme for a state frame.  Oxygen's stock tasks asset
-    # deliberately reduces inactive entries to an almost invisible underline;
-    # use the real Oxygen button frames instead, so every task is a tactile
-    # button and the focused task receives the style's focus treatment.
-    # Copy the already-converted button so its Oxygen relief follows the live
-    # KDE colour scheme just like the panel and the application surfaces.
-    shutil.copyfile(os.path.join(out, "widgets/button.svgz"),
-                    os.path.join(out, "widgets/tasks.svgz"))
-    os.chmod(os.path.join(out, "widgets/tasks.svgz"), 0o644)
+    # Task states need full frames, unlike the overlay-only button focus glow.
+    taskframes.build(os.path.join(out, "widgets/button.svgz"),
+                     os.path.join(out, "widgets/tasks.svgz"))
 
     # plasmarc carries the theme's blur/compositing hints -- keep it.
     for extra in ("plasmarc",):
