@@ -77,6 +77,20 @@ def main():
                 assert inputs("scheduler")["denoise"] == overrides.get("denoise", 1)
                 assert "model_sampling" not in roles and "negpip" not in roles
                 assert built["params"]["prompt_boxes"] == {k: p[k] for k in ("positive", "negative")}
+            # Capability discovery must preserve older backends and PPM paths.
+            from unittest.mock import patch
+            capabilities = {name: {} for name in ('PainterMossSampler', 'PainterMossSaveImage')}
+            with patch.object(G, 'validate', return_value=[]):
+                mapped = reg.build(entry, dict(positive='red cube'), object_info=capabilities)
+                mapped_graph = G.Graph(mapped['prompt'])
+                assert mapped_graph.node('sampler')['class_type'] == 'PainterMossSampler'
+                assert mapped_graph.node('sampler')['inputs']['text'] == 'red cube'
+                assert mapped_graph.node('save')['inputs']['heatmaps'] == [mapped_graph.id_of('sampler'), 2]
+                assert mapped['params']['moss_heatmaps'] is True
+                old = reg.build(entry, dict(moss_heatmaps=True), object_info={})
+                assert 'moss_heatmaps' not in old['params']
+                ppm = reg.build(entry, dict(toggles={'negpip': True}), object_info=capabilities)
+                assert 'moss_heatmaps' not in ppm['params']
             for layers in ('24, 26', ''):
                 settings = dict(slg_single_layers=layers, slg_start_percent=.125, slg_end_percent=.875)
                 custom = reg.build(entry, settings)

@@ -6,6 +6,7 @@ import "../../qmlcommon"
 Column {
     id: writer
     property string scope: "positive"
+    property var tokenProbe: null
     property bool busy: false
     property string requestId: ""
     property string snapshot: ""
@@ -82,6 +83,14 @@ Column {
             onClicked: writer.undo()
         }
         Item { Layout.fillWidth: true }
+        PixelText {
+            objectName: writer.scope + "TokenCount"
+            visible: writer.tokenProbe !== null && writer.tokenProbe.active
+            text: writer.tokenProbe && writer.tokenProbe.count >= 0 ? writer.tokenProbe.count + " tokens" : "— tokens"
+            ToolTip.visible: tokenHover.containsMouse
+            ToolTip.text: writer.tokenProbe ? writer.tokenProbe.tip : ""
+            MouseArea { id: tokenHover; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+        }
     }
     PixelText {
         width: parent.width

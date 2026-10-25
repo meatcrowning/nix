@@ -5,6 +5,7 @@ import "../../qmlcommon"
 
 Rectangle {
     id: box
+    property var tokenBoundaries: []
     property string placeholder: ""
     property bool negative: false
     property bool pillMode: false
@@ -371,6 +372,23 @@ Rectangle {
             // editable text item, so this one surface leads at Qt's rounded
             // 16px rather than kitty's 15px cell; that is an accepted loss and
             // NOT an invitation to re-add these two lines.
+            Repeater {
+                model: box.tokenBoundaries
+                Rectangle {
+                    required property int modelData
+                    objectName: "tokenBoundary"
+                    readonly property rect mark: {
+                        var layoutRevision = input.width + input.height + input.text.length
+                        return input.positionToRectangle(modelData)
+                    }
+                    x: mark.x - 0.5
+                    y: mark.y + 2
+                    width: 1
+                    height: Math.max(1, mark.height - 4)
+                    color: Theme.textDim
+                    opacity: 0.45
+                }
+            }
             selectByMouse: true
             // The selection SURVIVES the menu that acts on it. A TextEdit drops
             // its selection the moment it loses active focus, and opening

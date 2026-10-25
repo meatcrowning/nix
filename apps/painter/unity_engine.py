@@ -85,6 +85,8 @@ class Engine:
         self.region_list_height = max(0, min(600, int(prefs.get('layout.regionListHeight') or 0)))
         self.heights = {key: max(40, min(600, int(prefs.get(pref) or default)))
                        for (key, pref), default in zip(HEIGHT_KEYS.items(), (130, 64, 90))}
+        self.token_results = {}
+        ctl.inspection.tokenized.connect(self.tokens_received)
         self.view_path = ''
         self.before = ''
         self.player = self.sink = None
@@ -104,6 +106,11 @@ class Engine:
             if prefs.get(key):
                 method(prefs.get(key))
         self.model_changed()
+
+    def tokens_received(self, identity, text, result):
+        self.token_results[identity] = dict(text=text, result=result)
+        while len(self.token_results) > 8:
+            del self.token_results[next(iter(self.token_results))]
 
     def model_changed(self):
         c = self.ctl
@@ -258,6 +265,7 @@ class Engine:
             self.player.stop()
             self.player.setSource(QUrl())
         self.view_path = path
+        self.ctl.inspection.load(path)
         self.before = ''
         self.frame = QImage()
         self.frame_tick += 1
@@ -304,6 +312,16 @@ class Engine:
     def dispatch(self, request):
         c = self.ctl
         op = request.get('op')
+        if op == 'moss_tokenize':
+            identity, text = str(request['identity'])[:128], request['text']
+            if not isinstance(text, str) or len(text) > 100000:
+                raise ValueError('Prompt is too long')
+            c.inspection.tokenize(identity, text)
+            return {}
+        if op == 'heatmap_select':
+            if request.get('path') == self.view_path:
+                c.inspection.select(int(request['index']))
+            return {}
         if op == 'compare_params':
             import outmeta
             path = self.output_path(request['path'])
@@ -478,6 +496,9 @@ class Engine:
                     layoutHeight=self.layout_height, regionListHeight=self.region_list_height,
                     regionPromptHeight=self.region_prompt_height, wordingHeight=self.wording_height,
                     media=self.media(request), replacement=self.replacement,
+                    tokenResults=self.token_results,
+                    heatmap=dict(path=self.view_path, available=c.inspection.available,
+                                 tokens=c.inspection.tokens, overlay=c.inspection.overlay),
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,
                     queue=c.queue, elapsed=c.elapsed, rate=c.rate, messages=messages,

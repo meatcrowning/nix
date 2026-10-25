@@ -660,6 +660,16 @@ class Registry:
         g.set_input("sampler", "add_noise", bool(p.get("add_noise", True)))
         g.set_input("save", "filename_prefix", p.get("filename_prefix", "painter"))
 
+        p.pop("moss_heatmaps", None)
+        if (fam["id"] == "moss_image" and not g.has("negpip") and object_info
+                and "PainterMossSampler" in object_info and "PainterMossSaveImage" in object_info):
+            g.node("sampler")["class_type"] = "PainterMossSampler"
+            g.set_inputs("sampler", {"clip": list(g.node("encode_pos")["inputs"]["clip"]), "text": pos})
+            g.node("save")["class_type"] = "PainterMossSaveImage"
+            sampler_id = g.id_of("sampler")
+            g.set_input("save", "heatmaps", [sampler_id, 2])
+            p["moss_heatmaps"] = True
+
         prompt = g.to_prompt()
         if object_info is not None:
             problems = G.validate(prompt, object_info)

@@ -66,6 +66,7 @@ class ParameterForm(object):
         wildcard_scroll.add_with_viewport(self.wildcard_buttons)
         params.pack_start(wildcard_scroll, False, False, 0)
         self.prompt_writers = {}
+        self.token_marks = []
         for key, title, height in [('positive', 'Prompt', 120), ('negative', 'Negative prompt', 65)]:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             header = Gtk.Box(spacing=4)
@@ -87,6 +88,10 @@ class ParameterForm(object):
             box.pack_start(header, False, False, 0)
             editor = self.text_box(key, height)
             text = editor.text
+            count = label("")
+            header.pack_end(count, False, False, 0)
+            from moss_gtk import TokenMarks
+            self.token_marks.append(TokenMarks(text, count, self.send))
             box.pack_start(editor, False, False, 0)
             params.pack_start(box, False, False, 0)
             self.controls[key] = text
@@ -476,6 +481,8 @@ class ParameterForm(object):
 
     def visibility(self):
         flags = self.state.get('flags', {})
+        for marks in self.token_marks:
+            marks.update(self.state)
         self.controls['megapixels'].set_digits(6 if flags.get('layoutSupport') else 1)
         self.controls['megapixels'].set_range(.05 if flags.get('layoutSupport') else .1, 16 if flags.get('layoutSupport') else 8)
         self.layout_box.set_visible(bool(flags.get('layoutSupport')))

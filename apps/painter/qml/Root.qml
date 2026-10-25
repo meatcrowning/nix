@@ -624,6 +624,30 @@ Item {
         }
     }
 
+    readonly property var inspection: typeof App.inspection !== "undefined" ? App.inspection : null
+    readonly property string inspectionPath: root.inView ? root.selOne
+        : (results.preview.open && !results.preview.showLive ? results.preview.source : "")
+    property bool showHeatmap: false
+    onShowHeatmapChanged: pushButtons()
+    onInspectionPathChanged: {
+        showHeatmap = false
+        if (inspection) inspection.load(inspectionPath)
+    }
+    Connections {
+        target: root.inspection
+        function onChanged() { root.pushButtons() }
+    }
+    HeatmapPane {
+        visible: root.showHeatmap && root.inspection !== null && root.inspection.available
+        z: 31
+        x: results.x
+        y: results.y
+        width: results.width
+        height: results.height
+        service: root.inspection
+        onClosed: root.showHeatmap = false
+    }
+
     property bool showParameterCompare: false
     ParameterCompare {
         visible: root.showParameterCompare
@@ -831,6 +855,9 @@ Item {
         { id: "compareparams", label: "cmp", tip: "Compare Settings", menu: "edit",
           icon: "view-split-left-right", bar: true, barText: "Compare Settings", tb: true,
           checkable: true, state: root.showParameterCompare ? 1 : root.selOne !== "" ? 0 : 2 },
+        { id: "heatmap", label: "map", tip: "Token Heatmap", menu: "view",
+          icon: "view-preview", bar: true, barText: "Heatmap", tb: true, checkable: true,
+          state: root.inspection && root.inspection.available ? (root.showHeatmap ? 1 : 0) : 2 },
         { id: "injprompt", tip: "Reuse Prompt", menu: "edit",
           state: root.selParams ? 0 : 2 },
         { id: "injparams", tip: "Reuse Parameters", menu: "edit",
@@ -1033,6 +1060,7 @@ Item {
         else if (id === "full") App.toggleFullScreen()
         else if (id === "back") root.inView = false
         else if (id === "forward") root.enterView("")
+        else if (id === "heatmap") root.showHeatmap = !root.showHeatmap
         else if (id === "compareparams") root.showParameterCompare = !root.showParameterCompare
         else if (id === "compare") root.showCompare = !root.showCompare
         else if (id.indexOf("cols") === 0) root.gridColumns = parseInt(id.substring(4))

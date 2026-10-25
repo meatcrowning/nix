@@ -157,6 +157,24 @@ insert the derivative into generation history. Output PNG/MP4 metadata uses
 the shared `pngmeta.py`/`mp4meta.py` implementations. Metadata failure must not
 discard an otherwise valid downloaded output.
 
+## MOSS token inspection
+
+`moss_inspect.py` owns asynchronous token requests and selected-output maps;
+`moss_data.py` owns the bounded versioned `paHm` PNG chunk. Keep that chunk
+through metadata rewrites. Prompt probes debounce 350 ms, reject stale replies,
+and paint boundaries without changing text or undo. Counts use the unweighted
+MOSS tokenizer before wildcard/layout compilation and include template tokens.
+The tokenizer endpoint uses the existing backend connection; it never loads GPU
+weights or starts a backend on its own.
+
+`comfy_nodes/painter_moss.py` captures sparse layer-4 attention output similarity
+maps during ordinary MOSS generation when both nodes are advertised. PPM keeps
+its existing sampler because it changes tokenization/attention. Existing files
+without maps disable Heatmap. Maps are experimental associations, not causal
+word attribution; never infer maps for old images from a current prompt.
+Verify with `tools/moss-inspection-test.py` offscreen, `tools/moss-test.py`, and
+the Unity harness. Backend node installation is in `home/prog/painter.nix`.
+
 ## Models, prompts, and graphs
 
 `registry.MODES` owns anime/real/edit/video shortcut choices; QML does not choose

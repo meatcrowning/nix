@@ -845,6 +845,8 @@ class Painter(QObject):
         # construction: no warden, no gate. See apps/pylib/warden.py.
         self.warden = Warden(self)
         self.client = C.ComfyClient()
+        from moss_inspect import MossInspect
+        self._inspection = MossInspect(self.client, self)
         self.client.statusChanged.connect(self._on_queue)
         self.client.jobStarted.connect(self._on_started)
         self.client.jobProgress.connect(self._on_progress)
@@ -2096,6 +2098,10 @@ class Painter(QObject):
                 self.toast.emit(f"unload failed: {detail}", True)
 
         self.client.free(True, done)
+
+    @Property(QObject, constant=True)
+    def inspection(self):
+        return self._inspection
 
     def _on_queue(self, remaining):
         self._queue = remaining

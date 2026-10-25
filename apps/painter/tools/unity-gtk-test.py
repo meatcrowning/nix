@@ -78,6 +78,26 @@ def test():
         if not window.state.get('model'):
             return True
         if step[0] == 0:
+            from moss_gtk import TokenMarks
+            token_view, count = Gtk.TextView(), Gtk.Label()
+            sent = []
+            marks = TokenMarks(token_view, count, lambda *a, **kw: sent.append((a, kw)))
+            token_state = dict(flags=dict(layoutSupport=True), ready=True)
+            marks.update(token_state)
+            token_view.get_buffer().set_text('red cube')
+            assert marks.timer and not marks.boundaries
+            marks.destroy()  # drive the debounce deadline explicitly
+            marks.submit()
+            assert sent[-1][1]['text'] == 'red cube'
+            token_state['tokenResults'] = {marks.identity: dict(text='red cube', result=dict(count=12, boundaries=[3]))}
+            marks.update(token_state)
+            assert count.get_text() == '12 tokens' and marks.boundaries == [3]
+            token_view.get_buffer().set_text('red sphere')
+            marks.update(token_state)
+            assert not marks.boundaries
+            assert marks.text() == 'red sphere'
+            token_view.destroy()
+            print('PASS: GTK token debounce, count, markers and stale result rejection')
             assert notifications == ['Generation completed'], notifications
             buttons = window.wildcard_buttons.get_children()
             assert [b.get_label() for b in buttons] == window.state['wildcards']

@@ -71,10 +71,13 @@ Panel {
         }
     }
 
-    PromptWriter { scope: "positive" }
+    TokenProbe { id: positiveTokens; objectName: "positiveTokenProbe"; text: root.gen.positive; active: App.layoutSupport }
+    TokenProbe { id: negativeTokens; objectName: "negativeTokenProbe"; text: root.gen.negative; active: App.layoutSupport }
+    PromptWriter { scope: "positive"; tokenProbe: positiveTokens }
 
     PromptBox {
         id: positive
+        tokenBoundaries: positiveTokens.boundaries
         width: parent.width
         // Completion can assist mixed prose/tag prompts without changing
         // the family's generation-time text transform.
@@ -106,10 +109,12 @@ Panel {
     // is the story in `Panel.qml`.
     PromptWriter {
         scope: "negative"
+        tokenProbe: negativeTokens
         visible: !App.isVideo && (!App.isEdit || App.editSampling)
     }
     PromptBox {
         id: negative
+        tokenBoundaries: negativeTokens.boundaries
         width: parent.width
         // The negative is tags too — `lowres, worst quality` — so it completes
         // on the same families the positive does.
