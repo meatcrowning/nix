@@ -4,8 +4,8 @@ Vivaldi's UI is a Chromium page — `#browser` inside an extension window — an
 everything in it draws from about ninety CSS custom properties its theme engine
 computes and sets on that element. So the browser can be re-themed the way a
 web page is re-themed: define the whole ladder ourselves and the chrome follows,
-with no patched build and no source to compile (there is none to compile — the
-Chromium layer is only partly published and the Vivaldi layer not at all).
+without rebuilding Chromium. The optional sidebar splitter also loads
+`vivaldi-sidebar.js` through the packaged UI document.
 
 THREE LAYERS, and they are deliberately separable:
 
@@ -278,16 +278,55 @@ def sidebar_bookmarks_css() -> str:
   max-height: 55vh;
   border-bottom: 1px solid var(--colorBorder);
   margin: 0;
-  padding: 0 0 16px;
+  padding: 0 0 12px;
   overflow: auto;
   overflow-x: hidden;
   container-type: inline-size;
   z-index: 2;
 }
-#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField) .bookmark-bar::-webkit-resizer {
-  background: repeating-linear-gradient(135deg, transparent 0 3px, var(--colorFgFaded) 3px 4px, transparent 4px 6px);
-  border: 3px solid var(--colorBg);
-  cursor: ns-resize;
+/* A separate hit target leaves the bookmark scroller unobstructed. The
+   raster comes from QStyle::CE_Splitter, at its native logical size. */
+.desktop-bookmark-splitter {
+  position: fixed;
+  position-anchor: --sidebar-bookmarks;
+  top: calc(anchor(bottom) - var(--desktop-splitter-paint-height, 3px));
+  left: anchor(left);
+  width: anchor-size(width);
+  height: var(--desktop-splitter-paint-height, 3px);
+  z-index: 3;
+  cursor: row-resize;
+  touch-action: none;
+  background: var(--desktop-splitter-image, none) center / 220px var(--desktop-splitter-paint-height, 3px) no-repeat;
+}
+.desktop-bookmark-splitter::before {
+  content: "";
+  position: absolute;
+  inset: calc((var(--desktop-splitter-paint-height, 3px) - var(--desktop-splitter-hit-height, 12px)) / 2) 0;
+}
+.desktop-bookmark-splitter:hover,
+.desktop-bookmark-splitter.dragging {
+  background-image: var(--desktop-splitter-hover, var(--desktop-splitter-image, none));
+}
+.desktop-bookmark-splitter:focus-visible {
+  outline: 1px solid var(--colorHighlightBg);
+  outline-offset: -1px;
+}
+html.desktop-sidebar-splitter #browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField) .bookmark-bar {
+  resize: none;
+  overflow: hidden;
+  padding-bottom: var(--desktop-splitter-paint-height, 3px);
+  border-bottom: 0;
+}
+html.desktop-sidebar-splitter .bookmark-bar .observer {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+html.desktop-sidebar-splitter .bookmark-bar button {
+  width: 100% !important;
 }
 /* The bookmark bar lives outside the tab container: use the viewport as
    their shared containing block. Override Vivaldi's inline tab-height cap

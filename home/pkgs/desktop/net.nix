@@ -28,7 +28,7 @@ in
         # profile — which is how a launch from the runner lost him every
         # session cookie he had [2026-08-30]. One install per host, so there is
         # only one profile to land on.
-        (vivaldi.override {
+        ((vivaldi.override {
           proprietaryCodecs = isx86;
           enableWidevine = isx86;
           # Pin the password store instead of letting Chromium guess it.
@@ -50,6 +50,18 @@ in
           # (`apps/pylib/tools/chromium-key-recover.py`): the real key is the
           # kwallet one, so name that backend and the session stops mattering.
           commandLineArgs = "--password-store=kwallet6";
-        })
+        }).overrideAttrs (old: {
+          postInstall = (old.postInstall or "") + ''
+            ui="$out/opt/vivaldi/resources/vivaldi"
+            cp ${../../../apps/pylib/vivaldi-sidebar.js} "$ui/desktop-sidebar.js"
+            substituteInPlace "$ui/window.html" --replace-fail '</body>' \
+              '<script src="desktop-sidebar.js"></script></body>'
+            # The upstream bookmark component sums horizontal widths. In our
+            # vertical layout every item must remain mounted in the scroller.
+            substituteInPlace "$ui/bundle.js" --replace-fail \
+              'maxWidth:Math.floor(t.clientWidth)' \
+              'maxWidth:t.closest(".bookmark-bar")&&t.ownerDocument.documentElement.classList.contains("desktop-sidebar-splitter")?1e9:Math.floor(t.clientWidth)'
+          '';
+        }))
   ];
 }

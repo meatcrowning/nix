@@ -157,6 +157,17 @@ HEADER = """\
 def build_css(source=None, style=None):
     bar, barprov = scrollcss.build(source, style)
     css, prov = vivaldichrome.build(source, extra=bar)
+    if source == "plasma" or (source is None and vivaldichrome.kdetheme.is_plasma()):
+        renderer = shutil.which("vivaldi-splitter-render")
+        if renderer:
+            result = subprocess.run([renderer], capture_output=True, text=True, timeout=15)
+            if result.returncode == 0:
+                splitter = json.loads(result.stdout)
+                css += ("\n:root{--desktop-splitter-image:url(%s);"
+                        "--desktop-splitter-hover:url(%s);--desktop-splitter-paint-height:%spx;--desktop-splitter-hit-height:%spx}\n"
+                        % (splitter["normal"], splitter["hover"], splitter["height"], splitter["hitHeight"]))
+            else:
+                print("splitter renderer: " + result.stderr.strip(), file=sys.stderr)
     return css, "%s; scrollbar: %s" % (prov, barprov)
 
 
