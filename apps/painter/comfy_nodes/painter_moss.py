@@ -92,6 +92,10 @@ class PainterMossSampler:
     CATEGORY = 'painter'
 
     def sample(self, clip, text, **inputs):
+        sampler = nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']
+        if getattr(sampler, 'PAINTER_STEP_OBSERVER_VERSION', 0) < 1:
+            raise RuntimeError('MOSS heatmaps require the updated Painter sampler callback; '
+                               'apply the Painter backend configuration and restart the backend.')
         metadata = tokenize(text, clip.tokenizer)
         if metadata['count'] > 4096:
             return nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']().sample(**inputs) + ([],)

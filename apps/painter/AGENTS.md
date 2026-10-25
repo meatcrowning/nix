@@ -245,7 +245,10 @@ Maps are experimental associations, not causal
 word attribution; never infer maps for old images from a current prompt.
 Verify capture/scoring with the CPU-only `tools/moss-capture-test.py`, plus
 `tools/moss-inspection-test.py` offscreen, `tools/moss-test.py`, and
-the Unity harness. Backend node installation is in `home/prog/painter.nix`.
+the Unity harness. Backend node installation is in `home/prog/painter.nix`. Both the MOSS node
+and its partial-stop sampler callback link to live repository source; changing
+those links requires a host rebuild. The sampler advertises its observer contract
+so an outdated backend fails clearly instead of silently dropping maps.
 For accuracy experiments, `tools/moss_quality_experiment.py` is an isolated-only
 node requiring `PainterSamplerCustom`. It retains raw 64×64 captures by layer
 and sampler step; `tools/moss-quality-analyze.py` scores image-only polygon

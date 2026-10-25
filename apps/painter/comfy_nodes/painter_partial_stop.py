@@ -91,6 +91,7 @@ def _out(latent, samples, x0_output, model):
 
 
 class PainterSamplerCustom(custom.SamplerCustom):
+    PAINTER_STEP_OBSERVER_VERSION = 1
     RETURN_TYPES = ("LATENT", "LATENT")
     FUNCTION = "sample"
 

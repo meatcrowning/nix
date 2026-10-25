@@ -128,7 +128,7 @@ in
       # Live app source, like the Painter frontend; loaded on backend start.
       $DRY_RUN_CMD ln -sfn /home/lam/nix/apps/painter/comfy_nodes/painter_moss.py \
         ${comfyDir}/custom_nodes/painter_moss.py
-      $DRY_RUN_CMD ln -sfn ${../../apps/painter/comfy_nodes/painter_partial_stop.py} \
+      $DRY_RUN_CMD ln -sfn /home/lam/nix/apps/painter/comfy_nodes/painter_partial_stop.py \
         ${comfyDir}/custom_nodes/painter_partial_stop.py
       $DRY_RUN_CMD ln -sfn ${../../apps/painter/comfy_nodes/painter_qwen21.py} \
         ${comfyDir}/custom_nodes/painter_qwen21.py

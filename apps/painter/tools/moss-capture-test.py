@@ -86,3 +86,17 @@ for version,side in ((1,64),(2,128)):
     else:
         raise AssertionError('Oversized map accepted')
 print('PASS: native resolution, long-prompt budget, legacy/v2 packet bounds')
+
+# Reject a stale deployed sampler before running inference without map callbacks.
+source = Path(__file__).resolve().parents[1]/'comfy_nodes/painter_moss.py'
+node = next(n for n in ast.parse(source.read_text()).body if isinstance(n,ast.ClassDef) and n.name == 'PainterMossSampler')
+sample = next(n for n in node.body if isinstance(n,ast.FunctionDef) and n.name == 'sample')
+ns = dict(nodes=SimpleNamespace(NODE_CLASS_MAPPINGS={'PainterSamplerCustom':object}))
+exec(compile(ast.Module(body=[sample],type_ignores=[]),str(source),'exec'),ns)
+try:
+    ns['sample'](None,None,'bird')
+except RuntimeError as exc:
+    assert 'updated Painter sampler callback' in str(exc)
+else:
+    raise AssertionError('Stale sampler accepted')
+print('PASS: stale deployed sampler reports an actionable error')
