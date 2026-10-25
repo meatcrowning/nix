@@ -10,6 +10,10 @@ Item {
     readonly property bool heatmap: app ? app.showHeatmap : false
     readonly property bool sideBySide: (plasma && preview.open) || heatmap
     readonly property int inset: root.width < 320 ? 4 : 10
+    // The parameter side already contributes 10px padding + a 4px splitter;
+    // history contributes an 8px splitter. Balance the total viewer gaps.
+    readonly property real viewerLeftInset: root.sideBySide && app && app.split
+        ? root.inset - 6 : root.inset
     property real historyWidth: Prefs.get("plasma.historyWidth") > 0
                                 ? Prefs.get("plasma.historyWidth") : 300
     readonly property real historySize: Math.min(Math.max(120, historyWidth),
@@ -80,6 +84,7 @@ Item {
         anchors.bottom: root.sideBySide ? parent.bottom : undefined
         resizable: !root.sideBySide
         anchors.margins: root.width < 320 ? 4 : 10
+        anchors.leftMargin: root.viewerLeftInset
         anchors.bottomMargin: 0
         // The live viewport is a browsing affordance: in View the whole pane is
         // already one output, and a second smaller copy of a different one
@@ -99,6 +104,7 @@ Item {
         anchors.top: preview.visible ? preview.bottom : parent.top
         anchors.bottom: parent.bottom
         anchors.margins: root.width < 320 ? 4 : 10
+        anchors.leftMargin: root.viewerLeftInset
         anchors.topMargin: preview.visible ? 8 : 0
         visible: root.inView
         source: root.inView ? root.viewPath : ""
