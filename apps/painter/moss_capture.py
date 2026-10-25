@@ -26,3 +26,13 @@ class CaptureWindow:
             self.captured.append(step)
         self.pending = None
         self.step = step + 1
+
+
+def map_shape(height, width, tokens):
+    """Keep native detail up to 128, reserving storage for bounded metadata."""
+    height, width = min(height, 128), min(width, 128)
+    budget = 20 * 1024 * 1024
+    if height * width * tokens > budget:
+        scale = (budget / (height * width * tokens)) ** .5
+        height, width = max(1, int(height * scale)), max(1, int(width * scale))
+    return height, width

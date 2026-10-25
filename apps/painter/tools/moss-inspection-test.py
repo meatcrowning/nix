@@ -545,7 +545,7 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
             assert all(0 <= t['percentage'] <= 100 for t in panel_ranks[key])
         # Original panel is unmodified; the thermal panel differs.
         title_height = int(grid.text('PainterTitleHeight'))
-        assert grid.text('Title') == 'saved-moss — token association heatmaps'
+        assert grid.text('Title') == 'saved-moss — token association heatmaps v2'
         image_y = title_height + (grid.height() - title_height - 36) // 2 - original.height() + 16
         assert grid.pixelColor(16, image_y) == original.pixelColor(4, 4)
         assert grid.pixelColor(60, image_y) != original.pixelColor(4, 4)

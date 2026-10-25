@@ -68,3 +68,21 @@ else:
     raise AssertionError('Stop callback did not stop')
 assert events == [16,'preview']
 print('PASS: production callback commits capture before preview/stop')
+
+from moss_capture import map_shape
+assert map_shape(94,63,534) == (94,63)
+assert map_shape(256,256,534) == (128,128)
+h,w = map_shape(128,128,4096)
+assert h*w*4096 <= 20*1024*1024
+for version,side in ((1,64),(2,128)):
+    doc = dict(version=version,width=side,height=side,tokens=[dict(index=0,text='bird',visible=True)])
+    pixels = bytes(side*side)
+    assert moss_data.decode(moss_data.encode(doc,pixels)) == (doc,pixels)
+    doc['width'] = side+1
+    try:
+        moss_data.decode(moss_data.encode(doc,bytes((side+1)*side)))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('Oversized map accepted')
+print('PASS: native resolution, long-prompt budget, legacy/v2 packet bounds')

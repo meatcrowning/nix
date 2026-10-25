@@ -169,9 +169,13 @@ MOSS tokenizer before wildcard/layout compilation and exclude template tokens.
 The tokenizer endpoint uses the existing backend connection; it never loads GPU
 weights or starts a backend on its own.
 
-`comfy_nodes/painter_moss.py` captures sparse layer-4 attention output similarity
+`comfy_nodes/painter_moss.py` captures sparse layer-4/8 attention output similarity
 maps from the last positive evaluation before actual sampler callbacks in the
-middle third, with capture provenance saved alongside the maps. Capture runs
+middle third, with capture provenance saved alongside the maps. Version 2 maps average raw
+layer associations, apply one separable binomial smoothing pass before token
+normalization, and retain native resolution up to 128 per axis. Long prompts
+reduce map dimensions to keep planes within 20 MiB and the packet within 24 MiB;
+the reader still accepts version 1 maps. Capture runs
 during ordinary MOSS generation when both nodes are advertised. PPM keeps
 its existing sampler because it changes tokenization/attention. Existing files
 without maps cannot display a heatmap. The toolbar token picker and matching
@@ -183,7 +187,7 @@ activity. Hover temporarily shows one token, then restores the dropdown choice.
 Grid comparison arms two prompt/region clicks, validates each against saved tokens,
 and exports a labeled 3×2 PNG to the platform Pictures directory in a worker.
 Original/all-token panels precede the two picked maps; source resolution is kept.
-A title row uses the saved output’s model name and “token association heatmaps.”
+A title row uses the saved output’s model name and “token association heatmaps v2.”
 The Original output header includes two smaller truncated lines of the saved scene
 prompt; its full text is retained in `PainterComparisonPrompt` PNG metadata.
 Other headers fit two small lines of scored eligible words. Ranked headers omit

@@ -13,7 +13,7 @@ from comfy_extras.nodes_custom_sampler import SamplerCustom
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import moss_data
-from moss_capture import CaptureWindow
+from moss_capture import CaptureWindow, map_shape
 
 _tokenizer = None
 _token_lock = threading.Lock()
@@ -114,7 +114,7 @@ class PainterMossSampler:
             branches = options.get('cond_or_uncond', [])
             # Existing output features: sparse capture in the middle third.
             # No rivalry between tokens: adjectives and nouns may overlap.
-            if options.get('block_index') != 4 or 0 not in branches or not capture.wanted:
+            if options.get('block_index') not in (4, 8) or 0 not in branches or not capture.wanted:
                 return out
             h, w = state['shape']
             n = h * w
@@ -124,8 +124,11 @@ class PainterMossSampler:
                 raise ValueError('MOSS conditioning/token alignment changed')
             maps = features[:, n:] @ features[:, :n].transpose(1, 2)
             maps = maps.reshape(batch, metadata['count'], h, w)
-            maps = torch.nn.functional.interpolate(maps, size=(min(h, 64), min(w, 64)), mode='bilinear', align_corners=False)
-            capture.pending = maps
+            maps = torch.nn.functional.interpolate(maps, size=map_shape(h, w, metadata['count']), mode='bilinear', align_corners=False)
+            if capture.pending is None:
+                capture.pending = maps
+            else:
+                capture.pending.add_(maps)
             return out
 
         model.add_wrapper_with_key(WrappersMP.DIFFUSION_MODEL, 'painter_moss', forward)
@@ -136,15 +139,23 @@ class PainterMossSampler:
         maps = capture.maps
         packets = []
         if maps is not None:
-            maps = (maps / len(capture.captured)).flatten(2)
+            maps = maps / (2 * len(capture.captured))
+            # Smooth raw associations, before each token's contrast stretch.
+            padded = torch.nn.functional.pad(maps, (0, 0, 1, 1), mode='replicate')
+            maps = (padded[:, :, :-2] + 2*padded[:, :, 1:-1] + padded[:, :, 2:]) / 4
+            padded = torch.nn.functional.pad(maps, (1, 1, 0, 0), mode='replicate')
+            maps = (padded[:, :, :, :-2] + 2*padded[:, :, :, 1:-1] + padded[:, :, :, 2:]) / 4
+            h, w = maps.shape[-2:]
+            maps = maps.flatten(2)
             lo = torch.quantile(maps, .05, dim=-1, keepdim=True)
             hi = torch.quantile(maps, .99, dim=-1, keepdim=True)
             normalized = ((maps - lo) / (hi - lo).clamp_min(1e-12)).clamp(0, 1)
-            h, w = state['shape']
             for item in normalized:
-                doc = dict(version=1, prompt=text, tokens=metadata['tokens'], width=min(w, 64), height=min(h, 64),
+                doc = dict(version=2, prompt=text, tokens=metadata['tokens'], width=w, height=h,
                            method='attention output similarity', captured_calls=len(capture.captured),
-                           capture=dict(version=2, block_index=4, sampler_steps=capture.captured,
+                           capture=dict(version=3, block_indices=[4, 8], sampler_steps=capture.captured,
+                                        layer_reduction='mean raw associations', resolution_cap=128,
+                                        smoothing='separable binomial [1,2,1]/4; edge padding; before token quantiles',
                                         step_index_base=0, total_steps=steps,
                                         evaluation='last positive evaluation before sampler callback',
                                         normalization='per-token 5th–99th percentile, clipped to uint8',

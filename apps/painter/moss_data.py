@@ -1,4 +1,4 @@
-"""Portable MOSS token maps in a private ancillary PNG chunk (paHm), version 1."""
+"""Portable MOSS token maps in a private ancillary PNG chunk (paHm), versions 1 and 2."""
 import json
 import re
 import struct
@@ -154,7 +154,8 @@ def _decode(blob):
     if type(doc.get('height')) is not int or type(doc.get('width')) is not int:
         raise ValueError('Invalid map dimensions')
     n, h, w = len(doc['tokens']), int(doc['height']), int(doc['width'])
-    if doc.get('version') != 1 or not (0 < n <= 4096 and 0 < h <= 64 and 0 < w <= 64):
+    cap = {1: 64, 2: 128}.get(doc.get('version'), 0)
+    if not (0 < n <= 4096 and 0 < h <= cap and 0 < w <= cap):
         raise ValueError('Unsupported token maps')
     if any(not isinstance(t, dict) or t.get('index') != i or not isinstance(t.get('text'), str)
            or not isinstance(t.get('visible'), bool) for i, t in enumerate(doc['tokens'])):

@@ -160,7 +160,7 @@ def annotations(painter, rect, ranking, doc, font, padding, focused=False):
 
 def add_title(image, model):
     """Prepend a single title row, preserving every existing comparison pixel."""
-    title = '%s — token association heatmaps' % (Path(model).stem if model else 'Unknown model')
+    title = '%s — token association heatmaps v2' % (Path(model).stem if model else 'Unknown model')
     font = QFont('sans-serif')
     font.setPixelSize(max(16, min(72, image.width() // 65)))
     font.setBold(True)
