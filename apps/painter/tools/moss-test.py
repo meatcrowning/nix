@@ -127,6 +127,45 @@ def main():
                     pass
                 else:
                     raise AssertionError("unsupported MOSS pipeline accepted")
+        # The correction is automatic only for known stock SFT filenames.
+        stock = root / "diffusion_models/moss_image_sft_int8_convrot.safetensors"
+        stock.write_bytes((root / "diffusion_models/moss-sft-int8.safetensors").read_bytes())
+        reg.scan(use_cache=False)
+        entry = reg.find(stock.name)
+        try:
+            reg.build(entry, {})
+        except G.GraphError as exc:
+            assert "Destripe is missing" in str(exc)
+        else:
+            raise AssertionError("missing correction silently ignored")
+        assert not G.Graph(reg.build(entry, {"moss_destripe_strength": 0})["prompt"]).has("moss_destripe")
+        fixture(root / "loras/moss_sft_destripe_top64_bf16.safetensors", {
+            "diffusion_model.layers.24.proj.ffn_up_gate.lora_down.weight": [1, 3072],
+            "diffusion_model.layers.24.proj.ffn_up_gate.lora_up.weight": [8192, 1]})
+        reg.scan(use_cache=False)
+        entry = reg.find(stock.name)
+        for width, strength in ((768, 1.0), (1024, 1.5), (1536, 1.5)):
+            for negpip in (False, True):
+                built = reg.build(entry, {"width": width, "height": 1024,
+                                          "toggles": {"negpip": negpip}})
+                graph = G.Graph(built["prompt"])
+                fix = graph.node("moss_destripe")
+                assert fix["class_type"] == "LoraLoaderModelOnly"
+                assert fix["inputs"]["strength_model"] == strength
+                assert fix["inputs"]["model"] == [graph.id_of("loader"), 0]
+                assert graph.node("moss_guidance")["inputs"]["model"] == [graph.id_of("moss_destripe"), 0]
+                assert built["params"]["moss_destripe_strength"] == strength
+                assert built["params"]["moss_destripe_lora"] == fix["inputs"]["lora_name"]
+                assert graph.node("vae")["inputs"]["vae_name"] == "moss-image-vae.safetensors"
+        for invalid in (-1, 3, float('nan'), 'bad'):
+            try:
+                reg.build(entry, {"moss_destripe_strength": invalid})
+            except G.GraphError:
+                pass
+            else:
+                raise AssertionError("invalid Destripe strength accepted")
+        for name in ("moss-base-int8.safetensors", "moss-sft-int8.safetensors"):
+            assert not G.Graph(reg.build(reg.find(name), {})["prompt"]).has("moss_destripe")
         # Architecture detection survives renaming and doesn't steal other Qwens.
         h = F.Header({"language_model.layers.0.linear_attn.A_log": {"shape": [32]},
                       "language_model.layers.0.input_layernorm.weight": {"shape": [4096]}}, {}, "safetensors")

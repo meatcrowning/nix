@@ -31,5 +31,16 @@
     "slg_start_percent": 0.0,
     "slg_end_percent": 1.0
   },
+  "destripe": {
+    "models": [
+      "moss_image_sft_int8_convrot.safetensors",
+      "moss_image_sft_bf16.safetensors",
+      "moss_image_sft_bf16_split_qkv.safetensors"
+    ],
+    "file": "moss_sft_destripe_top64_bf16.safetensors",
+    "url": "https://huggingface.co/nynxz/MOSS-Image/resolve/138539ab15d94841c2736503953c4f7c45ae7dbc/loras/moss_sft_destripe_top64_bf16.safetensors",
+    "sha256": "fcd0d025f6a62dfe3171ab11fe9b3119eac735e22b94913c4efe45d8c69c2da9",
+    "source": "https://huggingface.co/nynxz/MOSS-Image#sft-destripe-lora"
+  },
   "resolution": {"megapixels": 1.0, "multiple": 16, "aspect": "1:1"}
 }

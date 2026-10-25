@@ -624,6 +624,32 @@ class Registry:
         g.set_input("latent", "height", int(h))
         g.set_input("latent", "batch_size", int(p.get("batch_size", 1)))
 
+        # SFT's colour stripes originate in transformer weights, not the VAE.
+        # Only known stock SFT filenames opt in; never patch Base or a merged
+        # community model just because its name contains "sft". See the family
+        # source link for the measured resolution-dependent LoRA strengths.
+        fix = fam.get("destripe") or {}
+        if entry.name in fix.get("models", []):
+            try:
+                strength = float(p.get("moss_destripe_strength", 1.0 if int(w) <= 768 else 1.5))
+            except (TypeError, ValueError) as exc:
+                raise G.GraphError("MOSS Destripe strength must be between 0 and 2") from exc
+            if not math.isfinite(strength) or not 0 <= strength <= 2:
+                raise G.GraphError("MOSS Destripe strength must be between 0 and 2")
+            p["moss_destripe_strength"] = strength
+            p["moss_destripe_lora"] = fix["file"] if strength else ""
+            if strength:
+                asset = self.find(fix["file"])
+                if asset is None or asset.role != "lora":
+                    raise G.GraphError("MOSS SFT Destripe is missing; run "
+                                       "python3 apps/painter/tools/install-moss-destripe.py "
+                                       "on the ComfyUI host")
+                source = [g.id_of("loader"), 0]
+                patch = g.add_node("LoraLoaderModelOnly", {
+                    "model": source, "lora_name": asset.name,
+                    "strength_model": strength}, "moss_destripe")
+                g.retarget(source, [patch, 0], skip={patch})
+
         # --- sampling --------------------------------------------------------
         g.set_input("sampler_select", "sampler_name", p.get("sampler_name", "euler"))
         g.set_input("scheduler", "scheduler", p.get("scheduler", "simple"))
