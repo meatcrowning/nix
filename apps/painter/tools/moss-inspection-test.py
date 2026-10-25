@@ -338,8 +338,11 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         assert len(exported) == 1
         grid = QImage(str(exported[0]))
         assert not grid.isNull()
+        assert grid.width() == original.width()*3 + 48
+        assert json.loads(grid.text('PainterRanking'))['focused']
         assert grid.text('Description').splitlines() == [
-            'Original', 'All tokens · relative association', 'Token 2 · red sphere', 'Token 1 · red sphere']
+            'Original', 'All tokens · relative association', 'Hottest areas',
+            'Token 2 · red sphere', 'Token 1 · red sphere', 'Most focused tokens']
         # Original panel is unmodified; the thermal panel differs.
         image_y = (grid.height() - 36) // 2 - original.height() + 16
         assert grid.pixelColor(16, image_y) == original.pixelColor(4, 4)

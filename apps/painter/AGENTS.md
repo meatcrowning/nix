@@ -178,8 +178,15 @@ mean the saved visible-token scores before a single 5–95% contrast stretch and
 thermal colour mapping; stored per-token normalization cannot recover raw model
 activity. Hover temporarily shows one token, then restores the dropdown choice.
 Grid comparison arms two prompt/region clicks, validates each against saved tokens,
-and exports a labeled 2×2 PNG to the platform Pictures directory in a worker.
+and exports a labeled 3×2 PNG to the platform Pictures directory in a worker.
 Original/all-token panels precede the two picked maps; source resolution is kept.
+The third column ranks up to four hot neighborhoods and focused tokens.
+`moss_rank.py` excludes punctuation and English function words using saved word
+spans (retaining content-word subpieces, labeled with their containing word).
+Hot-area labels maximize eligible-token
+mean within each neighborhood; focus ranks weighted RMS spread. These are
+relative saved-map scores, not absolute activity. Ranking methods and full token
+identities live in PNG metadata; panels show titles and token labels only.
 Output changes or leaving heatmap mode cancel unfinished picks. `moss_grid.py`
 uses the viewer's mask renderer; exports never alter the source or run inference.
 Compiled layouts map scene-caption
