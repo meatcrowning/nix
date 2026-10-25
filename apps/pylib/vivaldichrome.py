@@ -249,6 +249,55 @@ def relief_css(pal, chrome=None) -> str:
     ])
 
 
+def sidebar_bookmarks_css() -> str:
+    """Put bookmarks between the left tab list and its embedded address toolbar.
+
+    Anchor to the toolbar so sidebar resizing and panel visibility need no JS.
+    Vivaldi budgets bookmark visibility by summing button widths against the
+    observer width, even for a column; give that observer room while clipping
+    and scrolling at the real sidebar width. Keep the native buttons and menus.
+    """
+    return """
+@supports (top: anchor(bottom)) {
+#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField):has(.bookmark-bar) {
+  --sidebar-bookmarks-height: min(25vh, 240px);
+}
+#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField):has(.bookmark-bar) .toolbar-tabbar-before {
+  anchor-name: --sidebar-address-toolbar;
+  margin-bottom: var(--sidebar-bookmarks-height);
+}
+#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField) .bookmark-bar {
+  position: absolute;
+  position-anchor: --sidebar-address-toolbar;
+  top: anchor(bottom);
+  left: anchor(left);
+  width: anchor-size(width);
+  height: var(--sidebar-bookmarks-height);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  overflow-x: hidden;
+  container-type: inline-size;
+  z-index: 2;
+}
+#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField) .bookmark-bar .observer {
+  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 1000000px;
+  height: max-content;
+  padding: 0;
+}
+#browser.tabs-left:has(.toolbar-tabbar-before .UrlBar-AddressField) .bookmark-bar button {
+  width: 100cqw;
+  max-width: none;
+  min-height: 28px;
+  padding: 0 6px;
+}
+}
+"""
+
+
 def css(pal, chrome=None, extra="") -> str:
     """The whole `custom.css` body: the ladder, then the relief, then whatever
     the caller appends (the scrollbar sheet, in practice)."""
@@ -256,7 +305,7 @@ def css(pal, chrome=None, extra="") -> str:
     block = "".join("  --%s: %s !important;\n" % (k, val) for k, val in sorted(v.items()))
     # Both selectors: the theme engine sets these on #browser, and a few of
     # Vivaldi's own popups mount outside it.
-    return (":root,\n#browser,\n#app {\n%s}\n" % block) + relief_css(pal, chrome) + extra
+    return (":root,\n#browser,\n#app {\n%s}\n" % block) + relief_css(pal, chrome) + sidebar_bookmarks_css() + extra
 
 
 def theme(pal, name="desktop") -> dict:
