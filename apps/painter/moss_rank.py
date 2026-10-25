@@ -123,7 +123,7 @@ def duplicate_token(token, selected):
     return False
 
 
-def rank(document, pixels, limit=4):
+def rank(document, pixels, limit=4, image_size=None):
     """Return unique spatial rankings; None keeps all entries for fitted headers."""
     w, h = document['width'], document['height']
     area = w * h
@@ -155,6 +155,8 @@ def rank(document, pixels, limit=4):
                         association=association, percentage=association*100))
         if limit is not None and len(hot) == limit:
             break
+    image_w, image_h = image_size or (w, h)
+    scale_x, scale_y = image_w/w, image_h/h
     focused = []
     for token, plane in zip(tokens, planes):
         weights = [max(0, v/255 - .7)**2 for v in plane]
@@ -163,9 +165,9 @@ def rank(document, pixels, limit=4):
             continue
         x = sum(v*(i % w) for i, v in enumerate(weights)) / total
         y = sum(v*(i // w) for i, v in enumerate(weights)) / total
-        spread = math.sqrt(sum(v*((i % w-x)**2 + (i // w-y)**2) for i, v in enumerate(weights)) / total)
+        spread = math.sqrt(sum(v*(((i % w-x)*scale_x)**2 + ((i // w-y)*scale_y)**2) for i, v in enumerate(weights)) / total)
         focused.append(dict(radius=spread, x=x, y=y, token=dict(token),
-                            percentage=spread/math.hypot(w, h)*100))
+                            percentage=spread/math.hypot(image_w, image_h)*100))
     focused.sort(key=lambda item: (item['radius'], item['token']['index']))
     unique = []
     for item in focused:

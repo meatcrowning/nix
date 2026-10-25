@@ -64,6 +64,9 @@ def _callback(model, steps, x0_output):
     preview = latent_preview.prepare_callback(model, steps, x0_output)
 
     def wrapped(step, x0, x, total):
+        observer = model.model_options.get('painter_step_observer')
+        if observer is not None:
+            observer(step)
         preview(step, x0, x, total)
         if STATE.consume():
             raise _StopHere(x0)

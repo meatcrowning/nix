@@ -20,7 +20,7 @@ Item {
             currentIndex: pane.service ? pane.service.selected + 1 : -1
             onActivated: pane.service.select(currentIndex - 1)
             ToolTip.visible: hovered
-            ToolTip.text: "All tokens: mean saved association scores, with relative thermal contrast. Blue is low; red is high."
+            ToolTip.text: "All tokens: mean normalized descriptive-token associations; layout structure excluded. Relative thermal contrast, not probability or absolute activity. Blue is low; red is high."
             Accessible.name: "Prompt token heatmap"
         }
         Button {

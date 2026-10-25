@@ -127,7 +127,7 @@ def annotations(painter, rect, ranking, doc, font, padding, focused=False):
         cx = rect.x() + (item['x'] + .5) * rect.width() / doc['width']
         cy = rect.y() + (item['y'] + .5) * rect.height() / doc['height']
         label = item['token'].get('display', item['token']['text'].strip().replace('\n', '↵'))
-        percent = '%.1f%%' % item['percentage']
+        percent = ('%.1f%% radius' if focused else '%.1f%% assoc.') % item['percentage']
         percent_width = percent_metrics.horizontalAdvance(percent)
         space = metrics.horizontalAdvance(' ')
         label_width = min(rect.width() - 2*padding, metrics.horizontalAdvance(label) + space + percent_width + padding*2)
@@ -201,9 +201,10 @@ def save_grid(source, data, tokens, folder):
     padding = max(12, width // 80)
     header = metrics.height() + padding * 2
     gap = padding
+    data = (dict(data[0], _aggregate=moss_data.descriptive_aggregate(*data)), data[1])
     words, lookup = moss_rank.word_maps(*data)
     selected = [lookup[token['index']] for token in tokens]
-    full_ranking = moss_rank.rank(*words, limit=None)
+    full_ranking = moss_rank.rank(*words, limit=None, image_size=(width, height))
     ranking = {key: items[:4] for key, items in full_ranking.items()}
     all_tokens, related = moss_rank.association_lists(*words, selected, data[0]['_aggregate'])
     lists = {1: all_tokens, 2: moss_rank.unique_entries(full_ranking['areas'], ranking['areas']),
@@ -250,20 +251,25 @@ def save_grid(source, data, tokens, folder):
     canvas.setText('PainterComparisonPrompt', scene_prompt(data[0]))
     expanded['method'] = ('Eligible whole words; duplicate and close variants omitted. Ranked headers exclude words '
         'annotated on their panel. Area percentages: local mean saved normalized association. Focus percentages: '
-        'weighted RMS radius divided by map diagonal; lower is more focused. Related percentages: positive Pearson '
+        'weighted RMS radius in image pixels divided by image diagonal; lower is more focused. Related percentages: positive Pearson '
         'spatial correlation, not semantic or causal relatedness. All-token percentages: word-map mean weighted '
         'by displayed all-token map intensity. Not confidence or absolute activity. Two lines of complete entries.')
     canvas.setText('PainterExpandedLists', json.dumps(expanded, ensure_ascii=False))
     canvas.setText('PainterWordGrouping', json.dumps(dict(source=str(source), selected=selected,
         words=words[0]['tokens'], method='Mean of saved normalized token planes per word occurrence; '
-        'original all-token reference retained. No additional per-word contrast stretch.'), ensure_ascii=False))
+        'All-token reference excludes layout structure and includes descriptive prompt tokens. No additional per-word contrast stretch.'), ensure_ascii=False))
     ranking['method'] = ('Saved normalized associations, not absolute activity. English function words and punctuation excluded; '
                          'layout rankings use descriptive string values only, excluding structural fields and coordinates; '
                          'token pieces averaged per word occurrence before ranking; '
                          'up to 7x7 neighborhood means, centers separated by up to 12 cells; '
                          'area labels maximize eligible-token mean in that neighborhood; '
                          'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
-                         'focus minimizes RMS radius weighted by max(score-.70,0)^2. Up to four per panel.')
+                         'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to four per panel.')
+    canvas.setText('PainterHeatmapMethod', json.dumps(dict(
+        version=2, capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
+        aggregate='Mean of visible descriptive token maps; per-token 5–99% normalization already applied; aggregate stretched 5–95%',
+        focus_image_size=[width, height],
+        limitation='Relative feature associations, not probabilities, raw activity or causal attribution'), ensure_ascii=False))
     canvas.setText('PainterRanking', json.dumps(ranking, ensure_ascii=False))
     import pngmeta
     try:

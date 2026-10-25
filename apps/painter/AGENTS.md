@@ -170,11 +170,14 @@ The tokenizer endpoint uses the existing backend connection; it never loads GPU
 weights or starts a backend on its own.
 
 `comfy_nodes/painter_moss.py` captures sparse layer-4 attention output similarity
-maps during ordinary MOSS generation when both nodes are advertised. PPM keeps
+maps from the last positive evaluation before actual sampler callbacks in the
+middle third, with capture provenance saved alongside the maps. Capture runs
+during ordinary MOSS generation when both nodes are advertised. PPM keeps
 its existing sampler because it changes tokenization/attention. Existing files
 without maps cannot display a heatmap. The toolbar token picker and matching
 positive-prompt hovers share the selected token. Entry defaults to All tokens:
-mean the saved visible-token scores before a single 5–95% contrast stretch and
+mean the saved descriptive prompt-token scores (excluding layout structure)
+before a single 5–95% contrast stretch and
 thermal colour mapping; stored per-token normalization cannot recover raw model
 activity. Hover temporarily shows one token, then restores the dropdown choice.
 Grid comparison arms two prompt/region clicks, validates each against saved tokens,
@@ -187,7 +190,7 @@ Other headers fit two small lines of scored eligible words. Ranked headers omit
 words annotated on their panel; selected-map headers rank positive Pearson spatial
 correlation, and All tokens ranks word-map means weighted by its displayed aggregate.
 Area labels show local association percentages; focused labels show RMS radius as
-a percentage of map diagonal (lower is tighter). Over-image percentages use half
+a percentage of output image diagonal (lower is tighter). Over-image percentages use half
 the word-label font size. `PainterExpandedLists` records displayed entries and score
 definitions; these are relative map measurements, not probabilities or semantic similarity.
 Exports average saved token planes per word occurrence for picked maps and both
@@ -236,7 +239,8 @@ to compiled `items`; duplicate captions and current reordering never choose a ma
 by text alone. Old outputs without saved region IDs retain the dropdown picker.
 Maps are experimental associations, not causal
 word attribution; never infer maps for old images from a current prompt.
-Verify with `tools/moss-inspection-test.py` offscreen, `tools/moss-test.py`, and
+Verify capture/scoring with the CPU-only `tools/moss-capture-test.py`, plus
+`tools/moss-inspection-test.py` offscreen, `tools/moss-test.py`, and
 the Unity harness. Backend node installation is in `home/prog/painter.nix`.
 
 ## Models, prompts, and graphs

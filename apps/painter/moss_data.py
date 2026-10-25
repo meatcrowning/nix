@@ -28,6 +28,15 @@ def aggregate(document, pixels):
                  round(255 * ((value - low) / (high - low))) for value in totals)
 
 
+def descriptive_aggregate(document, pixels):
+    """Combine prompt content, excluding compiled layout keys/coordinates."""
+    from moss_rank import descriptive_spans
+    spans = descriptive_spans(document.get('prompt', ''))
+    tokens = [t for t in document['tokens'] if t['visible'] and
+              any(a < t.get('end', -1) and b > t.get('start', -1) for a, b in spans)]
+    return aggregate(dict(document, tokens=tokens), pixels)
+
+
 def json_value_span(source, path):
     """Locate a JSON value without losing offsets to escaping or repeated text."""
     decoder = json.JSONDecoder()

@@ -13,6 +13,7 @@ from comfy_extras.nodes_custom_sampler import SamplerCustom
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import moss_data
+from moss_capture import CaptureWindow
 
 _tokenizer = None
 _token_lock = threading.Lock()
@@ -98,22 +99,22 @@ class PainterMossSampler:
         if model.model_options.get('transformer_options', {}).get('optimized_attention_override'):
             return nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']().sample(**inputs) + ([],)
         steps = max(1, len(inputs['sigmas']) - 1)
-        state = dict(step=-1, count=0, maps=None)
+        state = {}
+        capture = CaptureWindow(steps)
 
         def forward(executor, x, timestep, context, transformer_options={}, **kw):
             state['shape'] = x.shape[-2:]
             if 0 in transformer_options.get('cond_or_uncond', []):
-                state['step'] += 1
+                capture.begin()
             return executor(x, timestep, context, transformer_options, **kw)
 
         def attention(original, q, k, v, heads, **kw):
             out = original(q, k, v, heads, **kw)
             options = kw.get('transformer_options', {})
             branches = options.get('cond_or_uncond', [])
-            step = state['step']
             # Existing output features: sparse capture in the middle third.
             # No rivalry between tokens: adjectives and nouns may overlap.
-            if options.get('block_index') != 4 or 0 not in branches or (step - steps // 3) % 3 or not (steps // 3 <= step < max(steps // 3 + 1, 2 * steps // 3)):
+            if options.get('block_index') != 4 or 0 not in branches or not capture.wanted:
                 return out
             h, w = state['shape']
             n = h * w
@@ -124,28 +125,31 @@ class PainterMossSampler:
             maps = features[:, n:] @ features[:, :n].transpose(1, 2)
             maps = maps.reshape(batch, metadata['count'], h, w)
             maps = torch.nn.functional.interpolate(maps, size=(min(h, 64), min(w, 64)), mode='bilinear', align_corners=False)
-            if state['maps'] is None:
-                state['maps'] = maps
-            else:
-                state['maps'].add_(maps)
-            state['count'] += 1
+            capture.pending = maps
             return out
 
         model.add_wrapper_with_key(WrappersMP.DIFFUSION_MODEL, 'painter_moss', forward)
         model.model_options['transformer_options']['optimized_attention_override'] = attention
+        model.model_options['painter_step_observer'] = capture.finish
         inputs['model'] = model
         sampled = nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']().sample(**inputs)
-        maps = state['maps']
+        maps = capture.maps
         packets = []
         if maps is not None:
-            maps = (maps / state['count']).flatten(2)
+            maps = (maps / len(capture.captured)).flatten(2)
             lo = torch.quantile(maps, .05, dim=-1, keepdim=True)
             hi = torch.quantile(maps, .99, dim=-1, keepdim=True)
             normalized = ((maps - lo) / (hi - lo).clamp_min(1e-12)).clamp(0, 1)
             h, w = state['shape']
             for item in normalized:
                 doc = dict(version=1, prompt=text, tokens=metadata['tokens'], width=min(w, 64), height=min(h, 64),
-                           method='attention output similarity', captured_calls=state['count'])
+                           method='attention output similarity', captured_calls=len(capture.captured),
+                           capture=dict(version=2, block_index=4, sampler_steps=capture.captured,
+                                        step_index_base=0, total_steps=steps,
+                                        evaluation='last positive evaluation before sampler callback',
+                                        normalization='per-token 5th–99th percentile, clipped to uint8',
+                                        latent_shape=list(state['shape']),
+                                        attribution='feature similarity, not attention probability or causal attribution'))
                 packets.append(moss_data.encode(doc, (item * 255).byte().cpu().numpy().tobytes()))
         return sampled + (packets,)
 

@@ -403,7 +403,7 @@ class MossInspect(QObject):
         combo.setMaximumWidth(260)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         combo.activated.connect(lambda index: self.select(index - 1))
-        combo.setToolTip('All tokens: mean saved association scores, with relative thermal contrast. Blue is low; red is high.')
+        combo.setToolTip('All tokens: mean normalized descriptive-token associations; layout structure excluded. Relative thermal contrast, not probability or absolute activity. Blue is low; red is high.')
         grid = QPushButton('Grid comparison', shell.window)
         grid.setObjectName('heatmapGrid')
         grid.setCheckable(True)
@@ -478,7 +478,7 @@ class MossInspect(QObject):
                 if not cached:
                     value = moss_data.read(path)
                 if value and not cached:
-                    value[0]['_aggregate'] = moss_data.aggregate(*value)
+                    value[0]['_aggregate'] = moss_data.descriptive_aggregate(*value)
                     import moss_rank
                     value[0]['_content_tokens'] = moss_rank.content_tokens(value[0])
                     import pngmeta
