@@ -301,11 +301,52 @@ class Toolkit(object):
     def visible(self, field, visible):
         field[2].set_visible(visible)
 
-    def region_list(self, parent, changed):
-        model = Gtk.ListStore(str, str)
+    def region_list(self, parent, changed, reordered):
+        model = Gtk.ListStore(str, str, str, bool)
         view = Gtk.TreeView(model=model)
         view.set_headers_visible(False)
-        view.append_column(Gtk.TreeViewColumn('Regions', Gtk.CellRendererText(), text=1))
+        column = Gtk.TreeViewColumn('Regions')
+        image = Gtk.CellRendererPixbuf()
+        column.pack_start(image, False)
+        column.add_attribute(image, 'icon-name', 2)
+        text = Gtk.CellRendererText()
+        text.set_property('ypad', 0)
+        column.pack_start(text, True)
+        column.add_attribute(text, 'text', 1)
+        view.append_column(column)
+        targets = [Gtk.TargetEntry.new('application/x-painter-region', Gtk.TargetFlags.SAME_WIDGET, 0)]
+        view.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, targets, Gdk.DragAction.MOVE)
+        view.drag_dest_set(Gtk.DestDefaults(0), targets, Gdk.DragAction.MOVE)
+        def drag_data(widget, context, data, info, time):
+            widget.stop_emission_by_name('drag-data-get')
+            identity = getattr(view, 'drag_identity', '')
+            data.set_text(identity, -1)
+        def press(widget, event):
+            hit = view.get_path_at_pos(int(event.x), int(event.y))
+            view.drag_identity = model[hit[0]][0] if hit and not model[hit[0]][3] else ''
+            return False
+        def receive(widget, context, x, y, data, info, time):
+            widget.stop_emission_by_name('drag-data-received')
+            hit = view.get_path_at_pos(x, y)
+            identity = data.get_text()
+            if hit and identity:
+                reordered(identity, hit[0].get_indices()[0])
+            Gtk.drag_finish(context, bool(hit and identity), False, time)
+        def motion(widget, context, x, y, time):
+            hit = view.get_path_at_pos(x, y)
+            context.drag_status(Gdk.DragAction.MOVE if hit else Gdk.DragAction(0), time)
+            view.set_drag_dest_row(hit[0] if hit else None, Gtk.TreeViewDropPosition.INTO_OR_BEFORE)
+            return True
+        def drop(widget, context, x, y, time):
+            target = widget.drag_dest_find_target(context, None)
+            widget.drag_get_data(context, target, time)
+            view.set_drag_dest_row(None, Gtk.TreeViewDropPosition.BEFORE)
+            return True
+        view.connect('drag-motion', motion)
+        view.connect('drag-drop', drop)
+        view.connect('button-press-event', press)
+        view.connect('drag-data-get', drag_data)
+        view.connect('drag-data-received', receive)
         selection = view.get_selection()
         selection.set_mode(Gtk.SelectionMode.MULTIPLE)
         selection.connect('changed', lambda s: changed([model[path][0] for path in s.get_selected_rows()[1]]))
@@ -325,11 +366,30 @@ class Toolkit(object):
 
     def set_list(self, view, rows, selected):
         model = view.get_model()
-        model.clear()
-        for identity, title in rows:
-            it = model.append([identity, title])
-            if identity in selected:
-                view.get_selection().select_iter(it)
+        identities = set(row['identity'] for row in rows)
+        for n in range(len(model) - 1, -1, -1):
+            if model[n][0] not in identities:
+                model.remove(model.get_iter(Gtk.TreePath.new_from_string(str(n))))
+        for n, row in enumerate(rows):
+            source = next((i for i in range(n, len(model)) if model[i][0] == row['identity']), -1)
+            values = [row['identity'], row['title'], row['icon'], row['locked']]
+            if source < 0:
+                model.insert(n, values)
+            else:
+                if source != n:
+                    order = list(range(len(model)))
+                    order.insert(n, order.pop(source))
+                    model.reorder(order)
+                for column, value in enumerate(values):
+                    if model[n][column] != value:
+                        model[n][column] = value
+        selection = view.get_selection()
+        for n, row in enumerate(rows):
+            path = Gtk.TreePath.new_from_string(str(n))
+            if row['identity'] in selected:
+                selection.select_path(path)
+            else:
+                selection.unselect_path(path)
 
         scroll = view.region_scroll
         scroll.set_size_request(-1, self.window.region_list_height or min(140, max(28, view.get_preferred_height()[1] + 4)))

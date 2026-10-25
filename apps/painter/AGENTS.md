@@ -212,6 +212,8 @@ through `LayoutNode.qml`.
 Add arms one box-drawing gesture, then returns to selection. The toolbar type
 selector changes selected regions, or the next added type when none are selected.
 Drag on empty canvas to box-select; moving a selection keeps its spacing.
+Region rows update in place so prompt edits preserve list scroll position.
+List dragging reorders unlocked rows; locked rows cannot move or be crossed.
 Locks prevent canvas selection and geometry edits, including list-selected
 regions. Clicking a selected locked region on the canvas deselects it on press
 before any drag or resize can begin. Locked preview layers are grey and clipped

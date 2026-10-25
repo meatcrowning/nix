@@ -473,7 +473,7 @@ def test():
             assert form.values()['positive'] == 'Saved prompt'
             form.controls['steps'].set_value(19)
             assert form.values()['steps'] == 19
-            assert form.layout_editor is not window.layout_editor
+            assert form.layout_editor is not window.layout_editor, form.status.get_text()
             assert form.layout_editor.ui.window is form
             assert form.layout_doc['items'][0]['caption'] == 'Saved region'
             form.layout_editor.ui.set(form.layout_editor.fields['summary.meta'], 'saved medium')

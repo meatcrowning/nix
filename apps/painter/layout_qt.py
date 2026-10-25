@@ -1,7 +1,7 @@
 """Qt Quick adapter for the shared inline layout editor; no secondary window."""
 import base64
 import math
-from PySide6.QtCore import QObject, Property, Signal, Slot, Qt, QBuffer, QIODevice, QByteArray, QUrl, QRectF, QPointF
+from PySide6.QtCore import QObject, Property, Signal, Slot, Qt, QAbstractListModel, QModelIndex, QBuffer, QIODevice, QByteArray, QUrl, QRectF, QPointF
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QFont, QFontInfo, QFontMetricsF, QPainter, QPainterPath
 from PySide6.QtQuick import QQuickPaintedItem
 from PySide6.QtQml import qmlRegisterType
@@ -9,6 +9,48 @@ from PySide6.QtSvg import QSvgRenderer
 import moss_layout as M
 from layout_ui import LayoutUI
 from layout_cache import LayerCache
+
+
+class RegionRows(QAbstractListModel):
+    """Stable delegates and scroll position while captions or order change."""
+    role = Qt.UserRole + 1
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.items = []
+
+    def roleNames(self):
+        return {self.role: b'modelData'}
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.items)
+
+    def data(self, index, role):
+        if role == self.role and index.isValid() and 0 <= index.row() < len(self.items):
+            return self.items[index.row()]
+
+    def update(self, rows):
+        identities = set(row['identity'] for row in rows)
+        for n in range(len(self.items) - 1, -1, -1):
+            if self.items[n]['identity'] not in identities:
+                self.beginRemoveRows(QModelIndex(), n, n)
+                self.items.pop(n)
+                self.endRemoveRows()
+        for n, row in enumerate(rows):
+            source = next((i for i in range(n, len(self.items))
+                           if self.items[i]['identity'] == row['identity']), -1)
+            if source < 0:
+                self.beginInsertRows(QModelIndex(), n, n)
+                self.items.insert(n, row)
+                self.endInsertRows()
+            else:
+                if source != n:
+                    self.beginMoveRows(QModelIndex(), source, source, QModelIndex(), n)
+                    self.items.insert(n, self.items.pop(source))
+                    self.endMoveRows()
+                if self.items[n] != row:
+                    self.items[n] = row
+                    self.dataChanged.emit(self.index(n), self.index(n), [self.role])
 
 
 class Node(QObject):
@@ -20,7 +62,7 @@ class Node(QObject):
         self._options, self.callback = options or [], callback
         self._nodes, self._value = [], ''
         self._visible, self._enabled, self._expand = True, True, expand
-        self._rows, self._selected = [], []
+        self._rows, self._selected = RegionRows(self), []
         if isinstance(parent, Node): parent._nodes.append(self)
 
     kind = Property(str, lambda s: s._kind, constant=True)
@@ -33,7 +75,7 @@ class Node(QObject):
     shown = Property(bool, lambda s: s._visible and (s._kind != 'label' or bool(s._title)), notify=changed)
     enabled = Property(bool, lambda s: s._enabled, notify=changed)
     expand = Property(bool, lambda s: s._expand, constant=True)
-    rows = Property('QVariantList', lambda s: s._rows, notify=changed)
+    rows = Property(QObject, lambda s: s._rows, constant=True)
     selected = Property('QStringList', lambda s: s._selected, notify=changed)
     swatches = Property('QStringList', lambda s: [v.strip() for v in str(s._value).split(',') if QColor(v.strip()).isValid()], notify=changed)
 
@@ -53,6 +95,10 @@ class Node(QObject):
         if identity in selected: selected.remove(identity)
         else: selected.append(identity)
         if self.callback: self.callback(selected)
+
+    @Slot(str, int)
+    def reorder(self, identity, target):
+        self.reorder_callback(identity, target)
 
     @Slot(str, str)
     def colour(self, value, replace):
@@ -136,9 +182,12 @@ class Toolkit(QObject):
     def sensitive(self, field, enabled): self.enable_widget(field, enabled)
     def visible(self, field, visible):
         if field._visible != visible: self.show_widget(field, visible)
-    def region_list(self, parent, changed): return Node('list', parent=parent, callback=changed)
+    def region_list(self, parent, changed, reordered):
+        node = Node('list', parent=parent, callback=changed)
+        node.reorder_callback = reordered
+        return node
     def set_list(self, view, rows, selected):
-        view._rows = [dict(identity=i, title=t) for i,t in rows]
+        view._rows.update(rows)
         view._selected = list(selected)
         view._visible = bool(rows)
         view.changed.emit()

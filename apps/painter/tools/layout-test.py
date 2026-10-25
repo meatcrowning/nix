@@ -12,6 +12,19 @@ import moss_layout as M
 
 
 def core():
+    order = M.Editor(M.fresh())
+    ids = [order.add()['id'] for _ in range(5)]
+    order.doc['items'][2]['locked'] = True
+    before = copy.deepcopy(order.doc)
+    for source, target in ((ids[2], 0), (ids[0], 3), (ids[4], 1), (ids[0], -1), ('missing', 0)):
+        assert not order.reorder(source, target)
+        assert order.doc == before
+    assert order.reorder(ids[0], 1)
+    assert [r['id'] for r in order.doc['items']] == [ids[1], ids[0], ids[2], ids[3], ids[4]]
+    order.undo()
+    assert order.doc == before
+    order.undo(True)
+    assert order.doc['items'][1]['id'] == ids[0]
     from layout_cache import LayerCache
     cache = LayerCache(lambda *args: object(), limit=1000, scale=2)
     cache.get(b'a' * 500, 5, 5)

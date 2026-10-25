@@ -45,7 +45,7 @@ class LayoutUI(object):
         self.side = u.column(root)
         u.tab_body(tabs, self.side)
         region = u.tab(tabs, 'Region')
-        self.list = u.region_list(region, self.selection_changed)
+        self.list = u.region_list(region, self.selection_changed, self.reorder)
         scene_controls = u.row(region)
         self.add(scene_controls, 'enabled', 'Use layout for generation', 'iconcheck')
         self.add(scene_controls, 'summary.meta', 'Medium / genre tags', 'inline_entry')
@@ -308,11 +308,19 @@ class LayoutUI(object):
         self.model.selected = ids
         self.refresh()
 
+    def reorder(self, identity, target):
+        if not self.syncing and self.model.reorder(identity, target):
+            self.refresh()
+
     def refresh_list(self):
         previous = self.syncing
         self.syncing = True
-        rows = [(r['id'], '%s%s%s %s' % (M.REGION_ICONS[r['label']], ' [off]' if not r.get('enabled', True) else '',
-                 (' [locked]' if r.get('locked') else '') + (' [grouped]' if r.get('group') else ''), (r.get('text') or r.get('caption') or 'Describe this region').replace('\n', ' ')[:70])) for r in self.model.doc['items']]
+        icons = {'object': 'package-x-generic', 'character': 'avatar-default', 'text': 'insert-text'}
+        rows = [dict(identity=r['id'], icon=icons[r['label']], locked=bool(r.get('locked')),
+                     title=('%s%s%s %s' % ('[off]' if not r.get('enabled', True) else '',
+                            ' [locked]' if r.get('locked') else '', ' [grouped]' if r.get('group') else '',
+                            (r.get('text') or r.get('caption') or 'Describe this region').replace('\n', ' ')[:70])).strip())
+                for r in self.model.doc['items']]
         self.ui.set_list(self.list, rows, self.model.selected)
         self.syncing = previous
 

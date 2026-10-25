@@ -5759,6 +5759,51 @@ def test_sidebar(win, ctl, tmp, shell=None):
     check("region list has a view background",
           prop(by_name("regionListBackground"), "color") == prop(_THEME[0], "bg")
           and by_name("regionListBackground").height() == by_name("regionList").height())
+    import copy
+    saved_layout = copy.deepcopy(ui.model.doc)
+    saved_selection = list(ui.model.selected)
+    for _ in range(12):
+        ui.model.add()
+    ui.refresh()
+    spin(100)
+    region_list = by_name("regionList")
+    scroll_to(region_list)
+    region_list.setProperty("contentY", 80)
+    spin(100)
+    old_scroll = prop(region_list, "contentY")
+    ui.fields['item.caption'].edit('Updated region prompt')
+    spin(100)
+    check("editing a region prompt preserves list scroll position",
+          prop(region_list, "contentY") == old_scroll and old_scroll > 0)
+    region_list.setProperty("contentY", 0)
+    spin(100)
+    identities = [row['id'] for row in ui.model.doc['items']]
+    first = by_name("regionRow_" + identities[0])
+    second = by_name("regionRow_" + identities[1])
+    check("region rows touch without blank space", abs(second.y() - first.y() - first.height()) < 1)
+    drag(win, first, first.width() / 2, first.height() / 2,
+         first.width() / 2, first.height() * 1.5)
+    spin(100)
+    check("dragging a region row changes the saved order",
+          [row['id'] for row in ui.model.doc['items']][:2] == [identities[1], identities[0]])
+    ui.model.doc['items'][0]['locked'] = True
+    ui.refresh()
+    spin(100)
+    first = by_name("regionRow_" + identities[1])
+    second = by_name("regionRow_" + identities[0])
+    locked_order = [row['id'] for row in ui.model.doc['items']]
+    drag(win, first, first.width() / 2, first.height() / 2,
+         first.width() / 2, first.height() * 1.5)
+    spin(100)
+    drag(win, second, second.width() / 2, second.height() / 2,
+         second.width() / 2, -second.height() / 2)
+    spin(100)
+    check("row dragging cannot move or cross a locked region",
+          [row['id'] for row in ui.model.doc['items']] == locked_order)
+    ui.load(saved_layout)
+    ui.model.selected = saved_selection
+    ui.refresh()
+    spin(100)
     check("selected canvas regions use the theme accent",
           prop(by_name("mossLayoutCanvas"), "selectedColor") == prop(_THEME[0], "focusColor"))
     palette = node_item(ui.fields["item.palette"])

@@ -233,14 +233,62 @@ Item {
                 clip: true
                 model: node.spec.rows
                 ScrollBar.vertical: VScroll { id: listBar }
+                spacing: 0
+                property int dropIndex: -1
                 delegate: ItemDelegate {
+                    id: regionRow
+                    objectName: "regionRow_" + modelData.identity
                     required property var modelData
                     width: ListView.view.width - listBar.barW
+                    height: Math.max(implicitContentHeight, icon.height) + 2
+                    topPadding: 1
+                    bottomPadding: 1
+                    topInset: 0
+                    bottomInset: 0
                     text: modelData.title
+                    icon.name: modelData.icon
+                    icon.width: 16
+                    icon.height: 16
                     highlighted: node.spec.selected.indexOf(modelData.identity) >= 0
+                    Rectangle {
+                        width: parent.width
+                        height: 2
+                        color: Theme.focusColor
+                        visible: regionList.dropIndex >= 0 && regionList.indexAt(0, regionRow.y) === regionList.dropIndex
+                    }
                     MouseArea {
+                        id: rowMouse
                         anchors.fill: parent
-                        onClicked: mouse => node.spec.pick(parent.modelData.identity, !!(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
+                        property real startY: 0
+                        property bool moving: false
+                        function updateDrop() {
+                            const point = mapToItem(regionList.contentItem, 0, mouseY)
+                            regionList.dropIndex = regionList.indexAt(1, Math.max(0, Math.min(regionList.contentHeight - 1, point.y)))
+                        }
+                        onPressed: mouse => { startY = mouse.y; moving = false }
+                        onPositionChanged: mouse => {
+                            if (!pressed || regionRow.modelData.locked) return
+                            if (Math.abs(mouse.y - startY) >= Qt.styleHints.startDragDistance) moving = true
+                            if (moving) updateDrop()
+                        }
+                        onReleased: mouse => {
+                            const target = regionList.dropIndex
+                            regionList.dropIndex = -1
+                            if (moving) node.spec.reorder(regionRow.modelData.identity, target)
+                            else node.spec.pick(regionRow.modelData.identity, !!(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)))
+                        }
+                        onCanceled: { moving = false; regionList.dropIndex = -1 }
+                        Timer {
+                            interval: 50
+                            repeat: true
+                            running: rowMouse.pressed && rowMouse.moving
+                            onTriggered: {
+                                const y = rowMouse.mapToItem(regionList, 0, rowMouse.mouseY).y
+                                const step = y < 20 ? -12 : y > regionList.height - 20 ? 12 : 0
+                                regionList.contentY = Math.max(0, Math.min(Math.max(0, regionList.contentHeight - regionList.height), regionList.contentY + step))
+                                rowMouse.updateDrop()
+                            }
+                        }
                     }
                 }
             }

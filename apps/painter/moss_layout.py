@@ -242,6 +242,18 @@ class Editor(object):
     def editable(self, row):
         return not row.get('locked')
 
+    def reorder(self, identity, target):
+        """Move one row to an index without moving or crossing locked rows."""
+        items = self.doc['items']
+        source = next((n for n, row in enumerate(items) if row['id'] == identity), -1)
+        if source < 0 or target < 0 or target >= len(items) or source == target:
+            return False
+        if any(row.get('locked') for row in items[min(source, target):max(source, target) + 1]):
+            return False
+        self.checkpoint()
+        items.insert(target, items.pop(source))
+        return True
+
     def select(self, identity, toggle=False, include_locked=True):
         row = next((r for r in self.doc['items'] if r['id'] == identity), None)
         ids = [r['id'] for r in self.doc['items'] if row and (include_locked or not r.get('locked')) and (r['id'] == identity or
