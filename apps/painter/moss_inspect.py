@@ -92,10 +92,10 @@ class MossInspect(QObject):
         if not self._viewing or not self._data:
             return
         saved = self._data[0].get('prompt', '')
-        if text.strip() != saved.strip():
-            return
         position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
-        position += (len(saved) - len(saved.lstrip())) - (len(text) - len(text.lstrip()))
+        position = moss_data.prompt_position(saved, text, position)
+        if position is None:
+            return
         for index, token in enumerate(self._tokens):
             if token.get('start', -1) <= position < token.get('end', -1):
                 self.select(index)

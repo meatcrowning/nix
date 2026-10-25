@@ -173,7 +173,8 @@ weights or starts a backend on its own.
 maps during ordinary MOSS generation when both nodes are advertised. PPM keeps
 its existing sampler because it changes tokenization/attention. Existing files
 without maps cannot display a heatmap. The toolbar token picker and matching
-positive-prompt hovers share the selected token; mismatched drafts never drive
+positive-prompt hovers share the selected token; compiled layouts map scene-caption
+positions through JSON escaping to saved token offsets. Mismatched drafts never drive
 saved maps. Heatmap mode leaves history accessible and survives output changes.
 Maps are experimental associations, not causal
 word attribution; never infer maps for old images from a current prompt.

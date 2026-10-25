@@ -1,10 +1,42 @@
 """Portable MOSS token maps in a private ancillary PNG chunk (paHm), version 1."""
 import json
+import re
 import struct
 import zlib
 
 CHUNK = b'paHm'
 LIMIT = 24 * 1024 * 1024
+
+
+def prompt_position(saved, text, position):
+    """Map an editor character to plain conditioning or a compiled scene caption."""
+    caption, offset = saved, 0
+    literal = None
+    if text.strip() != saved.strip():
+        # Layout compilation puts the prompt box in summary.caption. Anchor to
+        # that field, never a substring which could also occur in a region.
+        match = re.match(r'\s*\{\s*"summary"\s*:\s*\{\s*"caption"\s*:\s*', saved)
+        if not match:
+            return None
+        offset = match.end()
+        try:
+            caption, end = json.JSONDecoder().raw_decode(saved[offset:])
+        except ValueError:
+            return None
+        if not isinstance(caption, str) or text.strip() != caption.strip():
+            return None
+        literal = saved[offset:offset + end]
+    position += len(caption) - len(caption.lstrip()) - (len(text) - len(text.lstrip()))
+    if not 0 <= position < len(caption):
+        return None
+    if literal is not None:
+        # The stored offsets address JSON source, including escaped characters.
+        for ascii_only in (False, True):
+            if json.dumps(caption, ensure_ascii=ascii_only) == literal:
+                prefix = json.dumps(caption[:position], ensure_ascii=ascii_only)[1:-1]
+                return offset + 1 + len(prefix)
+        return None
+    return position
 
 
 def encode(document, maps):

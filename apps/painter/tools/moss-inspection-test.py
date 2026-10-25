@@ -138,6 +138,37 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     assert ctl.inspection.selected == 0
     from PySide6.QtCore import QUrl
     assert QImage(QUrl(ctl.inspection.overlay).toLocalFile()) != original
+    # Layout outputs store the prompt box inside JSON, including escape bytes.
+    caption = 'red "\U0001f30a"\\boat\nsphere'
+    for ascii_only in (False, True):
+        compiled = json.dumps(dict(summary=dict(caption=caption), items=[dict(caption=caption)]),
+                              ensure_ascii=ascii_only, separators=(',', ':'))
+        start = compiled.index(':"') + 2
+        for position in range(len(caption)):
+            expected = start + len(json.dumps(caption[:position], ensure_ascii=ascii_only)[1:-1])
+            assert moss_data.prompt_position(compiled, caption, position) == expected
+            assert moss_data.prompt_position(compiled, '  ' + caption + ' ', position + 2) == expected
+        assert moss_data.prompt_position(compiled, 'different draft', 0) is None
+    assert moss_data.prompt_position('a red sphere', 'red sphere', 1) is None
+    split = moss_data.prompt_position(compiled, caption, caption.index('sphere'))
+    layout_doc = dict(doc, prompt=compiled, tokens=[
+        dict(index=0, text='red', visible=True, start=start, end=split),
+        dict(index=1, text='sphere', visible=True, start=split, end=split + 6)])
+    layout_packet = moss_data.encode(layout_doc, bytes([0, 255, 0, 255, 255, 0, 255, 0]))
+    layout_chunk = (struct.pack('>I', len(layout_packet)) + moss_data.CHUNK + layout_packet
+                    + struct.pack('>I', zlib.crc32(moss_data.CHUNK + layout_packet)))
+    layout_output = Path(tmp) / 'layout.png'
+    layout_output.write_bytes(plain[:-12] + layout_chunk + plain[-12:])
+    gallery.setProperty('selection', [str(layout_output)])
+    for _ in range(100):
+        u.spin(10)
+        if ctl.inspection.available and ctl.inspection.overlay: break
+    assert ctl.inspection.selected == 0
+    position = len(caption[:caption.index('sphere')].encode('utf-16-le')) // 2
+    ctl.inspection.hoverPrompt(caption, position)
+    assert ctl.inspection.selected == 1
+    if combo: assert combo.currentIndex() == 1
+    print('PASS layout caption hover, JSON escapes, Unicode and mismatched drafts')
     old_output = Path(tmp) / 'old.png'
     old_output.write_bytes(plain)
     gallery.setProperty('selection', [str(old_output)])
