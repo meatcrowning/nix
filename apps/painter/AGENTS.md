@@ -163,7 +163,7 @@ discard an otherwise valid downloaded output.
 `moss_data.py` owns the bounded versioned `paHm` PNG chunk. Keep that chunk
 through metadata rewrites. Prompt probes debounce 350 ms, reject stale replies,
 and paint boundaries without changing text or undo. Counts use the unweighted
-MOSS tokenizer before wildcard/layout compilation and include template tokens.
+MOSS tokenizer before wildcard/layout compilation and exclude template tokens.
 The tokenizer endpoint uses the existing backend connection; it never loads GPU
 weights or starts a backend on its own.
 
@@ -223,10 +223,12 @@ scene text and editable regions for paste, output restore and comparison.
 using the actual output dimensions and current positive prompt as scene caption.
 Keep reference underlays, groups, locks and guides out of model-facing JSON.
 Layouts sit beneath the prompt boxes. The Region tab contains its list, a row
-for the layout-enable icon, medium/genre tags and scene palette, then the
+for medium/genre tags and scene palette, then the
 canvas and region fields. Scene and Canvas retain their remaining settings.
 GTK embeds `layout_gtk.py`; Qt Quick renders the `layout_qt.py` descriptor tree
 through `LayoutNode.qml`.
+The Add toolbar ends with layout-generation and preview toggles, each with
+distinct on/off icons. Preview visibility never changes generation settings.
 Add arms one box-drawing gesture, then returns to selection. The toolbar type
 selector changes selected regions, or the next added type when none are selected.
 Drag on empty canvas to box-select; moving a selection keeps its spacing.

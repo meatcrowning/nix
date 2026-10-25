@@ -441,11 +441,11 @@ Item {
         Button {
             checkable: true
             checked: node.spec.value === true
-            icon.name: "edit-select-all"
+            icon.name: node.spec.options.length === 2 ? node.spec.options[checked ? 0 : 1] : "edit-select-all"
             display: AbstractButton.IconOnly
             Accessible.name: node.spec.title
             ToolTip.visible: hovered
-            ToolTip.text: node.spec.title
+            ToolTip.text: node.spec.title + (checked ? " — On" : " — Off")
             onToggled: node.spec.edit(checked)
         }
     }

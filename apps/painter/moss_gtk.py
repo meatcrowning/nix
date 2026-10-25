@@ -51,9 +51,10 @@ class TokenMarks(object):
         entry = state.get('tokenResults', {}).get(self.identity)
         if active and entry and entry['text'] == self.request == self.text():
             result = entry['result']
-            self.count.set_text('%s tokens' % result.get('count', '—'))
+            count = max(0, result['count'] - result.get('template_tokens', 0)) if 'count' in result else '—'
+            self.count.set_text('%s tokens' % count)
             self.count.set_tooltip_text(result.get('error') or
-                'Unweighted MOSS tokens. Includes %s prompt-template tokens; before wildcard expansion or layout compilation.' % result.get('template_tokens', 0))
+                'Prompt tokens only; excludes the MOSS chat wrapper. Before weighting, wildcard expansion or layout compilation.')
             boundaries = result.get('boundaries', [])
             if boundaries != self.boundaries:
                 self.boundaries = boundaries

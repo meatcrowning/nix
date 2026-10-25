@@ -198,8 +198,18 @@ class Toolkit(object):
         elif kind in ('check', 'iconcheck'):
             control = Gtk.ToggleButton() if kind == 'iconcheck' else Gtk.CheckButton(label=title)
             if kind == 'iconcheck':
-                control.set_image(Gtk.Image.new_from_stock(Gtk.STOCK_SELECT_ALL, Gtk.IconSize.MENU))
-                control.set_tooltip_text(title)
+                def update_icon(*_):
+                    active = control.get_active()
+                    if title == 'Show layout preview':
+                        stock = Gtk.STOCK_ZOOM_FIT if active else Gtk.STOCK_CLOSE
+                    else:
+                        stock = Gtk.STOCK_APPLY if active else Gtk.STOCK_CANCEL
+                    control.set_image(Gtk.Image.new_from_stock(stock, Gtk.IconSize.MENU))
+                    control.set_tooltip_text(title + (' — On' if active else ' — Off'))
+                control.connect('toggled', update_icon)
+                update_icon()
+                if hasattr(parent, 'sizes'):
+                    parent.sizes.add_widget(control)
                 control.get_accessible().set_name(title)
             control.connect('toggled', lambda *_: callback())
             box.pack_start(control, False, False, 0)

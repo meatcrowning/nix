@@ -89,9 +89,9 @@ def test():
             marks.destroy()  # drive the debounce deadline explicitly
             marks.submit()
             assert sent[-1][1]['text'] == 'red cube'
-            token_state['tokenResults'] = {marks.identity: dict(text='red cube', result=dict(count=12, boundaries=[3]))}
+            token_state['tokenResults'] = {marks.identity: dict(text='red cube', result=dict(count=12, template_tokens=10, boundaries=[3]))}
             marks.update(token_state)
-            assert count.get_text() == '12 tokens' and marks.boundaries == [3]
+            assert count.get_text() == '2 tokens' and marks.boundaries == [3]
             token_view.get_buffer().set_text('red sphere')
             marks.update(token_state)
             assert not marks.boundaries

@@ -281,6 +281,11 @@ def qt():
     ui = Toolkit()
     accepted = []
     editor = LayoutUI(ui, M.fresh(caption='A poster'), accepted.append)
+    toolbar = ui.root.nodes[0]
+    assert editor.fields['enabled'].parent() == toolbar
+    assert editor.preview_toggle.parent() == toolbar
+    assert editor.preview_toggle.kind == 'iconcheck'
+    assert editor.fields['enabled'].options[0] != editor.fields['enabled'].options[1]
     before_toggle = copy.deepcopy(editor.model.doc)
     editor.preview_toggle.edit(False)
     assert not editor.canvas.shown

@@ -53,7 +53,10 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     u.spin(400)
     service.tokenized.emit(*service.calls[-1], dict(count=12, template_tokens=10, utf16_boundaries=[3]))
     u.spin(30)
-    assert probe.property('count') == 12
+    assert probe.property('count') == 2
+    service.tokenized.emit(*service.calls[-1], dict(count=10, template_tokens=10))
+    assert probe.property('count') == 0
+    service.tokenized.emit(*service.calls[-1], dict(count=12, template_tokens=10, utf16_boundaries=[3]))
     box = u.find(win.contentItem(), 'PromptBox', lambda o: o.property('placeholder') == 'Positive')
     editor = u.find(box, 'QQuickTextEdit')
     assert editor.property('text') == 'red sphere'

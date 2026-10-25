@@ -11,10 +11,9 @@ Item {
     property string request: ""
     property int revision: 0
     property var result: ({})
-    readonly property int count: result.count === undefined ? -1 : result.count
+    readonly property int count: result.count === undefined ? -1 : Math.max(0, result.count - (result.template_tokens || 0))
     readonly property var boundaries: result.utf16_boundaries || []
-    readonly property string tip: result.error || "Unweighted MOSS tokens, including " + (result.template_tokens || 0)
-        + " prompt-template tokens. Before wildcard expansion or layout compilation."
+    readonly property string tip: result.error || "Prompt tokens only; excludes the MOSS chat wrapper. Before weighting, wildcard expansion or layout compilation."
     function refresh() {
         revision++
         result = ({})
