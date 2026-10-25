@@ -238,6 +238,63 @@ Use `tools/tagger-test.py` offscreen for streaming/cancellation and worker tests
 Verify geometry/compiler and Qt controls with `tools/layout-test.py --qt`
 offscreen; `tools/unity-test.sh` includes the native GTK layout checks.
 
+## Agent control of a running Qt window
+
+Plasma and Hyprland windows on both hosts expose `agent_control.py` through a
+private, per-window Unix socket. `tools/control.py` is the stdlib-only client;
+it never launches Painter or the backend. New source takes effect on the next
+Painter launch. Unity retains its existing GTK/controller socket.
+
+Run from the repository root:
+
+```sh
+python3 apps/painter/tools/control.py list
+python3 apps/painter/tools/control.py state
+python3 apps/painter/tools/control.py describe
+python3 apps/painter/tools/control.py select --model MODEL_FILENAME
+python3 apps/painter/tools/control.py apply /tmp/painter-setup.json
+```
+
+With several windows, pass `--socket PATH` before the command, using a path from
+`list`. `describe` reports model/mode/LoRA choices, editable setting names and
+bounds, and sampler options. `select --mode MODE` is the mode-button equivalent;
+selecting a model directly clears the mode. Select first, then read its state.
+
+An apply document merges only supplied settings; image and LoRA lists replace
+those slots. For example:
+
+```json
+{"settings":{"positive":"A red fox in snow","negative":"blur","seed":42,
+ "steps":20,"aspectW":3,"aspectH":2,"megapixels":1},
+ "input":"/absolute/path/reference.png","references":[],"loras":[]}
+```
+
+Settings use the visible form's names from `describe`. Width/height are derived:
+use `aspectW`, `aspectH`, and `megapixels`. `ms` merges nested sampling controls;
+`moss_layout` accepts a layout document. `input` is the primary/edit/first-frame
+image; `last` is the final video frame; `references` contains additional images.
+Paths must exist on the host running Painter. Empty strings clear image slots;
+empty arrays clear additional references or LoRAs. LoRA rows take `name`,
+`strength`, and optional `enabled`. Relevant reference/frame toggles are enabled
+when attaching images unless explicitly overridden in `settings`.
+
+`apply -` reads stdin. An optional top-level `model` asserts the expected current
+model; the client reads it immediately before applying when omitted. Unknown
+fields, invalid settings/assets, and stale models fail before changing the form.
+Apply does not generate, focus/raise the window, or use the clipboard.
+`generate` is a separate explicit command using the visible form's submission
+path; its response acknowledges the request, not completed generation.
+
+Protocol v1 uses newline-delimited JSON: `op` is `state`, `describe`, `select`,
+`apply`, or `generate`. Raw apply/generate requests require `model`. Replies are
+`{"ok":true,"state":...}` or `{"ok":false,"error":"..."}`. Discovery scans
+`$XDG_RUNTIME_DIR/painter-agent-UID-*/control.sock` (private temporary directories
+under `/tmp` if no runtime directory exists), ignores stale endpoints, and never
+chooses arbitrarily between windows. Closing a window removes its endpoint.
+Verify with `PAINTER_UI_ONLY=agent` in the isolated UI harness; add
+`PAINTER_UI_NATIVE=1` for the native Plasma shell. Tests use scratch sockets and
+stub submission; never send verification requests to a user's live window.
+
 ## Headless generation and saved preferences
 
 `tools/smoke.py` is a real generation client used by Chatter, not automatically

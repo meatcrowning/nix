@@ -5870,6 +5870,137 @@ def test_history_layout(win, ctl, tmp, shell):
     check("Browse restores the side-by-side history", divider.isVisible() and gallery.isVisible())
 
 
+def test_agent_control(win, ctl, tmp):
+    from concurrent.futures import ThreadPoolExecutor
+    import importlib.util
+    import subprocess
+    import agent_control as agent
+    from PySide6.QtGui import QImage
+    from PySide6.QtQml import qmlContext
+
+    spec = importlib.util.spec_from_file_location("agent_krea", Path(__file__).with_name("krea-test.py"))
+    fixtures = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixtures)
+    fixtures.models(Path(os.environ["PAINTER_MODELS"]))
+    ctl.rescan()
+    spin(150)
+    runtime = Path(tmp) / "runtime"
+    runtime.mkdir(mode=0o700)
+    endpoint = agent.Endpoint(APP, ctl, directory=runtime)
+    second = None
+    pool = ThreadPoolExecutor(max_workers=1)
+    sent = []
+    original_generate, original_info = ctl.generate, ctl._object_info
+    ctl.generate = lambda params, count: sent.append((params, count))
+    ctl._object_info = {'stub': True}
+    def wait(future):
+        deadline = time.monotonic() + 8
+        while not future.done() and time.monotonic() < deadline:
+            spin(10)
+        return future.result(timeout=.1)
+    def call(**payload):
+        return wait(pool.submit(agent.request, endpoint.path, payload))
+    def cli(*args):
+        env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime))
+        return wait(pool.submit(subprocess.run,
+                    [sys.executable, str(Path(__file__).with_name("control.py")), *args],
+                    env=env, capture_output=True, text=True, timeout=5))
+    try:
+        check("agent socket and directory are private",
+              endpoint.directory.stat().st_mode & 0o777 == 0o700
+              and endpoint.path.stat().st_mode & 0o077 == 0)
+        described = call(op='describe')
+        check("agent describes available models and editable fields",
+              'positive' in described['settings'] and 'width' not in described['settings']
+              and len(described['models']) >= 2)
+        state = call(op='select', model='kroma-v0.3.1-turbo-opd-int8-convrot.safetensors')
+        model = state['model']
+        check("agent selects the visible model and its defaults",
+              ctl.selectedName == model and prop(APP, 'gen')['steps'] == 8)
+        image = Path(tmp) / 'agent-reference.png'
+        im = QImage(64, 48, QImage.Format_RGB32)
+        im.fill(0xff112233)
+        im.save(str(image))
+        ctl.choices.set_rows([dict(name='agent-lora', ok=True, reason='', score=1., patches_clip=True)])
+        state = call(op='apply', model=model,
+                     settings=dict(positive='A red fox — café', negative='blur', steps=12,
+                                   aspectW=3, aspectH=2, seed=42, ms={'shift_start': 2.5}),
+                     input=str(image), references=[str(image)],
+                     loras=[dict(name='agent-lora', strength=.75)])
+        spin(850)
+        g = prop(APP, 'gen')
+        check("agent applies prompts to the visible editors",
+              g['positive'] == 'A red fox — café' and g['negative'] == 'blur'
+              and any(prop(box, 'text') == g['positive'] for box in find_all(win.contentItem(), 'PromptBox')))
+        check("agent resolves dimensions and fixed seed through the UI",
+              g['width'] > g['height'] and g['seed'] == 42 and not g['randomSeed'])
+        check("partial model sampling edits retain other values", g['ms']['shift_start'] == 2.5 and 'curve' in g['ms'])
+        check("agent applies references and compatible LoRAs",
+              state['input'] == str(image) and state['references'] == [str(image)]
+              and state['loras'][0]['strength'] == .75 and g['useReferences'])
+        prefs = qmlContext(APP).contextProperty('Prefs')
+        check("agent changes use normal preference persistence", json.loads(prefs.get('gen'))['positive'] == g['positive'])
+        check("apply never starts generation", not sent)
+        before = call(op='state')
+        invalid = [dict(model='stale-model', settings={'positive': 'bad'}),
+                   dict(model=model, settings={'positive': 'bad', 'steps': 0}),
+                   dict(model=model, settings={'positive': 'bad', 'width': 1024}),
+                   dict(model=model, settings={'positive': 'bad'}, input='/missing/image.png'),
+                   dict(model=model, settings={'positive': 'bad'}, loras=[{'name': 'missing'}]),
+                   dict(model=model, settings={'positive': 'bad', 'ms': {'unknown': 1}}),
+                   dict(model=model, settings={'positive': 'bad', 'cfg': True}),
+                   dict(model=model, settings={'positive': 'bad', 'ms': {'shift_start': -1}}),
+                   dict(model=model, surprise=True)]
+        for payload in invalid:
+            try:
+                call(op='apply', **payload)
+                check("invalid agent request is rejected", False, payload)
+            except ValueError:
+                check("invalid request leaves the form untouched", call(op='state') == before)
+        check("CLI discovers the running window", json.loads(cli('list').stdout)[0]['socket'] == str(endpoint.path))
+        patch = Path(tmp) / 'agent-patch.json'
+        patch.write_text(json.dumps({'settings': {'positive': 'CLI prompt'}}))
+        response = cli('apply', str(patch))
+        check("CLI applies JSON without starting another window",
+              response.returncode == 0 and prop(APP, 'gen')['positive'] == 'CLI prompt', response.stderr)
+        second = agent.Endpoint(APP, ctl, directory=runtime)
+        response = cli('state')
+        check("multiple windows require an explicit target", response.returncode == 1 and 'found 2' in response.stderr)
+        check("explicit socket targets one window", cli('--socket', str(endpoint.path), 'state').returncode == 0)
+        result = call(op='generate', model=model)
+        check("explicit generation uses the visible submission path",
+              result['requested'] and len(sent) == 1 and sent[0][0]['positive'] == 'CLI prompt')
+        call(op='apply', model=model, input='', last='', references=[], loras=[])
+        check("explicit empty assets clear the form", not ctl.inputImage and not ctl.editExtraImages
+              and not ctl.lorasSnapshot() and not prop(APP, 'gen')['useReferences'])
+        import moss_layout as layout
+        spec = importlib.util.spec_from_file_location("agent_moss", Path(__file__).with_name("moss-test.py"))
+        fixtures = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixtures)
+        fixtures.models(Path(os.environ["PAINTER_MODELS"]))
+        ctl.rescan()
+        spin(100)
+        state = call(op='select', model='moss-base-int8.safetensors')
+        editor = layout.Editor(layout.fresh(1024, 1024, 'A garden'))
+        editor.add('object')['caption'] = 'A red bench'
+        editor.doc['enabled'] = True
+        state = call(op='apply', model=state['model'], settings={'moss_layout': editor.doc, 'positive': 'A garden'})
+        check("agent populates MOSS region layout", state['settings']['moss_layout'] == editor.doc)
+        before = call(op='state')
+        try:
+            call(op='select', mode='unknown-mode')
+            check("unknown mode is rejected", False)
+        except ValueError:
+            check("unavailable mode leaves selection unchanged", call(op='state') == before)
+    finally:
+        ctl.generate, ctl._object_info = original_generate, original_info
+        if second:
+            second.close()
+        endpoint.close()
+        pool.shutdown(wait=True)
+    check("agent shutdown removes its socket and discovery directory", not endpoint.directory.exists())
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -5884,9 +6015,11 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history"):
+                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent"):
         print("== %s ==" % only)
-        if only == "history":
+        if only == "agent":
+            test_agent_control(win, ctl, tmp)
+        elif only == "history":
             test_history_layout(win, ctl, tmp, keep[-1])
         elif only == "sidebar":
             test_sidebar(win, ctl, tmp, keep[-1] if os.environ.get("PAINTER_UI_NATIVE") == "1" else None)

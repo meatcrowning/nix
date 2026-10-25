@@ -20,6 +20,7 @@ import "../../qmlcommon"
 Item {
     NativeContentContext {}
     id: root
+    objectName: "painterRoot"
 
     // The desktop's one slide duration + curve (docs/DESIGN.md 6.2).
     Motion { id: motion }
@@ -186,6 +187,28 @@ Item {
             }
         }
         gen = g
+    }
+
+    // The local agent bridge validates the patch before calling this. Replace
+    // objects just as the visible controls do, preserving unrelated settings.
+    function agentApply(patch) {
+        var g = clone(gen)
+        for (var key in patch) {
+            if (key === "ms") {
+                g.ms = clone(gen.ms)
+                for (var mk in patch.ms) g.ms[mk] = patch.ms[mk]
+            } else g[key] = patch[key]
+        }
+        if (patch.positive !== undefined && App.layoutSupport) {
+            var imported = App.importLayoutPrompt(g)
+            if (imported.positive !== g.positive) {
+                g = imported
+                restoreSize(g, imported.moss_layout)
+            }
+        }
+        gen = g
+        materializeSeedPolicy()
+        recomputeDims()
     }
 
     // ...and the same for the nested ModelSampling block, which needs both

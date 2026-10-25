@@ -3126,6 +3126,16 @@ def main():
             return 2
         ctl.window = engine.rootObjects()[0]
 
+    agent_endpoint = None
+    if not selftest and not resource_fixture:
+        from agent_control import Endpoint
+        agent_root = shell.root if plasma else ctl.window.findChild(QObject, "painterRoot")
+        try:
+            agent_endpoint = Endpoint(agent_root, ctl, app)
+            app.aboutToQuit.connect(agent_endpoint.close)
+        except (OSError, RuntimeError) as exc:
+            print("Painter agent interface unavailable: " + str(exc), file=sys.stderr)
+
     if not selftest and not resource_fixture and ctl.window is not None:
         from winstate import WinState
         win_state = WinState(ctl.window, "painter")  # keep ref: persists geometry
