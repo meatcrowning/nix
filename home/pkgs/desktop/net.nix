@@ -54,6 +54,14 @@ in
           postInstall = (old.postInstall or "") + ''
             ui="$out/opt/vivaldi/resources/vivaldi"
             cp ${../../../apps/pylib/vivaldi-sidebar.js} "$ui/desktop-sidebar.js"
+            cp ${../../../apps/pylib/vivaldi-global-menu.js} "$ui/desktop-global-menu.js"
+            substituteInPlace "$ui/main.html" --replace-fail '<script src="bundle.js"></script>' \
+              '<script src="desktop-global-menu.js"></script><script src="bundle.js"></script>'
+            # Fail the package build if an upstream update changes this seam.
+            substituteInPlace "$ui/bundle.js" --replace-fail \
+              'getBrowserClasses=(e,t)=>{' \
+              'getBrowserClasses=(e,t)=>{globalThis.desktopVivaldiMenu?.(this.context,this._onMacMenuAction,Te.Z,Ze.Z,t);'
+
             substituteInPlace "$ui/window.html" --replace-fail '</body>' \
               '<script src="desktop-sidebar.js"></script></body>'
             # The upstream bookmark component sums horizontal widths. In our

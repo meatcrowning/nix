@@ -1,32 +1,9 @@
 { pkgs, lib, config, ... }:
 
-# A macOS-style menu bar for the Plasma panel: one that is always there.
-#
-# Plasma's stock `org.kde.plasma.appmenu` returns HiddenStatus whenever the
-# focused window exports no DBus menu (`applets/appmenu/qml/main.qml`, the
-# `buttonRepeater.count > 0` branch), and a panel drops a hidden applet
-# entirely — so the bar goes blank under Vivaldi, under any GTK/Chromium app,
-# and any time focus is on nothing at all. His report, 2026-09-05: *"the text
-# will disappear either when vivaldis focused or if im not focused on any
-# window"*, wanting instead the macOS behaviour where the bar always names an
-# owner and always has menus under it.
-#
-# Vivaldi cannot be fixed from Vivaldi's side: Chromium has no DBus menu export
-# and registers nothing on `com.canonical.AppMenu.Registrar` (checked on top,
-# 2026-09-05, with Vivaldi running). So the missing menus have to be authored,
-# not imported.
-#
-# This applet authors ONLY what Plasma has no source for, and sits immediately
-# AFTER the stock one. The stock applet vanishes outside a native app menu, so
-# this one then takes its place after Kickoff:
-#
-#   [kickoff]  [ File Edit View … ] [ ]          app exports a menu (stock applet)
-#   [kickoff]  [ Window ]                        Vivaldi (ours)
-#   [kickoff]  [ File Edit Go Window Help ]      desktop (ours)
-#
-# Keeping the stock applet is the point — the DBusMenu import, its keyboard
-# handling and its search entry stay upstream's, unforked, and a Plasma bump
-# cannot strand us on a patched copy of them.
+# The stock appmenu imports native DBus menus. This adjacent applet supplies
+# desktop menus, a Window fallback, and Vivaldi's own menus over a loopback
+# WebSocket restricted to the packaged browser UI origin. Vivaldi's resource
+# injection lives in home/pkgs/desktop/net.nix (top only; book uses Flatpak).
 #
 # NOTE the whole package directory is deployed as ONE symlink to a store path.
 # Per-file symlinks do not work: KPackage canonicalises every file it opens and
@@ -65,6 +42,16 @@ let
     version = "1";
     src = ./plasma-menubar-files/native;
     dontWrapQtApps = true;
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+      unset DISPLAY WAYLAND_DISPLAY
+      export QT_QPA_PLATFORM=offscreen
+      source ${../../tools/lib/session-guard.sh}
+      sg_require_offscreen
+      ctest --output-on-failure
+      runHook postCheck
+    '';
     nativeBuildInputs = [
       pkgs.cmake
       pkgs.ninja
@@ -74,6 +61,7 @@ let
     buildInputs = [
       pkgs.qt6.qtbase
       pkgs.qt6.qtdeclarative
+      pkgs.qt6.qtwebsockets
       pkgs.kdePackages.libplasma
       pkgs.kdePackages.kcoreaddons
       pkgs.kdePackages.kconfig

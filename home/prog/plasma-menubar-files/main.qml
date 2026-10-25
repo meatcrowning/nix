@@ -3,8 +3,8 @@
 
     Plasma's own `org.kde.plasma.appmenu` reports HiddenStatus whenever the
     focused window exports no DBus menu, and a panel drops a hidden applet
-    entirely. So the bar goes blank under Vivaldi (Chromium exports no menu at
-    all and never will), under every GTK app that does not, and any time focus
+    entirely. Vivaldi supplies its own menus through our browser bridge; the
+    fallback covers other apps without exported menus and any time focus
     is on nothing. macOS has no such state: the bar always names an owner and
     always has menus under it.
 
@@ -329,6 +329,8 @@ PlasmoidItem {
         return menus;
     }
 
+    readonly property string browserCategoryNames: JSON.stringify(Plasmoid.browserMenus.map(m => m.label))
+
     function appMenus() {
         // KDE applications retain only the stock DBusMenu applet to our
         // right.  The application-name button is deliberately absent: it was
@@ -337,7 +339,17 @@ PlasmoidItem {
             return [];
         }
 
-        // Apps without a DBus menu (notably Vivaldi) still need an honest
+        if (root.shown && root.shown.appId.toLowerCase().includes("vivaldi")
+                && (root.shown.title === Plasmoid.browserTitle
+                    || root.shown.title === Plasmoid.browserTitle + " - Vivaldi")
+                && root.browserCategoryNames !== "[]") {
+            return JSON.parse(root.browserCategoryNames).map((label, index) => ({
+                title: label,
+                build: () => Plasmoid.browserMenus[index]?.children || [],
+            }));
+        }
+
+        // Apps without a connected menu source still need an honest
         // window menu.  There is no app-name/title button before it.
         return [{
             title: "Window",
@@ -519,12 +531,21 @@ PlasmoidItem {
             root.nativeEntries = list;
             owner = button;
             visible = true;
-            const nativeList = list.map(entry => ({
-                label: entry.label || "",
-                enabled: entry.enabled !== false,
-                checked: entry.checked === true,
-                separator: entry.separator === true,
-            }));
+            function nativeEntry(entry) {
+                const result = {
+                    label: entry.label || "",
+                    enabled: entry.enabled !== false,
+                    checked: entry.checked === true,
+                    separator: entry.separator === true,
+                    checkable: entry.checkable === true,
+                    shortcut: entry.shortcut || "",
+                    id: entry.id || "",
+                    browser: entry.id !== undefined || entry.children !== undefined,
+                };
+                if (entry.children !== undefined) result.children = entry.children.map(nativeEntry);
+                return result;
+            }
+            const nativeList = list.map(nativeEntry);
             Plasmoid.openMenu(button, nativeList);
             switching = false;
         }
