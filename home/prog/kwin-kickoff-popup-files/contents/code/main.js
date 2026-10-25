@@ -5,20 +5,21 @@
 
 const TOP_PANEL_HEIGHT = 22;
 const LEFT_PANEL_WIDTH = 42;
+const TOP_PANEL_GAP = 6;
 const POPUP_MENU = 18;
 
 function moveKickoffPopup(window) {
     const frame = window.frameGeometry;
     if (window.resourceClass !== "org.kde.plasmashell"
         || window.windowType !== POPUP_MENU
-        || frame.x !== 0
+        || (frame.x !== 0 && frame.x !== LEFT_PANEL_WIDTH)
         || frame.y !== TOP_PANEL_HEIGHT) {
         return;
     }
 
     window.frameGeometry = {
         x: LEFT_PANEL_WIDTH,
-        y: TOP_PANEL_HEIGHT,
+        y: TOP_PANEL_HEIGHT + TOP_PANEL_GAP,
         width: frame.width,
         height: frame.height,
     };

@@ -100,13 +100,6 @@ in
             name = "org.kde.plasma.panelspacer";
             config.General = { expanding = false; length = 6; };
           }
-          {
-            name = "org.kde.plasma.kickoff";
-            config.General = {
-              icon = "launcher-circle";
-              systemFavorites = "suspend,hibernate,reboot,shutdown";
-            };
-          }
           "org.kde.plasma.appmenu"
           "org.kde.lam.menubar"
           "org.kde.plasma.panelspacer"
@@ -182,6 +175,13 @@ in
         floating = false;
         opacity = "translucent";
         widgets = [
+          {
+            name = "org.kde.plasma.kickoff";
+            config.General = {
+              icon = "launcher-kde-symbolic";
+              systemFavorites = "suspend,hibernate,reboot,shutdown";
+            };
+          }
           {
             name = "org.kde.plasma.icontasks";
             config.General = {
