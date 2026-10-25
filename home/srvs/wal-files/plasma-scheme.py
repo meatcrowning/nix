@@ -306,6 +306,14 @@ def push_to_kdeglobals(minted, name, digest, ui_accent_hex):
     if busctl:
         subprocess.run([busctl, "--user", "call", "org.kde.KWin", "/KWin",
                         "org.kde.KWin", "reconfigure"], check=False)
+    # The .colors write can start the raster service before these kdeglobals
+    # writes finish. `start` merely joins that in-flight render of the old
+    # palette; restart guarantees a fresh Qt palette after the final write.
+    # Keep this at the shared commit point for both wallpaper and scheme picks.
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        subprocess.run([systemctl, "--user", "restart",
+                        "plasma-panel-surface.service"], check=True)
     print("plasma-scheme: pushed %d keys into kdeglobals%s"
           % (len(writes) + 1, "" if ds else " (no dbus-send: no live repaint)"))
 

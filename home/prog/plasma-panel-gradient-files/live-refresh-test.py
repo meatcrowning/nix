@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Static contract for the Plasma panel's live palette refresh path.
+"""Isolated contracts for the Plasma panel's live palette refresh path.
 
-This is intentionally source-level: it verifies the path without starting a
+Source checks and mocked commands verify the path without starting a
 Plasma shell, which would be unsafe on the user's desktop.  The derivation
 copies the fragment into Panel.qml, adds its directory-model import, and the running
 panel then changes an Image URL when the renderer publishes a content hash.
 """
 
 from pathlib import Path
+import importlib.util
+import subprocess
 import sys
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +26,32 @@ def require(text: str, needle: str, where: str) -> None:
 
 
 def main() -> int:
+    scheme_path = ROOT.parent / "srvs/wal-files/plasma-scheme.py"
+    spec = importlib.util.spec_from_file_location("plasma_scheme", scheme_path)
+    scheme = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(scheme)
+    # Model a path-triggered render already running with the previous palette.
+    # A start would join it. Only a restart after the completed writes replaces
+    # that stale result, including when a scheme pick calls the generator alone.
+    roles = {}
+    rendered = {"background": "old"}
+
+    def run(command, **kwargs):
+        if command[0] == "kwriteconfig6":
+            roles[command[command.index("--key") + 1]] = command[-1]
+        elif command[:3] == ["systemctl", "--user", "restart"]:
+            assert command[3] == "plasma-panel-surface.service"
+            assert roles["ColorSchemeHash"] == "finished"
+            assert kwargs["check"] is True
+            rendered["background"] = roles["BackgroundNormal"]
+        return subprocess.CompletedProcess(command, 0)
+
+    with patch.object(scheme.shutil, "which", side_effect=lambda name: name), \
+            patch.object(scheme.subprocess, "run", side_effect=run):
+        scheme.push_to_kdeglobals("[Colors:Window]\nBackgroundNormal=15,44,49\n",
+                                  "OxygenDarkFlat", "finished", "9be0eb")
+    assert rendered["background"] == "15,44,49", "stale in-flight render survived"
+
     for needle in (
         "plasma-panel-surface.*.serial",
         "FolderListModel",

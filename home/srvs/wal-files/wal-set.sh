@@ -367,14 +367,6 @@ if [ "$PLASMA_SESSION" = 1 ]; then
         echo "wal-set: aero glass -> hue $AH sat $AS val $AV intensity $AI"
     fi
 
-    # The scheme file is also the source for the custom Oxygen panel surface.
-    # Path activation is asynchronous, so wait for the narrow renderer here:
-    # DeskStyle's completion must mean the panel image has been published, not
-    # merely that a future path unit may eventually notice the colour write.
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl --user start plasma-panel-surface.service
-    fi
-
     # wal's historic live wallpaper target is Quickshell's $CACHE/current.
     # Plasma does not read that file; commit the same selection through its
     # scripting API so every desktop containment repaints immediately.  Return
