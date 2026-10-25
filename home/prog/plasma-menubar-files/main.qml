@@ -96,7 +96,7 @@ PlasmoidItem {
     // makes KWin drop the active task — without this the bar would flip to
     // "Desktop" the moment you clicked it. Upstream guards the same way on the
     // containment's own input status; ours has to cover the popup too.
-    readonly property bool panelHasFocus: popup.visible
+    readonly property bool panelHasFocus: popup.visible || popup.switching
         || Plasmoid.containment.status === PlasmaCore.Types.AcceptingInputStatus
 
     onPanelHasFocusChanged: if (!panelHasFocus) retrack()
@@ -478,7 +478,7 @@ PlasmoidItem {
     property var nativeEntries: []
 
     Connections {
-        target: Plasmoid.nativeInterface
+        target: Plasmoid
         function onMenuTriggered(index) {
             const entry = root.nativeEntries[index];
             root.nativeEntries = [];
@@ -487,79 +487,50 @@ PlasmoidItem {
             }
         }
         function onMenuClosed() {
-            root.nativeEntries = [];
+            const serial = ++popup.serial;
+            // QMenu hides before QAction::triggered. Keep its entries and
+            // focused task until the action has run; a new menu cancels this.
+            Qt.callLater(() => {
+                if (popup.serial !== serial) return;
+                root.nativeEntries = [];
+                popup.owner = null;
+                popup.closedAt = Date.now();
+                popup.visible = false;
+            });
         }
     }
 
-    PlasmaComponents3.Menu {
+    QtObject {
         id: popup
-
+        property bool visible: false
+        property bool switching: false
+        property int serial: 0
         property Item owner: null
-        // hideOnWindowDeactivate closes us BEFORE the press that caused it
-        // reaches the button, so clicking an open menu's own button would
-        // close and instantly reopen it. Anything inside this shadow is that.
         property double closedAt: 0
+
         function justClosed() {
             return !visible && Date.now() - closedAt < 200;
         }
 
-        onClosed: {
-            owner = null;
-            closedAt = Date.now();
-        }
-
         function openFor(button, list) {
-            if (Plasmoid.nativeInterface
-                    && typeof Plasmoid.nativeInterface.openMenu === "function") {
-                root.nativeEntries = list;
-                const nativeList = list.map(entry => ({
-                    label: entry.label || "",
-                    enabled: entry.enabled !== false,
-                    checked: entry.checked === true,
-                    separator: entry.separator === true,
-                }));
-                Plasmoid.nativeInterface.openMenu(button, nativeList);
-                return;
-            }
-            while (count > 0) {
-                const oldItem = itemAt(0);
-                removeItem(oldItem);
-                oldItem.destroy();
-            }
-            for (const entry of list) {
-                const menuItem = entry.separator === true
-                    ? separatorComponent.createObject(popup)
-                    : itemComponent.createObject(popup, { entry: entry });
-                addItem(menuItem);
-            }
+            switching = true;
+            Plasmoid.closeMenu();
+            ++serial;
+            root.nativeEntries = list;
             owner = button;
-            popup.popup(button, 0, button.height);
+            visible = true;
+            const nativeList = list.map(entry => ({
+                label: entry.label || "",
+                enabled: entry.enabled !== false,
+                checked: entry.checked === true,
+                separator: entry.separator === true,
+            }));
+            Plasmoid.openMenu(button, nativeList);
+            switching = false;
         }
 
         function dismiss() {
-            close();
-        }
-
-        Component {
-            id: separatorComponent
-            PlasmaComponents3.MenuSeparator { }
-        }
-
-        Component {
-            id: itemComponent
-            PlasmaComponents3.MenuItem {
-                required property var entry
-                text: entry.label || ""
-                enabled: entry.enabled !== false
-                checkable: entry.checked === true
-                checked: entry.checked === true
-                onTriggered: {
-                    popup.dismiss();
-                    if (entry.trigger) {
-                        entry.trigger();
-                    }
-                }
-            }
+            Plasmoid.closeMenu();
         }
     }
 }

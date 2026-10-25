@@ -13,5 +13,6 @@ find_package(KF6 REQUIRED COMPONENTS Config CoreAddons)
 add_library(org.kde.lam.menubar MODULE menubarapplet.cpp)
 target_link_libraries(org.kde.lam.menubar PRIVATE
     Qt6::Core Qt6::Gui Qt6::Quick Qt6::Widgets Plasma::Plasma KF6::CoreAddons)
+set_target_properties(org.kde.lam.menubar PROPERTIES PREFIX "")
 target_compile_features(org.kde.lam.menubar PRIVATE cxx_std_20)
 install(TARGETS org.kde.lam.menubar DESTINATION ${KDE_INSTALL_PLUGINDIR}/plasma/applets)

@@ -5,6 +5,7 @@ let
     patches = (old.patches or []) ++ [
       ../../home/prog/oxygen-player-visualizer.patch
       ../../home/prog/oxygen-themed-vivaldi.patch
+      ../../home/prog/oxygen-compact-menus.patch
       # oxygen-desktop-field.patch is deliberately NOT here. It is book-only
       # for now, built natively by `oxygen-vivaldi-build`: the first top
       # generation carrying it dropped the boot into an emergency shell, and

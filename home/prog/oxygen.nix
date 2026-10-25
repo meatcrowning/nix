@@ -59,6 +59,7 @@
       SOURCE=${pkgs.kdePackages.oxygen.src}
       PATCH=${./oxygen-themed-vivaldi.patch}
       CONTENT_PATCH=${./oxygen-native-content.patch}
+      MENU_PATCH=${./oxygen-compact-menus.patch}
       FIELD_PATCH=${./oxygen-desktop-field.patch}
       DEST="$HOME/.local/lib64/qt6/plugins/org.kde.kdecoration3/org.kde.oxygen.so"
       FEDORA_VERSION=$(/usr/bin/rpm -q --qf '%{VERSION}' plasma-oxygen)
@@ -92,6 +93,7 @@
       # the content patch is a zero-context diff, which it refuses by default.
       /usr/bin/git apply --unidiff-zero --unsafe-paths --directory="$WORK/source" "$CONTENT_PATCH"
       /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$FIELD_PATCH"
+      /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$MENU_PATCH"
 
       env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
           -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \

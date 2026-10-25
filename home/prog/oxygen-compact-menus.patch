@@ -1,0 +1,24 @@
+--- a/kstyle/oxygen.h
++++ b/kstyle/oxygen.h
+@@ -41,8 +41,8 @@
+     LineEdit_FrameWidth = 6,
+ 
+     // menu items
+-    MenuItem_MarginWidth = 3,
+-    MenuItem_ItemSpacing = 4,
++    MenuItem_MarginWidth = 1,
++    MenuItem_ItemSpacing = 3,
+     MenuItem_AcceleratorSpace = 16,
+     MenuButton_IndicatorWidth = 20,
+ 
+@@ -72,8 +72,8 @@
+     CheckBox_ItemSpacing = 6,
+ 
+     // menubar items
+-    MenuBarItem_MarginWidth = 10,
+-    MenuBarItem_MarginHeight = 6,
++    MenuBarItem_MarginWidth = 6,
++    MenuBarItem_MarginHeight = 2,
+ 
+     // scrollbars
+     ScrollBar_MinSliderHeight = 21,
