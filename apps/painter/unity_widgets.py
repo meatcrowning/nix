@@ -266,6 +266,7 @@ class ImageView(Gtk.Box):
         Gtk.Box.__init__(self, orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.error, self.playback = error, playback
         self.original = self.before = None
+        self.heatmap = None
         self.path = None
         self.serial = 0
         self.zoom = 0.0
@@ -353,6 +354,7 @@ class ImageView(Gtk.Box):
     def load(self, path, before='', video=False):
         if (path, before, video) == self.path:
             return
+        self.heatmap = None
         self.path = (path, before, video)
         self.serial += 1
         self.zoom = 0.0
@@ -403,6 +405,11 @@ class ImageView(Gtk.Box):
         if not self.rendering and self.render_timer is None:
             self.render_timer = GLib.idle_add(self.render, priority=GLib.PRIORITY_HIGH_IDLE)
 
+    def set_heatmap(self, mask):
+        self.heatmap = mask
+        self.crop_key = None
+        self.render()
+
     def render(self):
         if self.render_timer:
             GLib.source_remove(self.render_timer)
@@ -432,7 +439,7 @@ class ImageView(Gtk.Box):
         sy = int(self.scroll.get_vadjustment().get_value())
         left, top = max(x, sx), max(y, sy)
         right, bottom = min(x + width, sx + vw), min(y + height, sy + vh)
-        key = (self.original, self.before, self.scale, x, y, width, height,
+        key = (self.original, self.before, self.heatmap, self.scale, x, y, width, height,
                vw, vh, self.compare.get_value())
         cl, ct, cr, cb = self.crop_bounds
         # Refresh before reaching the cached edge, while the old crop still
@@ -448,12 +455,16 @@ class ImageView(Gtk.Box):
             pixbuf.fill(0)
             self.original.scale(pixbuf, 0, 0, rw, rh, x - left, y - top,
                                 self.scale, self.scale, GdkPixbuf.InterpType.BILINEAR)
-            if self.before is not None:
+            if self.before is not None and self.heatmap is None:
                 cut = min(rw, max(0, x + int(width * self.compare.get_value() / 100) - left))
                 if cut:
                     self.before.scale(pixbuf, 0, 0, cut, rh, x - left, y - top,
                                       float(width) / self.before.get_width(),
                                       float(height) / self.before.get_height(), GdkPixbuf.InterpType.BILINEAR)
+            if self.heatmap is not None:
+                self.heatmap.composite(pixbuf, 0, 0, rw, rh, x - left, y - top,
+                                       float(width) / self.heatmap.get_width(),
+                                       float(height) / self.heatmap.get_height(), GdkPixbuf.InterpType.BILINEAR, 255)
             self.crop_key = key
             self.crop_bounds = (left, top, right, bottom)
             self.visible_origin = (left, top)

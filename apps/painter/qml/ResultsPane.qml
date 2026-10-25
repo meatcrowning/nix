@@ -72,7 +72,8 @@ Item {
 
     PreviewPane {
         id: preview
-        compare: root.app ? root.app.showCompare : true
+        compare: !root.heatmap && (root.app ? root.app.showCompare : true)
+        heatmap: root.heatmap
         winActive: root.winActive
         still: root.app ? root.app.gen.still === true : false
         // WHAT IS SELECTED, which is what this pane now shows. One output: a
@@ -109,13 +110,16 @@ Item {
         visible: root.inView
         source: root.inView ? root.viewPath : ""
         isVideo: root.viewIsVideo
-        compare: root.app ? root.app.showCompare : true
+        compare: !root.heatmap && (root.app ? root.app.showCompare : true)
+        heatmap: root.heatmap
         onMenuRequested: (sx, sy, items) => root.ctxMenu.open(sx, sy, items)
     }
 
     HeatmapPane {
         parent: root.inView ? outputView : preview
-        anchors.fill: parent
+        anchors.top: parent.top
+        width: parent.width
+        height: implicitHeight
         visible: root.heatmap && service !== null && service.available
         service: root.app ? root.app.inspection : null
         nativeToolbar: root.plasma

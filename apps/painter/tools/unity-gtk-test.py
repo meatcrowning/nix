@@ -121,6 +121,22 @@ def test():
             if heatmap_state is None: window.state.pop('heatmap', None)
             else: window.state['heatmap'] = heatmap_state
             print('PASS: GTK heatmap toolbar selector and accessible history')
+            from unity_widgets import ImageView
+            from gi.repository import GdkPixbuf
+            mask_view = ImageView(lambda *args: None, lambda: None)
+            source_pixels = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 4, 4)
+            source_pixels.fill(0x0000ffff)
+            mask_view.frame(source_pixels)
+            before_pixels = bytes(mask_view.picture.get_pixbuf().get_pixels())
+            mask = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 2, 2)
+            mask.fill(0xffdc00cc)
+            mask_view.set_heatmap(mask)
+            assert mask_view.original is source_pixels
+            assert bytearray(mask_view.picture.get_pixbuf().get_pixels())[0] > 100
+            mask_view.set_heatmap(None)
+            assert bytes(mask_view.picture.get_pixbuf().get_pixels()) == before_pixels
+            mask_view.destroy()
+            print('PASS: GTK heatmap composition keeps decoded source and restores it without reload')
             assert notifications == ['Generation completed'], notifications
             buttons = window.wildcard_buttons.get_children()
             assert [b.get_label() for b in buttons] == window.state['wildcards']

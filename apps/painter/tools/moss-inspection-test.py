@@ -136,8 +136,38 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     assert ctl.inspection.selected == 1
     ctl.inspection.hoverPrompt('red sphere', 0)
     assert ctl.inspection.selected == 0
-    from PySide6.QtCore import QUrl
-    assert QImage(QUrl(ctl.inspection.overlay).toLocalFile()) != original
+    assert ctl.inspection.mask.size().width() == 2
+    assert ctl.inspection.mask.pixelColor(0, 0).alpha() == 0
+    assert ctl.inspection.mask.pixelColor(1, 0).alpha() == 204
+    first_mask = ctl.inspection.mask.cacheKey()
+    ctl.inspection.select(1)
+    ctl.inspection.select(0)
+    assert ctl.inspection.mask.cacheKey() == first_mask, 'revisited token did not reuse its mask'
+    layer = next(o for o in u.walk(win.contentItem()) if o.objectName() == 'outputHeatmapLayer')
+    assert layer.textureSize() == ctl.inspection.mask.size()
+    base_image = layer.parentItem()
+    image_source = base_image.property('source')
+    # While the first map is pending, a transparent layer must leave the
+    # already decoded source visible. No opaque loading pane or image reload.
+    ctl.inspection.mask = QImage()
+    ctl.inspection.changed.emit()
+    u.spin(50)
+    capture = base_image.grabToImage()
+    for _ in range(50):
+        u.spin(10)
+        if not capture.image().isNull(): break
+    raster = capture.image()
+    assert raster.pixelColor(raster.width() // 2, raster.height() // 2) == QColor('blue')
+    ctl.inspection.select(1)
+    u.spin(50)
+    assert base_image.property('source') == image_source
+    capture = base_image.grabToImage()
+    for _ in range(50):
+        u.spin(10)
+        if not capture.image().isNull(): break
+    raster = capture.image()
+    assert any(raster.pixelColor(x, y).red() > 100 for y in range(raster.height()) for x in range(raster.width()))
+    print('PASS persistent base image during map loading, composited overlay and cached switching')
     # Layout outputs store the prompt box inside JSON, including escape bytes.
     caption = 'red "\U0001f30a"\\boat\nsphere'
     for ascii_only in (False, True):

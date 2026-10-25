@@ -1,4 +1,5 @@
 import QtQuick
+import PainterHeatmap 1.0
 import QtMultimedia
 import "../../qmlcommon"
 
@@ -79,6 +80,7 @@ Item {
     property string source: ""
     property bool sourceIsVideo: false
     property bool compare: true
+    property bool heatmap: false
     property bool winActive: true
     // A video family making one frame: the live label stops talking in frames.
     property bool still: false
@@ -259,6 +261,14 @@ Item {
                                          pane.handover = false
                                          pane.handoverPath = ""
                                      }
+                    HeatmapLayer {
+                        objectName: "previewHeatmapLayer"
+                        anchors.centerIn: parent
+                        width: finishedStill.paintedWidth
+                        height: finishedStill.paintedHeight
+                        service: App.inspection
+                        visible: pane.heatmap && finishedStill.status === Image.Ready
+                    }
                 }
 
                 // Reuse the same reveal as View, inside the preview's zoom/pan

@@ -1,12 +1,14 @@
 """Asynchronous prompt inspection and selected-output heatmap presentation."""
 import json
-import tempfile
+import base64
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
-from PySide6.QtCore import QObject, Property, Signal, Slot, QUrl, QCoreApplication
+from PySide6.QtCore import QObject, Property, Signal, Slot, QUrl, QCoreApplication, QBuffer, QIODevice
 from PySide6.QtGui import QImage, QColor, QPainter
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize
+from PySide6.QtQuick import QQuickPaintedItem
+from PySide6.QtQml import qmlRegisterType
 from PySide6.QtNetwork import QNetworkReply
 import moss_data
 
@@ -15,7 +17,6 @@ class MossInspect(QObject):
     tokenized = Signal(str, str, 'QVariantMap')
     changed = Signal()
     _loaded = Signal(int, object)
-    _rendered = Signal(int, str)
 
     def __init__(self, client, parent=None):
         super().__init__(parent)
@@ -23,22 +24,22 @@ class MossInspect(QObject):
         self._closed = False
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='moss-inspect')
         self._generation = 0
-        self._render_serial = 0
         self._data = None
         self._path = self._overlay = self._error = ''
         self._tokens = []
         self._selected = -1
         self._viewing = False
         self._future = None
-        self._cache = tempfile.TemporaryDirectory(prefix='painter-heatmaps-')
+        self._masks = OrderedDict()
+        self.mask = QImage()
+        self._packet = None
         self._loaded.connect(self._accept)
-        self._rendered.connect(self._accept_render)
         QCoreApplication.instance().aboutToQuit.connect(self.close)
 
     def close(self):
         self._closed = True
         self._pool.shutdown(wait=True, cancel_futures=True)
-        self._cache.cleanup()
+        self._masks.clear()
 
     @Slot(str, str, str, result='QVariantMap')
     def tokenStyle(self, text, background, selection):
@@ -145,7 +146,7 @@ class MossInspect(QObject):
 
     @Property(str, notify=changed)
     def overlay(self):
-        return QUrl.fromLocalFile(self._overlay).toString() if self._overlay else ''
+        return self._overlay
 
     @Property(str, notify=changed)
     def error(self):
@@ -158,9 +159,9 @@ class MossInspect(QObject):
         path = QUrl(path).toLocalFile() if path.startswith('file:') else path
         self._generation += 1
         serial = self._generation
-        self._render_serial += 1
-        if self._overlay:
-            Path(self._overlay).unlink(missing_ok=True)
+        self._masks.clear()
+        self.mask = QImage()
+        self._packet = None
         self._path, self._data, self._tokens, self._overlay, self._error = path, None, [], '', ''
         self._selected = -1
         self.changed.emit()
@@ -207,41 +208,76 @@ class MossInspect(QObject):
         if index == self._selected:
             return
         self._selected = index
-        self.changed.emit()
-        self._render_serial += 1
-        serial = self._render_serial
         doc, pixels = self._data
         token = self._tokens[index]['index']
-        path = self._path
-        destination = str(Path(self._cache.name) / ('map-%d.png' % serial))
-        if self._future:
-            self._future.cancel()
-        def render():
-            image = QImage(path)
-            if image.isNull():
-                return
+        mask = self._masks.pop(token, None)
+        if mask is None:
             w, h = doc['width'], doc['height']
-            mask = QImage(w, h, QImage.Format.Format_ARGB32)
-            for y in range(h):
-                for x in range(w):
-                    value = pixels[token * w * h + y * w + x] / 255
-                    strength = max(0, min(1, (value - .35) / .3))
-                    alpha = round(204 * strength * strength * (3 - 2 * strength))
-                    mask.setPixelColor(x, y, QColor(255, 220, 0, alpha))
-            overlay = mask.scaled(image.size(), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            painter = QPainter(image)
-            painter.drawImage(0, 0, overlay)
-            painter.end()
-            if image.save(destination):
-                self._rendered.emit(serial, destination)
-        self._future = self._pool.submit(render)
-
-    def _accept_render(self, serial, path):
-        if serial != self._render_serial:
-            Path(path).unlink(missing_ok=True)
-            return
-        previous = self._overlay
-        self._overlay = path
+            values = pixels[token * w * h:(token + 1) * w * h]
+            rgba = bytearray(bytes((255, 220, 0, 0)) * (w * h))
+            rgba[3::4] = values.translate(ALPHA)
+            mask = QImage(rgba, w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
+        self._masks[token] = mask
+        # At most 1 MiB for 64x64 maps; no full-resolution image copies.
+        while len(self._masks) > 64:
+            self._masks.popitem(last=False)
+        self.mask = mask
+        self._packet = None
+        self._overlay = '%d:%d' % (self._generation, token)
         self.changed.emit()
-        if previous and previous != path:
-            Path(previous).unlink(missing_ok=True)
+
+    def mask_packet(self):
+        """Small in-memory PNG for the historical GTK process's socket."""
+        if self._packet is None:
+            self._packet = ''
+            if not self.mask.isNull():
+                buffer = QBuffer()
+                buffer.open(QIODevice.WriteOnly)
+                self.mask.save(buffer, 'PNG')
+                self._packet = base64.b64encode(bytes(buffer.data())).decode('ascii')
+        return self._packet
+
+
+def _alpha(value):
+    strength = max(0, min(1, (value / 255 - .35) / .3))
+    return round(204 * strength * strength * (3 - 2 * strength))
+
+
+ALPHA = bytes(_alpha(value) for value in range(256))
+
+
+class HeatmapLayer(QQuickPaintedItem):
+    serviceChanged = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._service = None
+        self.setTextureSize(QSize(1, 1))
+        self.setSmooth(True)
+
+    def set_service(self, service):
+        if service is self._service:
+            return
+        if self._service:
+            self._service.changed.disconnect(self.refresh)
+        self._service = service
+        if service:
+            service.changed.connect(self.refresh)
+        self.serviceChanged.emit()
+        self.refresh()
+
+    def refresh(self):
+        # Keep the texture at map resolution, even when the image is zoomed.
+        size = self._service.mask.size() if self._service else QSize(1, 1)
+        self.setTextureSize(size if size.isValid() else QSize(1, 1))
+        self.update()
+
+    service = Property(QObject, lambda s: s._service, set_service, notify=serviceChanged)
+
+    def paint(self, painter):
+        if self._service and not self._service.mask.isNull():
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.drawImage(self.boundingRect(), self._service.mask)
+
+
+qmlRegisterType(HeatmapLayer, 'PainterHeatmap', 1, 0, 'HeatmapLayer')

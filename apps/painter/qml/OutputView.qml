@@ -1,4 +1,5 @@
 import QtQuick
+import PainterHeatmap 1.0
 import QtMultimedia
 import "../../qmlcommon"
 
@@ -42,6 +43,7 @@ Item {
     // recorded source — anything that is not an edit — has nothing to compare
     // and shows normally.
     property bool compare: true
+    property bool heatmap: false
     readonly property string beforePath:
         (view.source === "" || view.isVideo) ? "" : App.compareSource(view.source)
     readonly property bool comparing: view.compare && view.beforePath !== ""
@@ -124,6 +126,12 @@ Item {
                 // Nearest-neighbour past 2x, because past 2x he is looking at
                 // the pixels and smoothing is exactly what hides them.
                 mipmap: view.scaleNow < 1
+                HeatmapLayer {
+                    objectName: "outputHeatmapLayer"
+                    anchors.fill: parent
+                    service: App.inspection
+                    visible: view.heatmap && img.status === Image.Ready
+                }
             }
 
             AudioOutput { id: silent; muted: true }

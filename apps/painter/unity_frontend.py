@@ -421,10 +421,7 @@ class Window(Gtk.Window, ParameterForm):
             self.update_heatmap()
         else:
             self.heatmap_key = None
-            row = self.selection_row or {}
-            self.viewer.load('' if row.get('live') or row.get('is_video') else self.selection,
-                             self.state.get('media', {}).get('before', ''),
-                             video=bool(row.get('is_video') and not row.get('live')))
+            self.viewer.set_heatmap(None)
 
     def update_heatmap(self):
         heatmap = self.state.get('heatmap', {})
@@ -442,7 +439,12 @@ class Window(Gtk.Window, ParameterForm):
         if (self.heatmap_open and heatmap.get('path') == self.selection
                 and overlay and overlay != self.heatmap_key):
             self.heatmap_key = overlay
-            self.viewer.load(local_path(overlay))
+            packet = heatmap.get('mask', '')
+            if packet:
+                loader = GdkPixbuf.PixbufLoader.new()
+                loader.write(base64.b64decode(packet))
+                loader.close()
+                self.viewer.set_heatmap(loader.get_pixbuf())
 
     def select_heatmap(self, *_):
         index = self.heatmap_tokens.get_active()
@@ -452,7 +454,12 @@ class Window(Gtk.Window, ParameterForm):
     def receive(self, op, reply):
         if self.closing:
             return False
-        if op in ('moss_tokenize', 'heatmap_select', 'heatmap_hover', 'heatmap_viewing'):
+        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_viewing'):
+            if reply.get('ok') and reply.get('state', {}).get('heatmap'):
+                self.state['heatmap'] = reply['state']['heatmap']
+                self.update_heatmap()
+            return False
+        if op == 'moss_tokenize':
             return False
         if op == 'compare_params':
             if reply.get('ok'):

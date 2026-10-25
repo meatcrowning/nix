@@ -309,6 +309,12 @@ class Engine:
             result['data'] = base64.b64encode(bytes(buf.data())).decode('ascii')
         return result
 
+    def heatmap_state(self):
+        inspection = self.ctl.inspection
+        return dict(path=self.view_path, available=inspection.available,
+                    tokens=inspection.tokens, overlay=inspection.overlay, selected=inspection.selected,
+                    mask=inspection.mask_packet())
+
     def dispatch(self, request):
         c = self.ctl
         op = request.get('op')
@@ -320,17 +326,17 @@ class Engine:
             return {}
         if op == 'heatmap_viewing':
             c.inspection.setViewing(bool(request.get('viewing')))
-            return {}
+            return dict(heatmap=self.heatmap_state())
         if op == 'heatmap_hover':
             if request.get('region'):
                 c.inspection.hoverRegion(request['text'], int(request['position']), request['region'])
             else:
                 c.inspection.hoverPrompt(request['text'], int(request['position']))
-            return {}
+            return dict(heatmap=self.heatmap_state())
         if op == 'heatmap_select':
             if request.get('path') == self.view_path:
                 c.inspection.select(int(request['index']))
-            return {}
+            return dict(heatmap=self.heatmap_state())
         if op == 'compare_params':
             import outmeta
             path = self.output_path(request['path'])
@@ -506,8 +512,7 @@ class Engine:
                     regionPromptHeight=self.region_prompt_height, wordingHeight=self.wording_height,
                     media=self.media(request), replacement=self.replacement,
                     tokenResults=self.token_results,
-                    heatmap=dict(path=self.view_path, available=c.inspection.available,
-                                 tokens=c.inspection.tokens, overlay=c.inspection.overlay, selected=c.inspection.selected),
+                    heatmap=self.heatmap_state(),
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,
                     queue=c.queue, elapsed=c.elapsed, rate=c.rate, messages=messages,

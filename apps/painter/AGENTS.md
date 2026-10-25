@@ -176,6 +176,10 @@ without maps cannot display a heatmap. The toolbar token picker and matching
 positive-prompt hovers share the selected token; compiled layouts map scene-caption
 positions through JSON escaping to saved token offsets. Mismatched drafts never drive
 saved maps. Heatmap mode leaves history accessible and survives output changes.
+Qt paints transparent masks over the existing image, preserving fit/zoom and
+keeping it visible while maps load. `moss_inspect.py` caches at most 64 small RGBA
+masks; token changes never decode or save the full output. GTK receives small
+mask PNGs in immediate socket replies and composites them over its decoded image.
 Region prompt boxes share the debounce, count and decorations. Region hover uses
 IDs in saved `painter.moss_layout` metadata, skipping disabled regions when mapping
 to compiled `items`; duplicate captions and current reordering never choose a map
