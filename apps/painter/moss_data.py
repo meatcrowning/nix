@@ -8,6 +8,27 @@ CHUNK = b'paHm'
 LIMIT = 24 * 1024 * 1024
 
 
+def aggregate(document, pixels):
+    """Mean of all visible token scores, before thresholds or colour mapping."""
+    area = document['width'] * document['height']
+    totals, count = [0] * area, 0
+    for token in document['tokens']:
+        if not token['visible']:
+            continue
+        start = token['index'] * area
+        totals = [a + b for a, b in zip(totals, pixels[start:start + area])]
+        count += 1
+    if not count:
+        return bytes(area)
+    # One display stretch after aggregation reveals structure without giving
+    # already coloured/thresholded masks extra weight. Flat maps stay flat.
+    ordered = sorted(totals)
+    low, high = ordered[int((area - 1) * .05)], ordered[int((area - 1) * .95)]
+    if high == low:
+        return bytes(round(value / count) for value in totals)
+    return bytes(round(255 * max(0, min(1, (value - low) / (high - low)))) for value in totals)
+
+
 def json_value_span(source, path):
     """Locate a JSON value without losing offsets to escaping or repeated text."""
     decoder = json.JSONDecoder()

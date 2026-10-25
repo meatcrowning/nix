@@ -58,6 +58,7 @@ class TokenMarks(object):
 
     def leave(self, *_):
         self.hovered = None
+        self.send('heatmap_hover_end', owner='region:' + self.region() if self.region else 'prompt')
         return False
 
     def hover(self, view, event):

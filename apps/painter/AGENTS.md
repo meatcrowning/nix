@@ -173,7 +173,11 @@ weights or starts a backend on its own.
 maps during ordinary MOSS generation when both nodes are advertised. PPM keeps
 its existing sampler because it changes tokenization/attention. Existing files
 without maps cannot display a heatmap. The toolbar token picker and matching
-positive-prompt hovers share the selected token; compiled layouts map scene-caption
+positive-prompt hovers share the selected token. Entry defaults to All tokens:
+mean the saved visible-token scores before a single 5–95% contrast stretch and
+thermal colour mapping; stored per-token normalization cannot recover raw model
+activity. Hover temporarily shows one token, then restores the dropdown choice.
+Compiled layouts map scene-caption
 positions through JSON escaping to saved token offsets. Mismatched drafts never drive
 saved maps. Heatmap mode leaves history accessible and survives output changes.
 Qt paints transparent masks over the existing image, preserving fit/zoom and

@@ -172,6 +172,7 @@ class Window(Gtk.Window, ParameterForm):
         self.heatmap_tokens = Gtk.ComboBoxText()
         self.heatmap_tokens.connect('changed', self.select_heatmap)
         self.heatmap_tokens.get_accessible().set_name('Prompt token heatmap')
+        self.heatmap_tokens.set_tooltip_text('All tokens: mean saved association scores, with relative thermal contrast. Blue is low; red is high.')
         self.heatmap_picker = Gtk.ToolItem()
         self.heatmap_picker.set_no_show_all(True)
         self.heatmap_picker.add(self.heatmap_tokens)
@@ -425,14 +426,14 @@ class Window(Gtk.Window, ParameterForm):
 
     def update_heatmap(self):
         heatmap = self.state.get('heatmap', {})
-        labels = [t['label'] for t in heatmap.get('tokens', [])]
+        labels = ['All tokens'] + [t['label'] for t in heatmap.get('tokens', [])]
         self.syncing_heatmap = True
         if labels != self.heatmap_labels:
             self.heatmap_tokens.remove_all()
             for text in labels:
                 self.heatmap_tokens.append_text(text)
             self.heatmap_labels = labels
-        self.heatmap_tokens.set_active(heatmap.get('selected', -1))
+        self.heatmap_tokens.set_active(heatmap.get('selected', -2) + 1)
         self.heatmap_tokens.set_sensitive(bool(heatmap.get('available')) and heatmap.get('path') == self.selection)
         self.syncing_heatmap = False
         overlay = heatmap.get('overlay', '')
@@ -449,12 +450,12 @@ class Window(Gtk.Window, ParameterForm):
     def select_heatmap(self, *_):
         index = self.heatmap_tokens.get_active()
         if self.heatmap_open and not self.syncing_heatmap and index >= 0:
-            self.send('heatmap_select', path=self.selection, index=index)
+            self.send('heatmap_select', path=self.selection, index=index - 1)
 
     def receive(self, op, reply):
         if self.closing:
             return False
-        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_viewing'):
+        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing'):
             if reply.get('ok') and reply.get('state', {}).get('heatmap'):
                 self.state['heatmap'] = reply['state']['heatmap']
                 self.update_heatmap()

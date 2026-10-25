@@ -513,6 +513,7 @@ Rectangle {
                 anchors.fill: parent
                 acceptedButtons: Qt.RightButton
                 hoverEnabled: box.tokenMarksReady && !box.negative
+                onExited: if (!box.negative && typeof App.inspection !== "undefined" && App.inspection) App.inspection.endHover("prompt")
                 onPositionChanged: function(m) {
                     if (containsMouse && !box.negative && typeof App.inspection !== "undefined" && App.inspection)
                         App.inspection.hoverPrompt(input.text, input.positionAt(m.x, m.y))

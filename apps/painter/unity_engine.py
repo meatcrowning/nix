@@ -327,6 +327,9 @@ class Engine:
         if op == 'heatmap_viewing':
             c.inspection.setViewing(bool(request.get('viewing')))
             return dict(heatmap=self.heatmap_state())
+        if op == 'heatmap_hover_end':
+            c.inspection.endHover(request.get('owner', ''))
+            return dict(heatmap=self.heatmap_state())
         if op == 'heatmap_hover':
             if request.get('region'):
                 c.inspection.hoverRegion(request['text'], int(request['position']), request['region'])

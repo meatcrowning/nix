@@ -537,6 +537,11 @@ Item {
                     }
                     HoverHandler {
                         enabled: node.spec.kind === "prompt"
+                        onHoveredChanged: {
+                            if (hovered)
+                                App.inspection.hoverRegion(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
+                            else App.inspection.endHover("region:" + node.bridge.regionIdentity)
+                        }
                         onPointChanged: if (hovered)
                             App.inspection.hoverRegion(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
                     }

@@ -27,7 +27,9 @@ class MossInspect(QObject):
         self._data = None
         self._path = self._overlay = self._error = ''
         self._tokens = []
-        self._selected = -1
+        self._selected = -2
+        self._chosen = -1
+        self._hover_owner = ''
         self._viewing = False
         self._future = None
         self._masks = OrderedDict()
@@ -76,6 +78,10 @@ class MossInspect(QObject):
     def tokens(self):
         return self._tokens
 
+    @Property('QVariantList', notify=changed)
+    def choices(self):
+        return [dict(label='All tokens')] + self._tokens
+
     @Property(int, notify=changed)
     def selected(self):
         return self._selected
@@ -83,8 +89,15 @@ class MossInspect(QObject):
     @Slot(bool)
     def setViewing(self, viewing):
         self._viewing = viewing
-        if viewing and self.available and self._selected < 0:
-            self.select(0)
+        if viewing and self.available:
+            self.select(-1)
+
+    @Slot()
+    @Slot(str)
+    def endHover(self, owner=''):
+        if self._viewing and (not owner or owner == self._hover_owner):
+            self._hover_owner = ''
+            self._show(self._chosen)
 
     @Slot(str, int)
     def hoverPrompt(self, text, position):
@@ -95,7 +108,7 @@ class MossInspect(QObject):
         saved = self._data[0].get('prompt', '')
         position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
         position = moss_data.prompt_position(saved, text, position)
-        self._select_position(position)
+        self._select_position(position, 'prompt')
 
     @Slot(str, int, str)
     def hoverRegion(self, text, position, identity):
@@ -106,15 +119,16 @@ class MossInspect(QObject):
         for index, region in enumerate(regions):
             if region.get('id') == identity and region.get('caption', '').strip() == text.strip():
                 position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
-                self._select_position(moss_data.prompt_position(doc.get('prompt', ''), text, position, index))
+                self._select_position(moss_data.prompt_position(doc.get('prompt', ''), text, position, index), 'region:' + identity)
                 break
 
-    def _select_position(self, position):
+    def _select_position(self, position, owner):
         if position is None:
             return
         for index, token in enumerate(self._tokens):
             if token.get('start', -1) <= position < token.get('end', -1):
-                self.select(index)
+                self._hover_owner = owner
+                self._show(index)
                 break
 
     def bind_toolbar(self, shell, root):
@@ -125,16 +139,17 @@ class MossInspect(QObject):
         combo.setMinimumContentsLength(12)
         combo.setMaximumWidth(260)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.activated.connect(self.select)
+        combo.activated.connect(lambda index: self.select(index - 1))
+        combo.setToolTip('All tokens: mean saved association scores, with relative thermal contrast. Blue is low; red is high.')
         labels = []
         def refresh():
-            current = [token['label'] for token in self.tokens]
+            current = [token['label'] for token in self.choices]
             combo.blockSignals(True)
             if current != labels:
                 combo.clear()
                 combo.addItems(current)
                 labels[:] = current
-            combo.setCurrentIndex(self.selected)
+            combo.setCurrentIndex(self.selected + 1)
             combo.blockSignals(False)
             combo.setVisible(bool(root.property('showHeatmap')))
             combo.setEnabled(self.available)
@@ -163,7 +178,9 @@ class MossInspect(QObject):
         self.mask = QImage()
         self._packet = None
         self._path, self._data, self._tokens, self._overlay, self._error = path, None, [], '', ''
-        self._selected = -1
+        self._selected = -2
+        self._chosen = -1
+        self._hover_owner = ''
         self.changed.emit()
         if self._future:
             self._future.cancel()
@@ -173,6 +190,7 @@ class MossInspect(QObject):
             try:
                 value = moss_data.read(path)
                 if value:
+                    value[0]['_aggregate'] = moss_data.aggregate(*value)
                     import pngmeta
                     try:
                         params = json.loads(pngmeta.read_text_path(path).get('painter', '{}'))
@@ -197,25 +215,31 @@ class MossInspect(QObject):
                             for i, t in enumerate(visible)]
         self.changed.emit()
         if self._viewing and self.available:
-            self.select(0)
+            self.select(-1)
 
     @Slot(int)
     def select(self, index):
+        if -1 <= index < len(self._tokens):
+            self._hover_owner = ''
+            self._chosen = index
+            self._show(index)
+
+    def _show(self, index):
         if self._closed:
             return
-        if not self._data or not (0 <= index < len(self._tokens)):
+        if not self._data or not (-1 <= index < len(self._tokens)):
             return
         if index == self._selected:
             return
         self._selected = index
         doc, pixels = self._data
-        token = self._tokens[index]['index']
+        token = self._tokens[index]['index'] if index >= 0 else -1
         mask = self._masks.pop(token, None)
         if mask is None:
             w, h = doc['width'], doc['height']
-            values = pixels[token * w * h:(token + 1) * w * h]
-            rgba = bytearray(bytes((255, 220, 0, 0)) * (w * h))
-            rgba[3::4] = values.translate(ALPHA)
+            values = pixels[token * w * h:(token + 1) * w * h] if token >= 0 else doc['_aggregate']
+            table = THERMAL if token >= 0 else THERMAL_ALL
+            rgba = b''.join(table[value] for value in values)
             mask = QImage(rgba, w, h, w * 4, QImage.Format.Format_RGBA8888).copy()
         self._masks[token] = mask
         # At most 1 MiB for 64x64 maps; no full-resolution image copies.
@@ -238,12 +262,20 @@ class MossInspect(QObject):
         return self._packet
 
 
-def _alpha(value):
-    strength = max(0, min(1, (value / 255 - .35) / .3))
-    return round(204 * strength * strength * (3 - 2 * strength))
+def _thermal(value, all_tokens=False):
+    stops = ((25, 45, 150), (0, 125, 255), (0, 205, 190),
+             (150, 225, 45), (255, 195, 0), (245, 45, 20))
+    level = value / 255
+    offset = level * (len(stops) - 1)
+    index = min(len(stops) - 2, int(offset))
+    fraction = offset - index
+    rgb = [round(a + (b - a) * fraction) for a, b in zip(stops[index], stops[index + 1])]
+    strength = level * level * (3 - 2 * level)
+    return bytes(rgb + [round(65 + 145 * strength if all_tokens else 210 * strength)])
 
 
-ALPHA = bytes(_alpha(value) for value in range(256))
+THERMAL = tuple(_thermal(value) for value in range(256))
+THERMAL_ALL = tuple(_thermal(value, True) for value in range(256))
 
 
 class HeatmapLayer(QQuickPaintedItem):

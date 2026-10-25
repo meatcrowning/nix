@@ -107,14 +107,14 @@ def test():
             heatmap_state = window.state.get('heatmap')
             requests = []
             window.send = lambda op, **kw: requests.append((op, kw))
-            window.state['heatmap'] = dict(available=True, path=window.selection, selected=0,
+            window.state['heatmap'] = dict(available=True, path=window.selection, selected=-1,
                 tokens=[dict(label='1 · red'), dict(label='2 · cube')], overlay='')
             window.toggle_heatmap()
             assert window.heatmap_picker.get_visible() and window.history_scroll.get_visible()
             assert isinstance(window.heatmap_picker.get_parent(), Gtk.Toolbar)
             assert window.heatmap_tokens.get_active() == 0
             window.heatmap_tokens.set_active(1)
-            assert requests[-1][0] == 'heatmap_select' and requests[-1][1]['index'] == 1
+            assert requests[-1][0] == 'heatmap_select' and requests[-1][1]['index'] == 0
             window.toggle_heatmap()
             assert not window.heatmap_picker.get_visible()
             window.send = send

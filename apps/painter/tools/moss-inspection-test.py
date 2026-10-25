@@ -17,6 +17,12 @@ import moss_data
 import pngmeta
 
 
+# Aggregate numeric scores before display mapping, excluding wrapper tokens.
+aggregate_doc = dict(width=4, height=1, tokens=[dict(index=i, visible=i < 2) for i in range(3)])
+assert moss_data.aggregate(aggregate_doc, bytes([0, 0, 100, 200, 0, 100, 100, 200, 255, 0, 0, 0])) == bytes([0, 128, 255, 255])
+assert moss_data.aggregate(aggregate_doc, bytes([0, 100, 200, 0, 200, 100, 0, 200, 255, 0, 0, 0])) == bytes([100]*4)
+
+
 class Tokens(QObject):
     tokenized = Signal(str, str, 'QVariantMap')
     def __init__(self):
@@ -125,20 +131,33 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         u.spin(10)
         if ctl.inspection.overlay: break
     assert ctl.inspection.overlay
+    assert ctl.inspection.selected == -1
+    aggregate_key = ctl.inspection.mask.cacheKey()
+    ctl.inspection.hoverPrompt('red sphere', 5)
+    assert ctl.inspection.selected == 1
+    ctl.inspection.endHover()
+    assert ctl.inspection.selected == -1 and ctl.inspection.mask.cacheKey() == aggregate_key
+    ctl.inspection.select(0)
+    ctl.inspection.hoverPrompt('red sphere', 5)
+    ctl.inspection.endHover('region:unrelated')
+    assert ctl.inspection.selected == 1
+    ctl.inspection.endHover('prompt')
+    assert ctl.inspection.selected == 0  # Restore an explicit dropdown choice.
+    ctl.inspection.select(-1)
     assert gallery.isVisible()
     assert u.find(win.contentItem(), 'HeatmapPane').width() < u.find(win.contentItem(), 'ResultsPane').width()
     if combo:
-        assert combo.isVisible() and combo.count() == 2
+        assert combo.isVisible() and combo.count() == 3
     ctl.inspection.hoverPrompt('red sphere', 5)
     assert ctl.inspection.selected == 1
-    if combo: assert combo.currentIndex() == 1
+    if combo: assert combo.currentIndex() == 2
     ctl.inspection.hoverPrompt('different draft', 0)
     assert ctl.inspection.selected == 1
     ctl.inspection.hoverPrompt('red sphere', 0)
     assert ctl.inspection.selected == 0
     assert ctl.inspection.mask.size().width() == 2
     assert ctl.inspection.mask.pixelColor(0, 0).alpha() == 0
-    assert ctl.inspection.mask.pixelColor(1, 0).alpha() == 204
+    assert ctl.inspection.mask.pixelColor(1, 0).alpha() == 210
     first_mask = ctl.inspection.mask.cacheKey()
     ctl.inspection.select(1)
     ctl.inspection.select(0)
@@ -193,11 +212,11 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     for _ in range(100):
         u.spin(10)
         if ctl.inspection.available and ctl.inspection.overlay: break
-    assert ctl.inspection.selected == 0
+    assert ctl.inspection.selected == -1
     position = len(caption[:caption.index('sphere')].encode('utf-16-le')) // 2
     ctl.inspection.hoverPrompt(caption, position)
     assert ctl.inspection.selected == 1
-    if combo: assert combo.currentIndex() == 1
+    if combo: assert combo.currentIndex() == 2
     print('PASS layout caption hover, JSON escapes, Unicode and mismatched drafts')
     old_output = Path(tmp) / 'old.png'
     old_output.write_bytes(plain)
@@ -265,9 +284,12 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     scroller.setProperty('contentY', max(0, field_y - 50))
     u.spin(50)
     point = region_field.mapToItem(win.contentItem(), QPointF(region_field.property('leftPadding') + 12, region_field.property('topPadding') + 8))
-    QTest.mouseMove(getattr(win, 'keyTarget', win), QPoint(round(point.x()), round(point.y())))
+    QTest.mouseMove(keep[-1].view if combo else win, QPoint(round(point.x()), round(point.y())))
     u.spin(100)
     assert ctl.inspection.selected == 1, 'region hover did not reach saved token selection'
+    QTest.mouseMove(keep[-1].view if combo else win, QPoint(round(point.x()), round(point.y()) - 40))
+    u.spin(50)
+    assert ctl.inspection.selected == -1, 'leaving region did not restore all tokens'
     u.spin(400)
     service.tokenized.emit(region_probe.property('request'), 'red sphere', dict(count=12, template_tokens=10, utf16_boundaries=[3]))
     u.spin(50)
