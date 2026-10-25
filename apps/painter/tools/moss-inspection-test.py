@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     assert moss_rank.duplicate_token({'text': 'colour'}, [{'token': {'text': 'color'}}])
     assert not moss_rank.duplicate_token({'text': 'red'}, [{'token': {'text': 'bed'}}])
     scout = MossInspect(None)
-    words = ['with', 'red', 'blue', 'green', 'gold', 'silver']
+    words = ['with', 'red', 'blue', 'green', 'gold', 'silver', 'amber']
     prompt = ' '.join(words)
     offset = 0
     records, planes = [], []
@@ -101,11 +101,11 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     scout._viewing = True
     scout._accept(0, (scout_doc, bytes(planes)))
     scout.hoverImage(0, 0)
-    assert [t['text'] for t in scout.nearby] == ['red', 'blue', 'green', 'gold']
+    assert [t['text'] for t in scout.nearby] == ['red', 'blue', 'green', 'gold', 'silver', 'amber']
     assert abs(scout.nearby[0]['score'] - 225/255) < 1e-6
     left_key = scout.mask.cacheKey()
     scout.hoverImage(.99, .99)
-    assert [t['text'] for t in scout.nearby] == ['silver', 'gold', 'green', 'blue']
+    assert [t['text'] for t in scout.nearby] == ['amber', 'silver', 'gold', 'green', 'blue', 'red']
     scout.hoverImage(0, 0)
     assert scout.mask.cacheKey() == left_key
     scout.holdImage(0, 0)
@@ -114,6 +114,20 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     scout.hoverImage(.99, .99)
     scout.leaveImage()
     assert scout.imageHeld and [t['choice'] for t in scout.nearby] == held_choices
+    scout._picks = []
+    list_changes = []
+    scout.nearbyChanged.connect(lambda: list_changes.append(True))
+    scout.hoverNearby(held_choices[0])
+    first_hover = scout.mask.cacheKey()
+    assert scout.selected == held_choices[0] and scout.imageHeld and not scout._picks
+    scout.hoverNearby(held_choices[1])
+    scout.leaveNearby(held_choices[0])  # A late leave must not override the next row.
+    assert scout.selected == held_choices[1]
+    scout.hoverNearby(held_choices[0])
+    assert scout.mask.cacheKey() == first_hover
+    scout.leaveNearby(held_choices[0])
+    assert scout.mask.cacheKey() == left_key and scout.imageHeld
+    assert not list_changes, 'individual previews rebuilt the held list'
     scout.releaseImage()
     assert not scout.imageHeld and not scout.nearby
     scout.hoverImage(1, .5)
@@ -197,6 +211,28 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     output.write_bytes(saved)
     assert moss_data.read(output)[0] == doc
     assert QImage(str(output)) == original
+    from unittest.mock import patch
+    from threading import Event
+    cache_probe = MossInspect(None)
+    gate = Event()
+    export_work = cache_probe._pool.submit(gate.wait, 5)
+    try:
+        with patch('moss_data.read', wraps=moss_data.read) as reader:
+            for expected_reads in (1, 1, 2):
+                if expected_reads == 2:
+                    stamp = output.stat()
+                    os.utime(output, ns=(stamp.st_atime_ns, stamp.st_mtime_ns+1))
+                cache_probe.load(str(output))
+                for _ in range(100):
+                    u.spin(10)
+                    if cache_probe.available: break
+                assert cache_probe.available, 'map loading waited for the export worker'
+                assert reader.call_count == expected_reads, 'cache missed or reused a modified file'
+        assert not export_work.done()
+    finally:
+        gate.set()
+        cache_probe.close()
+    print('PASS map cache reuse, file invalidation and loading during an export')
     gallery = u.find(win.contentItem(), 'GalleryView')
     gallery.setProperty('selection', [str(output)])
     root.setProperty('inView', True)
@@ -292,6 +328,8 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     near_mask = ctl.inspection.mask.cacheKey()
     ctl.inspection.hoverImage(.26, .76)
     assert ctl.inspection.mask.cacheKey() == near_mask
+    ctl.inspection.holdImage(.26, .76)
+    u.spin(50)
     buttons = [o for o in u.walk(win.contentItem()) if o.objectName() == 'nearbyTokenChoice' and o.isVisible()]
     assert buttons, 'nearby tooltip is not visible'
     button = buttons[-1]
@@ -300,6 +338,8 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     QTest.mouseMove(keep[-1].view if combo else win, QPoint(round(bp.x()), round(bp.y())))
     u.spin(250)  # The interactive tooltip survives crossing out of the image.
     assert ctl.inspection.nearby
+    assert ctl.inspection.selected == choice and ctl.inspection.imageHeld, 'held row hover did not preview its token'
+    assert button in list(u.walk(win.contentItem())), 'preview recreated its own hovered button'
     QTest.mouseClick(keep[-1].view if combo else win, Qt.LeftButton, Qt.NoModifier, QPoint(round(bp.x()), round(bp.y())))
     assert ctl.inspection.selected == choice and not ctl.inspection._exploring
     ctl.inspection.leaveImage()
@@ -485,9 +525,10 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         assert grid.width() == original.width()*3 + 48
         assert json.loads(grid.text('PainterRanking'))['focused']
         assert grid.text('Description').splitlines() == [
-            'Original', 'All tokens · relative association', 'Hottest areas',
+            'Original output', 'All tokens · relative association', 'Hottest areas',
             'red sphere - token: [red sphere]', 'red sphere - token: [red sphere]', 'Most focused tokens']
         assert len(json.loads(grid.text('PainterWordGrouping'))['selected']) == 2
+        assert grid.text('PainterComparisonPrompt') == json.loads(compiled)['summary']['caption']
         # Original panel is unmodified; the thermal panel differs.
         title_height = int(grid.text('PainterTitleHeight'))
         assert grid.text('Title') == 'saved-moss — token association heatmaps'

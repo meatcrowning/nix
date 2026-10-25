@@ -3,6 +3,7 @@ import json
 import re
 import struct
 import zlib
+from functools import lru_cache
 
 CHUNK = b'paHm'
 LIMIT = 24 * 1024 * 1024
@@ -11,22 +12,20 @@ LIMIT = 24 * 1024 * 1024
 def aggregate(document, pixels):
     """Mean of all visible token scores, before thresholds or colour mapping."""
     area = document['width'] * document['height']
-    totals, count = [0] * area, 0
-    for token in document['tokens']:
-        if not token['visible']:
-            continue
-        start = token['index'] * area
-        totals = [a + b for a, b in zip(totals, pixels[start:start + area])]
-        count += 1
+    planes = [pixels[t['index']*area:(t['index']+1)*area]
+              for t in document['tokens'] if t['visible']]
+    count = len(planes)
     if not count:
         return bytes(area)
+    totals = list(map(sum, zip(*planes)))
     # One display stretch after aggregation reveals structure without giving
     # already coloured/thresholded masks extra weight. Flat maps stay flat.
     ordered = sorted(totals)
     low, high = ordered[int((area - 1) * .05)], ordered[int((area - 1) * .95)]
     if high == low:
         return bytes(round(value / count) for value in totals)
-    return bytes(round(255 * max(0, min(1, (value - low) / (high - low)))) for value in totals)
+    return bytes(0 if value <= low else 255 if value >= high else
+                 round(255 * ((value - low) / (high - low))) for value in totals)
 
 
 def json_value_span(source, path):
@@ -65,8 +64,9 @@ def json_value_span(source, path):
     return descend(0, path)
 
 
-def prompt_position(saved, text, position, region_index=None):
-    """Map an editor character to plain conditioning or a compiled scene caption."""
+@lru_cache(maxsize=16)
+def prompt_positions(saved, text, region_index=None):
+    """Resolve a caption once, including escaped offsets, for all its characters."""
     caption, offset = saved, 0
     literal = None
     if region_index is not None:
@@ -75,36 +75,46 @@ def prompt_position(saved, text, position, region_index=None):
             literal = saved[offset:end]
             caption = json.loads(literal)
         except (ValueError, IndexError):
-            return None
+            return ()
         # The caller checks the saved region's original caption. Compilation
         # may append typography instructions after that exact caption.
         if not isinstance(caption, str) or not caption.startswith(text.strip()):
-            return None
+            return ()
     elif text.strip() != saved.strip():
         # Layout compilation puts the prompt box in summary.caption. Anchor to
         # that field, never a substring which could also occur in a region.
         match = re.match(r'\s*\{\s*"summary"\s*:\s*\{\s*"caption"\s*:\s*', saved)
         if not match:
-            return None
+            return ()
         offset = match.end()
         try:
             caption, end = json.JSONDecoder().raw_decode(saved[offset:])
         except ValueError:
-            return None
+            return ()
         if not isinstance(caption, str) or text.strip() != caption.strip():
-            return None
+            return ()
         literal = saved[offset:offset + end]
-    position += len(caption) - len(caption.lstrip()) - (len(text) - len(text.lstrip()))
-    if not 0 <= position < len(caption):
-        return None
+    shift = len(caption) - len(caption.lstrip()) - (len(text) - len(text.lstrip()))
+    positions = range(len(caption))
     if literal is not None:
         # The stored offsets address JSON source, including escaped characters.
         for ascii_only in (False, True):
             if json.dumps(caption, ensure_ascii=ascii_only) == literal:
-                prefix = json.dumps(caption[:position], ensure_ascii=ascii_only)[1:-1]
-                return offset + 1 + len(prefix)
-        return None
-    return position
+                positions = []
+                current = offset + 1
+                for character in caption:
+                    positions.append(current)
+                    current += len(json.dumps(character, ensure_ascii=ascii_only)) - 2
+                break
+        else:
+            return ()
+    return tuple(positions[i+shift] if 0 <= i+shift < len(positions) else None for i in range(len(text)))
+
+
+def prompt_position(saved, text, position, region_index=None):
+    """Map an editor character to plain conditioning or a compiled scene caption."""
+    positions = prompt_positions(saved, text, region_index)
+    return positions[position] if 0 <= position < len(positions) else None
 
 
 def encode(document, maps):

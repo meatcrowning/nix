@@ -337,11 +337,13 @@ class ImageView(Gtk.Box):
         nearby_text.load_from_data(b'* { color: #ffffff; text-shadow: none; }')
         for label in (self.nearby_title, self.nearby_release.get_child()):
             label.get_style_context().add_provider(nearby_text, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        for i in range(4):
+        for i in range(6):
             button = Gtk.Button(label='')
             button.get_child().get_style_context().add_provider(nearby_text, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             button.set_no_show_all(True)
             button.connect('clicked', lambda b: self.explore_send('heatmap_nearby', index=b.token_choice))
+            button.connect('enter-notify-event', lambda b, e: self.explore_send('heatmap_nearby_hover', index=b.token_choice) if self.image_held else False)
+            button.connect('leave-notify-event', lambda b, e: self.explore_send('heatmap_nearby_leave', index=b.token_choice) if self.image_held else False)
             column.pack_start(button, False, False, 0)
             self.nearby_buttons.append(button)
         frame.show_all()

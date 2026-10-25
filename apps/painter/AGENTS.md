@@ -181,6 +181,8 @@ Grid comparison arms two prompt/region clicks, validates each against saved toke
 and exports a labeled 3×2 PNG to the platform Pictures directory in a worker.
 Original/all-token panels precede the two picked maps; source resolution is kept.
 A title row uses the saved output’s model name and “token association heatmaps.”
+The Original output header includes two smaller truncated lines of the saved scene
+prompt; its full text is retained in `PainterComparisonPrompt` PNG metadata.
 Exports average saved token planes per word occurrence for picked maps and both
 ranked panels. Picked headers list the word and its pieces with singular “token”
 or plural “tokens”; `PainterWordGrouping` preserves source indices and offsets.
@@ -206,13 +208,18 @@ saved maps. Heatmap mode leaves history accessible and survives output changes.
 Qt paints transparent masks over the existing image, preserving fit/zoom and
 keeping it visible while maps load. `moss_inspect.py` caches at most 64 small RGBA
 masks; token changes never decode or save the full output.
+Map loading has its own worker, independent of grid exports, and caches up to
+three files/24 MiB of planes by path, modification time and size. Caption-offset
+mapping is cached and resolved in one pass; nearby-list notifications are separate
+from mask changes so individual previews do not rebuild lists or prompt highlights.
 Image-hover exploration in both preview/view maps the pointer through fit/zoom/pan
 and samples at most every 40 ms. Rank eligible tokens by a 3×3 saved-map neighborhood;
-show the top four in an interactive tooltip and their mean thermal map. Reuse
+show the top six in an interactive tooltip and their mean thermal map. Reuse
 combined masks by token set within the same 64-entry cache. Tooltip clicks select
 one token; leaving restores the dropdown choice. Clicking the image holds its
 area/list until a token is chosen or Resume hover is pressed. During grid selection,
-a held-list choice fills the next comparison slot, then releases the hold; prompt
+a held-list hover previews that individual token and leaving restores the combined
+map. A click fills the next comparison slot, then releases the hold; prompt
 clicks remain an alternative. Leaving heatmap mode or changing outputs clears holds. Prompt/region highlights use
 saved offsets (UTF-16 in Qt), reject mismatched drafts, and never alter text/undo. GTK receives small
 mask PNGs in immediate socket replies and composites them over its decoded image.

@@ -332,7 +332,7 @@ class Engine:
                 raise ValueError('Prompt is too long')
             c.inspection.tokenize(identity, text)
             return {}
-        if op in ('heatmap_image', 'heatmap_image_end', 'heatmap_nearby', 'heatmap_hold', 'heatmap_release'):
+        if op in ('heatmap_image', 'heatmap_image_end', 'heatmap_nearby', 'heatmap_hold', 'heatmap_release', 'heatmap_nearby_hover', 'heatmap_nearby_leave'):
             if request.get('path') == self.view_path:
                 if op == 'heatmap_hold':
                     c.inspection.holdImage(float(request['x']), float(request['y']))
@@ -342,6 +342,10 @@ class Engine:
                     c.inspection.hoverImage(float(request['x']), float(request['y']))
                 elif op == 'heatmap_image_end':
                     c.inspection.leaveImage()
+                elif op == 'heatmap_nearby_hover':
+                    c.inspection.hoverNearby(int(request['index']))
+                elif op == 'heatmap_nearby_leave':
+                    c.inspection.leaveNearby(int(request['index']))
                 else:
                     c.inspection.chooseNearby(int(request['index']))
             return dict(heatmap=self.heatmap_state())

@@ -470,7 +470,7 @@ class Window(Gtk.Window, ParameterForm):
     def receive(self, op, reply):
         if self.closing:
             return False
-        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick', 'heatmap_image', 'heatmap_image_end', 'heatmap_nearby', 'heatmap_hold', 'heatmap_release'):
+        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick', 'heatmap_image', 'heatmap_image_end', 'heatmap_nearby', 'heatmap_hold', 'heatmap_release', 'heatmap_nearby_hover', 'heatmap_nearby_leave'):
             if reply.get('ok') and reply.get('state', {}).get('heatmap'):
                 self.state['heatmap'] = reply['state']['heatmap']
                 for marks in self.token_marks:

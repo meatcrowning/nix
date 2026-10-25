@@ -81,6 +81,11 @@ Item {
                     objectName: "nearbyTokenChoice"
                     Layout.fillWidth: true
                     enabled: !explorer.service.picking || explorer.service.imageHeld
+                    hoverEnabled: true
+                    onHoveredChanged: {
+                        if (hovered) explorer.service.hoverNearby(modelData.choice)
+                        else explorer.service.leaveNearby(modelData.choice)
+                    }
                     text: modelData.label + "  ·  " + Math.round(modelData.score * 100) + "%"
                     contentItem: Text {
                         text: tokenButton.text

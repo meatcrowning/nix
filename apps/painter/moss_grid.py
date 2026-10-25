@@ -5,12 +5,57 @@ from pathlib import Path
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSaveFile, QIODevice
-from PySide6.QtGui import QImage, QPainter, QColor, QFont, QFontMetrics, QPen
+from PySide6.QtGui import QImage, QPainter, QColor, QFont, QFontMetrics, QPen, QTextLayout, QTextOption
 import moss_data
 import moss_rank
 
 
 COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573')
+
+
+def scene_prompt(document):
+    prompt = document.get('prompt', '')
+    try:
+        layout = json.loads(prompt)
+        if isinstance(layout, dict) and isinstance(layout.get('summary'), dict):
+            return str(layout['summary'].get('caption', ''))
+    except ValueError:
+        pass
+    return prompt
+
+
+def original_header(painter, rect, prompt, font, padding):
+    title = 'Original output'
+    metrics = QFontMetrics(font)
+    title_width = metrics.horizontalAdvance(title)
+    painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, metrics.elidedText(title, Qt.ElideRight, max(0, rect.width())))
+    remaining = rect.adjusted(title_width+padding, 0, 0, 0)
+    if remaining.width() < 20:
+        return
+    small = QFont(font)
+    small.setPixelSize(max(10, round(font.pixelSize()*.55)))
+    small_metrics = QFontMetrics(small)
+    prompt = ' '.join(prompt.split())
+    layout = QTextLayout(prompt, small)
+    option = QTextOption()
+    option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+    layout.setTextOption(option)
+    layout.beginLayout()
+    line = layout.createLine()
+    if line.isValid():
+        line.setLineWidth(remaining.width())
+        split = len(prompt.encode('utf-16-le')[:line.textLength()*2].decode('utf-16-le'))
+    else:
+        split = 0
+    layout.endLayout()
+    lines = [prompt[:split].rstrip(), small_metrics.elidedText(prompt[split:].lstrip(), Qt.ElideRight, remaining.width())]
+    painter.save()
+    painter.setFont(small)
+    y = remaining.y() + (remaining.height()-2*small_metrics.height())//2
+    for text in lines:
+        painter.drawText(QRect(remaining.x(), y, remaining.width(), small_metrics.height()), Qt.AlignVCenter | Qt.AlignLeft, text)
+        y += small_metrics.height()
+    painter.restore()
 
 
 def ranked_masks(data, ranking):
@@ -127,16 +172,19 @@ def save_grid(source, data, tokens, folder):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setFont(font)
         painter.setPen(QColor('#f4f5f7'))
-        labels = ['Original', 'All tokens · relative association', 'Hottest areas',
+        labels = ['Original output', 'All tokens · relative association', 'Hottest areas',
                   moss_rank.word_label(selected[0]), moss_rank.word_label(selected[1]), 'Most focused tokens']
         masks = [QImage(), token_mask(*data, -1), hot,
                  token_mask(*words, selected[0]['index']), token_mask(*words, selected[1]['index']), focus]
         for i, (label, mask) in enumerate(zip(labels, masks)):
             x = gap + (i % 3) * (width + gap)
             y = gap + (i // 3) * (height + header + gap)
-            painter.drawText(QRect(x + padding, y, width - padding * 2, header),
-                             Qt.AlignVCenter | Qt.AlignLeft,
-                             metrics.elidedText(label, Qt.ElideRight, max(0, width - padding * 2)))
+            heading = QRect(x + padding, y, width - padding * 2, header)
+            if i == 0:
+                original_header(painter, heading, scene_prompt(data[0]), font, padding)
+            else:
+                painter.drawText(heading, Qt.AlignVCenter | Qt.AlignLeft,
+                                 metrics.elidedText(label, Qt.ElideRight, max(0, width - padding * 2)))
             rect = QRect(x, y + header, width, height)
             painter.drawImage(rect, original)
             if not mask.isNull():
@@ -151,6 +199,7 @@ def save_grid(source, data, tokens, folder):
         painter.end()
     # Keep full labels, token identities, scores and methods off the artwork.
     canvas.setText('Description', '\n'.join(labels))
+    canvas.setText('PainterComparisonPrompt', scene_prompt(data[0]))
     canvas.setText('PainterWordGrouping', json.dumps(dict(source=str(source), selected=selected,
         words=words[0]['tokens'], method='Mean of saved normalized token planes per word occurrence; '
         'original all-token reference retained. No additional per-word contrast stretch.'), ensure_ascii=False))

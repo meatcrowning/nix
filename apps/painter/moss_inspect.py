@@ -2,6 +2,7 @@
 import json
 import base64
 import math
+import os
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -17,6 +18,7 @@ import moss_data
 class MossInspect(QObject):
     tokenized = Signal(str, str, 'QVariantMap')
     changed = Signal()
+    nearbyChanged = Signal()
     _loaded = Signal(int, object)
     _exported = Signal(str)
 
@@ -25,6 +27,8 @@ class MossInspect(QObject):
         self.client = client
         self._closed = False
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='moss-inspect')
+        self._load_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='moss-load')
+        self._data_cache = OrderedDict()
         self._generation = 0
         self._data = None
         self._path = self._overlay = self._error = ''
@@ -35,6 +39,7 @@ class MossInspect(QObject):
         self._nearby = []
         self._image_cell = None
         self._image_held = False
+        self._nearby_hover = -1
         self._exploring = False
         self._positions = OrderedDict()
         self._viewing = False
@@ -52,6 +57,8 @@ class MossInspect(QObject):
     def close(self):
         self._closed = True
         self._pool.shutdown(wait=True, cancel_futures=True)
+        self._load_pool.shutdown(wait=True, cancel_futures=True)
+        self._data_cache.clear()
         self._masks.clear()
 
     @Slot(str, str, str, result='QVariantMap')
@@ -112,9 +119,15 @@ class MossInspect(QObject):
     def exploring(self):
         return self._exploring
 
-    @Property('QVariantList', notify=changed)
+    @Property('QVariantList', notify=nearbyChanged)
     def nearby(self):
         return self._nearby
+
+    def _set_nearby(self, tokens):
+        self._nearby_hover = -1
+        if tokens != self._nearby:
+            self._nearby = tokens
+            self.nearbyChanged.emit()
 
     @Property(bool, notify=changed)
     def imageHeld(self):
@@ -154,12 +167,16 @@ class MossInspect(QObject):
                 scores.append((score, token))
         scores.sort(key=lambda item: (-item[0], item[1]['index']))
         visible = {token['index']: i for i, token in enumerate(self._tokens)}
-        self._nearby = [dict(token, choice=visible[token['index']], score=score,
-                             label=token.get('display', token['text'].strip())) for score, token in scores[:4]]
+        self._set_nearby([dict(token, choice=visible[token['index']], score=score,
+                             label=token.get('display', token['text'].strip())) for score, token in scores[:6]])
         if not self._nearby:
             self._show(self._chosen)
             self.changed.emit()
             return
+        self._show_nearby()
+
+    def _show_nearby(self):
+        doc, pixels = self._data
         key = tuple(sorted(t['index'] for t in self._nearby))
         mask = self._masks.pop(key, None)
         if mask is None:
@@ -179,6 +196,18 @@ class MossInspect(QObject):
             self._overlay = overlay
         self.changed.emit()
 
+    @Slot(int)
+    def hoverNearby(self, index):
+        if self._image_held and any(t['choice'] == index for t in self._nearby):
+            self._nearby_hover = index
+            self._show(index)
+
+    @Slot(int)
+    def leaveNearby(self, index):
+        if self._image_held and self._nearby_hover == index:
+            self._nearby_hover = -1
+            self._show_nearby()
+
     @Slot()
     def releaseImage(self):
         self._image_held = False
@@ -189,7 +218,7 @@ class MossInspect(QObject):
         if self._image_held:
             return
         had_nearby = bool(self._nearby)
-        self._nearby = []
+        self._set_nearby([])
         self._image_cell = None
         if self._hover_owner == 'image':
             self._hover_owner = ''
@@ -204,7 +233,7 @@ class MossInspect(QObject):
         if any(t['choice'] == index for t in self._nearby):
             self._image_held = False
             self.select(index)
-            self._nearby = []
+            self._set_nearby([])
             self._image_cell = None
             if self.picking:
                 self._record_pick(index)
@@ -228,9 +257,10 @@ class MossInspect(QObject):
         if positions is None:
             positions = []
             offset = 0
+            mapped = moss_data.prompt_positions(doc.get('prompt',''), text, region)
             for i, character in enumerate(text):
                 end = offset + len(character.encode('utf-16-le'))//2
-                position = moss_data.prompt_position(doc.get('prompt',''), text, i, region)
+                position = mapped[i] if i < len(mapped) else None
                 if position is not None:
                     positions.append((offset, end, position))
                 offset = end
@@ -357,7 +387,7 @@ class MossInspect(QObject):
         for index, token in enumerate(self._tokens):
             if token.get('start', -1) <= position < token.get('end', -1):
                 had_nearby = bool(self._nearby)
-                self._nearby = []
+                self._set_nearby([])
                 self._image_cell = None
                 self._hover_owner = owner
                 self._show(index)
@@ -379,13 +409,17 @@ class MossInspect(QObject):
         grid.setCheckable(True)
         grid.clicked.connect(self.toggleGrid)
         labels = []
+        signature = []
         def refresh():
-            current = [token['label'] for token in self.choices]
             combo.blockSignals(True)
-            if current != labels:
-                combo.clear()
-                combo.addItems(current)
-                labels[:] = current
+            state = [self._generation, self.available, self._exploring]
+            if state != signature:
+                current = [token['label'] for token in self.choices]
+                if current != labels:
+                    combo.clear()
+                    combo.addItems(current)
+                    labels[:] = current
+                signature[:] = state
             combo.setCurrentIndex(self.selected + 1)
             combo.blockSignals(False)
             combo.setVisible(bool(root.property('showHeatmap')))
@@ -416,7 +450,7 @@ class MossInspect(QObject):
             return
         path = QUrl(path).toLocalFile() if path.startswith('file:') else path
         self._picks = None
-        self._nearby = []
+        self._set_nearby([])
         self._positions.clear()
         self._image_cell = None
         self._image_held = False
@@ -437,8 +471,13 @@ class MossInspect(QObject):
             return
         def read():
             try:
-                value = moss_data.read(path)
-                if value:
+                stat = os.stat(path)
+                key = (path, stat.st_mtime_ns, stat.st_size)
+                value = self._data_cache.pop(key, None)
+                cached = value is not None
+                if not cached:
+                    value = moss_data.read(path)
+                if value and not cached:
                     value[0]['_aggregate'] = moss_data.aggregate(*value)
                     import moss_rank
                     value[0]['_content_tokens'] = moss_rank.content_tokens(value[0])
@@ -449,10 +488,14 @@ class MossInspect(QObject):
                                                 if r.get('enabled', True)]
                     except (ValueError, TypeError, AttributeError):
                         value[0]['_regions'] = []
+                if value:
+                    self._data_cache[key] = value
+                    while len(self._data_cache) > 3 or sum(len(v[1]) for v in self._data_cache.values()) > 24*1024*1024:
+                        self._data_cache.popitem(last=False)
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 value = str(exc)
             self._loaded.emit(serial, value)
-        self._future = self._pool.submit(read)
+        self._future = self._load_pool.submit(read)
 
     def _accept(self, serial, value):
         if serial != self._generation:
