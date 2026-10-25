@@ -29,7 +29,9 @@ bash -n "$WAL"
 python3 -m py_compile "$SCHEME"
 rg -F -- '--apply-file' "$WAL" "$SCHEME" >/dev/null
 rg -F 'prepared scheme unavailable, re-minting' "$WAL" >/dev/null
-rg -F 'systemctl --user start plasma-panel-surface.service' "$WAL" >/dev/null
+# The shared scheme commit now guarantees the completed panel raster for both
+# wallpaper and scheme selections, including a path-triggered render in flight.
+python3 "$ROOT/home/prog/plasma-panel-gradient-files/live-refresh-test.py"
 rg -F 'org.kde.PlasmaShell.evaluateScript' "$WAL" >/dev/null
 rg -F 'deskstyle-wallpaper-ok:' "$WAL" >/dev/null
 rg -F '"$HOME/.nix-profile/bin/qdbus"' "$WAL" >/dev/null
