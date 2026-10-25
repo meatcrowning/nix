@@ -67,7 +67,7 @@ class ParameterForm(object):
         params.pack_start(wildcard_scroll, False, False, 0)
         self.prompt_writers = {}
         self.token_marks = []
-        for key, title, height in [('positive', 'Prompt', 120), ('negative', 'Negative prompt', 65)]:
+        for key, title, height in [('positive', 'Prompt', 120), ('negative', 'Neg prompt', 65)]:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             header = Gtk.Box(spacing=4)
             header.pack_start(label(title), False, False, 0)

@@ -55,7 +55,7 @@ Column {
     RowLayout {
         width: parent.width
         spacing: 4
-        PixelText { text: writer.scope === "negative" ? "Negative prompt" : "Prompt" }
+        PixelText { text: writer.scope === "negative" ? "Neg prompt" : "Prompt" }
         SpinBox {
             id: limit
             from: 16; to: 512; stepSize: 16; value: 128
