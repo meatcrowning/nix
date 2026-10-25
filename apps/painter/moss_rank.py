@@ -14,6 +14,41 @@ this that these those which who whom whose what there here then than also just v
 WORD = re.compile(r"\w+(?:['’-]\w+)*", re.UNICODE)
 
 
+def word_maps(document, pixels):
+    """Average saved planes per word occurrence; retain source token identities."""
+    prompt = document.get('prompt', '')
+    words = list(WORD.finditer(prompt))
+    visible = [t for t in document['tokens'] if t['visible']]
+    area = document['width'] * document['height']
+    groups, lookup, planes = {}, {}, bytearray()
+    for token in visible:
+        start, end = token.get('start', -1), token.get('end', -1)
+        spans = [m for m in words if start >= 0 and m.start() < end and m.end() > start]
+        if spans:
+            start, end = spans[0].start(), spans[-1].end()
+            key = (start, end)
+            pieces = [t for t in visible if t.get('start', -1) < end and t.get('end', -1) > start]
+            text = prompt[start:end]
+        else:
+            # Punctuation and legacy maps without offsets remain individually selectable.
+            key, pieces, text = ('token', token['index']), [token], token['text'].strip()
+        if key not in groups:
+            index = len(groups)
+            groups[key] = dict(index=index, text=text, start=start, end=end, visible=True,
+                               pieces=[t['text'].strip() for t in pieces],
+                               source_indices=[t['index'] for t in pieces])
+            planes.extend(round(sum(pixels[t['index']*area+i] for t in pieces)/len(pieces))
+                          for i in range(area))
+        lookup[token['index']] = groups[key]
+    return (dict(document, tokens=list(groups.values())), bytes(planes)), lookup
+
+
+def word_label(token):
+    pieces = token['pieces']
+    return '%s - %s: %s' % (token['text'], 'token' if len(pieces) == 1 else 'tokens',
+                            ', '.join('[%s]' % piece.replace('\n', '↵') for piece in pieces))
+
+
 def content_tokens(document):
     words = [(m.start(), m.end(), m.group().casefold()) for m in WORD.finditer(document.get('prompt', ''))]
     result = []

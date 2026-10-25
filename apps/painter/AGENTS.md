@@ -181,6 +181,10 @@ Grid comparison arms two prompt/region clicks, validates each against saved toke
 and exports a labeled 3×2 PNG to the platform Pictures directory in a worker.
 Original/all-token panels precede the two picked maps; source resolution is kept.
 A title row uses the saved output’s model name and “token association heatmaps.”
+Exports average saved token planes per word occurrence for picked maps and both
+ranked panels. Picked headers list the word and its pieces with singular “token”
+or plural “tokens”; `PainterWordGrouping` preserves source indices and offsets.
+The all-token reference and interactive viewer retain their token-based maps.
 The third column ranks up to four hot neighborhoods and focused tokens.
 `moss_rank.py` excludes punctuation and English function words using saved word
 spans (retaining content-word subpieces, labeled with their containing word).

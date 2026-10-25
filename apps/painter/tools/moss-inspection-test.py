@@ -44,6 +44,16 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     # Neighborhood ranking uses the saved content maps, with no wrapper/stopwords.
     from moss_inspect import MossInspect
     import moss_rank
+    word_doc = dict(width=2, height=1, prompt='ramshackle ramshackle warehouse', tokens=[
+        dict(index=i, text=text, start=start, end=end, visible=True)
+        for i, (text, start, end) in enumerate([
+            ('ram', 0, 3), ('sh', 3, 5), ('ackle', 5, 10),
+            (' ramshackle', 10, 21), (' warehouse', 21, 31)])])
+    word_data, lookup = moss_rank.word_maps(word_doc, bytes([0,255,120,120,240,0,20,40,50,60]))
+    assert word_data[1] == bytes([120,125,20,40,50,60])
+    assert lookup[0] == lookup[1] == lookup[2] and lookup[3] != lookup[0]
+    assert moss_rank.word_label(lookup[0]) == 'ramshackle - tokens: [ram], [sh], [ackle]'
+    assert moss_rank.word_label(lookup[4]) == 'warehouse - token: [warehouse]'
     # Repeated occurrences, split pieces and plurals must not crowd out distinct words.
     rank_words = ['flower', 'FLOWER', 'flowers', 'flower', 'orange', 'oranges', 'blue', 'green']
     rank_prompt = ' '.join(rank_words)
@@ -462,7 +472,8 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         assert json.loads(grid.text('PainterRanking'))['focused']
         assert grid.text('Description').splitlines() == [
             'Original', 'All tokens · relative association', 'Hottest areas',
-            'Token 2 · red sphere', 'Token 1 · red sphere', 'Most focused tokens']
+            'red sphere - token: [red sphere]', 'red sphere - token: [red sphere]', 'Most focused tokens']
+        assert len(json.loads(grid.text('PainterWordGrouping'))['selected']) == 2
         # Original panel is unmodified; the thermal panel differs.
         title_height = int(grid.text('PainterTitleHeight'))
         assert grid.text('Title') == 'saved-moss — token association heatmaps'

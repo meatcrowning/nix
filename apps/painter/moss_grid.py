@@ -113,8 +113,10 @@ def save_grid(source, data, tokens, folder):
     padding = max(12, width // 80)
     header = metrics.height() + padding * 2
     gap = padding
-    ranking = moss_rank.rank(*data)
-    hot, focus = ranked_masks(data, ranking)
+    words, lookup = moss_rank.word_maps(*data)
+    selected = [lookup[token['index']] for token in tokens]
+    ranking = moss_rank.rank(*words)
+    hot, focus = ranked_masks(words, ranking)
     canvas = QImage(width * 3 + gap * 4, (height + header) * 2 + gap * 3, QImage.Format_RGB32)
     if canvas.isNull():
         raise ValueError('Not enough memory for the comparison')
@@ -126,9 +128,9 @@ def save_grid(source, data, tokens, folder):
         painter.setFont(font)
         painter.setPen(QColor('#f4f5f7'))
         labels = ['Original', 'All tokens · relative association', 'Hottest areas',
-                  'Token ' + tokens[0]['label'], 'Token ' + tokens[1]['label'], 'Most focused tokens']
+                  moss_rank.word_label(selected[0]), moss_rank.word_label(selected[1]), 'Most focused tokens']
         masks = [QImage(), token_mask(*data, -1), hot,
-                 token_mask(*data, tokens[0]['index']), token_mask(*data, tokens[1]['index']), focus]
+                 token_mask(*words, selected[0]['index']), token_mask(*words, selected[1]['index']), focus]
         for i, (label, mask) in enumerate(zip(labels, masks)):
             x = gap + (i % 3) * (width + gap)
             y = gap + (i // 3) * (height + header + gap)
@@ -149,7 +151,11 @@ def save_grid(source, data, tokens, folder):
         painter.end()
     # Keep full labels, token identities, scores and methods off the artwork.
     canvas.setText('Description', '\n'.join(labels))
+    canvas.setText('PainterWordGrouping', json.dumps(dict(source=str(source), selected=selected,
+        words=words[0]['tokens'], method='Mean of saved normalized token planes per word occurrence; '
+        'original all-token reference retained. No additional per-word contrast stretch.'), ensure_ascii=False))
     ranking['method'] = ('Saved normalized associations, not absolute activity. English function words and punctuation excluded; '
+                         'token pieces averaged per word occurrence before ranking; '
                          'up to 7x7 neighborhood means, centers separated by up to 12 cells; '
                          'area labels maximize eligible-token mean in that neighborhood; '
                          'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
