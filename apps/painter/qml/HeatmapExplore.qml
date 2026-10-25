@@ -55,23 +55,41 @@ Item {
             anchors.fill: parent
             spacing: 2
             Label {
+                color: "white"
                 text: explorer.service.imageHeld ? "Held area · choose a token"
                       : explorer.service.picking ? "Click image to hold tokens" : "Nearby tokens"
                 Layout.fillWidth: true
             }
             ToolButton {
+                id: resumeButton
                 text: "Resume hover"
+                contentItem: Text {
+                    text: resumeButton.text
+                    font: resumeButton.font
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
                 visible: explorer.service.imageHeld
                 onClicked: explorer.service.releaseImage()
             }
             Repeater {
                 model: explorer.service ? explorer.service.nearby : []
                 Button {
+                    id: tokenButton
                     required property var modelData
                     objectName: "nearbyTokenChoice"
                     Layout.fillWidth: true
                     enabled: !explorer.service.picking || explorer.service.imageHeld
                     text: modelData.label + "  ·  " + Math.round(modelData.score * 100) + "%"
+                    contentItem: Text {
+                        text: tokenButton.text
+                        font: tokenButton.font
+                        color: "white"
+                        elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
                     onClicked: explorer.service.chooseNearby(modelData.choice)
                 }
             }
