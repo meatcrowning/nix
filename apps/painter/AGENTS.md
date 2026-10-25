@@ -242,6 +242,11 @@ word attribution; never infer maps for old images from a current prompt.
 Verify capture/scoring with the CPU-only `tools/moss-capture-test.py`, plus
 `tools/moss-inspection-test.py` offscreen, `tools/moss-test.py`, and
 the Unity harness. Backend node installation is in `home/prog/painter.nix`.
+For accuracy experiments, `tools/moss_quality_experiment.py` is an isolated-only
+node requiring `PainterSamplerCustom`. It retains raw 64×64 captures by layer
+and sampler step; `tools/moss-quality-analyze.py` scores image-only polygon
+annotations with separate selection/held-out scenes. Never load that node into
+the user’s backend or infer semantic accuracy from plumbing tests.
 
 ## Models, prompts, and graphs
 
