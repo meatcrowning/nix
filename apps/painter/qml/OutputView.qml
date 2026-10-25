@@ -127,6 +127,7 @@ Item {
                 // the pixels and smoothing is exactly what hides them.
                 mipmap: view.scaleNow < 1
                 HeatmapLayer {
+                    id: heatmapLayer
                     objectName: "outputHeatmapLayer"
                     anchors.fill: parent
                     service: App.inspection
@@ -169,6 +170,8 @@ Item {
                            : (flick.contentWidth > flick.width
                               || flick.contentHeight > flick.height)
                              ? Qt.OpenHandCursor : Qt.ArrowCursor
+                hoverEnabled: view.heatmap
+                onExited: explore.leave()
                 property bool panning: false
                 property real lastX: 0
                 property real lastY: 0
@@ -189,7 +192,7 @@ Item {
                 onReleased: panning = false
                 onCanceled: panning = false
                 onPositionChanged: function (m) {
-                    if (!panning) return
+                    if (!panning) { explore.track(this, m.x, m.y); return }
                     flick.contentX = Math.max(0, Math.min(
                         flick.contentWidth - flick.width, flick.contentX - (m.x - lastX)))
                     flick.contentY = Math.max(0, Math.min(
@@ -209,6 +212,13 @@ Item {
                 }
             }
         }
+    }
+
+    HeatmapExplore {
+        id: explore
+        anchors.fill: parent
+        imageItem: heatmapLayer
+        active: view.heatmap && !view.comparing && img.status === Image.Ready && view.visible
     }
 
     // What you are looking at and how big, bottom-left over a scrim — the same

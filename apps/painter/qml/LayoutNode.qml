@@ -520,6 +520,10 @@ Item {
                         boundaries: node.tokenProbe ? node.tokenProbe.boundaries : []
                         colours: textEdit.tokenStyle.bands
                         marked: textEdit.tokenReady
+                        highlighted: {
+                            App.inspection.nearby
+                            return node.spec.kind === "prompt" ? App.inspection.highlightedRanges(textEdit.text, node.bridge.regionIdentity) : []
+                        }
                         z: -0.5
                     }
                     Repeater {

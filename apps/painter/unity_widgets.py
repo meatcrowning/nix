@@ -267,6 +267,11 @@ class ImageView(Gtk.Box):
         self.error, self.playback = error, playback
         self.original = self.before = None
         self.heatmap = None
+        self.explore_enabled = False
+        self.explore_send = lambda *a, **kw: None
+        self.explore_timer = self.explore_leave = None
+        self.explore_point = None
+        self.nearby_inside = False
         self.path = None
         self.serial = 0
         self.zoom = 0.0
@@ -293,6 +298,7 @@ class ImageView(Gtk.Box):
         self.events.connect('scroll-event', self.wheel)
         self.events.connect('button-press-event', self.press)
         self.events.connect('motion-notify-event', self.motion)
+        self.events.connect('leave-notify-event', lambda *_: self.leave_explore())
         self.events.connect('button-release-event', self.release)
         self.events.connect('realize', lambda w: w.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.HAND1)))
         self.scroll = Gtk.ScrolledWindow()
@@ -304,7 +310,33 @@ class ImageView(Gtk.Box):
         self.scroll.get_vadjustment().connect('value-changed', self.scrolled)
         self.scroll.connect('size-allocate', self.resized)
         self.canvas.connect('size-allocate', self.resized)
-        self.pack_start(self.scroll, True, True, 0)
+        overlay = Gtk.Overlay()
+        overlay.add(self.scroll)
+        self.nearby_panel = Gtk.EventBox()
+        self.nearby_panel.set_no_show_all(True)
+        self.nearby_panel.set_halign(Gtk.Align.END)
+        self.nearby_panel.set_valign(Gtk.Align.START)
+        self.nearby_panel.set_margin_right(8)
+        self.nearby_panel.set_margin_top(8)
+        self.nearby_panel.connect('enter-notify-event', self.enter_nearby)
+        self.nearby_panel.connect('leave-notify-event', self.exit_nearby)
+        frame = Gtk.Frame()
+        self.nearby_panel.add(frame)
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        column.set_border_width(6)
+        frame.add(column)
+        column.pack_start(Gtk.Label(label='Nearby tokens'), False, False, 0)
+        self.nearby_buttons = []
+        for i in range(4):
+            button = Gtk.Button()
+            button.set_no_show_all(True)
+            button.connect('clicked', lambda b: self.explore_send('heatmap_nearby', index=b.token_choice))
+            column.pack_start(button, False, False, 0)
+            self.nearby_buttons.append(button)
+        frame.show_all()
+        overlay.add_overlay(self.nearby_panel)
+        self.pack_start(overlay, True, True, 0)
+        self.connect('destroy', self.destroy_explore)
         bar = Gtk.Box(spacing=6)
         self.info = Gtk.Label(label='Select an output')
         self.info.set_alignment(0, .5)
@@ -404,6 +436,61 @@ class ImageView(Gtk.Box):
         # the latest viewport once before GTK paints, not once per adjustment.
         if not self.rendering and self.render_timer is None:
             self.render_timer = GLib.idle_add(self.render, priority=GLib.PRIORITY_HIGH_IDLE)
+
+    def destroy_explore(self, *_):
+        for timer in (self.explore_timer, self.explore_leave):
+            if timer: GLib.source_remove(timer)
+        self.explore_timer = self.explore_leave = None
+
+    def enter_nearby(self, *_):
+        self.nearby_inside = True
+        self.destroy_explore()
+        return False
+
+    def exit_nearby(self, *args):
+        if args and getattr(args[-1], 'detail', None) == Gdk.NotifyType.INFERIOR:
+            return False
+        self.nearby_inside = False
+        return self.leave_explore()
+
+    def leave_explore(self):
+        if self.explore_timer:
+            GLib.source_remove(self.explore_timer)
+            self.explore_timer = None
+        if not self.explore_leave and not self.nearby_inside:
+            def leave():
+                self.explore_leave = None
+                if self.explore_enabled and not self.nearby_inside:
+                    self.explore_send('heatmap_image_end')
+                return False
+            self.explore_leave = GLib.timeout_add(200, leave)
+        return False
+
+    def update_nearby(self, tokens):
+        self.nearby_panel.set_visible(bool(tokens) and self.explore_enabled)
+        for i, button in enumerate(self.nearby_buttons):
+            button.set_visible(i < len(tokens))
+            if i < len(tokens):
+                token = tokens[i]
+                button.token_choice = token['choice']
+                button.set_label(u'%s · %d%%' % (token['label'], round(token['score'] * 100)))
+
+    def explore_motion(self, event):
+        if not self.explore_enabled or self.original is None or self.video or self.before is not None:
+            return
+        if self.explore_leave:
+            GLib.source_remove(self.explore_leave)
+            self.explore_leave = None
+        self.explore_point = (
+            (event.x + self.visible_origin[0] - self.image_origin[0]) / float(self.scale*self.original.get_width()),
+            (event.y + self.visible_origin[1] - self.image_origin[1]) / float(self.scale*self.original.get_height()))
+        if self.explore_timer is None:
+            def send():
+                self.explore_timer = None
+                if self.explore_enabled:
+                    self.explore_send('heatmap_image', x=self.explore_point[0], y=self.explore_point[1])
+                return False
+            self.explore_timer = GLib.timeout_add(40, send)
 
     def set_heatmap(self, mask):
         self.heatmap = mask
@@ -524,6 +611,8 @@ class ImageView(Gtk.Box):
         return True
 
     def motion(self, widget, event):
+        if not self.drag:
+            self.explore_motion(event)
         if not self.drag or self.video:
             return False
         self.zoom_anchor = None

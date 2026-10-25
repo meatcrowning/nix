@@ -41,6 +41,34 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     os.environ['PAINTER_MODELS'] = u.fake_models(str(Path(tmp) / 'models'))
     app, engine, win, ctl, keep = u.build(tmp)
     root = u.APP
+    # Neighborhood ranking uses the saved content maps, with no wrapper/stopwords.
+    from moss_inspect import MossInspect
+    import moss_rank
+    scout = MossInspect(None)
+    words = ['with', 'red', 'blue', 'green', 'gold', 'silver']
+    prompt = ' '.join(words)
+    offset = 0
+    records, planes = [], []
+    for index, word in enumerate(words):
+        records.append(dict(index=index, text=word, start=offset, end=offset+len(word), visible=True))
+        offset += len(word)+1
+        planes.extend([(255 if index == 0 else (255-index*30 if x < 4 else index*40)) for y in range(8) for x in range(8)])
+    scout_doc = dict(width=8, height=8, prompt=prompt, tokens=records)
+    scout_doc['_aggregate'] = moss_data.aggregate(scout_doc, bytes(planes))
+    scout_doc['_content_tokens'] = moss_rank.content_tokens(scout_doc)
+    scout._viewing = True
+    scout._accept(0, (scout_doc, bytes(planes)))
+    scout.hoverImage(0, 0)
+    assert [t['text'] for t in scout.nearby] == ['red', 'blue', 'green', 'gold']
+    assert abs(scout.nearby[0]['score'] - 225/255) < 1e-6
+    left_key = scout.mask.cacheKey()
+    scout.hoverImage(.99, .99)
+    assert [t['text'] for t in scout.nearby] == ['silver', 'gold', 'green', 'blue']
+    scout.hoverImage(0, 0)
+    assert scout.mask.cacheKey() == left_key
+    scout.hoverImage(1, .5)
+    assert not scout.nearby and not scout.exploring
+    scout.close()
     combo = ctl.inspection.bind_toolbar(keep[-1], root) if os.environ.get('PAINTER_UI_NATIVE') == '1' else None
     probe = next(o for o in u.walk(win.contentItem()) if o.objectName() == 'positiveTokenProbe')
     service = Tokens()
@@ -202,6 +230,55 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     raster = capture.image()
     assert any(raster.pixelColor(x, y).red() > 100 for y in range(raster.height()) for x in range(raster.width()))
     print('PASS persistent base image during map loading, composited overlay and cached switching')
+    ctl.inspection.select(-1)
+    point_image = layer.mapToItem(win.contentItem(), QPointF(layer.width()*.25, layer.height()*.75))
+    QTest.mouseMove(keep[-1].view if combo else win, QPoint(round(point_image.x()), round(point_image.y())))
+    u.spin(100)
+    assert len(ctl.inspection.nearby) == 2, 'image hover did not reach saved maps'
+    assert ctl.inspection._exploring and ':near:' in ctl.inspection.overlay
+    assert ctl.inspection.highlightedRanges('red sphere', '') == [dict(start=0, end=10)]
+    assert ctl.inspection.highlightedRanges('different draft', '') == []
+    assert bands.property('highlighted'), 'nearby tokens were not highlighted in the prompt'
+    near_mask = ctl.inspection.mask.cacheKey()
+    ctl.inspection.hoverImage(.26, .76)
+    assert ctl.inspection.mask.cacheKey() == near_mask
+    buttons = [o for o in u.walk(win.contentItem()) if o.objectName() == 'nearbyTokenChoice' and o.isVisible()]
+    assert buttons, 'nearby tooltip is not visible'
+    button = buttons[-1]
+    choice = button.property('modelData')['choice']
+    bp = button.mapToItem(win.contentItem(), QPointF(button.width()/2, button.height()/2))
+    QTest.mouseMove(keep[-1].view if combo else win, QPoint(round(bp.x()), round(bp.y())))
+    u.spin(250)  # The interactive tooltip survives crossing out of the image.
+    assert ctl.inspection.nearby
+    QTest.mouseClick(keep[-1].view if combo else win, Qt.LeftButton, Qt.NoModifier, QPoint(round(bp.x()), round(bp.y())))
+    assert ctl.inspection.selected == choice and not ctl.inspection._exploring
+    ctl.inspection.leaveImage()
+    assert not ctl.inspection.nearby and ctl.inspection.selected == choice
+    ctl.inspection.select(-1)
+    ctl.inspection.hoverImage(.25, .75)
+    ctl.inspection.hoverImage(-.1, .5)
+    assert not ctl.inspection.nearby and ctl.inspection.mask.cacheKey() == aggregate_key
+    print('PASS image hover, combined cached map, prompt ranges, clickable tooltip and leave restoration')
+    root.setProperty('inView', False)
+    preview = u.find(win.contentItem(), 'PreviewPane')
+    preview.setProperty('open', True)
+    u.spin(100)
+    preview.setProperty('zoom', 1.6)
+    preview.setProperty('panX', -50)
+    preview.setProperty('panY', -30)
+    preview_layer = next(o for o in u.walk(win.contentItem()) if o.objectName() == 'previewHeatmapLayer')
+    pp = preview_layer.mapToItem(win.contentItem(), QPointF(preview_layer.width()*.35, preview_layer.height()*.45))
+    QTest.mouseMove(keep[-1].view if combo else win, QPoint(round(pp.x()), round(pp.y())))
+    u.spin(100)
+    assert ctl.inspection.nearby and ctl.inspection._image_cell == (0, 0), 'zoomed/panned preview hover coordinates are wrong'
+    ctl.inspection.leaveImage()
+    preview.setProperty('zoom', 1)
+    preview.setProperty('panX', 0)
+    preview.setProperty('panY', 0)
+    root.setProperty('inView', True)
+    u.spin(50)
+
+
     # Layout outputs store the prompt box inside JSON, including escape bytes.
     caption = 'red "\U0001f30a"\\boat\nsphere'
     for ascii_only in (False, True):
@@ -290,6 +367,11 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     ctl.inspection.hoverRegion('edited draft', 5, region['id'])
     ctl.inspection.hoverRegion('red sphere', 5, 'unknown')
     assert ctl.inspection.selected == 0
+    ctl.inspection.hoverImage(.5, .5)
+    assert ctl.inspection.highlightedRanges('red sphere', region['id']) == [dict(start=0, end=10)]
+    assert ctl.inspection.highlightedRanges('red sphere', 'unknown') == []
+    assert ctl.inspection.highlightedRanges('edited draft', region['id']) == []
+    ctl.inspection.leaveImage()
     print('PASS region count, decorations, native undo and saved region hover identity')
     # Exercise the actual region hover handler, not only the inspection slot.
     from PySide6.QtCore import QPointF, QPoint

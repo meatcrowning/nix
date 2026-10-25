@@ -1,6 +1,7 @@
 """Asynchronous prompt inspection and selected-output heatmap presentation."""
 import json
 import base64
+import math
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
@@ -31,6 +32,10 @@ class MossInspect(QObject):
         self._selected = -2
         self._chosen = -1
         self._hover_owner = ''
+        self._nearby = []
+        self._image_cell = None
+        self._exploring = False
+        self._positions = OrderedDict()
         self._viewing = False
         self._picks = None
         self._exporting = False
@@ -85,7 +90,7 @@ class MossInspect(QObject):
 
     @Property('QVariantList', notify=changed)
     def choices(self):
-        return [dict(label='All tokens')] + self._tokens
+        return [dict(label='Nearby tokens' if self._exploring else 'All tokens')] + self._tokens
 
     @Property(int, notify=changed)
     def selected(self):
@@ -96,9 +101,119 @@ class MossInspect(QObject):
         self._viewing = viewing
         if not viewing:
             self._picks = None
+            self.leaveImage()
             self.changed.emit()
         if viewing and self.available:
             self.select(-1)
+
+    @Property(bool, notify=changed)
+    def exploring(self):
+        return self._exploring
+
+    @Property('QVariantList', notify=changed)
+    def nearby(self):
+        return self._nearby
+
+    @Slot(float, float)
+    def hoverImage(self, x, y):
+        if not self._viewing or not self.available or not math.isfinite(x + y):
+            return
+        if not (0 <= x < 1 and 0 <= y < 1):
+            self.leaveImage()
+            return
+        doc, pixels = self._data
+        w, h = doc['width'], doc['height']
+        cell = (min(w-1, int(x*w)), min(h-1, int(y*h)))
+        if cell == self._image_cell:
+            return
+        self._image_cell = cell
+        cx, cy = cell
+        cells = [j*w+i for j in range(max(0,cy-1), min(h,cy+2))
+                 for i in range(max(0,cx-1), min(w,cx+2))]
+        scores = []
+        for token in doc.get('_content_tokens', []):
+            start = token['index'] * w * h
+            score = sum(pixels[start+i] for i in cells) / (255*len(cells))
+            if score > 0:
+                scores.append((score, token))
+        scores.sort(key=lambda item: (-item[0], item[1]['index']))
+        visible = {token['index']: i for i, token in enumerate(self._tokens)}
+        self._nearby = [dict(token, choice=visible[token['index']], score=score,
+                             label=token.get('display', token['text'].strip())) for score, token in scores[:4]]
+        if not self._nearby:
+            self._show(self._chosen)
+            self.changed.emit()
+            return
+        key = tuple(sorted(t['index'] for t in self._nearby))
+        mask = self._masks.pop(key, None)
+        if mask is None:
+            combined = dict(doc, tokens=self._nearby)
+            combined['_aggregate'] = moss_data.aggregate(combined, pixels)
+            mask = token_mask(combined, pixels, -1)
+        self._masks[key] = mask
+        while len(self._masks) > 64:
+            self._masks.popitem(last=False)
+        self._exploring = True
+        self._hover_owner = 'image'
+        self._selected = -1
+        overlay = '%d:near:%s' % (self._generation, ','.join(map(str,key)))
+        if overlay != self._overlay:
+            self.mask = mask
+            self._packet = None
+            self._overlay = overlay
+        self.changed.emit()
+
+    @Slot()
+    def leaveImage(self):
+        had_nearby = bool(self._nearby)
+        self._nearby = []
+        self._image_cell = None
+        if self._hover_owner == 'image':
+            self._hover_owner = ''
+            self._show(self._chosen)
+        if had_nearby:
+            self.changed.emit()
+
+    @Slot(int)
+    def chooseNearby(self, index):
+        if any(t['choice'] == index for t in self._nearby):
+            self.select(index)
+
+    @Slot(str, str, result='QVariantList')
+    def highlightedRanges(self, text, identity):
+        if not self._nearby or not self._data:
+            return []
+        doc = self._data[0]
+        region = None
+        if identity:
+            for i, item in enumerate(doc.get('_regions', [])):
+                if item.get('id') == identity and item.get('caption', '').strip() == text.strip():
+                    region = i
+                    break
+            if region is None:
+                return []
+        key = (text, identity)
+        positions = self._positions.pop(key, None)
+        if positions is None:
+            positions = []
+            offset = 0
+            for i, character in enumerate(text):
+                end = offset + len(character.encode('utf-16-le'))//2
+                position = moss_data.prompt_position(doc.get('prompt',''), text, i, region)
+                if position is not None:
+                    positions.append((offset, end, position))
+                offset = end
+        self._positions[key] = positions
+        while len(self._positions) > 8:
+            self._positions.popitem(last=False)
+        result = []
+        for start, end, position in positions:
+            if any(t.get('start', -1) <= position < t.get('end', -1) for t in self._nearby):
+                if result and result[-1]['end'] == start:
+                    result[-1]['end'] = end
+                else:
+                    result.append(dict(start=start, end=end))
+        return result
 
     @Property(bool, notify=changed)
     def picking(self):
@@ -202,8 +317,12 @@ class MossInspect(QObject):
             return
         for index, token in enumerate(self._tokens):
             if token.get('start', -1) <= position < token.get('end', -1):
+                had_nearby = bool(self._nearby)
+                self._nearby = []
+                self._image_cell = None
                 self._hover_owner = owner
                 self._show(index)
+                if had_nearby: self.changed.emit()
                 break
 
     def bind_toolbar(self, shell, root):
@@ -258,6 +377,10 @@ class MossInspect(QObject):
             return
         path = QUrl(path).toLocalFile() if path.startswith('file:') else path
         self._picks = None
+        self._nearby = []
+        self._positions.clear()
+        self._image_cell = None
+        self._exploring = False
         self._generation += 1
         serial = self._generation
         self._masks.clear()
@@ -277,6 +400,8 @@ class MossInspect(QObject):
                 value = moss_data.read(path)
                 if value:
                     value[0]['_aggregate'] = moss_data.aggregate(*value)
+                    import moss_rank
+                    value[0]['_content_tokens'] = moss_rank.content_tokens(value[0])
                     import pngmeta
                     try:
                         params = json.loads(pngmeta.read_text_path(path).get('painter', '{}'))
@@ -315,8 +440,9 @@ class MossInspect(QObject):
             return
         if not self._data or not (-1 <= index < len(self._tokens)):
             return
-        if index == self._selected:
+        if index == self._selected and not self._exploring:
             return
+        self._exploring = False
         self._selected = index
         doc, pixels = self._data
         token = self._tokens[index]['index'] if index >= 0 else -1
@@ -374,6 +500,7 @@ class HeatmapLayer(QQuickPaintedItem):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._service = None
+        self._mask_key = None
         self.setTextureSize(QSize(1, 1))
         self.setSmooth(True)
 
@@ -389,6 +516,10 @@ class HeatmapLayer(QQuickPaintedItem):
         self.refresh()
 
     def refresh(self):
+        key = self._service.mask.cacheKey() if self._service else 0
+        if key == self._mask_key:
+            return
+        self._mask_key = key
         # Keep the texture at map resolution, even when the image is zoomed.
         size = self._service.mask.size() if self._service else QSize(1, 1)
         self.setTextureSize(size if size.isValid() else QSize(1, 1))

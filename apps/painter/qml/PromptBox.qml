@@ -382,6 +382,11 @@ Rectangle {
                 boundaries: box.tokenBoundaries
                 colours: box.tokenStyle.bands
                 marked: box.tokenMarksReady
+                highlighted: {
+                    if (box.negative || !App.inspection) return []
+                    App.inspection.nearby
+                    return App.inspection.highlightedRanges(input.text, "")
+                }
             }
             Repeater {
                 model: box.tokenBoundaries

@@ -9,6 +9,7 @@ class TokenMarks(object):
     def __init__(self, view, count, send, hover=False, region=None):
         self.view, self.count, self.send = view, count, send
         self.region = region
+        self.can_hover = hover
         self.hovered = None
         self.picking = False
         if hover:
@@ -21,6 +22,7 @@ class TokenMarks(object):
         self.boundaries = []
         self.marked = False
         self.tags = [view.get_buffer().create_tag(None) for _ in range(2)]
+        self.highlight_tag = view.get_buffer().create_tag(None, underline=1)
         self.separator = (0, 0, 0)
         view.connect('style-updated', self.style_changed)
         self.style_changed()
@@ -43,6 +45,8 @@ class TokenMarks(object):
                 else: selection = color
         rgb = lambda c: tuple(round(v * 255) for v in (c.red, c.green, c.blue))
         style = colours(rgb(foreground), rgb(background), rgb(selection))
+        self.highlight_tag.set_property('background', '#%02x%02x%02x' % tuple(
+            int(round(a*.6+b*.4)) for a,b in zip(rgb(background), rgb(selection))))
         for tag, color in zip(self.tags, style['bands']):
             tag.set_property('background', color)
         self.separator = tuple(int(style['separator'][i:i+2], 16) / 255.0 for i in (1, 3, 5))
@@ -103,6 +107,7 @@ class TokenMarks(object):
     def changed(self, *_):
         self.destroy()
         self.hovered = None
+        self.highlight({})
         self.boundaries, self.request, self.marked = [], None, False
         self.paint_bands()
         self.count.set_text('— tok')
@@ -116,7 +121,24 @@ class TokenMarks(object):
         self.send('moss_tokenize', identity=self.identity, text=self.request)
         return False
 
+    def highlight(self, heatmap):
+        buf = self.view.get_buffer()
+        buf.remove_tag(self.highlight_tag, buf.get_start_iter(), buf.get_end_iter())
+        if not self.can_hover:
+            return
+        identity = self.region() if self.region else ''
+        entry = heatmap.get('highlights', {}).get(identity, {})
+        text = self.text()
+        if entry.get('text') != text:
+            return
+        encoded = text.encode('utf-16-le')
+        for span in entry.get('ranges', []):
+            start = len(encoded[:span['start']*2].decode('utf-16-le'))
+            end = len(encoded[:span['end']*2].decode('utf-16-le'))
+            buf.apply_tag(self.highlight_tag, buf.get_iter_at_offset(start), buf.get_iter_at_offset(end))
+
     def update(self, state):
+        self.highlight(state.get('heatmap', {}))
         self.picking = bool(state.get('heatmap', {}).get('picking'))
         active = bool(state.get('flags', {}).get('layoutSupport'))
         if self.region:

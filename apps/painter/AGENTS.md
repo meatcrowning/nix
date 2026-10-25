@@ -194,7 +194,13 @@ positions through JSON escaping to saved token offsets. Mismatched drafts never 
 saved maps. Heatmap mode leaves history accessible and survives output changes.
 Qt paints transparent masks over the existing image, preserving fit/zoom and
 keeping it visible while maps load. `moss_inspect.py` caches at most 64 small RGBA
-masks; token changes never decode or save the full output. GTK receives small
+masks; token changes never decode or save the full output.
+Image-hover exploration in both preview/view maps the pointer through fit/zoom/pan
+and samples at most every 40 ms. Rank eligible tokens by a 3×3 saved-map neighborhood;
+show the top four in an interactive tooltip and their mean thermal map. Reuse
+combined masks by token set within the same 64-entry cache. Tooltip clicks select
+one token; leaving restores the dropdown choice. Prompt/region highlights use
+saved offsets (UTF-16 in Qt), reject mismatched drafts, and never alter text/undo. GTK receives small
 mask PNGs in immediate socket replies and composites them over its decoded image.
 Region prompt boxes share the debounce, count and decorations. Region hover uses
 IDs in saved `painter.moss_layout` metadata, skipping disabled regions when mapping

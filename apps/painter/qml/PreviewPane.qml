@@ -262,6 +262,7 @@ Item {
                                          pane.handoverPath = ""
                                      }
                     HeatmapLayer {
+                        id: heatmapLayer
                         objectName: "previewHeatmapLayer"
                         anchors.centerIn: parent
                         width: finishedStill.paintedWidth
@@ -353,7 +354,8 @@ Item {
                 objectName: "previewMouse"
                 acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                 preventStealing: true
-                hoverEnabled: pane.comparing
+                hoverEnabled: pane.comparing || pane.heatmap
+                onExited: explore.leave()
                 cursorShape: panning ? Qt.ClosedHandCursor
                            : (pane.sourceIsVideo && !pane.showLive) ? Qt.PointingHandCursor
                            : pane.comparing ? Qt.SizeHorCursor : Qt.ArrowCursor
@@ -423,6 +425,7 @@ Item {
                         pane.panY = viewMa.startPanY + dy
                         pane.clampPan()
                     }
+                    if (!viewMa.panning) explore.track(viewMa, m.x, m.y)
                     viewMa.trackCompare(m.x, m.y)
                 }
                 onReleased: function (m) {
@@ -450,6 +453,13 @@ Item {
                     if (m.button === Qt.LeftButton && pane.source !== "")
                         pane.openRequested(pane.source)
                 }
+            }
+            HeatmapExplore {
+                id: explore
+                anchors.fill: parent
+                imageItem: heatmapLayer
+                active: pane.heatmap && !pane.comparing && !pane.showLive && !pane.sourceIsVideo
+                        && finishedStill.status === Image.Ready && pane.open
             }
         }   // viewport
 

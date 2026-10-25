@@ -7,6 +7,10 @@ Canvas {
     property var boundaries: []
     property var colours: []
     property bool marked: false
+    property var highlighted: []
+    property color highlightColor: editor.selectionColor
+    onHighlightedChanged: requestPaint()
+    onHighlightColorChanged: requestPaint()
     objectName: "tokenBands"
     z: -1
     width: editor.width
@@ -29,7 +33,7 @@ Canvas {
     onPaint: {
         var ctx = getContext("2d")
         ctx.clearRect(0, 0, width, height)
-        if (!marked || colours.length !== 2) return
+        if ((!marked && !highlighted.length) || colours.length !== 2) return
         var text = editor.text, token = 0
         // Follow the real editor's cursor geometry, including soft wraps and
         // surrogate pairs. Paint under its glyphs and native selection.
@@ -45,7 +49,8 @@ Canvas {
                 var sameLine = Math.abs(start.y - end.y) < 1
                 var span = sameLine ? Math.abs(end.x - start.x) : metrics.advanceWidth(character)
                 var x = sameLine ? Math.min(start.x, end.x) : start.x
-                ctx.fillStyle = colours[token % 2]
+                var active = highlighted.some(function(r) { return i >= r.start && i < r.end })
+                ctx.fillStyle = active ? Qt.rgba(highlightColor.r, highlightColor.g, highlightColor.b, 0.38) : marked ? colours[token % 2] : "transparent"
                 ctx.fillRect(x, start.y - bands.y, span, start.height)
             }
             i += n

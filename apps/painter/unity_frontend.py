@@ -244,6 +244,7 @@ class Window(Gtk.Window, ParameterForm):
         self.pages.connect_after('switch-page', self.page_switched)
         self.viewer = ImageView(self.message, lambda: self.send('playback'))
         self.viewer.events.connect('button-press-event', self.preview_menu)
+        self.viewer.explore_send = lambda op, **kw: self.send(op, path=self.selection, **kw)
         self.heatmap_key = None
         self.heatmap_labels = []
         self.syncing_heatmap = False
@@ -416,6 +417,8 @@ class Window(Gtk.Window, ParameterForm):
         if getattr(self, 'syncing_heatmap_toggle', False):
             return
         self.heatmap_open = not self.heatmap_open
+        self.viewer.explore_enabled = self.heatmap_open
+        if not self.heatmap_open: self.viewer.update_nearby([])
         self.send('heatmap_viewing', viewing=self.heatmap_open)
         self.heatmap_picker.set_visible(self.heatmap_open)
         self.heatmap_grid.set_visible(self.heatmap_open)
@@ -433,10 +436,12 @@ class Window(Gtk.Window, ParameterForm):
 
     def update_heatmap(self):
         heatmap = self.state.get('heatmap', {})
+        self.viewer.explore_enabled = self.heatmap_open and bool(heatmap.get('available')) and heatmap.get('path') == self.selection
+        self.viewer.update_nearby(heatmap.get('nearby', []))
         self.heatmap_grid.set_label(heatmap.get('gridLabel', 'Grid comparison'))
         self.heatmap_grid.set_tooltip_text(heatmap.get('gridStatus', ''))
         self.heatmap_grid.set_sensitive(bool(heatmap.get('available')) and not heatmap.get('exporting'))
-        labels = ['All tokens'] + [t['label'] for t in heatmap.get('tokens', [])]
+        labels = ['Nearby tokens' if heatmap.get('exploring') else 'All tokens'] + [t['label'] for t in heatmap.get('tokens', [])]
         self.syncing_heatmap = True
         if labels != self.heatmap_labels:
             self.heatmap_tokens.remove_all()
@@ -465,11 +470,12 @@ class Window(Gtk.Window, ParameterForm):
     def receive(self, op, reply):
         if self.closing:
             return False
-        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick'):
+        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick', 'heatmap_image', 'heatmap_image_end', 'heatmap_nearby'):
             if reply.get('ok') and reply.get('state', {}).get('heatmap'):
                 self.state['heatmap'] = reply['state']['heatmap']
                 for marks in self.token_marks:
                     marks.picking = bool(self.state['heatmap'].get('picking'))
+                    marks.highlight(self.state['heatmap'])
                 self.update_heatmap()
             return False
         if op == 'moss_tokenize':

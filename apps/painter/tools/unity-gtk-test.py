@@ -101,6 +101,11 @@ def test():
                 def get_iter_at_location(self, *args): return buf.get_iter_at_offset(4)
             class PickEvent(object):
                 button, x, y = 1, 0, 0
+            marks.can_hover = True
+            marks.highlight(dict(highlights={'': dict(text='red cube', ranges=[dict(start=4, end=8)])}))
+            assert buf.get_iter_at_offset(4).has_tag(marks.highlight_tag)
+            marks.highlight(dict(highlights={'': dict(text='stale draft', ranges=[dict(start=0, end=3)])}))
+            assert not buf.get_iter_at_offset(4).has_tag(marks.highlight_tag)
             marks.picking = True
             assert marks.pick(PickView(), PickEvent())
             assert sent[-1] == (('heatmap_pick',), dict(text='red cube', position=4, region=''))
@@ -154,6 +159,25 @@ def test():
             assert bytearray(mask_view.picture.get_pixbuf().get_pixels())[0] > 100
             mask_view.set_heatmap(None)
             assert bytes(mask_view.picture.get_pixbuf().get_pixels()) == before_pixels
+            calls = []
+            mask_view.explore_send = lambda op, **kw: calls.append((op, kw))
+            mask_view.explore_enabled = True
+            mask_view.video = False
+            mask_view.image_origin = (20, 30)
+            mask_view.visible_origin = (22, 32)
+            mask_view.scale = 2
+            class HoverEvent(object):
+                x, y = 1, 1
+            mask_view.explore_motion(HoverEvent())
+            assert mask_view.explore_point == (3.0/(2*source_pixels.get_width()), 3.0/(2*source_pixels.get_height()))
+            mask_view.enter_nearby()
+            token = dict(choice=2, label='red', score=.8)
+            mask_view.update_nearby([token])
+            assert mask_view.nearby_panel.get_visible()
+            mask_view.nearby_buttons[0].clicked()
+            assert calls[-1] == ('heatmap_nearby', dict(index=2))
+            mask_view.update_nearby([])
+            assert not mask_view.nearby_panel.get_visible()
             mask_view.destroy()
             print('PASS: GTK heatmap composition keeps decoded source and restores it without reload')
             assert notifications == ['Generation completed'], notifications
