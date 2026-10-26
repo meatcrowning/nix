@@ -559,7 +559,7 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         panel_ranks = json.loads(grid.text('PainterRanking'))
         assert all(t['extreme'] in ('hot', 'cold') for t in panel_ranks['areas'])
         assert all(t['extreme'] in ('most', 'least') for t in panel_ranks['focused'])
-        assert len(panel_ranks['areas']) <= 9 and len(panel_ranks['focused']) <= 9
+        assert len(panel_ranks['areas']) <= 6 and len(panel_ranks['focused']) <= 6
         assert 'words' in json.loads(grid.text('PainterPromptLinks'))
         for i, key in ((2, 'areas'), (5, 'focused')):
             assert all(not moss_rank.duplicate_token(t['token'], panel_ranks[key]) for t in expanded[str(i)]['entries'])

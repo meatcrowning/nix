@@ -81,9 +81,23 @@ def ranked_masks(data, ranking):
 def ranked_header(painter, rect, label, entries, font, padding):
     """Fit scored words in two lines, with a bold related-word lead-in."""
     metrics = QFontMetrics(font)
-    painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft,
-                     metrics.elidedText(label, Qt.ElideRight, max(0, rect.width())))
-    remaining = rect.adjusted(metrics.horizontalAdvance(label) + padding, 0, 0, 0)
+    title_width = metrics.horizontalAdvance(label)
+    if label.startswith('Most &'):
+        bold_title = QFont(font)
+        bold_title.setWeight(QFont.Bold)
+        first_width = QFontMetrics(bold_title).horizontalAdvance('Most')
+        title_width = first_width + metrics.horizontalAdvance(label[4:])
+        painter.save()
+        painter.setClipRect(rect)
+        painter.setFont(bold_title)
+        painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, 'Most')
+        painter.setFont(font)
+        painter.drawText(rect.adjusted(first_width, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, label[4:])
+        painter.restore()
+    else:
+        painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft,
+                         metrics.elidedText(label, Qt.ElideRight, max(0, rect.width())))
+    remaining = rect.adjusted(title_width + padding, 0, 0, 0)
     small = QFont(font)
     small.setPixelSize(max(10, round(font.pixelSize() * 0.55)))
     bold = QFont(small)
@@ -129,34 +143,22 @@ def ranked_header(painter, rect, label, entries, font, padding):
 
 
 def annotations(painter, rect, ranking, doc, font, padding, focused=False):
-    """Tight labels and group headings share one row height and gap."""
+    """Label ranked neighborhoods; focused boxes mark their weighted centroids."""
     painter.save()
     painter.setClipRect(rect)
     small = QFont(font)
     small.setPixelSize(max(12, round(font.pixelSize() * 0.8)))
-    metrics = QFontMetrics(small)
-    pf = QFont(small)
-    pf.setPixelSize(round(small.pixelSize() * 0.5))
-    pm = QFontMetrics(pf)
-    lh = metrics.height() + 4
-    gap = 5
-    most_y = rect.y() + padding + lh + gap
-    most_count = sum((t['extreme'] == 'most' for t in ranking))
-    least_count = len(ranking) - most_count
-    least_y = rect.bottom() - padding - least_count * (lh + gap)
-    if focused:
-        painter.setFont(small)
-        painter.setPen(QColor('white'))
-        for heading, row_y in [('Most', most_y), ('Least', least_y)]:
-            if not (most_count if heading == 'Most' else least_count):
-                continue
-            baseline = row_y - gap - lh + 2 + metrics.ascent()
-            x = rect.x() + padding
-            painter.fillRect(QRectF(x, baseline - metrics.ascent() - 2, metrics.horizontalAdvance(heading) + 8, metrics.height() + 4), QColor('#e615191f'))
-            painter.drawText(QPointF(x + 4, baseline), heading)
+    placed = []
+    captions = []
     counts = {'hot': 0, 'cold': 0}
     for i, item in enumerate(ranking):
         kind = item['extreme']
+        small.setWeight(QFont.Bold if kind == 'most' else QFont.Light if kind == 'least' else QFont.Normal)
+        metrics = QFontMetrics(small)
+        pf = QFont(small)
+        pf.setPixelSize(round(small.pixelSize() * .5))
+        pm = QFontMetrics(pf)
+        lh = metrics.height() + 4
         counts[kind] = counts.get(kind, 0) + 1
         color = QColor(COLORS[i] if focused else '#ff5555' if kind == 'hot' else '#55baff')
         label = ' '.join(item['token'].get('display', item['token']['text']).split())
@@ -166,20 +168,36 @@ def annotations(painter, rect, ranking, doc, font, padding, focused=False):
         lw = metrics.horizontalAdvance(label) + 4 + pm.horizontalAdvance(percent) + 8
         cx = rect.x() + (item['x'] + 0.5) * rect.width() / doc['width']
         cy = rect.y() + (item['y'] + 0.5) * rect.height() / doc['height']
-        painter.setPen(QPen(color, 2))
+        painter.setPen(QPen(color, 3 if kind == 'most' else 1 if kind == 'least' else 2))
         painter.setBrush(Qt.NoBrush)
         if focused:
-            by = most_y + i * (lh + gap) if i < most_count else least_y + (i - most_count) * (lh + gap)
-            box = QRectF(rect.x() + padding, by, lw, lh)
-            painter.drawLine(QPointF(box.right(), box.center().y()), QPointF(cx, cy))
-            painter.setBrush(color)
-            painter.drawEllipse(QPointF(cx, cy), 4, 4)
+            rx, ry = moss_rank.neighborhood(doc['width'], doc['height'])
+            side, side_y = 2*rx+1, 2*ry+1
         else:
-            bw = item['side'] * rect.width() / doc['width']
-            bh = item.get('side_y', item['side']) * rect.height() / doc['height']
-            outline = QRectF(cx - bw / 2, cy - bh / 2, bw, bh)
-            painter.drawRoundedRect(outline, 6, 6)
-            box = QRectF(max(rect.x(), min(rect.right() - lw, outline.x())), max(rect.y(), outline.y() - lh), lw, lh)
+            side, side_y = item['side'], item.get('side_y', item['side'])
+        bw = side * rect.width() / doc['width']
+        bh = side_y * rect.height() / doc['height']
+        outline = QRectF(cx - bw / 2, cy - bh / 2, bw, bh)
+        painter.drawRoundedRect(outline, 6, 6)
+        bx = max(rect.x(), min(rect.right() - lw, outline.x()))
+        by = max(rect.y(), outline.y() - lh)
+        box = QRectF(bx, by, lw, lh)
+        # Nearby centroids can coincide; keep their individual captions readable.
+        for shift in range(len(placed) + 1):
+            candidates = [by - shift*(lh+5), by + shift*(lh+5)]
+            found = False
+            for candidate_y in candidates:
+                trial = QRectF(bx, candidate_y, lw, lh)
+                if rect.contains(trial.toAlignedRect()) and not any(trial.intersects(other) for other in placed):
+                    box, found = trial, True
+                    break
+            if found:
+                break
+        placed.append(box.adjusted(-2, -2, 2, 2))
+        captions.append((box, color, label, percent, QFont(small), QFont(pf)))
+    # Draw captions last so a later neighborhood outline cannot cross their text.
+    for box, color, label, percent, small, pf in captions:
+        metrics = QFontMetrics(small)
         painter.fillRect(box, QColor('#e615191f'))
         painter.setPen(color)
         baseline = box.y() + 2 + metrics.ascent()
@@ -302,7 +320,7 @@ def save_grid(source, data, tokens, folder):
                          'neighborhood radii scale as 3/64 of each axis; center separation at least 12/64 in normalized image coordinates; '
                          'area labels maximize eligible-token mean in that neighborhood; '
                          'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
-                         'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to six hot and three cold areas; six most and three least focused words. Cold percentages are regional means across eligible words; cold labels are local winning words.')
+                         'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to four hot and two cold areas; four most and two least focused words. Focus boxes mark fixed neighborhoods around weighted centroids, not measured spread. Cold percentages are regional means across eligible words; cold labels are local winning words.')
     canvas.setText('PainterHeatmapMethod', json.dumps(dict(
         version=3, consistency=data[0].get('consistency'), consistency_method=data[0].get('consistency_method'), capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
         aggregate='Mean of visible descriptive token maps; per-token 5–99% normalization already applied; aggregate stretched 5–95%',

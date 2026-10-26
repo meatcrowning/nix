@@ -227,7 +227,7 @@ def rank(document, pixels, limit=4, image_size=None, extremes=False):
             if limit is not None and len(unique) == limit:
                 break
     if extremes:
-        areas = [dict(item, extreme='hot') for item in hot[:6]]
+        areas = [dict(item, extreme='hot') for item in hot[:4]]
         for score, x, y in sorted(candidates):
             if any(math.hypot((x-a['x'])/w, (y-a['y'])/h) < separation for a in areas):
                 continue
@@ -237,13 +237,13 @@ def rank(document, pixels, limit=4, image_size=None, extremes=False):
             areas.append(dict(score=score, x=x, y=y, side=sx, side_y=sy,
                               token=dict(tokens[best]), extreme='cold',
                               association=winner_scores[y*w+x]/(255*sx*sy), percentage=score*100))
-            if sum(a['extreme'] == 'cold' for a in areas) == 3:
+            if sum(a['extreme'] == 'cold' for a in areas) == 2:
                 break
-        spread = [dict(item, extreme='most') for item in unique[:6]]
+        spread = [dict(item, extreme='most') for item in unique[:4]]
         for item in sorted(focused, key=lambda item: (-item['radius'], item['token']['index'])):
             if not duplicate_token(item['token'], spread):
                 spread.append(dict(item, extreme='least'))
-            if sum(a['extreme'] == 'least' for a in spread) == 3:
+            if sum(a['extreme'] == 'least' for a in spread) == 2:
                 break
         result = dict(areas=areas, focused=spread,
                       area_headers=unique_entries(hot, areas),

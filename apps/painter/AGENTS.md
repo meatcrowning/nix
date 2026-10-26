@@ -206,10 +206,13 @@ Exports use saved raw-grouped word planes for picked maps and both ranked panels
 legacy files fall back to averaging saved normalized token planes. Picked headers list the word and its pieces with singular “token”
 or plural “tokens”; `PainterWordGrouping` preserves source indices and offsets.
 The all-token reference and interactive viewer retain their token-based maps.
-The third column ranks up to six hot and three cold neighborhoods, and six most
-and three least focused words. Cold labels use the local winning word; their
+The third column ranks up to four hot and two cold neighborhoods, and four most
+and two least focused words. Cold labels use the local winning word; their
 percentages are mean eligible-word scores. Red/blue area labels have separate
-ranks; Most/Least headings share the token-label background and row gap.
+ranks. Focused boxes mark fixed neighborhoods around weighted centroids, not
+the measured RMS extent. Most-focused labels and outlines are bold/thick;
+least-focused labels and outlines are light/thin. Only “Most” is bold in the
+section title; there are no separate over-image group headings.
 The all-token export stacks scene-prompt words at the left with circular links
 to their saved word-map peaks, breaking ties by local mean then proximity to
 the tied-cell centroid. Words use tight dark backings matching the ranked labels,
