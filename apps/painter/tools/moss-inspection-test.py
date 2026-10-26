@@ -12,7 +12,7 @@ spec = importlib.util.spec_from_file_location('ui', Path(__file__).with_name('ui
 u = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(u)
 from PySide6.QtCore import QObject, Signal, Slot, Qt, QMetaObject
-from PySide6.QtGui import QImage, QColor
+from PySide6.QtGui import QImage, QColor, QFont, QFontMetrics
 import moss_data
 import pngmeta
 
@@ -547,29 +547,34 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         assert len(exported) == 1
         grid = QImage(str(exported[0]))
         assert not grid.isNull()
-        assert grid.width() == original.width()*3 + 48
-        assert json.loads(grid.text('PainterRanking'))['focused']
+        export_font = QFont('sans-serif')
+        export_font.setPixelSize(max(16, min(48, original.width() // 35)))
+        header = QFontMetrics(export_font).height() + 24
+        large_height = 2*original.height() + header + 12
+        large_width = round(large_height*original.width()/original.height())
+        assert grid.width() == large_width + original.width()*2 + 48
+        assert 'focused' not in json.loads(grid.text('PainterRanking'))
         assert grid.text('Description').splitlines() == [
             'Original output', 'All tokens · relative association', 'Hottest & coldest areas',
-            'red sphere - token: [red sphere]', 'red sphere - token: [red sphere]', 'Most & least focused tokens']
+            'red sphere - token: [red sphere]', 'red sphere - token: [red sphere]']
+        assert '5' not in json.loads(grid.text('PainterExpandedLists'))
         assert len(json.loads(grid.text('PainterWordGrouping'))['selected']) == 2
         assert grid.text('PainterComparisonPrompt') == json.loads(compiled)['summary']['caption']
         expanded = json.loads(grid.text('PainterExpandedLists'))
-        assert all(len(expanded[str(i)]['lines']) == 2 for i in range(1, 6))
+        assert all(len(expanded[str(i)]['lines']) == 2 for i in range(1, 5))
         panel_ranks = json.loads(grid.text('PainterRanking'))
         assert all(t['extreme'] in ('hot', 'cold') for t in panel_ranks['areas'])
-        assert all(t['extreme'] in ('most', 'least') for t in panel_ranks['focused'])
-        assert len(panel_ranks['areas']) <= 6 and len(panel_ranks['focused']) <= 6
+        assert len(panel_ranks['areas']) <= 6
         assert 'words' in json.loads(grid.text('PainterPromptLinks'))
-        for i, key in ((2, 'areas'), (5, 'focused')):
+        for i, key in ((2, 'areas'),):
             assert all(not moss_rank.duplicate_token(t['token'], panel_ranks[key]) for t in expanded[str(i)]['entries'])
             assert all(0 <= t['percentage'] <= 100 for t in panel_ranks[key])
         # Original panel is unmodified; the thermal panel differs.
         title_height = int(grid.text('PainterTitleHeight'))
         assert grid.text('Title') == 'saved-moss — token association heatmaps'
-        image_y = title_height + (grid.height() - title_height - 36) // 2 - original.height() + 16
+        image_y = title_height + 12 + header + 4
         assert grid.pixelColor(16, image_y) == original.pixelColor(4, 4)
-        assert grid.pixelColor(60, image_y) != original.pixelColor(4, 4)
+        assert grid.pixelColor(large_width + 28, image_y) != original.pixelColor(4, 4)
         ctl.inspection.toggleGrid()
         for choice in (0, 1):
             ctl.inspection.holdImage(.5, .5)

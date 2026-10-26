@@ -189,8 +189,10 @@ before a single 5–95% contrast stretch and
 thermal colour mapping; stored per-token normalization cannot recover raw model
 activity. Hover temporarily shows one token, then restores the dropdown choice.
 Grid comparison arms two prompt/region clicks, validates each against saved tokens,
-and exports a labeled 3×2 PNG to the platform Pictures directory in a worker.
-Original/all-token panels precede the two picked maps; source resolution is kept.
+and exports a labeled five-panel PNG to the platform Pictures directory in a worker.
+The original spans the left side with its aspect ratio preserved; the right 2×2
+contains All tokens and Hottest/coldest above the two picked maps. Heatmap panels
+retain source resolution; the original is enlarged to match both rows.
 A title row uses the saved output’s model name and “token association heatmaps.”
 The Original output header includes two smaller truncated lines of the saved scene
 prompt; its full text is retained in `PainterComparisonPrompt` PNG metadata.
@@ -198,21 +200,16 @@ Other headers fit two small lines of scored eligible words. Ranked headers omit
 words annotated on their panel; selected-map headers rank positive Pearson spatial
 correlation, and All tokens ranks word-map means weighted by its displayed aggregate.
 Area neighborhoods scale with each map axis (radius 3/64, center separation
-12/64 in normalized coordinates). Area labels show local association percentages; focused labels show RMS radius as
-a percentage of output image diagonal (lower is tighter). Over-image percentages use half
+12/64 in normalized coordinates). Hot labels show local association percentages; cold labels show regional means. Over-image percentages use half
 the word-label font size. `PainterExpandedLists` records displayed entries and score
 definitions; these are relative map measurements, not probabilities or semantic similarity.
-Exports use saved raw-grouped word planes for picked maps and both ranked panels;
+Exports use saved raw-grouped word planes for picked maps and the area panel;
 legacy files fall back to averaging saved normalized token planes. Picked headers list the word and its pieces with singular “token”
 or plural “tokens”; `PainterWordGrouping` preserves source indices and offsets.
 The all-token reference and interactive viewer retain their token-based maps.
-The third column ranks up to four hot and two cold neighborhoods, and four most
-and two least focused words. Cold labels use the local winning word; their
-percentages are mean eligible-word scores. Red/blue area labels have separate
-ranks. Focused boxes mark fixed neighborhoods around weighted centroids, not
-the measured RMS extent. Most-focused labels and outlines are bold/thick;
-least-focused labels and outlines are light/thin. Only “Most” is bold in the
-section title; there are no separate over-image group headings.
+The area panel ranks up to four hot and two cold neighborhoods. Cold labels
+use the local winning word; their percentages are mean eligible-word scores.
+Red/blue area labels have separate ranks.
 The all-token export stacks scene-prompt words at the left with circular links
 to their saved word-map peaks, breaking ties by local mean then proximity to
 the tied-cell centroid. Words use tight dark backings matching the ranked labels,
@@ -226,9 +223,8 @@ For compiled layouts, eligible maps must overlap descriptive string values:
 summary caption/meta/palette and item caption/text/tags/palette. JSON field names,
 region types, coordinates and other structural values are excluded from automatic
 rankings and nearby-token lists; ordinary prose retains meaningful numeric text.
-Hot-area labels maximize eligible-token
-mean within each neighborhood; focus ranks weighted RMS spread. Both panels
-deduplicate containing words, plurals and close spelling variants;
+Area labels maximize eligible-token
+mean within each neighborhood and deduplicate containing words, plurals and close spelling variants;
 duplicate hot-area winners are skipped, never relabeled with weaker tokens. These are
 relative saved-map scores, not absolute activity. Ranking methods and full token
 identities live in PNG metadata; panels show titles and token labels only.

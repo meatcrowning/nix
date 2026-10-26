@@ -1,4 +1,4 @@
-"""Labeled 3×2 exports using the same thermal masks as the viewer."""
+"""Five-panel exports with an enlarged original beside four thermal maps."""
 from datetime import datetime
 import json
 from pathlib import Path
@@ -8,9 +8,6 @@ from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QSaveFile, QIODevice
 from PySide6.QtGui import QImage, QPainter, QColor, QFont, QFontMetrics, QPen, QTextLayout, QTextOption
 import moss_data
 import moss_rank
-
-
-COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff', '#65caff', '#b6a3ff', '#baf6ff')
 
 
 def scene_prompt(document):
@@ -58,7 +55,7 @@ def original_header(painter, rect, prompt, font, padding):
     painter.restore()
 
 
-def ranked_masks(data, ranking):
+def area_mask(data, ranking):
     from moss_inspect import token_mask
     doc, pixels = data
     w, h = doc['width'], doc['height']
@@ -72,31 +69,15 @@ def ranked_masks(data, ranking):
             color = hot.pixelColor(x, y)
             color.setAlpha(round(color.alpha() * edge))
             hot.setPixelColor(x, y, color)
-    focused = dict(doc, tokens=[t['token'] for t in ranking['focused']])
-    focused['_aggregate'] = moss_data.aggregate(focused, pixels)
-    focus = token_mask(focused, pixels, -1) if focused['tokens'] else QImage()
-    return hot, focus
+    return hot
 
 
 def ranked_header(painter, rect, label, entries, font, padding):
     """Fit scored words in two lines, with a bold related-word lead-in."""
     metrics = QFontMetrics(font)
     title_width = metrics.horizontalAdvance(label)
-    if label.startswith('Most &'):
-        bold_title = QFont(font)
-        bold_title.setWeight(QFont.Bold)
-        first_width = QFontMetrics(bold_title).horizontalAdvance('Most')
-        title_width = first_width + metrics.horizontalAdvance(label[4:])
-        painter.save()
-        painter.setClipRect(rect)
-        painter.setFont(bold_title)
-        painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, 'Most')
-        painter.setFont(font)
-        painter.drawText(rect.adjusted(first_width, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, label[4:])
-        painter.restore()
-    else:
-        painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft,
-                         metrics.elidedText(label, Qt.ElideRight, max(0, rect.width())))
+    painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft,
+                     metrics.elidedText(label, Qt.ElideRight, max(0, rect.width())))
     remaining = rect.adjusted(title_width + padding, 0, 0, 0)
     small = QFont(font)
     small.setPixelSize(max(10, round(font.pixelSize() * 0.55)))
@@ -142,8 +123,8 @@ def ranked_header(painter, rect, label, entries, font, padding):
     return dict(title=label, lines=[''.join((t for t, b in row)).strip() for row in runs], entries=shown)
 
 
-def annotations(painter, rect, ranking, doc, font, padding, focused=False):
-    """Label ranked neighborhoods; focused boxes mark their weighted centroids."""
+def annotations(painter, rect, ranking, doc, font, padding):
+    """Label hot and cold neighborhoods with compact ranked captions."""
     painter.save()
     painter.setClipRect(rect)
     small = QFont(font)
@@ -151,30 +132,24 @@ def annotations(painter, rect, ranking, doc, font, padding, focused=False):
     placed = []
     captions = []
     counts = {'hot': 0, 'cold': 0}
-    for i, item in enumerate(ranking):
+    for item in ranking:
         kind = item['extreme']
-        small.setWeight(QFont.Bold if kind == 'most' else QFont.Light if kind == 'least' else QFont.Normal)
         metrics = QFontMetrics(small)
         pf = QFont(small)
         pf.setPixelSize(round(small.pixelSize() * .5))
         pm = QFontMetrics(pf)
         lh = metrics.height() + 4
         counts[kind] = counts.get(kind, 0) + 1
-        color = QColor(COLORS[i] if focused else '#ff5555' if kind == 'hot' else '#55baff')
+        color = QColor('#ff5555' if kind == 'hot' else '#55baff')
         label = ' '.join(item['token'].get('display', item['token']['text']).split())
-        if not focused:
-            label = '%d. %s' % (counts[kind], label)
-        percent = ('%.1f%% radius' if focused else '%.1f%% mean' if kind == 'cold' else '%.1f%% assoc.') % item['percentage']
+        label = '%d. %s' % (counts[kind], label)
+        percent = ('%.1f%% mean' if kind == 'cold' else '%.1f%% assoc.') % item['percentage']
         lw = metrics.horizontalAdvance(label) + 4 + pm.horizontalAdvance(percent) + 8
         cx = rect.x() + (item['x'] + 0.5) * rect.width() / doc['width']
         cy = rect.y() + (item['y'] + 0.5) * rect.height() / doc['height']
-        painter.setPen(QPen(color, 3 if kind == 'most' else 1 if kind == 'least' else 2))
+        painter.setPen(QPen(color, 2))
         painter.setBrush(Qt.NoBrush)
-        if focused:
-            rx, ry = moss_rank.neighborhood(doc['width'], doc['height'])
-            side, side_y = 2*rx+1, 2*ry+1
-        else:
-            side, side_y = item['side'], item.get('side_y', item['side'])
+        side, side_y = item['side'], item.get('side_y', item['side'])
         bw = side * rect.width() / doc['width']
         bh = side_y * rect.height() / doc['height']
         outline = QRectF(cx - bw / 2, cy - bh / 2, bw, bh)
@@ -256,15 +231,16 @@ def save_grid(source, data, tokens, folder):
     words, lookup = moss_rank.word_maps(*data)
     selected = [lookup[token['index']] for token in tokens]
     full_ranking = moss_rank.rank(*words, limit=None, image_size=(width, height), extremes=True)
-    ranking = {key: full_ranking[key] for key in ('areas', 'focused')}
+    ranking = dict(areas=full_ranking['areas'])
     all_tokens, related = moss_rank.association_lists(*words, selected, data[0]['_aggregate'])
     lists = {1: all_tokens, 2: full_ranking['area_headers'],
-             3: related[0], 4: related[1],
-             5: full_ranking['focus_headers']}
+             3: related[0], 4: related[1]}
     expanded = {}
     prompt_links = []
-    hot, focus = ranked_masks(words, ranking)
-    canvas = QImage(width * 3 + gap * 4, (height + header) * 2 + gap * 3, QImage.Format_RGB32)
+    hot = area_mask(words, ranking)
+    original_height = 2 * height + header + gap
+    original_width = round(original_height * width / height)
+    canvas = QImage(original_width + width * 2 + gap * 4, (height + header) * 2 + gap * 3, QImage.Format_RGB32)
     if canvas.isNull():
         raise ValueError('Not enough memory for the comparison')
     canvas.fill(QColor('#15191f'))
@@ -275,27 +251,32 @@ def save_grid(source, data, tokens, folder):
         painter.setFont(font)
         painter.setPen(QColor('#f4f5f7'))
         labels = ['Original output', 'All tokens · relative association', 'Hottest & coldest areas',
-                  moss_rank.word_label(selected[0]), moss_rank.word_label(selected[1]), 'Most & least focused tokens']
+                  moss_rank.word_label(selected[0]), moss_rank.word_label(selected[1])]
         masks = [QImage(), token_mask(*data, -1), hot,
-                 token_mask(*words, selected[0]['index']), token_mask(*words, selected[1]['index']), focus]
+                 token_mask(*words, selected[0]['index']), token_mask(*words, selected[1]['index'])]
         for i, (label, mask) in enumerate(zip(labels, masks)):
-            x = gap + (i % 3) * (width + gap)
-            y = gap + (i // 3) * (height + header + gap)
-            heading = QRect(x + padding, y, width - padding * 2, header)
+            if i == 0:
+                x, y = gap, gap
+                panel_width, panel_height = original_width, original_height
+            else:
+                x = original_width + 2 * gap + ((i - 1) % 2) * (width + gap)
+                y = gap + ((i - 1) // 2) * (height + header + gap)
+                panel_width, panel_height = width, height
+            heading = QRect(x + padding, y, panel_width - padding * 2, header)
             if i == 0:
                 original_header(painter, heading, scene_prompt(data[0]), font, padding)
             else:
                 expanded[str(i)] = ranked_header(painter, heading, label, lists[i], font, padding)
-            rect = QRect(x, y + header, width, height)
+            rect = QRect(x, y + header, panel_width, panel_height)
             painter.drawImage(rect, original)
             if not mask.isNull():
                 painter.drawImage(rect, mask)
             if i == 1:
                 import moss_links
                 prompt_links = moss_links.draw(painter, rect, words)
-            if i in (2, 5):
-                items = ranking['areas' if i == 2 else 'focused']
-                annotations(painter, rect, items, data[0], font, padding, focused=i == 5)
+            if i == 2:
+                items = ranking['areas']
+                annotations(painter, rect, items, data[0], font, padding)
                 if not items:
                     painter.drawText(rect.adjusted(padding, padding, -padding, -padding),
                                      Qt.AlignTop | Qt.AlignLeft, 'No eligible token maps')
@@ -306,8 +287,7 @@ def save_grid(source, data, tokens, folder):
     canvas.setText('Description', '\n'.join(labels))
     canvas.setText('PainterComparisonPrompt', scene_prompt(data[0]))
     expanded['method'] = ('Eligible whole words; duplicate and close variants omitted. Ranked headers exclude words '
-        'annotated on their panel. Hot percentages: local winning word association; cold percentages: regional mean across eligible word maps. Focus percentages: '
-        'weighted RMS radius in image pixels divided by image diagonal; lower is more focused. Related percentages: positive Pearson '
+        'annotated on their panel. Hot percentages: local winning word association; cold percentages: regional mean across eligible word maps. Related percentages: positive Pearson '
         'spatial correlation, not semantic or causal relatedness. All-token percentages: word-map mean weighted '
         'by displayed all-token map intensity. Not confidence or absolute activity. Two lines of complete entries.')
     canvas.setText('PainterExpandedLists', json.dumps(expanded, ensure_ascii=False))
@@ -320,11 +300,10 @@ def save_grid(source, data, tokens, folder):
                          'neighborhood radii scale as 3/64 of each axis; center separation at least 12/64 in normalized image coordinates; '
                          'area labels maximize eligible-token mean in that neighborhood; '
                          'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
-                         'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to four hot and two cold areas; four most and two least focused words. Focus boxes mark fixed neighborhoods around weighted centroids, not measured spread. Cold percentages are regional means across eligible words; cold labels are local winning words.')
+                         'Up to four hot and two cold areas. Cold percentages are regional means across eligible words; cold labels are local winning words.')
     canvas.setText('PainterHeatmapMethod', json.dumps(dict(
         version=3, consistency=data[0].get('consistency'), consistency_method=data[0].get('consistency_method'), capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
         aggregate='Mean of visible descriptive token maps; per-token 5–99% normalization already applied; aggregate stretched 5–95%',
-        focus_image_size=[width, height],
         limitation='Relative feature associations, not probabilities, raw activity or causal attribution'), ensure_ascii=False))
     canvas.setText('PainterRanking', json.dumps(ranking, ensure_ascii=False))
     import pngmeta
