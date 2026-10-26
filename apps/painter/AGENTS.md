@@ -216,8 +216,9 @@ section title; there are no separate over-image group headings.
 The all-token export stacks scene-prompt words at the left with circular links
 to their saved word-map peaks, breaking ties by local mean then proximity to
 the tied-cell centroid. Words use tight dark backings matching the ranked labels,
-with no glyph outline. Their 10 px font and 16.5 px row pitch stay fixed; longer
-prompts continue down successive columns sized to their widest word. Selected-map header
+with no glyph outline. Long prompts retain a 10 px font and 16.5 px row pitch, continuing down
+successive columns sized to their widest word. Short single-column prompts
+enlarge their text and spacing to fill the panel height; word width caps font growth. Selected-map header
 lists begin with a bold “is most closely associated with”.
 `moss_rank.py` excludes punctuation and English function words using saved word
 spans (retaining content-word subpieces, labeled with their containing word).

@@ -12,15 +12,23 @@ COLUMN_GAP = 16
 COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff')
 
 
+def label_geometry(count, height):
+    """Expand short captions vertically; longer captions retain the fixed columns."""
+    available = max(1, height - 2 * MARGIN)
+    rows = max(1, int(available // ROW_SPACING))
+    spacing = available / count if 0 < count <= rows else ROW_SPACING
+    return rows, spacing, spacing / ROW_SPACING
+
+
 def label_positions(items, height, metrics):
-    """Fill down, then right, preserving type size and row pitch for every prompt."""
-    rows = max(1, int((height - 2 * MARGIN) // ROW_SPACING))
+    """Fill down, then right; only a short single column expands to full height."""
+    rows, spacing, _ = label_geometry(len(items), height)
     positions = []
     x = MARGIN
     for start in range(0, len(items), rows):
         column = items[start:start + rows]
         widths = [metrics.horizontalAdvance(item['text']) for item in column]
-        positions.extend((x, MARGIN + (row + .5) * ROW_SPACING, width)
+        positions.extend((x, MARGIN + (row + .5) * spacing, width)
                          for row, width in enumerate(widths))
         x += max(widths) + COLUMN_GAP
     return positions
@@ -41,10 +49,16 @@ def draw(p, rect, words):
     p.save()
     p.setClipRect(rect)
     p.translate(rect.x(), rect.y())
+    _, spacing, scale = label_geometry(len(items), h)
     font = QFont('sans-serif')
-    font.setPixelSize(WORD_SIZE)
+    font.setPixelSize(max(WORD_SIZE, round(WORD_SIZE * scale)))
     font.setBold(True)
     fm = QFontMetrics(font)
+    # Very short captions can otherwise grow a single word beyond the panel.
+    while font.pixelSize() > WORD_SIZE and max(fm.horizontalAdvance(t['text']) for t in items) > w - 2*MARGIN:
+        font.setPixelSize(font.pixelSize() - 1)
+        fm = QFontMetrics(font)
+    label_height = min(LABEL_HEIGHT * font.pixelSize() / WORD_SIZE, spacing - 2)
     positions = label_positions(items, h, fm)
     entries = []
     mw, mh = (wd['width'], wd['height'])
@@ -85,8 +99,8 @@ def draw(p, rect, words):
         p.setBrush(color)
         p.drawEllipse(b, 3.2, 3.2)
     for i, e in enumerate(entries):
-        p.fillRect(QRectF(e['x'] - 4, e['y'] - LABEL_HEIGHT / 2,
-                          e['width'] + 8, LABEL_HEIGHT), QColor('#e615191f'))
+        p.fillRect(QRectF(e['x'] - 4, e['y'] - label_height / 2,
+                          e['width'] + 8, label_height), QColor('#e615191f'))
         path = QPainterPath()
         path.addText(QPointF(e['x'], e['y'] + (fm.ascent() - fm.descent()) / 2), font, e['text'])
         p.setPen(Qt.NoPen)
