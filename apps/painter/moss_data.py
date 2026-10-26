@@ -1,4 +1,4 @@
-"""Portable MOSS token maps in a private ancillary PNG chunk (paHm), versions 1 and 2."""
+"""Portable MOSS token maps in a private ancillary PNG chunk (paHm), versions 1–3."""
 import json
 import re
 import struct
@@ -127,6 +127,9 @@ def prompt_position(saved, text, position, region_index=None):
 
 
 def encode(document, maps):
+    if '_word_pixels' in document:
+        maps += document['_word_pixels']
+    document = {k:v for k,v in document.items() if not k.startswith('_')}
     header = json.dumps(document, ensure_ascii=False, separators=(',', ':')).encode()
     raw = struct.pack('>I', len(header)) + header + maps
     if len(raw) > LIMIT:
@@ -154,14 +157,31 @@ def _decode(blob):
     if type(doc.get('height')) is not int or type(doc.get('width')) is not int:
         raise ValueError('Invalid map dimensions')
     n, h, w = len(doc['tokens']), int(doc['height']), int(doc['width'])
-    cap = {1: 64, 2: 128}.get(doc.get('version'), 0)
+    cap = {1: 64, 2: 128, 3: 128}.get(doc.get('version'), 0)
     if not (0 < n <= 4096 and 0 < h <= cap and 0 < w <= cap):
         raise ValueError('Unsupported token maps')
     if any(not isinstance(t, dict) or t.get('index') != i or not isinstance(t.get('text'), str)
            or not isinstance(t.get('visible'), bool) for i, t in enumerate(doc['tokens'])):
         raise ValueError('Invalid token metadata')
-    if len(pixels) != n * h * w:
+    words = doc.get('words', []) if doc.get('version') == 3 else []
+    if not isinstance(words, list) or len(words) > n:
+        raise ValueError('Invalid word metadata')
+    if words:
+        from moss_rank import word_groups
+        expected, _ = word_groups(doc)
+        if words != expected:
+            raise ValueError('Word/token alignment changed')
+    if len(pixels) != (n + len(words)) * h * w:
         raise ValueError('Truncated token maps')
+    if words:
+        doc['_word_pixels'] = pixels[n*h*w:]
+        pixels = pixels[:n*h*w]
+    consistency = doc.get('consistency')
+    if consistency is not None:
+        import math
+        if not isinstance(consistency, list) or len(consistency) != n or any(
+                not isinstance(v, (int, float)) or not math.isfinite(v) or not -1 <= v <= 1 for v in consistency):
+            raise ValueError('Invalid capture consistency')
     return doc, pixels
 
 

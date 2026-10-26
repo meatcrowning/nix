@@ -67,7 +67,7 @@ def ranked_masks(data, ranking):
     hot = token_mask(eligible, pixels, -1)
     for y in range(h):
         for x in range(w):
-            edge = max((max(0, min(1, (a['side']/2 + 1.5 - max(abs(x-a['x']), abs(y-a['y']))) / 2))
+            edge = max((max(0, min(1, (min(a['side']/2 + 1.5 - abs(x-a['x']), a.get('side_y', a['side'])/2 + 1.5 - abs(y-a['y']))) / 2))
                         for a in ranking['areas']), default=0)
             color = hot.pixelColor(x, y)
             color.setAlpha(round(color.alpha() * edge))
@@ -141,7 +141,7 @@ def annotations(painter, rect, ranking, doc, font, padding, focused=False):
             painter.drawEllipse(QPointF(cx, cy), 4, 4)
         else:
             bw = item['side'] * rect.width() / doc['width']
-            bh = item['side'] * rect.height() / doc['height']
+            bh = item.get('side_y', item['side']) * rect.height() / doc['height']
             outline = QRectF(cx-bw/2, cy-bh/2, bw, bh)
             painter.drawRoundedRect(outline, padding/2, padding/2)
             bx = max(rect.x(), min(rect.right()-label_width, round(outline.x())))
@@ -201,7 +201,8 @@ def save_grid(source, data, tokens, folder):
     padding = max(12, width // 80)
     header = metrics.height() + padding * 2
     gap = padding
-    data = (dict(data[0], _aggregate=moss_data.descriptive_aggregate(*data)), data[1])
+    if '_aggregate' not in data[0]:
+        data[0]['_aggregate'] = moss_data.descriptive_aggregate(*data)
     words, lookup = moss_rank.word_maps(*data)
     selected = [lookup[token['index']] for token in tokens]
     full_ranking = moss_rank.rank(*words, limit=None, image_size=(width, height))
@@ -256,17 +257,17 @@ def save_grid(source, data, tokens, folder):
         'by displayed all-token map intensity. Not confidence or absolute activity. Two lines of complete entries.')
     canvas.setText('PainterExpandedLists', json.dumps(expanded, ensure_ascii=False))
     canvas.setText('PainterWordGrouping', json.dumps(dict(source=str(source), selected=selected,
-        words=words[0]['tokens'], method='Mean of saved normalized token planes per word occurrence; '
-        'All-token reference excludes layout structure and includes descriptive prompt tokens. No additional per-word contrast stretch.'), ensure_ascii=False))
+        words=words[0]['tokens'], method=('Mean raw token-piece scores before smoothing and per-word normalization; ' if data[0].get('words') else 'Legacy mean of saved normalized token planes per word occurrence; ')+
+        'All-token reference excludes layout structure and includes descriptive prompt tokens.'), ensure_ascii=False))
     ranking['method'] = ('Saved normalized associations, not absolute activity. English function words and punctuation excluded; '
                          'layout rankings use descriptive string values only, excluding structural fields and coordinates; '
-                         'token pieces averaged per word occurrence before ranking; '
-                         'up to 7x7 neighborhood means, centers separated by up to 12 cells; '
+                         'word maps use the grouping method in PainterWordGrouping; '
+                         'neighborhood radii scale as 3/64 of each axis; center separation at least 12/64 in normalized image coordinates; '
                          'area labels maximize eligible-token mean in that neighborhood; '
                          'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
                          'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to four per panel.')
     canvas.setText('PainterHeatmapMethod', json.dumps(dict(
-        version=2, capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
+        version=3, consistency=data[0].get('consistency'), consistency_method=data[0].get('consistency_method'), capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
         aggregate='Mean of visible descriptive token maps; per-token 5–99% normalization already applied; aggregate stretched 5–95%',
         focus_image_size=[width, height],
         limitation='Relative feature associations, not probabilities, raw activity or causal attribution'), ensure_ascii=False))

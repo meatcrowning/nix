@@ -13,6 +13,7 @@ from comfy_extras.nodes_custom_sampler import SamplerCustom
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import moss_data
+from moss_rank import word_groups
 from moss_capture import CaptureWindow, map_shape
 
 _tokenizer = None
@@ -98,25 +99,27 @@ class PainterMossSampler:
                                'apply the Painter backend configuration and restart the backend.')
         metadata = tokenize(text, clip.tokenizer)
         if metadata['count'] > 4096:
-            return nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']().sample(**inputs) + ([],)
+            return nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']().sample(**inputs) + ([dict(reason='Prompt exceeds the 4096-token capture limit')],)
         model = inputs['model'].clone()
         if model.model_options.get('transformer_options', {}).get('optimized_attention_override'):
-            return nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']().sample(**inputs) + ([],)
+            return nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']().sample(**inputs) + ([dict(reason='Another attention override prevents heatmap capture')],)
         steps = max(1, len(inputs['sigmas']) - 1)
-        state = {}
+        groups, _ = word_groups(dict(prompt=text, tokens=metadata['tokens']))
+        state = dict(agreement=None, agreement_norm=None, agreement_count=0, pending_units=[])
         capture = CaptureWindow(steps)
 
         def forward(executor, x, timestep, context, transformer_options={}, **kw):
             state['shape'] = x.shape[-2:]
             if 0 in transformer_options.get('cond_or_uncond', []):
                 capture.begin()
+                state['pending_units'] = []
             return executor(x, timestep, context, transformer_options, **kw)
 
         def attention(original, q, k, v, heads, **kw):
             out = original(q, k, v, heads, **kw)
             options = kw.get('transformer_options', {})
             branches = options.get('cond_or_uncond', [])
-            # Existing output features: sparse capture in the middle third.
+            # Existing output features: sparse capture starting a quarter into sampling.
             # No rivalry between tokens: adjectives and nouns may overlap.
             if options.get('block_index') not in (4, 8) or 0 not in branches or not capture.wanted:
                 return out
@@ -128,22 +131,45 @@ class PainterMossSampler:
                 raise ValueError('MOSS conditioning/token alignment changed')
             maps = features[:, n:] @ features[:, :n].transpose(1, 2)
             maps = maps.reshape(batch, metadata['count'], h, w)
-            maps = torch.nn.functional.interpolate(maps, size=map_shape(h, w, metadata['count']), mode='bilinear', align_corners=False)
+            maps = torch.nn.functional.interpolate(maps, size=map_shape(h, w, metadata['count'] + len(groups)), mode='bilinear', align_corners=False)
             if capture.pending is None:
                 capture.pending = maps
             else:
                 capture.pending.add_(maps)
+            # Coarse spatial correlation measures agreement across layers/steps
+            # without retaining every full-resolution capture.
+            small = torch.nn.functional.adaptive_avg_pool2d(maps, (min(16, maps.shape[-2]), min(16, maps.shape[-1]))).flatten(2)
+            centered = small - small.mean(-1, keepdim=True)
+            unit = centered / centered.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            state['pending_units'].append(unit)
             return out
+
+        def finish(step):
+            if step == capture.step and capture.wanted and capture.pending is not None:
+                for unit in state['pending_units']:
+                    norm = (unit * unit).sum(-1)
+                    if state['agreement'] is None:
+                        state['agreement'], state['agreement_norm'] = unit, norm
+                    else:
+                        state['agreement'].add_(unit)
+                        state['agreement_norm'].add_(norm)
+                    state['agreement_count'] += 1
+            state['pending_units'] = []
+            capture.finish(step)
 
         model.add_wrapper_with_key(WrappersMP.DIFFUSION_MODEL, 'painter_moss', forward)
         model.model_options['transformer_options']['optimized_attention_override'] = attention
-        model.model_options['painter_step_observer'] = capture.finish
+        model.model_options['painter_step_observer'] = finish
         inputs['model'] = model
         sampled = nodes.NODE_CLASS_MAPPINGS['PainterSamplerCustom']().sample(**inputs)
         maps = capture.maps
         packets = []
         if maps is not None:
-            maps = maps / (2 * len(capture.captured))
+            maps = maps / state['agreement_count']
+            # Combine raw token pieces before spatial filtering and normalization.
+            if groups:
+                words = torch.stack([maps[:, g['source_indices']].mean(1) for g in groups], dim=1)
+                maps = torch.cat((maps, words), dim=1)
             # Smooth raw associations, before each token's contrast stretch.
             padded = torch.nn.functional.pad(maps, (0, 0, 1, 1), mode='replicate')
             maps = (padded[:, :, :-2] + 2*padded[:, :, 1:-1] + padded[:, :, 2:]) / 4
@@ -154,11 +180,19 @@ class PainterMossSampler:
             lo = torch.quantile(maps, .05, dim=-1, keepdim=True)
             hi = torch.quantile(maps, .99, dim=-1, keepdim=True)
             normalized = ((maps - lo) / (hi - lo).clamp_min(1e-12)).clamp(0, 1)
-            for item in normalized:
-                doc = dict(version=2, prompt=text, tokens=metadata['tokens'], width=w, height=h,
+            count = state['agreement_count']
+            agreement = ((state['agreement'].square().sum(-1) - state['agreement_norm']) /
+                         max(1, count*(count-1))).clamp(-1, 1).cpu().tolist()
+            for batch_index, item in enumerate(normalized):
+                doc = dict(version=3, prompt=text, tokens=metadata['tokens'], words=groups, width=w, height=h,
+                           consistency=agreement[batch_index],
+                           consistency_method='Mean pairwise spatial correlation across captured layers and steps on at most 16x16 pooled raw maps; not correctness or confidence',
                            method='attention output similarity', captured_calls=len(capture.captured),
-                           capture=dict(version=3, block_indices=[4, 8], sampler_steps=capture.captured,
+                           capture=dict(version=4, block_indices=[4, 8], sampler_steps=capture.captured,
+                                        layer_evaluations=state['agreement_count'],
                                         layer_reduction='mean raw associations', resolution_cap=128,
+                                        word_reduction='mean raw token-piece associations before normalization',
+                                        schedule='quarter-start, middle-third capture budget, stride 3',
                                         smoothing='separable binomial [1,2,1]/4; edge padding; before token quantiles',
                                         step_index_base=0, total_steps=steps,
                                         evaluation='last positive evaluation before sampler callback',
@@ -166,7 +200,7 @@ class PainterMossSampler:
                                         latent_shape=list(state['shape']),
                                         attribution='feature similarity, not attention probability or causal attribution'))
                 packets.append(moss_data.encode(doc, (item * 255).byte().cpu().numpy().tobytes()))
-        return sampled + (packets,)
+        return sampled + (packets or [dict(reason='Sampling ended before a heatmap capture completed')],)
 
 
 class PainterMossSaveImage(nodes.SaveImage):
@@ -181,11 +215,18 @@ class PainterMossSaveImage(nodes.SaveImage):
         # chunk. Ordinary metadata/gallery scans skip this binary payload.
         result = super().save_images(images, filename_prefix, prompt, extra_pnginfo)
         import struct, zlib
-        for entry, packet in zip(result['ui']['images'], heatmaps):
+        for index, entry in enumerate(result['ui']['images']):
+            packet = heatmaps[index] if index < len(heatmaps) else heatmaps[-1] if heatmaps and isinstance(heatmaps[-1], dict) else None
+            if packet is None:
+                continue
             path = Path(self.output_dir) / entry['subfolder'] / entry['filename']
             data = path.read_bytes()
-            chunk = struct.pack('>I', len(packet)) + moss_data.CHUNK + packet
-            chunk += struct.pack('>I', zlib.crc32(moss_data.CHUNK + packet) & 0xffffffff)
+            kind = moss_data.CHUNK
+            if isinstance(packet, dict):
+                kind = b'tEXt'
+                packet = b'painter_moss_status\0' + packet['reason'].encode('latin-1', 'replace')
+            chunk = struct.pack('>I', len(packet)) + kind + packet
+            chunk += struct.pack('>I', zlib.crc32(kind + packet) & 0xffffffff)
             path.write_bytes(data[:-12] + chunk + data[-12:])
         return result
 

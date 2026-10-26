@@ -440,6 +440,9 @@ class Window(Gtk.Window, ParameterForm):
         self.viewer.update_nearby(heatmap.get('nearby', []), heatmap.get('imageHeld', False), heatmap.get('picking', False))
         self.heatmap_grid.set_label(heatmap.get('gridLabel', 'Grid comparison'))
         self.heatmap_grid.set_tooltip_text(heatmap.get('gridStatus', ''))
+        self.heatmap_tokens.set_tooltip_text(heatmap.get('status', ''))
+        for widget in self.actions.get('heatmap', []):
+            widget.set_tooltip_text(heatmap.get('status', ''))
         self.heatmap_grid.set_sensitive(bool(heatmap.get('available')) and not heatmap.get('exporting'))
         labels = ['Nearby tokens' if heatmap.get('exploring') else 'All tokens'] + [t['label'] for t in heatmap.get('tokens', [])]
         self.syncing_heatmap = True

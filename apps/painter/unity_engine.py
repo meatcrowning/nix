@@ -317,7 +317,7 @@ class Engine:
             prompts += [(r.get('id', ''), r.get('caption', '')) for r in self.settings.get('moss_layout', {}).get('items', [])]
             for identity, text in prompts:
                 highlights[identity] = dict(text=text, ranges=inspection.highlightedRanges(text, identity))
-        return dict(path=self.view_path, available=inspection.available, nearby=inspection.nearby, highlights=highlights, exploring=inspection.exploring, imageHeld=inspection.imageHeld,
+        return dict(path=self.view_path, status=inspection.status, available=inspection.available, nearby=inspection.nearby, highlights=highlights, exploring=inspection.exploring, imageHeld=inspection.imageHeld,
                     tokens=inspection.tokens, overlay=inspection.overlay, selected=inspection.selected,
                     picking=inspection.picking, exporting=inspection.exporting,
                     gridLabel=inspection.gridLabel, gridStatus=inspection.gridStatus,

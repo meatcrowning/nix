@@ -9,8 +9,9 @@ class CaptureWindow:
 
     @property
     def wanted(self):
-        start = self.steps // 3
-        return start <= self.step < max(start + 1, 2*self.steps//3) and (self.step-start) % 3 == 0
+        start = self.steps // 4
+        span = max(1, 2*self.steps//3 - self.steps//3)
+        return start <= self.step < start + span and (self.step-start) % 3 == 0
 
     def begin(self):
         # A corrector or guidance evaluation may precede the predictor. Only

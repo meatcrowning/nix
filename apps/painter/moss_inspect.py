@@ -31,6 +31,7 @@ class MossInspect(QObject):
         self._data_cache = OrderedDict()
         self._generation = 0
         self._data = None
+        self._loading = False
         self._path = self._overlay = self._error = ''
         self._tokens = []
         self._selected = -2
@@ -91,6 +92,29 @@ class MossInspect(QObject):
     @Property(bool, notify=changed)
     def available(self):
         return self._data is not None and bool(self._tokens)
+
+    @Property(str, notify=changed)
+    def status(self):
+        if self._loading:
+            return 'Loading heatmaps…'
+        if self._error:
+            return self._error
+        if not self.available:
+            return 'No heatmaps saved for this output' if self._path else 'Select an output to inspect heatmaps'
+        doc = self._data[0]
+        capture = doc.get('capture', {})
+        layers = capture.get('block_indices', [capture.get('block_index', 4)])
+        text = 'Saved maps v%d · %d×%d · layers %s' % (doc.get('version',1),doc['width'],doc['height'],
+                ', '.join(str(i+1) for i in layers))
+        values = doc.get('consistency')
+        if values and 0 <= self._selected < len(self._tokens):
+            value = values[self._tokens[self._selected]['index']]
+            text += ' · Capture agreement %.2f (−1 to 1; not confidence)' % value
+        elif values:
+            text += ' · Select a token for capture agreement'
+        else:
+            text += ' · Capture agreement unavailable for this older output'
+        return text
 
     @Property('QVariantList', notify=changed)
     def tokens(self):
@@ -157,8 +181,11 @@ class MossInspect(QObject):
             return
         self._image_cell = cell
         cx, cy = cell
-        cells = [j*w+i for j in range(max(0,cy-1), min(h,cy+2))
-                 for i in range(max(0,cx-1), min(w,cx+2))]
+        from moss_rank import neighborhood
+        rx, ry = neighborhood(w, h, 1)
+        rx, ry = max(1, rx), max(1, ry)
+        cells = [j*w+i for j in range(max(0,cy-ry), min(h,cy+ry+1))
+                 for i in range(max(0,cx-rx), min(w,cx+rx+1))]
         scores = []
         for token in doc.get('_content_tokens', []):
             start = token['index'] * w * h
@@ -429,6 +456,7 @@ class MossInspect(QObject):
             grid.setChecked(self.picking)
             grid.setText(self.gridLabel)
             grid.setToolTip(self.gridStatus)
+            combo.setToolTip(self.status + '\nRelative association; blue is low and red is high. Agreement measures consistency across captures, not correctness.')
         shell.toolbar_widget('main', combo)
         shell.toolbar_widget('main', grid)
         self.changed.connect(refresh)
@@ -464,6 +492,7 @@ class MossInspect(QObject):
         self._selected = -2
         self._chosen = -1
         self._hover_owner = ''
+        self._loading = bool(path and path.lower().endswith('.png'))
         self.changed.emit()
         if self._future:
             self._future.cancel()
@@ -477,6 +506,14 @@ class MossInspect(QObject):
                 cached = value is not None
                 if not cached:
                     value = moss_data.read(path)
+                    if value is None:
+                        import pngmeta
+                        meta = pngmeta.read_text_path(path)
+                        params = json.loads(meta.get('painter', '{}'))
+                        if meta.get('painter_moss_status'):
+                            raise ValueError('Heatmaps unavailable: ' + meta['painter_moss_status'])
+                        if params.get('moss_heatmaps'):
+                            raise ValueError('Heatmap capture unavailable: this generation saved no maps')
                 if value and not cached:
                     value[0]['_aggregate'] = moss_data.descriptive_aggregate(*value)
                     import moss_rank
@@ -490,7 +527,7 @@ class MossInspect(QObject):
                         value[0]['_regions'] = []
                 if value:
                     self._data_cache[key] = value
-                    while len(self._data_cache) > 3 or sum(len(v[1]) for v in self._data_cache.values()) > 24*1024*1024:
+                    while len(self._data_cache) > 3 or sum(len(v[1]) + len(v[0].get('_word_pixels', b'')) for v in self._data_cache.values()) > 24*1024*1024:
                         self._data_cache.popitem(last=False)
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 value = str(exc)
@@ -500,6 +537,7 @@ class MossInspect(QObject):
     def _accept(self, serial, value):
         if serial != self._generation:
             return
+        self._loading = False
         if isinstance(value, str):
             self._error = value
         elif value:
@@ -534,7 +572,7 @@ class MossInspect(QObject):
         if mask is None:
             mask = token_mask(doc, pixels, token)
         self._masks[token] = mask
-        # At most 1 MiB for 64x64 maps; no full-resolution image copies.
+        # At most 4 MiB for 128x128 maps; no full-resolution image copies.
         while len(self._masks) > 64:
             self._masks.popitem(last=False)
         self.mask = mask

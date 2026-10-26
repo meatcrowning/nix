@@ -231,12 +231,29 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
                     stamp = output.stat()
                     os.utime(output, ns=(stamp.st_atime_ns, stamp.st_mtime_ns+1))
                 cache_probe.load(str(output))
+                assert cache_probe.status == 'Loading heatmaps…'
                 for _ in range(100):
                     u.spin(10)
                     if cache_probe.available: break
                 assert cache_probe.available, 'map loading waited for the export worker'
+                assert 'Saved maps v1' in cache_probe.status
                 assert reader.call_count == expected_reads, 'cache missed or reused a modified file'
         assert not export_work.done()
+        missing = Path(tmp)/'no-maps.png'
+        missing.write_bytes(pngmeta.upsert_text(plain, {'painter': {'moss_heatmaps': True},
+                                                     'painter_moss_status': 'Sampling ended before capture'}))
+        cache_probe.load(str(missing))
+        for _ in range(100):
+            u.spin(10)
+            if 'Loading' not in cache_probe.status: break
+        assert not cache_probe.available and 'Sampling ended before capture' in cache_probe.status
+        missing.write_bytes(plain)
+        cache_probe.load(str(missing))
+        for _ in range(100):
+            u.spin(10)
+            if 'Loading' not in cache_probe.status: break
+        assert cache_probe.status == 'No heatmaps saved for this output'
+
     finally:
         gate.set()
         cache_probe.close()

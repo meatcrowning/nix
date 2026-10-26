@@ -845,7 +845,7 @@ Item {
         { id: "compareparams", label: "cmp", tip: "Compare Settings", menu: "edit",
           icon: "view-split-left-right", bar: true, barText: "Compare Settings", tb: true,
           checkable: true, state: root.showParameterCompare ? 1 : root.selOne !== "" ? 0 : 2 },
-        { id: "heatmap", label: "map", tip: "Token Heatmap", menu: "view",
+        { id: "heatmap", label: "map", menuText: "Token Heatmap", tip: root.inspection ? root.inspection.status : "Token Heatmap", menu: "view",
           icon: "view-preview", bar: true, barText: "Heatmap", tb: true, checkable: true,
           state: root.showHeatmap ? 1 : root.inspection && root.inspection.available ? 0 : 2 },
         { id: "injprompt", tip: "Reuse Prompt", menu: "edit",

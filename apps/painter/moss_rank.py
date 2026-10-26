@@ -15,13 +15,12 @@ this that these those which who whom whose what there here then than also just v
 WORD = re.compile(r"\w+(?:['’-]\w+)*", re.UNICODE)
 
 
-def word_maps(document, pixels):
-    """Average saved planes per word occurrence; retain source token identities."""
+def word_groups(document):
+    """Resolve word occurrences once, without reading any spatial planes."""
     prompt = document.get('prompt', '')
     words = list(WORD.finditer(prompt))
     visible = [t for t in document['tokens'] if t['visible']]
-    area = document['width'] * document['height']
-    groups, lookup, planes = {}, {}, bytearray()
+    groups, lookup = {}, {}
     for token in visible:
         start, end = token.get('start', -1), token.get('end', -1)
         spans = [m for m in words if start >= 0 and m.start() < end and m.end() > start]
@@ -31,17 +30,57 @@ def word_maps(document, pixels):
             pieces = [t for t in visible if t.get('start', -1) < end and t.get('end', -1) > start]
             text = prompt[start:end]
         else:
-            # Punctuation and legacy maps without offsets remain individually selectable.
             key, pieces, text = ('token', token['index']), [token], token['text'].strip()
         if key not in groups:
-            index = len(groups)
-            groups[key] = dict(index=index, text=text, start=start, end=end, visible=True,
+            groups[key] = dict(index=len(groups), text=text, start=start, end=end, visible=True,
                                pieces=[t['text'].strip() for t in pieces],
                                source_indices=[t['index'] for t in pieces])
-            planes.extend(round(sum(pixels[t['index']*area+i] for t in pieces)/len(pieces))
-                          for i in range(area))
         lookup[token['index']] = groups[key]
-    return (dict(document, tokens=list(groups.values())), bytes(planes)), lookup
+    return list(groups.values()), lookup
+
+
+def word_maps(document, pixels):
+    """Use raw-grouped saved word maps when available; cache legacy grouping."""
+    if '_words' in document and document.get('_words_source') is pixels:
+        return document['_words']
+    groups, lookup = word_groups(document)
+    area = document['width'] * document['height']
+    if document.get('words') == groups and '_word_pixels' in document:
+        planes = document['_word_pixels']
+    else:
+        planes = bytearray()
+        for group in groups:
+            parts = [pixels[i*area:(i+1)*area] for i in group['source_indices']]
+            planes.extend(parts[0] if len(parts) == 1 else
+                          bytes(round(sum(values)/len(parts)) for values in zip(*parts)))
+        planes = bytes(planes)
+    doc = {k:v for k,v in document.items() if not k.startswith('_') and k != 'words'}
+    doc['tokens'] = groups
+    result = ((doc, planes), lookup)
+    document['_words'] = result
+    document['_words_source'] = pixels
+    return result
+
+
+def neighborhood(width, height, radius=3):
+    """A fixed fraction of each map axis, referenced to the original 64 grid."""
+    return (min((width-1)//2, max(1, round(radius*width/64))),
+            min((height-1)//2, max(1, round(radius*height/64))))
+
+
+def summed_area(plane, width, height):
+    table = [0] * ((width+1)*(height+1))
+    for y in range(height):
+        row = 0
+        for x in range(width):
+            row += plane[y*width+x]
+            table[(y+1)*(width+1)+x+1] = row + table[y*(width+1)+x+1]
+    return table
+
+
+def area_sum(table, width, x0, y0, x1, y1):
+    stride = width+1
+    return table[y1*stride+x1]-table[y0*stride+x1]-table[y1*stride+x0]+table[y0*stride+x0]
 
 
 def word_label(token):
@@ -125,6 +164,10 @@ def duplicate_token(token, selected):
 
 def rank(document, pixels, limit=4, image_size=None):
     """Return unique spatial rankings; None keeps all entries for fitted headers."""
+    cache = document.setdefault('_rankings', {})
+    key = (limit, tuple(image_size) if image_size else None)
+    if key in cache and cache[key][0] is pixels:
+        return cache[key][1]
     w, h = document['width'], document['height']
     area = w * h
     tokens = content_tokens(document)
@@ -132,27 +175,35 @@ def rank(document, pixels, limit=4, image_size=None):
     if not tokens:
         return dict(areas=[], focused=[])
     mean = [sum(p[i] for p in planes) / (255 * len(planes)) for i in range(area)]
-    radius = min(3, (min(w, h) - 1) // 2)
-    side = radius * 2 + 1
+    rx, ry = neighborhood(w, h)
+    sx, sy = 2*rx+1, 2*ry+1
+    table = summed_area(mean, w, h)
     candidates = []
-    for y in range(radius, h - radius):
-        for x in range(radius, w - radius):
-            cells = [j*w+i for j in range(y-radius, y+radius+1) for i in range(x-radius, x+radius+1)]
-            score = sum(mean[i] for i in cells) / len(cells)
+    for y in range(ry, h-ry):
+        for x in range(rx, w-rx):
+            score = area_sum(table,w,x-rx,y-ry,x+rx+1,y+ry+1)/(sx*sy)
             if score > 0:
-                candidates.append((score, x, y, cells))
+                candidates.append((score,x,y))
+    winners = [0] * area
+    winner_scores = [-1] * area
+    for k, plane in enumerate(planes):
+        local = summed_area(plane, w, h)
+        for _, x, y in candidates:
+            value = area_sum(local,w,x-rx,y-ry,x+rx+1,y+ry+1)
+            index = y*w+x
+            if value > winner_scores[index]:
+                winner_scores[index], winners[index] = value, k
     hot = []
-    separation = max(side, min(12, min(w, h) / 5))
-    for score, x, y, cells in sorted(candidates, reverse=True):
-        if any(math.hypot(x-a['x'], y-a['y']) < separation for a in hot):
+    separation = max(sx/w, sy/h, 12/64)
+    for score,x,y in sorted(candidates, reverse=True):
+        if any(math.hypot((x-a['x'])/w,(y-a['y'])/h) < separation for a in hot):
             continue
-        best = max(range(len(tokens)), key=lambda k: sum(planes[k][i] for i in cells))
-        # Skip the neighborhood rather than mislabel it with a weaker runner-up.
+        best = winners[y*w+x]
         if duplicate_token(tokens[best], hot):
             continue
-        association = sum(planes[best][i] for i in cells) / (255*len(cells))
-        hot.append(dict(score=score, x=x, y=y, side=side, token=dict(tokens[best]),
-                        association=association, percentage=association*100))
+        association = winner_scores[y*w+x]/(255*sx*sy)
+        hot.append(dict(score=score,x=x,y=y,side=sx,side_y=sy,token=dict(tokens[best]),
+                        association=association,percentage=association*100))
         if limit is not None and len(hot) == limit:
             break
     image_w, image_h = image_size or (w, h)
@@ -175,7 +226,9 @@ def rank(document, pixels, limit=4, image_size=None):
             unique.append(item)
             if limit is not None and len(unique) == limit:
                 break
-    return dict(areas=hot, focused=unique)
+    result = dict(areas=hot, focused=unique)
+    cache[key] = (pixels, result)
+    return result
 
 
 def unique_entries(entries, exclude=()):
@@ -196,19 +249,18 @@ def association_lists(document, pixels, selected, aggregate):
     all_tokens = [dict(token=t, percentage=sum(a*b for a, b in zip(planes[t['index']], aggregate)) /
                        (255*weight)*100 if weight else 0) for t in tokens]
     all_tokens.sort(key=lambda item: (-item['percentage'], item['token']['index']))
+    stats = {i: (sum(p), sum(v*v for v in p)) for i,p in planes.items()}
     related = []
     for choice in selected:
         plane = pixels[choice['index']*area:(choice['index']+1)*area]
-        mean = sum(plane)/area
-        centered = [v-mean for v in plane]
-        norm = math.sqrt(sum(v*v for v in centered))
+        total, squares = sum(plane), sum(v*v for v in plane)
+        variance = max(0, squares-total*total/area)
         entries = []
         for token in tokens:
             candidate = planes[token['index']]
-            mean = sum(candidate)/area
-            values = [v-mean for v in candidate]
-            denominator = norm*math.sqrt(sum(v*v for v in values))
-            score = sum(a*b for a, b in zip(centered, values))/denominator if denominator else 0
+            other_total, other_squares = stats[token['index']]
+            denominator = math.sqrt(variance*max(0, other_squares-other_total*other_total/area))
+            score = (sum(a*b for a,b in zip(plane,candidate))-total*other_total/area)/denominator if denominator else 0
             if score > 0:
                 entries.append(dict(token=token, percentage=min(100, score*100)))
         entries.sort(key=lambda item: (-item['percentage'], item['token']['index']))

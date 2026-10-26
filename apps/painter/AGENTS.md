@@ -171,11 +171,15 @@ weights or starts a backend on its own.
 
 `comfy_nodes/painter_moss.py` captures sparse layer-4/8 attention output similarity
 maps from the last positive evaluation before actual sampler callbacks in the
-middle third, with capture provenance saved alongside the maps. Version 2 maps average raw
+quarter-start window, retaining the middle-third capture count and stride of three,
+with capture provenance saved alongside the maps. Maps average raw
 layer associations, apply one separable binomial smoothing pass before token
 normalization, and retain native resolution up to 128 per axis. Long prompts
 reduce map dimensions to keep planes within 20 MiB and the packet within 24 MiB;
-the reader still accepts version 1 maps. Capture runs
+the reader still accepts version 1/2 maps. Version 3 packets also save word
+planes formed by averaging raw token pieces before normalization, and per-token
+mean pairwise spatial correlation across captured layers/steps on at most 16×16
+pooled maps. This agreement is consistency, not correctness or confidence. Capture runs
 during ordinary MOSS generation when both nodes are advertised. PPM keeps
 its existing sampler because it changes tokenization/attention. Existing files
 without maps cannot display a heatmap. The toolbar token picker and matching
@@ -193,12 +197,13 @@ prompt; its full text is retained in `PainterComparisonPrompt` PNG metadata.
 Other headers fit two small lines of scored eligible words. Ranked headers omit
 words annotated on their panel; selected-map headers rank positive Pearson spatial
 correlation, and All tokens ranks word-map means weighted by its displayed aggregate.
-Area labels show local association percentages; focused labels show RMS radius as
+Area neighborhoods scale with each map axis (radius 3/64, center separation
+12/64 in normalized coordinates). Area labels show local association percentages; focused labels show RMS radius as
 a percentage of output image diagonal (lower is tighter). Over-image percentages use half
 the word-label font size. `PainterExpandedLists` records displayed entries and score
 definitions; these are relative map measurements, not probabilities or semantic similarity.
-Exports average saved token planes per word occurrence for picked maps and both
-ranked panels. Picked headers list the word and its pieces with singular “token”
+Exports use saved raw-grouped word planes for picked maps and both ranked panels;
+legacy files fall back to averaging saved normalized token planes. Picked headers list the word and its pieces with singular “token”
 or plural “tokens”; `PainterWordGrouping` preserves source indices and offsets.
 The all-token reference and interactive viewer retain their token-based maps.
 The third column ranks up to four hot neighborhoods and focused tokens.
@@ -223,19 +228,24 @@ Qt paints transparent masks over the existing image, preserving fit/zoom and
 keeping it visible while maps load. `moss_inspect.py` caches at most 64 small RGBA
 masks; token changes never decode or save the full output.
 Map loading has its own worker, independent of grid exports, and caches up to
-three files/24 MiB of planes by path, modification time and size. Caption-offset
+three files/24 MiB of saved planes by path, modification time and size.
+Word grouping and full rankings are reused for repeat exports; summed-area
+tables compute neighborhood means without repeatedly scanning each box. Caption-offset
 mapping is cached and resolved in one pass; nearby-list notifications are separate
 from mask changes so individual previews do not rebuild lists or prompt highlights.
 Image-hover exploration in both preview/view maps the pointer through fit/zoom/pan
-and samples at most every 40 ms. Rank eligible tokens by a 3×3 saved-map neighborhood;
-show the top six in an interactive tooltip and their mean thermal map. Reuse
+and samples at most every 40 ms. Rank eligible tokens by neighborhood means,
+with radii scaled as 1/64 per axis. Show the top six in an interactive tooltip
+and their mean thermal map. Reuse
 combined masks by token set within the same 64-entry cache. Tooltip clicks select
 one token; leaving restores the dropdown choice. Clicking the image holds its
 area/list until a token is chosen or Resume hover is pressed. During grid selection,
 a held-list hover previews that individual token and leaving restores the combined
 map. A click fills the next comparison slot, then releases the hold; prompt
 clicks remain an alternative. Leaving heatmap mode or changing outputs clears holds. Prompt/region highlights use
-saved offsets (UTF-16 in Qt), reject mismatched drafts, and never alter text/undo. GTK receives small
+saved offsets (UTF-16 in Qt), reject mismatched drafts, and never alter text/undo. Toolbar tooltips distinguish loading, missing maps,
+capture failure and saved format/layers; selected tokens include capture agreement
+when available. GTK receives small
 mask PNGs in immediate socket replies and composites them over its decoded image.
 Region prompt boxes share the debounce, count and decorations. Region hover uses
 IDs in saved `painter.moss_layout` metadata, skipping disabled regions when mapping
@@ -243,7 +253,8 @@ to compiled `items`; duplicate captions and current reordering never choose a ma
 by text alone. Old outputs without saved region IDs retain the dropdown picker.
 Maps are experimental associations, not causal
 word attribution; never infer maps for old images from a current prompt.
-Verify capture/scoring with the CPU-only `tools/moss-capture-test.py`, plus
+Verify capture/scoring with the CPU-only `tools/moss-capture-test.py` and
+`tools/moss-capture-tensor-test.py` (Comfy Python, CUDA hidden), plus
 `tools/moss-inspection-test.py` offscreen, `tools/moss-test.py`, and
 the Unity harness. Backend node installation is in `home/prog/painter.nix`. Both the MOSS node
 and its partial-stop sampler callback link to live repository source; changing

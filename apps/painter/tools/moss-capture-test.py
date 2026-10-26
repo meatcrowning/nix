@@ -23,7 +23,7 @@ for heun in (False, True):
             capture.begin()
             if capture.wanted:
                 capture.pending = Values(('corrector', step))
-    assert capture.captured == [16, 19, 22, 25, 28, 31]
+    assert capture.captured == [12, 15, 18, 21, 24, 27]
     assert capture.maps.values == [('predictor', i) for i in capture.captured]
 # No callback means no accepted map; stops keep only completed captures.
 capture = CaptureWindow(1)
@@ -100,3 +100,15 @@ except RuntimeError as exc:
 else:
     raise AssertionError('Stale sampler accepted')
 print('PASS: stale deployed sampler reports an actionable error')
+
+# Summed-area neighborhoods match direct sums, including rectangular maps.
+for width,height in ((3,5),(53,74),(128,128)):
+    plane = bytes((i*17)%256 for i in range(width*height))
+    table = moss_rank.summed_area(plane,width,height)
+    for x0,y0,x1,y1 in ((0,0,width,height),(1,1,width,height),(0,0,1,1)):
+        expected = sum(plane[y*width+x] for y in range(y0,y1) for x in range(x0,x1))
+        assert moss_rank.area_sum(table,width,x0,y0,x1,y1) == expected
+assert moss_rank.neighborhood(64,64) == (3,3)
+assert moss_rank.neighborhood(128,128) == (6,6)
+assert moss_rank.neighborhood(64,128) == (3,6)
+print('PASS rectangular summed-area scores and resolution-scaled neighborhoods')
