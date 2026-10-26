@@ -3,7 +3,28 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen, QPainterPath, QPain
 from PySide6.QtCore import Qt, QPointF, QRectF
 import moss_data
 import moss_rank
+WORD_SIZE = 10
+ROW_SPACING = 16.5
+LABEL_HEIGHT = 14.5
+MARGIN = 13
+COLUMN_GAP = 16
+
 COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff')
+
+
+def label_positions(items, height, metrics):
+    """Fill down, then right, preserving type size and row pitch for every prompt."""
+    rows = max(1, int((height - 2 * MARGIN) // ROW_SPACING))
+    positions = []
+    x = MARGIN
+    for start in range(0, len(items), rows):
+        column = items[start:start + rows]
+        widths = [metrics.horizontalAdvance(item['text']) for item in column]
+        positions.extend((x, MARGIN + (row + .5) * ROW_SPACING, width)
+                         for row, width in enumerate(widths))
+        x += max(widths) + COLUMN_GAP
+    return positions
+
 
 def draw(p, rect, words):
     wd, wp = words
@@ -20,17 +41,11 @@ def draw(p, rect, words):
     p.save()
     p.setClipRect(rect)
     p.translate(rect.x(), rect.y())
-    margin = 13
-    spacing = (h - 2 * margin) / len(items)
     font = QFont('sans-serif')
-    font.setPixelSize(max(1, min(17, int(spacing * 0.77))))
+    font.setPixelSize(WORD_SIZE)
     font.setBold(True)
     fm = QFontMetrics(font)
-    # Keep individual backings separated even for a long scene caption.
-    while fm.height() > spacing - 2 and font.pixelSize() > 1:
-        font.setPixelSize(font.pixelSize() - 1)
-        fm = QFontMetrics(font)
-    label_height = min(fm.height() + 4, max(1, spacing - 2))
+    positions = label_positions(items, h, fm)
     entries = []
     mw, mh = (wd['width'], wd['height'])
     area = mw * mh
@@ -52,14 +67,14 @@ def draw(p, rect, words):
         cy = sum((i // mw for i in candidates)) / len(candidates)
         chosen = min(candidates, key=lambda i: ((i % mw - cx) ** 2 + (i // mw - cy) ** 2, i))
         point = QPointF((chosen % mw + 0.5) * w / mw, (chosen // mw + 0.5) * h / mh)
-        y = margin + row * spacing + spacing / 2
-        entries.append(dict(token=token, text=token['text'], y=y, width=fm.horizontalAdvance(token['text']), point=point))
+        x, y, width = positions[row]
+        entries.append(dict(token=token, text=token['text'], x=x, y=y, width=width, point=point))
     p.setRenderHint(QPainter.Antialiasing)
     p.setFont(font)
     for i, e in enumerate(entries):
         color = QColor(COLORS[i % 6])
         color.setAlpha(150)
-        a = QPointF(margin + e['width'] + 7, e['y'])
+        a = QPointF(e['x'] + e['width'] + 7, e['y'])
         b = e['point']
         p.setPen(QPen(QColor(0, 0, 0, 65), 2.3))
         p.drawLine(a, b)
@@ -70,10 +85,10 @@ def draw(p, rect, words):
         p.setBrush(color)
         p.drawEllipse(b, 3.2, 3.2)
     for i, e in enumerate(entries):
-        p.fillRect(QRectF(margin - 4, e['y'] - label_height / 2,
-                          e['width'] + 8, label_height), QColor('#e615191f'))
+        p.fillRect(QRectF(e['x'] - 4, e['y'] - LABEL_HEIGHT / 2,
+                          e['width'] + 8, LABEL_HEIGHT), QColor('#e615191f'))
         path = QPainterPath()
-        path.addText(QPointF(margin, e['y'] + (fm.ascent() - fm.descent()) / 2), font, e['text'])
+        path.addText(QPointF(e['x'], e['y'] + (fm.ascent() - fm.descent()) / 2), font, e['text'])
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(COLORS[i % 6]))
         p.drawPath(path)
