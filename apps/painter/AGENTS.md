@@ -212,7 +212,8 @@ percentages are mean eligible-word scores. Red/blue area labels have separate
 ranks; Most/Least headings share the token-label background and row gap.
 The all-token export stacks scene-prompt words at the left with circular links
 to their saved word-map peaks, breaking ties by local mean then proximity to
-the tied-cell centroid. Text has no background or outline. Selected-map header
+the tied-cell centroid. Words use tight dark backings matching the ranked labels,
+with no glyph outline. Selected-map header
 lists begin with a bold “is most closely associated with”.
 `moss_rank.py` excludes punctuation and English function words using saved word
 spans (retaining content-word subpieces, labeled with their containing word).

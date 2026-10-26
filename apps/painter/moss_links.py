@@ -1,6 +1,6 @@
 """Prompt-word peak connectors for exported association maps."""
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen, QPainterPath, QPainter
-from PySide6.QtCore import Qt, QPointF
+from PySide6.QtCore import Qt, QPointF, QRectF
 import moss_data
 import moss_rank
 COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff')
@@ -26,6 +26,11 @@ def draw(p, rect, words):
     font.setPixelSize(max(1, min(17, int(spacing * 0.77))))
     font.setBold(True)
     fm = QFontMetrics(font)
+    # Keep individual backings separated even for a long scene caption.
+    while fm.height() > spacing - 2 and font.pixelSize() > 1:
+        font.setPixelSize(font.pixelSize() - 1)
+        fm = QFontMetrics(font)
+    label_height = min(fm.height() + 4, max(1, spacing - 2))
     entries = []
     mw, mh = (wd['width'], wd['height'])
     area = mw * mh
@@ -65,6 +70,8 @@ def draw(p, rect, words):
         p.setBrush(color)
         p.drawEllipse(b, 3.2, 3.2)
     for i, e in enumerate(entries):
+        p.fillRect(QRectF(margin - 4, e['y'] - label_height / 2,
+                          e['width'] + 8, label_height), QColor('#e615191f'))
         path = QPainterPath()
         path.addText(QPointF(margin, e['y'] + (fm.ascent() - fm.descent()) / 2), font, e['text'])
         p.setPen(Qt.NoPen)
