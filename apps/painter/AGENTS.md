@@ -191,7 +191,7 @@ activity. Hover temporarily shows one token, then restores the dropdown choice.
 Grid comparison arms two prompt/region clicks, validates each against saved tokens,
 and exports a labeled 3×2 PNG to the platform Pictures directory in a worker.
 Original/all-token panels precede the two picked maps; source resolution is kept.
-A title row uses the saved output’s model name and “token association heatmaps v2.”
+A title row uses the saved output’s model name and “token association heatmaps.”
 The Original output header includes two smaller truncated lines of the saved scene
 prompt; its full text is retained in `PainterComparisonPrompt` PNG metadata.
 Other headers fit two small lines of scored eligible words. Ranked headers omit
@@ -206,7 +206,7 @@ Exports use saved raw-grouped word planes for picked maps and both ranked panels
 legacy files fall back to averaging saved normalized token planes. Picked headers list the word and its pieces with singular “token”
 or plural “tokens”; `PainterWordGrouping` preserves source indices and offsets.
 The all-token reference and interactive viewer retain their token-based maps.
-The third column ranks up to four hot neighborhoods and focused tokens.
+The third column ranks up to six hot neighborhoods and focused tokens.
 `moss_rank.py` excludes punctuation and English function words using saved word
 spans (retaining content-word subpieces, labeled with their containing word).
 For compiled layouts, eligible maps must overlap descriptive string values:

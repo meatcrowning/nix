@@ -10,7 +10,7 @@ import moss_data
 import moss_rank
 
 
-COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573')
+COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff')
 
 
 def scene_prompt(document):
@@ -160,7 +160,7 @@ def annotations(painter, rect, ranking, doc, font, padding, focused=False):
 
 def add_title(image, model):
     """Prepend a single title row, preserving every existing comparison pixel."""
-    title = '%s — token association heatmaps v2' % (Path(model).stem if model else 'Unknown model')
+    title = '%s — token association heatmaps' % (Path(model).stem if model else 'Unknown model')
     font = QFont('sans-serif')
     font.setPixelSize(max(16, min(72, image.width() // 65)))
     font.setBold(True)
@@ -206,7 +206,7 @@ def save_grid(source, data, tokens, folder):
     words, lookup = moss_rank.word_maps(*data)
     selected = [lookup[token['index']] for token in tokens]
     full_ranking = moss_rank.rank(*words, limit=None, image_size=(width, height))
-    ranking = {key: items[:4] for key, items in full_ranking.items()}
+    ranking = {key: items[:6] for key, items in full_ranking.items()}
     all_tokens, related = moss_rank.association_lists(*words, selected, data[0]['_aggregate'])
     lists = {1: all_tokens, 2: moss_rank.unique_entries(full_ranking['areas'], ranking['areas']),
              3: related[0], 4: related[1],
@@ -265,7 +265,7 @@ def save_grid(source, data, tokens, folder):
                          'neighborhood radii scale as 3/64 of each axis; center separation at least 12/64 in normalized image coordinates; '
                          'area labels maximize eligible-token mean in that neighborhood; '
                          'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
-                         'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to four per panel.')
+                         'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to six per panel.')
     canvas.setText('PainterHeatmapMethod', json.dumps(dict(
         version=3, consistency=data[0].get('consistency'), consistency_method=data[0].get('consistency_method'), capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
         aggregate='Mean of visible descriptive token maps; per-token 5–99% normalization already applied; aggregate stretched 5–95%',
