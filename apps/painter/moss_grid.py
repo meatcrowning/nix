@@ -10,7 +10,7 @@ import moss_data
 import moss_rank
 
 
-COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff')
+COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff', '#65caff', '#b6a3ff', '#baf6ff')
 
 
 def scene_prompt(document):
@@ -79,82 +79,114 @@ def ranked_masks(data, ranking):
 
 
 def ranked_header(painter, rect, label, entries, font, padding):
-    """Fit complete scored words in two small lines beside the panel title."""
+    """Fit scored words in two lines, with a bold related-word lead-in."""
     metrics = QFontMetrics(font)
     painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft,
                      metrics.elidedText(label, Qt.ElideRight, max(0, rect.width())))
-    remaining = rect.adjusted(metrics.horizontalAdvance(label)+padding, 0, 0, 0)
+    remaining = rect.adjusted(metrics.horizontalAdvance(label) + padding, 0, 0, 0)
     small = QFont(font)
-    small.setPixelSize(max(10, round(font.pixelSize()*.55)))
-    metrics = QFontMetrics(small)
-    lines, shown, line = ['', ''], [], 0
+    small.setPixelSize(max(10, round(font.pixelSize() * 0.55)))
+    bold = QFont(small)
+    bold.setBold(True)
+    prefix = 'is most closely associated with ' if ' - token' in label else ''
+    strong = prefix.startswith('is most')
+    runs = [[], []]
+    widths = [0, 0]
+    line = 0
+    shown = []
+    if prefix:
+        runs[0].append((prefix, strong))
+        widths[0] = QFontMetrics(bold if strong else small).horizontalAdvance(prefix)
     for entry in entries:
-        text = '%s %.1f%%' % (entry['token']['text'], entry['percentage'])
-        proposed = (lines[line]+' · ' if lines[line] else '')+text
-        if metrics.horizontalAdvance(proposed) > remaining.width():
+        text = '%s %.1f%%' % (' '.join(entry['token']['text'].split()), entry['percentage'])
+        sep = ' · ' if runs[line] and (not prefix or len(runs[line]) > 1 or line > 0) else ''
+        advance = QFontMetrics(small).horizontalAdvance(sep + text)
+        if widths[line] + advance > remaining.width():
             line += 1
-            if line >= 2:
+            if line == 2:
                 break
-            proposed = text
-        if metrics.horizontalAdvance(proposed) > remaining.width():
-            break
-        lines[line] = proposed
+            sep = ''
+            advance = QFontMetrics(small).horizontalAdvance(text)
+        if advance > remaining.width():
+            continue
+        runs[line].append((sep + text, False))
+        widths[line] += advance
         shown.append(entry)
     painter.save()
-    painter.setFont(small)
-    y = remaining.y()+(remaining.height()-2*metrics.height())//2
-    for text in lines:
-        painter.drawText(QRect(remaining.x(), y, max(0, remaining.width()), metrics.height()),
-                         Qt.AlignVCenter | Qt.AlignLeft, text)
+    painter.setClipRect(remaining)
+    metrics = QFontMetrics(small)
+    y = remaining.y() + (remaining.height() - 2 * metrics.height()) / 2 + metrics.ascent()
+    for row in runs:
+        x = remaining.x()
+        for text, strong in row:
+            f = bold if strong else small
+            painter.setFont(f)
+            painter.drawText(QPointF(x, y), text)
+            x += QFontMetrics(f).horizontalAdvance(text)
         y += metrics.height()
     painter.restore()
-    return dict(title=label, lines=lines, entries=shown)
+    return dict(title=label, lines=[''.join((t for t, b in row)).strip() for row in runs], entries=shown)
 
 
 def annotations(painter, rect, ranking, doc, font, padding, focused=False):
-    """Word labels with half-size percentages; methods stay in PNG metadata."""
+    """Tight labels and group headings share one row height and gap."""
     painter.save()
     painter.setClipRect(rect)
     small = QFont(font)
-    small.setPixelSize(max(12, round(font.pixelSize() * .8)))
-    painter.setFont(small)
+    small.setPixelSize(max(12, round(font.pixelSize() * 0.8)))
     metrics = QFontMetrics(small)
-    percent_font = QFont(small)
-    percent_font.setPixelSize(max(1, round(small.pixelSize()*.5)))
-    percent_metrics = QFontMetrics(percent_font)
+    pf = QFont(small)
+    pf.setPixelSize(round(small.pixelSize() * 0.5))
+    pm = QFontMetrics(pf)
+    lh = metrics.height() + 4
+    gap = 5
+    most_y = rect.y() + padding + lh + gap
+    most_count = sum((t['extreme'] == 'most' for t in ranking))
+    least_count = len(ranking) - most_count
+    least_y = rect.bottom() - padding - least_count * (lh + gap)
+    if focused:
+        painter.setFont(small)
+        painter.setPen(QColor('white'))
+        for heading, row_y in [('Most', most_y), ('Least', least_y)]:
+            if not (most_count if heading == 'Most' else least_count):
+                continue
+            baseline = row_y - gap - lh + 2 + metrics.ascent()
+            x = rect.x() + padding
+            painter.fillRect(QRectF(x, baseline - metrics.ascent() - 2, metrics.horizontalAdvance(heading) + 8, metrics.height() + 4), QColor('#e615191f'))
+            painter.drawText(QPointF(x + 4, baseline), heading)
+    counts = {'hot': 0, 'cold': 0}
     for i, item in enumerate(ranking):
-        color = QColor(COLORS[i])
-        cx = rect.x() + (item['x'] + .5) * rect.width() / doc['width']
-        cy = rect.y() + (item['y'] + .5) * rect.height() / doc['height']
-        label = item['token'].get('display', item['token']['text'].strip().replace('\n', '↵'))
-        percent = ('%.1f%% radius' if focused else '%.1f%% assoc.') % item['percentage']
-        percent_width = percent_metrics.horizontalAdvance(percent)
-        space = metrics.horizontalAdvance(' ')
-        label_width = min(rect.width() - 2*padding, metrics.horizontalAdvance(label) + space + percent_width + padding*2)
-        label_height = metrics.height() + padding
-        painter.setPen(QPen(color, max(2, rect.width()/450)))
+        kind = item['extreme']
+        counts[kind] = counts.get(kind, 0) + 1
+        color = QColor(COLORS[i] if focused else '#ff5555' if kind == 'hot' else '#55baff')
+        label = ' '.join(item['token'].get('display', item['token']['text']).split())
+        if not focused:
+            label = '%d. %s' % (counts[kind], label)
+        percent = ('%.1f%% radius' if focused else '%.1f%% mean' if kind == 'cold' else '%.1f%% assoc.') % item['percentage']
+        lw = metrics.horizontalAdvance(label) + 4 + pm.horizontalAdvance(percent) + 8
+        cx = rect.x() + (item['x'] + 0.5) * rect.width() / doc['width']
+        cy = rect.y() + (item['y'] + 0.5) * rect.height() / doc['height']
+        painter.setPen(QPen(color, 2))
         painter.setBrush(Qt.NoBrush)
         if focused:
-            box = QRect(rect.x()+padding, rect.y()+padding+i*(label_height+padding//2), label_width, label_height)
+            by = most_y + i * (lh + gap) if i < most_count else least_y + (i - most_count) * (lh + gap)
+            box = QRectF(rect.x() + padding, by, lw, lh)
             painter.drawLine(QPointF(box.right(), box.center().y()), QPointF(cx, cy))
             painter.setBrush(color)
             painter.drawEllipse(QPointF(cx, cy), 4, 4)
         else:
             bw = item['side'] * rect.width() / doc['width']
             bh = item.get('side_y', item['side']) * rect.height() / doc['height']
-            outline = QRectF(cx-bw/2, cy-bh/2, bw, bh)
-            painter.drawRoundedRect(outline, padding/2, padding/2)
-            bx = max(rect.x(), min(rect.right()-label_width, round(outline.x())))
-            by = max(rect.y(), round(outline.y())-label_height)
-            box = QRect(bx, by, label_width, label_height)
+            outline = QRectF(cx - bw / 2, cy - bh / 2, bw, bh)
+            painter.drawRoundedRect(outline, 6, 6)
+            box = QRectF(max(rect.x(), min(rect.right() - lw, outline.x())), max(rect.y(), outline.y() - lh), lw, lh)
         painter.fillRect(box, QColor('#e615191f'))
         painter.setPen(color)
-        label = metrics.elidedText(label, Qt.ElideRight, max(0, label_width-padding-space-percent_width))
-        baseline = box.y()+(box.height()-metrics.height())/2+metrics.ascent()
+        baseline = box.y() + 2 + metrics.ascent()
         painter.setFont(small)
-        painter.drawText(QPointF(box.x()+padding//2, baseline), label)
-        painter.setFont(percent_font)
-        painter.drawText(QPointF(box.x()+padding//2+metrics.horizontalAdvance(label)+space, baseline), percent)
+        painter.drawText(QPointF(box.x() + 4, baseline), label)
+        painter.setFont(pf)
+        painter.drawText(QPointF(box.x() + 8 + metrics.horizontalAdvance(label), baseline), percent)
     painter.restore()
 
 
@@ -205,13 +237,14 @@ def save_grid(source, data, tokens, folder):
         data[0]['_aggregate'] = moss_data.descriptive_aggregate(*data)
     words, lookup = moss_rank.word_maps(*data)
     selected = [lookup[token['index']] for token in tokens]
-    full_ranking = moss_rank.rank(*words, limit=None, image_size=(width, height))
-    ranking = {key: items[:6] for key, items in full_ranking.items()}
+    full_ranking = moss_rank.rank(*words, limit=None, image_size=(width, height), extremes=True)
+    ranking = {key: full_ranking[key] for key in ('areas', 'focused')}
     all_tokens, related = moss_rank.association_lists(*words, selected, data[0]['_aggregate'])
-    lists = {1: all_tokens, 2: moss_rank.unique_entries(full_ranking['areas'], ranking['areas']),
+    lists = {1: all_tokens, 2: full_ranking['area_headers'],
              3: related[0], 4: related[1],
-             5: moss_rank.unique_entries(full_ranking['focused'], ranking['focused'])}
+             5: full_ranking['focus_headers']}
     expanded = {}
+    prompt_links = []
     hot, focus = ranked_masks(words, ranking)
     canvas = QImage(width * 3 + gap * 4, (height + header) * 2 + gap * 3, QImage.Format_RGB32)
     if canvas.isNull():
@@ -223,8 +256,8 @@ def save_grid(source, data, tokens, folder):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setFont(font)
         painter.setPen(QColor('#f4f5f7'))
-        labels = ['Original output', 'All tokens · relative association', 'Hottest areas',
-                  moss_rank.word_label(selected[0]), moss_rank.word_label(selected[1]), 'Most focused tokens']
+        labels = ['Original output', 'All tokens · relative association', 'Hottest & coldest areas',
+                  moss_rank.word_label(selected[0]), moss_rank.word_label(selected[1]), 'Most & least focused tokens']
         masks = [QImage(), token_mask(*data, -1), hot,
                  token_mask(*words, selected[0]['index']), token_mask(*words, selected[1]['index']), focus]
         for i, (label, mask) in enumerate(zip(labels, masks)):
@@ -239,6 +272,9 @@ def save_grid(source, data, tokens, folder):
             painter.drawImage(rect, original)
             if not mask.isNull():
                 painter.drawImage(rect, mask)
+            if i == 1:
+                import moss_links
+                prompt_links = moss_links.draw(painter, rect, words)
             if i in (2, 5):
                 items = ranking['areas' if i == 2 else 'focused']
                 annotations(painter, rect, items, data[0], font, padding, focused=i == 5)
@@ -248,10 +284,11 @@ def save_grid(source, data, tokens, folder):
     finally:
         painter.end()
     # Keep full labels, token identities, scores and methods off the artwork.
+    canvas.setText('PainterPromptLinks', json.dumps(dict(words=prompt_links, method='Saved whole-word maxima; ties resolved by local mean, then nearest tied point to centroid. Circular endpoints.')))
     canvas.setText('Description', '\n'.join(labels))
     canvas.setText('PainterComparisonPrompt', scene_prompt(data[0]))
     expanded['method'] = ('Eligible whole words; duplicate and close variants omitted. Ranked headers exclude words '
-        'annotated on their panel. Area percentages: local mean saved normalized association. Focus percentages: '
+        'annotated on their panel. Hot percentages: local winning word association; cold percentages: regional mean across eligible word maps. Focus percentages: '
         'weighted RMS radius in image pixels divided by image diagonal; lower is more focused. Related percentages: positive Pearson '
         'spatial correlation, not semantic or causal relatedness. All-token percentages: word-map mean weighted '
         'by displayed all-token map intensity. Not confidence or absolute activity. Two lines of complete entries.')
@@ -265,7 +302,7 @@ def save_grid(source, data, tokens, folder):
                          'neighborhood radii scale as 3/64 of each axis; center separation at least 12/64 in normalized image coordinates; '
                          'area labels maximize eligible-token mean in that neighborhood; '
                          'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
-                         'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to six per panel.')
+                         'focus minimizes image-pixel RMS radius weighted by max(score-.70,0)^2. Up to six hot and three cold areas; six most and three least focused words. Cold percentages are regional means across eligible words; cold labels are local winning words.')
     canvas.setText('PainterHeatmapMethod', json.dumps(dict(
         version=3, consistency=data[0].get('consistency'), consistency_method=data[0].get('consistency_method'), capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
         aggregate='Mean of visible descriptive token maps; per-token 5–99% normalization already applied; aggregate stretched 5–95%',

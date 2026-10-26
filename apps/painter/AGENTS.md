@@ -206,7 +206,14 @@ Exports use saved raw-grouped word planes for picked maps and both ranked panels
 legacy files fall back to averaging saved normalized token planes. Picked headers list the word and its pieces with singular “token”
 or plural “tokens”; `PainterWordGrouping` preserves source indices and offsets.
 The all-token reference and interactive viewer retain their token-based maps.
-The third column ranks up to six hot neighborhoods and focused tokens.
+The third column ranks up to six hot and three cold neighborhoods, and six most
+and three least focused words. Cold labels use the local winning word; their
+percentages are mean eligible-word scores. Red/blue area labels have separate
+ranks; Most/Least headings share the token-label background and row gap.
+The all-token export stacks scene-prompt words at the left with circular links
+to their saved word-map peaks, breaking ties by local mean then proximity to
+the tied-cell centroid. Text has no background or outline. Selected-map header
+lists begin with a bold “is most closely associated with”.
 `moss_rank.py` excludes punctuation and English function words using saved word
 spans (retaining content-word subpieces, labeled with their containing word).
 For compiled layouts, eligible maps must overlap descriptive string values:

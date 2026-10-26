@@ -162,10 +162,10 @@ def duplicate_token(token, selected):
     return False
 
 
-def rank(document, pixels, limit=4, image_size=None):
+def rank(document, pixels, limit=4, image_size=None, extremes=False):
     """Return unique spatial rankings; None keeps all entries for fitted headers."""
     cache = document.setdefault('_rankings', {})
-    key = (limit, tuple(image_size) if image_size else None)
+    key = (limit, tuple(image_size) if image_size else None, extremes)
     if key in cache and cache[key][0] is pixels:
         return cache[key][1]
     w, h = document['width'], document['height']
@@ -173,7 +173,7 @@ def rank(document, pixels, limit=4, image_size=None):
     tokens = content_tokens(document)
     planes = [pixels[t['index'] * area:(t['index'] + 1) * area] for t in tokens]
     if not tokens:
-        return dict(areas=[], focused=[])
+        return dict(areas=[], focused=[], area_headers=[], focus_headers=[]) if extremes else dict(areas=[], focused=[])
     mean = [sum(p[i] for p in planes) / (255 * len(planes)) for i in range(area)]
     rx, ry = neighborhood(w, h)
     sx, sy = 2*rx+1, 2*ry+1
@@ -182,7 +182,7 @@ def rank(document, pixels, limit=4, image_size=None):
     for y in range(ry, h-ry):
         for x in range(rx, w-rx):
             score = area_sum(table,w,x-rx,y-ry,x+rx+1,y+ry+1)/(sx*sy)
-            if score > 0:
+            if score > 0 or extremes:
                 candidates.append((score,x,y))
     winners = [0] * area
     winner_scores = [-1] * area
@@ -226,7 +226,30 @@ def rank(document, pixels, limit=4, image_size=None):
             unique.append(item)
             if limit is not None and len(unique) == limit:
                 break
-    result = dict(areas=hot, focused=unique)
+    if extremes:
+        areas = [dict(item, extreme='hot') for item in hot[:6]]
+        for score, x, y in sorted(candidates):
+            if any(math.hypot((x-a['x'])/w, (y-a['y'])/h) < separation for a in areas):
+                continue
+            best = winners[y*w+x]
+            if duplicate_token(tokens[best], areas):
+                continue
+            areas.append(dict(score=score, x=x, y=y, side=sx, side_y=sy,
+                              token=dict(tokens[best]), extreme='cold',
+                              association=winner_scores[y*w+x]/(255*sx*sy), percentage=score*100))
+            if sum(a['extreme'] == 'cold' for a in areas) == 3:
+                break
+        spread = [dict(item, extreme='most') for item in unique[:6]]
+        for item in sorted(focused, key=lambda item: (-item['radius'], item['token']['index'])):
+            if not duplicate_token(item['token'], spread):
+                spread.append(dict(item, extreme='least'))
+            if sum(a['extreme'] == 'least' for a in spread) == 3:
+                break
+        result = dict(areas=areas, focused=spread,
+                      area_headers=unique_entries(hot, areas),
+                      focus_headers=unique_entries(unique, spread))
+    else:
+        result = dict(areas=hot, focused=unique)
     cache[key] = (pixels, result)
     return result
 
