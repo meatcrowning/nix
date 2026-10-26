@@ -1,4 +1,4 @@
-{ pkgs, lib, config, ... }:
+{ pkgs, lib, config, host, ... }:
 
 # The stock appmenu imports native DBus menus. This adjacent applet supplies
 # desktop menus, a Window fallback, and Vivaldi's own menus over a loopback
@@ -69,7 +69,33 @@ let
   };
 in
 {
-  home.packages = [ nativeInterface ];
+  # Fedora Plasma cannot load Nix's Qt plugins. Like Oxygen on book, build
+  # this interface against Fedora's libraries and install in its user path.
+  # Prerequisites: libplasma-devel, qt6-qtwebsockets-devel, KF6 development
+  # packages and the native CMake/GCC toolchain. Run after source updates.
+  home.packages = [ nativeInterface ] ++ lib.optionals (host == "air") [
+    (pkgs.writeShellScriptBin "plasma-menubar-build" ''
+      set -euo pipefail
+      WORK=$(/usr/bin/mktemp -d "$HOME/.cache/plasma-menubar-build.XXXXXX")
+      trap '/usr/bin/rm -rf -- "$WORK"' EXIT
+      env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
+          -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \
+        /usr/bin/cmake -S ${./plasma-menubar-files/native} -B "$WORK" -G Ninja \
+          -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
+          -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      /usr/bin/cmake --build "$WORK" -j2
+      (
+        unset DISPLAY WAYLAND_DISPLAY
+        export QT_QPA_PLATFORM=offscreen
+        source ${../../tools/lib/session-guard.sh}
+        sg_require_offscreen
+        /usr/bin/ctest --test-dir "$WORK" --output-on-failure
+      )
+      /usr/bin/install -Dm755 "$WORK/org.kde.lam.menubar.so" \
+        "$HOME/.local/lib64/qt6/plugins/plasma/applets/org.kde.lam.menubar.so"
+      echo "Menu interface installed; reload Plasma to use it."
+    '')
+  ];
   xdg.dataFile."plasma/plasmoids/${pkgId}".source = package;
 
   # Installing a plasmoid package never instantiates it, and Plasma has no
