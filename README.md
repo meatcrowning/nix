@@ -1,4 +1,4 @@
-# `nixos/hyprland/qs/plasma/...`
+# `nixos/hyprland/Qt/GTK/...`
 
 monorepo for what is essentially my entire system (and some random side projects). point an agent at this and ask it to explain. 
 
