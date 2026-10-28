@@ -572,7 +572,7 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         # Original panel is unmodified; the thermal panel differs.
         title_height = int(grid.text('PainterTitleHeight'))
         assert grid.text('Title') == 'saved-moss — token association heatmaps'
-        image_y = title_height + 12 + header + 4
+        image_y = title_height - int(grid.text('PainterComparisonTopTrim')) + 12 + header + 4
         assert grid.pixelColor(16, image_y) == original.pixelColor(4, 4)
         assert grid.pixelColor(large_width + 28, image_y) != original.pixelColor(4, 4)
         ctl.inspection.toggleGrid()

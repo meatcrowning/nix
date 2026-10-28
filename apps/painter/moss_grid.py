@@ -184,7 +184,7 @@ def annotations(painter, rect, ranking, doc, font, padding):
 
 
 def add_title(image, model):
-    """Prepend a single title row, preserving every existing comparison pixel."""
+    """Fit the title and column headings with matching small gaps above/below."""
     title = '%s — token association heatmaps' % (Path(model).stem if model else 'Unknown model')
     font = QFont('sans-serif')
     font.setPixelSize(max(16, min(72, image.width() // 65)))
@@ -195,21 +195,31 @@ def add_title(image, model):
         font.setPixelSize(font.pixelSize()-1)
         metrics = QFontMetrics(font)
     bounds = metrics.tightBoundingRect(title)
-    height = bounds.height()
-    result = QImage(image.width(), image.height()+height, QImage.Format_RGB32)
+    vertical_padding = max(3, round(font.pixelSize() / 10))
+    height = bounds.height() + 2 * vertical_padding
+    # The first panel headers already contain top padding. Remove only blank
+    # scanlines so the title's lower gap meets their first actual text pixels.
+    pixels = image.constBits()
+    stride = image.bytesPerLine()
+    background = bytes(pixels[:4]) * image.width()
+    trim = 0
+    while trim < image.height() and bytes(pixels[trim*stride:trim*stride + image.width()*4]) == background:
+        trim += 1
+    result = QImage(image.width(), image.height()-trim+height, QImage.Format_RGB32)
     if result.isNull():
         raise ValueError('Not enough memory for the comparison title')
     result.fill(QColor('#15191f'))
     painter = QPainter(result)
-    painter.drawImage(0, height, image)
+    painter.drawImage(0, height, image.copy(0, trim, image.width(), image.height()-trim))
     painter.setFont(font)
     painter.setPen(QColor('#f4f5f7'))
-    painter.drawText(QPointF(padding, -bounds.top()), title)
+    painter.drawText(QPointF(padding, vertical_padding-bounds.top()), title)
     painter.end()
     for key in image.textKeys():
         result.setText(key, image.text(key))
     result.setText('Title', title)
     result.setText('PainterTitleHeight', str(height))
+    result.setText('PainterComparisonTopTrim', str(trim))
     return result
 
 

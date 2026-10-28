@@ -3,34 +3,26 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen, QPainterPath, QPain
 from PySide6.QtCore import Qt, QPointF, QRectF
 import moss_data
 import moss_rank
-WORD_SIZE = 10
-ROW_SPACING = 16.5
-LABEL_HEIGHT = 14.5
+WORD_SIZE = 12
+ROW_SPACING = 18.5
+LABEL_HEIGHT = 16.5
 MARGIN = 13
 COLUMN_GAP = 16
 
 COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff')
 
 
-def label_geometry(count, height):
-    """Expand short captions vertically; longer captions retain the fixed columns."""
-    available = max(1, height - 2 * MARGIN)
-    rows = max(1, int(available // ROW_SPACING))
-    spacing = available / count if 0 < count <= rows else ROW_SPACING
-    return rows, spacing, spacing / ROW_SPACING
-
-
-def label_positions(items, height, metrics):
-    """Fill down, then right; only a short single column expands to full height."""
-    rows, spacing, _ = label_geometry(len(items), height)
+def label_positions(items, width, height, metrics):
+    """Stack from the top right; overflow continues in columns to the left."""
+    rows = max(1, int(max(1, height - 2 * MARGIN) // ROW_SPACING))
     positions = []
-    x = MARGIN
+    right = width - MARGIN
     for start in range(0, len(items), rows):
         column = items[start:start + rows]
         widths = [metrics.horizontalAdvance(item['text']) for item in column]
-        positions.extend((x, MARGIN + (row + .5) * spacing, width)
-                         for row, width in enumerate(widths))
-        x += max(widths) + COLUMN_GAP
+        positions.extend((right - word_width, MARGIN + (row + .5) * ROW_SPACING, word_width)
+                         for row, word_width in enumerate(widths))
+        right -= max(widths) + COLUMN_GAP
     return positions
 
 
@@ -49,13 +41,12 @@ def draw(p, rect, words):
     p.save()
     p.setClipRect(rect)
     p.translate(rect.x(), rect.y())
-    _, spacing, _ = label_geometry(len(items), h)
     font = QFont('sans-serif')
     font.setPixelSize(WORD_SIZE)
     font.setBold(True)
     fm = QFontMetrics(font)
-    label_height = min(LABEL_HEIGHT, spacing - 2)
-    positions = label_positions(items, h, fm)
+    label_height = LABEL_HEIGHT
+    positions = label_positions(items, w, h, fm)
     entries = []
     mw, mh = (wd['width'], wd['height'])
     area = mw * mh
@@ -84,7 +75,7 @@ def draw(p, rect, words):
     for i, e in enumerate(entries):
         color = QColor(COLORS[i % 6])
         color.setAlpha(150)
-        a = QPointF(e['x'] + e['width'] + 7, e['y'])
+        a = QPointF(e['x'] - 7, e['y'])
         b = e['point']
         p.setPen(QPen(QColor(0, 0, 0, 65), 2.3))
         p.drawLine(a, b)
