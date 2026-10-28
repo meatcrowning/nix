@@ -191,3 +191,9 @@ the matching host rebuild. Do not relaunch the user's Chatter for verification.
 a top system rebuild. Keep it under the existing Ollama service lifecycle,
 tunnel, and warden contract; use `tools/qwen38-ollama-shim-test.py` with stub
 backends for verification, never the user's active inference service.
+
+Qwen QAT supports images through its pinned Q8 vision projector. Install it on
+top with `python3 apps/oracle/tools/fetch-qwen38-projector.py` before applying
+the service. The router verifies both artifacts before loading and converts
+Ollama base64 images to llama.cpp image content parts. Bonsai remains text-only;
+image requests to that route fail explicitly. Book uses the same remote service.

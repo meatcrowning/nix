@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Protocol regression test for qwen38-ollama-shim.py; no real daemon/GPU."""
 
+import base64
 import importlib.util
 import json
 import os
@@ -173,7 +174,7 @@ def main():
 
         show = json.loads(post(base + "/api/show", {"model": shim.MODEL}))
         assert show["details"]["quantization_level"] == "Q2_0"
-        assert show["capabilities"] == ["completion", "tools", "thinking"]
+        assert show["capabilities"] == ["completion", "tools", "thinking", "vision"]
 
         with urllib.request.urlopen(base + "/api/ps", timeout=5) as response:
             models = json.loads(response.read())["models"]
@@ -218,6 +219,30 @@ def main():
         assert result["eval_count"] == 3 and result["eval_duration"] == 150_000_000
         assert shim.ENGINES.starts == 2
 
+        # Both streaming modes retain text and multiple images in order.
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\nfixture").decode()
+        jpeg = base64.b64encode(b"\xff\xd8\xfffixture").decode()
+        for stream in (False, True):
+            post(base + "/api/chat", {"model": shim.MODEL, "stream": stream,
+                "messages": [{"role": "user", "content": "Compare", "images": [png, jpeg]},
+                             {"role": "user", "content": "", "images": [png]}]})
+            messages = Llama.seen[-1]["messages"]
+            assert messages[0]["content"] == [
+                {"type": "text", "text": "Compare"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + png}},
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + jpeg}}]
+            assert messages[1]["content"] == messages[0]["content"][1:2]
+        for images in (["not base64!"], [base64.b64encode(b"not image").decode()], "bad"):
+            starts = shim.ENGINES.starts
+            try:
+                post(base + "/api/chat", {"model": shim.MODEL,
+                    "messages": [{"role": "user", "images": images}]})
+            except urllib.error.HTTPError as error:
+                assert error.code == 400
+            else:
+                raise AssertionError("invalid image accepted")
+            assert shim.ENGINES.starts == starts
+
         for mode in ("error", "eof", "length"):
             Llama.mode = mode
             frames = [json.loads(line) for line in post(base + "/api/chat", {
@@ -235,6 +260,14 @@ def main():
                                hashlib.sha256(b"fake model").hexdigest(),
                                "prism-server", 32768, "PQ2_0", shim.BONSAI.args)
             shim.ROUTES.append(route)
+            assert "vision" not in json.loads(post(base + "/api/show", {"model": route.name}))["capabilities"]
+            try:
+                post(base + "/api/chat", {"model": route.name,
+                    "messages": [{"role": "user", "images": [png]}]})
+            except urllib.error.HTTPError as error:
+                assert error.code == 400
+            else:
+                raise AssertionError("text-only route discarded image")
             with urllib.request.urlopen(base + "/api/tags") as response:
                 assert sum(m["name"] == route.name for m in json.load(response)["models"]) == 1
             result = json.loads(post(base + "/api/chat", {
@@ -286,15 +319,23 @@ def main():
             engines = shim.Engines()
             route2 = shim.Route("second", str(weights), 10, route.digest,
                                 "stock-server", 16384, "Q2_0", shim.QWEN.args)
+            projector = Path(tmp) / "mmproj.gguf"
+            projector.write_bytes(b"projector")
+            route2.projector = shim.Artifact("projector", str(projector), 9,
+                                            hashlib.sha256(b"projector").hexdigest())
             with patch.object(shim.subprocess, "Popen", Process), \
                  patch.object(shim.urllib.request, "urlopen", lambda *a, **k: Health(b'{"models":[]}')):
                 engines.start_llama(route)
                 first_argv = events[-1][1]
+                assert "--no-mmproj" in first_argv
                 assert first_argv[0] == "prism-server" and "--spec-type" not in first_argv
                 assert first_argv[first_argv.index("--parallel") + 1] == "1"
                 engines.start_llama(route2)
                 assert [e[0] for e in events] == ["start", "stop", "start"]
                 assert events[-1][1][0] == "stock-server" and "--spec-type" in events[-1][1]
+                argv = events[-1][1]
+                assert "--no-mmproj" not in argv
+                assert argv[argv.index("--mmproj") + 1] == str(projector)
                 engines.stop_llama(route)
                 assert engines.route is route2
                 engines.stop_llama()
@@ -308,6 +349,22 @@ def main():
                 else:
                     raise AssertionError("failed unload did not block load")
                 launch.assert_not_called()
+            projector.write_bytes(b"corrupted")
+            with patch.object(shim.subprocess, "Popen") as launch:
+                try:
+                    engines.start_llama(route2)
+                except RuntimeError:
+                    pass
+                else:
+                    raise AssertionError("corrupt projector accepted")
+                launch.assert_not_called()
+            projector.unlink()
+            try:
+                route2.verify()
+            except FileNotFoundError:
+                pass
+            else:
+                raise AssertionError("missing projector accepted")
             weights.write_bytes(b"wrong data")
             try:
                 route.verify()

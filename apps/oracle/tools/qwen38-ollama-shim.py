@@ -15,6 +15,8 @@ one first, preserving the one-model invariant of OLLAMA_MAX_LOADED_MODELS=1.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -48,10 +50,9 @@ LLAMA_BIN = os.environ.get("OLLAMA_SHIM_LLAMA_BIN", "llama-server")
 START_TIMEOUT = int(os.environ.get("QWEN38_Q2_START_TIMEOUT", "900"))
 
 
-class Route:
-    def __init__(self, name, path, size, digest, binary, ctx, quant, args=()):
+class Artifact:
+    def __init__(self, name, path, size, digest):
         self.name, self.path, self.size, self.digest = name, path, size, digest
-        self.binary, self.ctx, self.quant, self.args = binary, ctx, quant, args
         self.verified_stat = None
 
     def installed(self):
@@ -70,6 +71,18 @@ class Route:
                 raise RuntimeError(f"{self.name}: model size/SHA-256 mismatch")
             self.verified_stat = identity
 
+
+class Route(Artifact):
+    def __init__(self, name, path, size, digest, binary, ctx, quant, args=(), projector=None):
+        super().__init__(name, path, size, digest)
+        self.binary, self.ctx, self.quant, self.args = binary, ctx, quant, args
+        self.projector = projector
+
+    def verify(self):
+        super().verify()
+        if self.projector:
+            self.projector.verify()
+
     def details(self):
         return {"format": "gguf", "family": "qwen35",
                 "parameter_size": "26.9B", "quantization_level": self.quant}
@@ -79,11 +92,16 @@ class Route:
                 "digest": "sha256:" + self.digest, "details": self.details()}
 
 
+PROJECTOR_DIGEST = "02262642680a6ea1e44aba92ad3fa551032803f6dc39f880b3cac82a55fea085"
+PROJECTOR = Artifact("Qwen3.8 vision projector",
+    os.environ.get("QWEN38_Q2_MMPROJ_PATH",
+                   "/home/lam/.local/share/qwen38/" + PROJECTOR_DIGEST + ".gguf"),
+    629247168, PROJECTOR_DIGEST)
 QWEN = Route(MODEL, MODEL_PATH, MODEL_SIZE,
              "cadd809e691c5fa2cc33a75020930fc404db84528bff9a06177bf77bedc0a877",
              LLAMA_BIN, CTX, "Q2_0",
              ("--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "24",
-              "--spec-ngram-mod-n-min", "48", "--spec-ngram-mod-n-max", "64"))
+              "--spec-ngram-mod-n-min", "48", "--spec-ngram-mod-n-max", "64"), projector=PROJECTOR)
 BONSAI_DIGEST = "3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1"
 BONSAI = Route("prism-ml/Ternary-Bonsai-2-27B-PQ2_0",
                os.environ.get("BONSAI_MODEL_PATH", "/home/lam/.local/share/bonsai/" + BONSAI_DIGEST + ".gguf"),
@@ -123,7 +141,7 @@ def _tool_arguments(value: object) -> object:
         return {"raw": value}
 
 
-def ollama_messages_to_openai(messages: object) -> list[dict]:
+def ollama_messages_to_openai(messages: object, route=QWEN) -> list[dict]:
     """Add the call ids OpenAI requires to Ollama's id-less tool history."""
     out: list[dict] = []
     pending: list[tuple[str, str]] = []
@@ -156,9 +174,30 @@ def ollama_messages_to_openai(messages: object) -> list[dict]:
             msg["tool_call_id"] = str(msg.get("tool_call_id") or call_id)
             msg["name"] = str(msg.get("name") or msg.get("tool_name") or name)
             msg.pop("tool_name", None)
-        # This model is text-only in the tailored server (--no-mmproj).  The
-        # synthetic /api/show response keeps chatter from sending media here.
-        msg.pop("images", None)
+        images = msg.pop("images", None)
+        if images:
+            if not route.projector:
+                raise ValueError(f"{route.name} does not support images")
+            if not isinstance(images, list):
+                raise ValueError("images must be an array of base64 strings")
+            content = msg.get("content") or ""
+            if not isinstance(content, str):
+                raise ValueError("Ollama image messages require text content")
+            parts = [{"type": "text", "text": content}] if content else []
+            for encoded in images:
+                try:
+                    raw = base64.b64decode(encoded, validate=True)
+                except (ValueError, TypeError, binascii.Error):
+                    raise ValueError("Invalid base64 image") from None
+                mime = ("image/png" if raw.startswith(b"\x89PNG\r\n\x1a\n") else
+                        "image/jpeg" if raw.startswith(b"\xff\xd8\xff") else
+                        "image/webp" if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP" else
+                        "image/gif" if raw[:6] in (b"GIF87a", b"GIF89a") else None)
+                if not mime:
+                    raise ValueError("Unsupported image encoding; use PNG, JPEG, WebP or GIF")
+                parts.append({"type": "image_url", "image_url": {
+                    "url": f"data:{mime};base64,{encoded}"}})
+            msg["content"] = parts
         out.append(msg)
     return out
 
@@ -184,7 +223,7 @@ def ollama_chat_to_openai(body: dict, route=QWEN) -> dict:
     opts = body.get("options") if isinstance(body.get("options"), dict) else {}
     payload = {
         "model": route.name,
-        "messages": ollama_messages_to_openai(body.get("messages")),
+        "messages": ollama_messages_to_openai(body.get("messages"), route),
         "stream": bool(body.get("stream", True)),
         "cache_prompt": True,
         "reasoning_format": "deepseek",
@@ -296,8 +335,8 @@ class Engines:
                 "--temp", "1.0", "--top-p", "0.95", "--top-k", "20",
                 "--min-p", "0.0", "--presence-penalty", "0.0",
                 "--repeat-penalty", "1.0", "--flash-attn", "on",
-                "--no-mmproj", "--slots", "--metrics",
-            ] + list(route.args)
+                "--slots", "--metrics",
+            ] + (["--mmproj", route.projector.path] if route.projector else ["--no-mmproj"]) + list(route.args)
             self.llama = subprocess.Popen(argv)
             self.route = route
             log(f"llama.cpp loading {route.name} (pid {self.llama.pid})")
@@ -468,7 +507,7 @@ class Handler(BaseHTTPRequestHandler):
             "details": route.details(),
             "model_info": {"general.architecture": "qwen35",
                            "qwen35.context_length": 262144},
-            "capabilities": ["completion", "tools", "thinking"],
+            "capabilities": ["completion", "tools", "thinking"] + (["vision"] if route.projector else []),
         })
 
     def _merged_ps(self) -> None:
@@ -498,13 +537,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _chat(self, body: dict, route=QWEN) -> None:
         try:
-            ENGINES.start_llama(route)
             payload = ollama_chat_to_openai(body, route)
+            ENGINES.start_llama(route)
             if payload["stream"]:
                 self._chat_stream(payload)
             else:
                 obj = request_json(LLAMA + "/v1/chat/completions", payload, timeout=3600)
                 self._send_json(200, openai_response_to_ollama(obj, route))
+        except ValueError as error:
+            self._send_json(400, {"error": str(error)})
         except urllib.error.HTTPError as error:
             reason = error.read().decode("utf-8", "replace") or str(error)
             self._send_json(error.code, {"error": reason[:4000]})

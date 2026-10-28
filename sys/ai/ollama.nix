@@ -98,6 +98,8 @@ in {
       QWEN38_Q2_MODEL_PATH = "/home/lam/.ollama/models/blobs/sha256-cadd809e691c5fa2cc33a75020930fc404db84528bff9a06177bf77bedc0a877";
       QWEN38_Q2_MODEL_SIZE = "8759266208";
       QWEN38_Q2_CTX = "32768";
+      # Install with apps/oracle/tools/fetch-qwen38-projector.py.
+      QWEN38_Q2_MMPROJ_PATH = "/home/lam/.local/share/qwen38/02262642680a6ea1e44aba92ad3fa551032803f6dc39f880b3cac82a55fea085.gguf";
       BONSAI_LLAMA_BIN = "${bonsaiLlama}/bin/llama-server";
     };
   };
