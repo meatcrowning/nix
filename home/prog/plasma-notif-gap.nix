@@ -43,7 +43,8 @@ let
         // note it sets the HORIZONTAL inset from the screen edge too.
         readonly property int edgeDistance: 8
 
-        Plasmoid.status: PlasmaCore.Types.PassiveStatus
+        // Passive applets still reserve a panel slot; this helper draws nothing.
+        Plasmoid.status: PlasmaCore.Types.HiddenStatus
         preferredRepresentation: compactRepresentation
         compactRepresentation: Item { implicitWidth: 1; implicitHeight: 1 }
 

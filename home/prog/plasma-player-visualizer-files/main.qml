@@ -7,7 +7,7 @@ import org.kde.plasma.plasma5support as P5Support
 // with the Oxygen decoration, so this applet never starts a second Cava.
 PlasmoidItem {
     id: root
-    Plasmoid.status: PlasmaCore.Types.ActiveStatus
+    Plasmoid.status: playerOwnsVisualizer ? PlasmaCore.Types.HiddenStatus : PlasmaCore.Types.ActiveStatus
     preferredRepresentation: compactRepresentation
     property var levels: []
     property bool playerOwnsVisualizer: false
