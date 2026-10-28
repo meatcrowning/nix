@@ -23,12 +23,10 @@ class TokenMarks(object):
         self.marked = False
         self.tags = [view.get_buffer().create_tag(None) for _ in range(2)]
         self.highlight_tag = view.get_buffer().create_tag(None, underline=1)
-        self.separator = (0, 0, 0)
         view.connect('style-updated', self.style_changed)
         self.style_changed()
         self.request = None
         view.get_buffer().connect('changed', self.changed)
-        view.connect_after('draw', self.draw)
         view.connect('destroy', self.destroy)
         count.set_no_show_all(True)
         count.hide()
@@ -49,7 +47,6 @@ class TokenMarks(object):
             int(round(a*.6+b*.4)) for a,b in zip(rgb(background), rgb(selection))))
         for tag, color in zip(self.tags, style['bands']):
             tag.set_property('background', color)
-        self.separator = tuple(int(style['separator'][i:i+2], 16) / 255.0 for i in (1, 3, 5))
         self.view.queue_draw()
 
     def paint_bands(self):
@@ -161,15 +158,3 @@ class TokenMarks(object):
                 self.boundaries, self.marked = boundaries, marked
                 self.paint_bands()
                 self.view.queue_draw()
-
-    def draw(self, view, cr):
-        cr.set_source_rgb(*self.separator)
-        cr.set_line_width(1)
-        buf = view.get_buffer()
-        for index in self.boundaries:
-            rect = view.get_iter_location(buf.get_iter_at_offset(index))
-            x, y = view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)
-            cr.move_to(x + .5, y + 2)
-            cr.line_to(x + .5, y + rect.height - 2)
-        cr.stroke()
-        return False

@@ -526,19 +526,6 @@ Item {
                         }
                         z: -0.5
                     }
-                    Repeater {
-                        model: textEdit.tokenReady ? node.tokenProbe.boundaries : []
-                        Rectangle {
-                            required property int modelData
-                            readonly property rect mark: {
-                                textEdit.text; textEdit.width; textEdit.font
-                                return textEdit.positionToRectangle(modelData)
-                            }
-                            x: mark.x - 1; y: mark.y + 2
-                            width: 1; height: Math.max(1, mark.height - 4)
-                            color: textEdit.tokenStyle.separator
-                        }
-                    }
                     TapHandler {
                         enabled: node.spec.kind === "prompt" && App.inspection.picking
                         acceptedButtons: Qt.LeftButton

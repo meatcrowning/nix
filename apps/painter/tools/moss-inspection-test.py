@@ -167,7 +167,7 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     box = u.find(win.contentItem(), 'PromptBox', lambda o: o.property('placeholder') == 'Positive')
     editor = u.find(box, 'QQuickTextEdit')
     assert editor.property('text') == 'red sphere'
-    assert any(o.objectName() == 'tokenBoundary' and o.width() == 1 for o in u.walk(box))
+    assert not any(o.objectName() == 'tokenBoundary' for o in u.walk(box))
     bands = next(o for o in u.walk(box) if o.objectName() == 'tokenBands')
     style = u.prop(box, 'tokenStyle')
     assert style['separator'] not in style['bands']

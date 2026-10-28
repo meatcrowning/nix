@@ -162,7 +162,7 @@ discard an otherwise valid downloaded output.
 `moss_inspect.py` owns asynchronous token requests and selected-output maps;
 `moss_data.py` owns the bounded versioned `paHm` PNG chunk. Keep that chunk
 through metadata rewrites. Prompt probes debounce 350 ms, reject stale replies,
-and paint alternating token backgrounds plus distinct separators without changing
+and paint alternating token backgrounds without vertical dividers or changing
 text or undo; native selection stays above the backgrounds. `token_style.py`
 shares the decoration colours across Qt/GTK. Counts use the unweighted
 MOSS tokenizer before wildcard/layout compilation and exclude template tokens.

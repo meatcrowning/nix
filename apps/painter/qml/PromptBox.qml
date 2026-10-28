@@ -388,22 +388,6 @@ Rectangle {
                     return App.inspection.highlightedRanges(input.text, "")
                 }
             }
-            Repeater {
-                model: box.tokenBoundaries
-                Rectangle {
-                    required property int modelData
-                    objectName: "tokenBoundary"
-                    readonly property rect mark: {
-                        var layoutRevision = input.width + input.height + input.text.length
-                        return input.positionToRectangle(modelData)
-                    }
-                    x: mark.x - 0.5
-                    y: mark.y + 2
-                    width: 1
-                    height: Math.max(1, mark.height - 4)
-                    color: box.tokenStyle.separator
-                }
-            }
             selectByMouse: true
             // The selection SURVIVES the menu that acts on it. A TextEdit drops
             // its selection the moment it loses active focus, and opening
