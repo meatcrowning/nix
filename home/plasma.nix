@@ -411,6 +411,8 @@ in
         ShadowSize = 0;
         theme = "Oxygen";
       };
+      # Maximized window controls and title move into the global menu bar.
+      kwinrc.Windows.BorderlessMaximizedWindows = true;
       kwinrc.Desktops.Number = 1;
       kwinrc.Desktops.Rows = 1;
       # The translucent left launcher needs compositor blur on both hosts.

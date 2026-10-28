@@ -39,7 +39,9 @@
      //* dots
 --- a/liboxygen/oxygenhelper.cpp
 +++ b/liboxygen/oxygenhelper.cpp
-@@ -15,7 +15,10 @@
+@@ -15,7 +15,12 @@
++#include <KConfigGroup>
++#include <KSharedConfig>
  #include <KWindowSystem>
  
  #include <QApplication>
@@ -105,7 +107,7 @@
  void Helper::renderWindowBackground(QPainter *p, const QRectF &clipRect, const QWidget *widget, const QWidget *window, const QColor &color, int yShift)
  {
      // get coordinates relative to the client area
-@@ -136,6 +187,22 @@
+@@ -136,6 +189,26 @@
          w = w->parentWidget();
      }
  
@@ -115,9 +117,13 @@
 +    // field's own, not this window's and not a caller's local restart.
 +    const Qt::WindowStates state = window->windowState();
 +    if (state & (Qt::WindowMaximized | Qt::WindowFullScreen)) {
++        // The panel owns the titlebar when KWin maximizes without borders.
++        const bool folded = KSharedConfig::openConfig(QStringLiteral("kwinrc"))
++            ->group(QStringLiteral("Windows"))
++            .readEntry("BorderlessMaximizedWindows", false);
 +        const QPoint inset = (state & Qt::WindowFullScreen)
 +            ? -panelWorkArea().topLeft()
-+            : QPoint(0, titleBarConvention);
++            : QPoint(0, folded ? 0 : titleBarConvention);
 +        const QRectF field = desktopFieldRect(window->screen(), inset);
 +        if (field.isValid()) {
 +            renderWindowBackground(p, clipRect, field.translated(-x, -y), color, -titleBarConvention);

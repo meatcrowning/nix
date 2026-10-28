@@ -100,10 +100,17 @@
         /usr/bin/cmake -S "$WORK/source" -B "$WORK/build" -G Ninja \
           -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
           -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+          -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+          -DCMAKE_INSTALL_RPATH="$HOME/.local/lib64/oxygen-custom" \
           -DBUILD_QT6=ON -DBUILD_QT5=OFF
       env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
           -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \
         /usr/bin/cmake --build "$WORK/build" --target oxygendecoration oxygen6 -j2
+      # The background renderer lives in liboxygenstyle, not the style plugin.
+      # Ship the matching library: a temporary build RPATH otherwise falls back
+      # to Fedora's unpatched renderer as soon as WORK is removed.
+      /usr/bin/install -Dm755 "$WORK/build/bin/liboxygenstyle6.so.$SOURCE_VERSION" \
+        "$HOME/.local/lib64/oxygen-custom/liboxygenstyle6.so.6"
       /usr/bin/install -Dm755 "$WORK/build/bin/org.kde.oxygen.so" "$DEST"
       /usr/bin/install -Dm755 "$WORK/build/bin/oxygen6.so" \
         "$HOME/.local/lib64/qt6/plugins/styles/oxygen6.so"

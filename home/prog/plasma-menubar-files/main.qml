@@ -82,6 +82,9 @@ PlasmoidItem {
     // when our menu closes.  Only an actual task activation clears this.
     property bool desktopPinned: false
 
+    readonly property bool folded: shown !== null && shown.maximized
+        && !shown.fullScreen && !shown.minimized && !vertical
+
     readonly property bool onDesktop: shown === null
     // Non-empty means the stock applet is about to draw this window's real
     // menus to our right, so we must not draw menus of our own beside them.
@@ -469,6 +472,74 @@ PlasmoidItem {
                 ? root.desktopGutter : root.appGutter
             Layout.preferredHeight: 0
             Layout.fillHeight: true
+        }
+
+        // KWin removes the decoration only while fully maximized. Keep its
+        // controls in the same stable representation as the global menus.
+        RowLayout {
+            visible: root.folded
+            spacing: 0
+            Layout.fillHeight: true
+
+            PlasmaComponents3.ToolButton {
+                icon.name: "window-close"
+                Accessible.name: qsTr("Close Window")
+                enabled: root.folded && root.shown.closable
+                implicitHeight: 22
+                implicitWidth: 22
+                padding: 2
+                icon.width: 16
+                icon.height: 16
+                focusPolicy: Qt.NoFocus
+                Layout.preferredWidth: 22
+                Layout.fillHeight: true
+                onClicked: if (root.folded) tasksModel.requestClose(root.activeIndex())
+                PlasmaComponents3.ToolTip.text: Accessible.name
+            }
+            PlasmaComponents3.ToolButton {
+                icon.name: "window-minimize"
+                Accessible.name: qsTr("Minimize")
+                enabled: root.folded && root.shown.minimizable
+                implicitHeight: 22
+                implicitWidth: 22
+                padding: 2
+                icon.width: 16
+                icon.height: 16
+                focusPolicy: Qt.NoFocus
+                Layout.preferredWidth: 22
+                Layout.fillHeight: true
+                onClicked: if (root.folded) tasksModel.requestToggleMinimized(root.activeIndex())
+                PlasmaComponents3.ToolTip.text: Accessible.name
+            }
+            PlasmaComponents3.ToolButton {
+                icon.name: "window-restore"
+                Accessible.name: qsTr("Restore")
+                enabled: root.folded && root.shown.maximizable
+                implicitHeight: 22
+                implicitWidth: 22
+                padding: 2
+                icon.width: 16
+                icon.height: 16
+                focusPolicy: Qt.NoFocus
+                Layout.preferredWidth: 22
+                Layout.fillHeight: true
+                onClicked: if (root.folded) tasksModel.requestToggleMaximized(root.activeIndex())
+                PlasmaComponents3.ToolTip.text: Accessible.name
+            }
+            PlasmaComponents3.Label {
+                text: root.folded ? root.shown.title : ""
+                Layout.preferredWidth: Math.min(implicitWidth, 220)
+                Layout.fillHeight: true
+                Layout.leftMargin: 4
+                Layout.rightMargin: 8
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                MouseArea {
+                    anchors.fill: parent
+                    onDoubleClicked: if (root.folded && root.shown.maximizable)
+                        tasksModel.requestToggleMaximized(root.activeIndex())
+                }
+            }
         }
 
         Repeater {
