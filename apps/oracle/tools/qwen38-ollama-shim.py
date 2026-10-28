@@ -100,7 +100,10 @@ PROJECTOR = Artifact("Qwen3.8 vision projector",
 QWEN = Route(MODEL, MODEL_PATH, MODEL_SIZE,
              "cadd809e691c5fa2cc33a75020930fc404db84528bff9a06177bf77bedc0a877",
              LLAMA_BIN, CTX, "Q2_0",
-             ("--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "24",
+             # The router admits one request; extra recurrent slots and large
+             # prompt batches leave no workspace for vision on top's 12 GB GPU.
+             ("--parallel", "1", "--batch-size", "512", "--ubatch-size", "128",
+              "--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "24",
               "--spec-ngram-mod-n-min", "48", "--spec-ngram-mod-n-max", "64"), projector=PROJECTOR)
 BONSAI_DIGEST = "3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1"
 BONSAI = Route("prism-ml/Ternary-Bonsai-2-27B-PQ2_0",

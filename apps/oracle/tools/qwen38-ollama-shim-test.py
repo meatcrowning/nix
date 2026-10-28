@@ -334,6 +334,8 @@ def main():
                 assert [e[0] for e in events] == ["start", "stop", "start"]
                 assert events[-1][1][0] == "stock-server" and "--spec-type" in events[-1][1]
                 argv = events[-1][1]
+                assert argv[argv.index("--parallel") + 1] == "1"
+                assert argv[argv.index("--ubatch-size") + 1] == "128"
                 assert "--no-mmproj" not in argv
                 assert argv[argv.index("--mmproj") + 1] == str(projector)
                 engines.stop_llama(route)
