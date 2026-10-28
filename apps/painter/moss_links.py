@@ -49,16 +49,12 @@ def draw(p, rect, words):
     p.save()
     p.setClipRect(rect)
     p.translate(rect.x(), rect.y())
-    _, spacing, scale = label_geometry(len(items), h)
+    _, spacing, _ = label_geometry(len(items), h)
     font = QFont('sans-serif')
-    font.setPixelSize(max(WORD_SIZE, round(WORD_SIZE * scale)))
+    font.setPixelSize(WORD_SIZE)
     font.setBold(True)
     fm = QFontMetrics(font)
-    # Very short captions can otherwise grow a single word beyond the panel.
-    while font.pixelSize() > WORD_SIZE and max(fm.horizontalAdvance(t['text']) for t in items) > w - 2*MARGIN:
-        font.setPixelSize(font.pixelSize() - 1)
-        fm = QFontMetrics(font)
-    label_height = min(LABEL_HEIGHT * font.pixelSize() / WORD_SIZE, spacing - 2)
+    label_height = min(LABEL_HEIGHT, spacing - 2)
     positions = label_positions(items, h, fm)
     entries = []
     mw, mh = (wd['width'], wd['height'])

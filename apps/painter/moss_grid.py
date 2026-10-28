@@ -194,7 +194,8 @@ def add_title(image, model):
     while metrics.horizontalAdvance(title) > image.width()-padding*2 and font.pixelSize() > 8:
         font.setPixelSize(font.pixelSize()-1)
         metrics = QFontMetrics(font)
-    height = metrics.height() + padding*2
+    bounds = metrics.tightBoundingRect(title)
+    height = bounds.height()
     result = QImage(image.width(), image.height()+height, QImage.Format_RGB32)
     if result.isNull():
         raise ValueError('Not enough memory for the comparison title')
@@ -203,7 +204,7 @@ def add_title(image, model):
     painter.drawImage(0, height, image)
     painter.setFont(font)
     painter.setPen(QColor('#f4f5f7'))
-    painter.drawText(QRect(padding, 0, image.width()-padding*2, height), Qt.AlignVCenter | Qt.AlignLeft, title)
+    painter.drawText(QPointF(padding, -bounds.top()), title)
     painter.end()
     for key in image.textKeys():
         result.setText(key, image.text(key))
