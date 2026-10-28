@@ -211,12 +211,12 @@ The all-token reference and interactive viewer retain their token-based maps.
 The area panel ranks up to four hot and two cold neighborhoods. Cold labels
 use the local winning word; their percentages are mean eligible-word scores.
 Red/blue area labels have separate ranks.
-The all-token export stacks scene-prompt words at the top right with circular links
+The all-token export stacks scene-prompt words at the top left with circular links
 to their saved word-map peaks, breaking ties by local mean then proximity to
 the tied-cell centroid. Words use tight dark backings matching the ranked labels,
-with no glyph outline. All prompts use a 12 px font and a fixed 18.5 px row
-pitch, continuing down then left in columns sized to their widest word. Words
-align to each column’s right edge. Selected-map header
+with no glyph outline. All prompts use a 20 px font and a fixed 26.5 px row
+pitch, continuing down then right in columns sized to their widest word. Words
+align to each column’s left edge. Selected-map header
 lists begin with a bold “is most closely associated with”.
 `moss_rank.py` excludes punctuation and English function words using saved word
 spans (retaining content-word subpieces, labeled with their containing word).

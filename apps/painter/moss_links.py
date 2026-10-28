@@ -3,26 +3,26 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen, QPainterPath, QPain
 from PySide6.QtCore import Qt, QPointF, QRectF
 import moss_data
 import moss_rank
-WORD_SIZE = 12
-ROW_SPACING = 18.5
-LABEL_HEIGHT = 16.5
+WORD_SIZE = 20
+ROW_SPACING = 26.5
+LABEL_HEIGHT = 24.5
 MARGIN = 13
 COLUMN_GAP = 16
 
 COLORS = ('#ffcc44', '#42dbff', '#ff70ce', '#b1f573', '#ff9860', '#c6a0ff')
 
 
-def label_positions(items, width, height, metrics):
-    """Stack from the top right; overflow continues in columns to the left."""
+def label_positions(items, height, metrics):
+    """Stack from the top left; overflow continues in columns to the right."""
     rows = max(1, int(max(1, height - 2 * MARGIN) // ROW_SPACING))
     positions = []
-    right = width - MARGIN
+    left = MARGIN
     for start in range(0, len(items), rows):
         column = items[start:start + rows]
         widths = [metrics.horizontalAdvance(item['text']) for item in column]
-        positions.extend((right - word_width, MARGIN + (row + .5) * ROW_SPACING, word_width)
+        positions.extend((left, MARGIN + (row + .5) * ROW_SPACING, word_width)
                          for row, word_width in enumerate(widths))
-        right -= max(widths) + COLUMN_GAP
+        left += max(widths) + COLUMN_GAP
     return positions
 
 
@@ -46,7 +46,7 @@ def draw(p, rect, words):
     font.setBold(True)
     fm = QFontMetrics(font)
     label_height = LABEL_HEIGHT
-    positions = label_positions(items, w, h, fm)
+    positions = label_positions(items, h, fm)
     entries = []
     mw, mh = (wd['width'], wd['height'])
     area = mw * mh
@@ -75,7 +75,7 @@ def draw(p, rect, words):
     for i, e in enumerate(entries):
         color = QColor(COLORS[i % 6])
         color.setAlpha(150)
-        a = QPointF(e['x'] - 7, e['y'])
+        a = QPointF(e['x'] + e['width'] + 7, e['y'])
         b = e['point']
         p.setPen(QPen(QColor(0, 0, 0, 65), 2.3))
         p.drawLine(a, b)
