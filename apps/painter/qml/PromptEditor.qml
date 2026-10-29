@@ -132,81 +132,12 @@ Panel {
         onResized: function (h) { Prefs.set("prompt.negH", h) }
         onMenuRequested: (sx, sy, items) => panel.menuRequested(sx, sy, items)
     }
-    Column {
-        width: parent.width
-        visible: App.layoutSupport
-        spacing: 6
-        function seedMode(random) {
-            root.set("seed", random ? -1 : (root.gen.seed < 0 ? App.freshSeed() : root.gen.seed))
-            root.set("randomSeed", random)
-            root.set("reuseSeed", false)
-        }
-        RowLayout {
-            width: parent.width
-            spacing: 4
-            Button {
-                icon.name: "media-playlist-shuffle"
-                display: AbstractButton.IconOnly
-                implicitWidth: implicitHeight
-                Accessible.name: "Randomize seed"
-                ToolTip.visible: hovered
-                ToolTip.text: "Randomize seed for each generation"
-                onClicked: parent.parent.seedMode(true)
-            }
-            Button {
-                icon.name: "document-new"
-                display: AbstractButton.IconOnly
-                implicitWidth: implicitHeight
-                Accessible.name: "New fixed seed"
-                ToolTip.visible: hovered
-                ToolTip.text: "New fixed seed"
-                onClicked: {
-                    root.set("seed", App.freshSeed())
-                    parent.parent.seedMode(false)
-                }
-            }
-            ComboBox {
-                model: ["Fixed", "Random", "Reuse last"]
-                currentIndex: root.gen.reuseSeed ? 2 : root.gen.randomSeed ? 1 : 0
-                onActivated: index => {
-                    if (index === 2) {
-                        root.set("randomSeed", false)
-                        root.set("reuseSeed", true)
-                        if (App.lastSeed >= 0) root.set("seed", App.lastSeed)
-                    } else parent.parent.seedMode(index === 1)
-                }
-            }
-            PixelText {
-                text: "Seed number"
-                Layout.alignment: Qt.AlignVCenter
-            }
-            SeedInput {
-                Layout.fillWidth: true
-                Layout.minimumWidth: 40
-                Layout.preferredWidth: 100
-                enabled: !root.gen.randomSeed && !root.gen.reuseSeed
-                value: root.gen.reuseSeed && App.lastSeed >= 0 ? App.lastSeed : root.gen.seed
-                onEdited: value => root.set("seed", value)
-            }
-        }
-        Row {
-            width: parent.width
-            spacing: 4
-            PixelText { text: "AR"; anchors.verticalCenter: parent.verticalCenter }
-            Spin { width: 34; value: root.gen.aspectW; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectW", Math.round(v)); root.recomputeDims() } }
-            PixelText { text: ":"; anchors.verticalCenter: parent.verticalCenter }
-            Spin { width: 34; value: root.gen.aspectH; from: 1; to: 999; step: 1; onEdited: v => { root.set("aspectH", Math.round(v)); root.recomputeDims() } }
-            PixelText { text: "MP"; anchors.verticalCenter: parent.verticalCenter }
-            Spin { width: 64; value: root.gen.megapixels; from: .05; to: 16; step: .1; decimals: 6; trimZeros: true; onEdited: v => { root.set("megapixels", v); root.recomputeDims() } }
-            PixelText { text: root.gen.width + " × " + root.gen.height; anchors.verticalCenter: parent.verticalCenter }
-        }
-    }
     Loader {
         width: parent.width
         height: active && item ? item.implicitHeight : 0
         active: App.layoutSupport
         visible: active
-        sourceComponent: LayoutEditor { generation: root.gen }
+        sourceComponent: LayoutEditor { generation: root.gen; sceneOnly: true }
     }
 
 }

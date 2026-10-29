@@ -31,6 +31,16 @@ class ParameterForm(object):
         self.params_scroll = params_scroll
         params_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         params_scroll.add_with_viewport(params)
+        sections = {}
+        for name in ('Prompt', 'Latent', 'Model', 'Sampling', 'Regions'):
+            expander = Gtk.Expander(label=name)
+            expander.set_expanded(True)
+            body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            expander.add(body)
+            params.pack_start(expander, False, False, 0)
+            sections[name] = (expander, body)
+        self.sections = sections
+        params = sections['Model'][1]
         self.mode_store = Gtk.ListStore(str, str, bool)
         self.mode = Gtk.ComboBox.new_with_model(self.mode_store)
         cell = Gtk.CellRendererText()
@@ -58,6 +68,7 @@ class ParameterForm(object):
         self.model_info.set_line_wrap(True)
         self.model_info.set_no_show_all(True)
         params.pack_start(self.model_info, False, False, 0)
+        params = sections['Prompt'][1]
         self.wildcard_names = None
         self.wildcard_cards = {}
         self.wildcard_buttons = Gtk.Box(spacing=2)
@@ -97,19 +108,14 @@ class ParameterForm(object):
             self.controls[key] = text
             self.rows[key] = box
 
-        self.layout_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        prompt_tail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        params.remove(self.rows['negative'])
-        params.pack_start(prompt_tail, False, False, 0)
-        prompt_tail.pack_start(self.rows['negative'], False, False, 0)
-        prompt_tail.pack_start(self.layout_box, False, False, 0)
-
+        self.scene_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        params.pack_start(self.scene_box, False, False, 0)
+        self.layout_box = sections['Regions'][1]
         self.grid = Gtk.Grid()
         self.grid.set_row_spacing(6)
         self.grid.set_column_spacing(10)
         self.placement_grid = self.grid
-        prompt_tail.pack_start(self.grid, False, False, 0)
-        prompt_tail.reorder_child(self.grid, 1)
+        sections['Latent'][1].pack_start(self.grid, False, False, 0)
         self.grid_row = 0
         seed_actions = Gtk.Box(spacing=4)
         randomize = Gtk.Button()
@@ -172,12 +178,9 @@ class ParameterForm(object):
         self.dimensions = label('')
         self.dimensions.set_ellipsize(Pango.EllipsizeMode.END)
         dimensions_row.pack_start(self.dimensions, False, False, 0)
-        self.sampling = Gtk.Expander(label='Sampling settings')
-        self.sampling.set_expanded(True)
+        self.sampling = sections['Sampling'][0]
         self.sampling.connect('notify::expanded', self.sampling_toggled)
-        params.pack_start(self.sampling, False, False, 0)
-        params = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.sampling.add(params)
+        params = sections['Sampling'][1]
         self.grid = Gtk.Grid()
         self.grid.set_row_spacing(6)
         self.grid.set_column_spacing(10)
@@ -485,7 +488,8 @@ class ParameterForm(object):
             marks.update(self.state)
         self.controls['megapixels'].set_digits(6 if flags.get('layoutSupport') else 1)
         self.controls['megapixels'].set_range(.05 if flags.get('layoutSupport') else .1, 16 if flags.get('layoutSupport') else 8)
-        self.layout_box.set_visible(bool(flags.get('layoutSupport')))
+        self.sections['Regions'][0].set_visible(bool(flags.get('layoutSupport')))
+        self.scene_box.set_visible(bool(flags.get('layoutSupport')))
         self.ppm.set_visible(bool(flags.get('layoutSupport')))
         for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
             self.visible(key, flags.get('layoutSupport', False))
@@ -553,10 +557,11 @@ class ParameterForm(object):
             if self.layout_editor and self.layout_model == self.state['model']:
                 self.layout_editor.load(doc)
                 return
-            for child in self.layout_box.get_children():
-                child.destroy()
+            for container in (self.layout_box, self.scene_box):
+                for child in container.get_children():
+                    child.destroy()
             self.layout_model = self.state['model']
-            self.layout_editor = open_editor(self.layout_box, doc, self.layout_changed, owner=self)
+            self.layout_editor = open_editor(self.layout_box, doc, self.layout_changed, owner=self, scene_parent=self.scene_box)
         except (ValueError, TypeError, KeyError) as exc:
             self.message(str(exc), True)
 

@@ -22,6 +22,7 @@ Control {
     Binding { target: editor; property: "palette.highlightedText"; value: Theme.accent; when: !editor.nativeStyle }
     Binding { target: editor; property: "font.family"; value: Theme.font; when: !editor.nativeStyle }
     Binding { target: editor; property: "font.pixelSize"; value: Theme.fontSize; when: !editor.nativeStyle }
+    property bool sceneOnly: false
     required property var generation
     readonly property var bridge: App.layoutEditor
     function sync() {
@@ -33,12 +34,12 @@ Control {
     Connections { target: App; function onModelChanged() { editor.sync() } }
     TokenProbe {
         id: regionTokens
-        objectName: "regionTokenProbe"
+        objectName: editor.sceneOnly ? "sceneTokenProbe" : "regionTokenProbe"
         text: editor.bridge.regionPrompt
-        active: App.layoutSupport && editor.bridge.regionIdentity !== ""
+        active: !editor.sceneOnly && App.layoutSupport && editor.bridge.regionIdentity !== ""
     }
-    LayoutNode { id: tree; anchors.fill: parent; anchors.margins: 6; spec: editor.bridge.root; bridge: editor.bridge; tokenProbe: regionTokens }
-    Connections { target: editor.bridge.toolkitObject; function onReferenceRequested() { reference.open() } }
+    LayoutNode { id: tree; anchors.fill: parent; anchors.margins: 6; spec: editor.sceneOnly ? editor.bridge.sceneRoot : editor.bridge.root; bridge: editor.bridge; tokenProbe: regionTokens }
+    Connections { target: editor.bridge.toolkitObject; function onReferenceRequested() { if (!editor.sceneOnly) reference.open() } }
     FileDialog {
         id: reference
         title: "Reference underlay"

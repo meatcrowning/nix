@@ -201,6 +201,21 @@ def core():
             scene['enabled'] = False
             built = reg.build(entry, params)
             node = next(n for n in built['prompt'].values() if n['_meta']['painter_role'] == 'encode_pos')
+            scene_prompt = json.loads(node['inputs']['text'])
+            assert scene_prompt['items'] == [] and 'canvas' not in scene_prompt['summary']
+            assert scene_prompt['summary']['meta'] == ['watercolour']
+            assert scene_prompt['summary']['palette'] == ['blue', 'gold']
+            # Disabled regions never leak their caption or geometry into scene conditioning.
+            region = M.Editor(scene)
+            region.add()['caption'] = 'A giant red dragon'
+            region.doc['enabled'] = False
+            params['moss_layout'] = region.doc
+            built = reg.build(entry, params)
+            node = next(n for n in built['prompt'].values() if n['_meta']['painter_role'] == 'encode_pos')
+            assert json.loads(node['inputs']['text']) == scene_prompt
+            params['moss_layout']['summary'].update(meta=[], palette=[])
+            built = reg.build(entry, params)
+            node = next(n for n in built['prompt'].values() if n['_meta']['painter_role'] == 'encode_pos')
             assert node['inputs']['text'] == 'A quiet harbour'
     draft = dict(width=1536, height=1024, bbox_coord_space='abs', bbox_format='xyxy',
                  summary=dict(caption='A campaign', canvas='single', meta=['poster']),
@@ -298,6 +313,8 @@ def qt():
     accepted = []
     editor = LayoutUI(ui, M.fresh(caption='A poster'), accepted.append)
     toolbar = ui.root.nodes[0]
+    assert editor.fields['summary.meta'].parent().parent() == ui.scene_root
+    assert editor.fields['summary.palette'].parent().parent() == ui.scene_root
     assert editor.fields['enabled'].parent() == toolbar
     assert editor.preview_toggle.parent() == toolbar
     assert editor.preview_toggle.kind == 'iconcheck'

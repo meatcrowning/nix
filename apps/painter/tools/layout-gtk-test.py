@@ -116,6 +116,8 @@ def run(parent):
     accepted = []
     initial_width = parent.get_allocated_width()
     before_windows = [w for w in Gtk.Window.list_toplevels() if w.get_visible()]
+    parent.sections['Regions'][0].show()
+    parent.sections['Regions'][0].set_expanded(True)
     parent.layout_box.show()
     e = open_editor(parent.layout_box, M.fresh(caption='A travel poster'), accepted.append)
     e.ui.set(e.preview_toggle, False)
@@ -408,8 +410,12 @@ def run(parent):
     u.set(e.fields['summary.palette'], '#ffffff, #123456')
     assert e.fields['item.caption'][2].get_visible()
     u.set(e.fields['item.caption'], 'Large heading')
+    parent.sections['Regions'][0].show()
+    parent.sections['Regions'][0].set_expanded(True)
     parent.layout_box.show()
     while Gtk.events_pending(): Gtk.main_iteration()
+    parent.sections['Regions'][0].show()
+    parent.sections['Regions'][0].set_expanded(True)
     parent.layout_box.show()
     parent.check_resize()
     prompt = e.fields['item.caption'][1]
@@ -426,11 +432,15 @@ def run(parent):
     u.set(e.fields['item.text'], 'HELLO')
     wording = e.fields['item.text'][1]
     parent.browse()
+    parent.sections['Regions'][0].show()
+    parent.sections['Regions'][0].set_expanded(True)
     parent.layout_box.show()
     e.tabs.set_current_page(0)
     wording.grab_focus()
     while Gtk.events_pending(): Gtk.main_iteration()
     # The fixture's non-MOSS settings poll hides this manually attached editor.
+    parent.sections['Regions'][0].show()
+    parent.sections['Regions'][0].set_expanded(True)
     parent.layout_box.show()
     wording.grab_focus()
     assert wording.get_realized() and wording.get_mapped()

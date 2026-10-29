@@ -563,7 +563,8 @@ class Registry:
             pos = ((pos + ", ") if pos else "") + "(%s:%g)" % (neg, weight)
             neg = ""
         layout = p.get("moss_layout") or {}
-        if layout.get("enabled"):
+        scene = layout.get("summary") or {}
+        if layout.get("enabled") or (fam["id"] == "moss_image" and (scene.get("meta") or scene.get("palette"))):
             if fam["id"] != "moss_image":
                 raise G.GraphError("Layout prompting is only supported by MOSS")
             import moss_layout
@@ -572,7 +573,7 @@ class Registry:
                 width, height = p.get("width"), p.get("height")
                 if not width or not height:
                     width, height = calc_dims(res.get("aspect", "1:1"), res.get("megapixels", 1), res.get("multiple", 16))
-                pos = moss_layout.compile(layout, width, height, pos)
+                pos = moss_layout.compile(layout, width, height, pos, include_regions=bool(layout.get("enabled")))
             except (ValueError, TypeError, KeyError) as exc:
                 raise G.GraphError("Invalid MOSS layout: " + str(exc)) from exc
 

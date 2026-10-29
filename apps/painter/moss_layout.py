@@ -108,7 +108,7 @@ def description(item):
     return ' '.join(p for p in parts if p)
 
 
-def compile(doc, width=None, height=None, caption=None):
+def compile(doc, width=None, height=None, caption=None, include_regions=True):
     d = valid(doc)
     d = resize(d, width or d['width'], height or d['height'])
     width, height = d['width'], d['height']
@@ -117,9 +117,11 @@ def compile(doc, width=None, height=None, caption=None):
         summary['caption'] = caption
     if not summary.get('caption', '').strip():
         raise ValueError('Describe the overall scene before generating a layout')
+    if not include_regions:
+        summary.pop('canvas', None)
     summary = {k: summary[k] for k in ('caption', 'canvas', 'meta', 'palette') if summary.get(k)}
     items = []
-    for item in d['items']:
+    for item in d['items'] if include_regions else []:
         if not item.get('enabled', True):
             continue
         if not description(item):

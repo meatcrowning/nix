@@ -11,6 +11,7 @@ Item {
     required property QtObject spec
     required property QtObject bridge
     property var tokenProbe: null
+    readonly property var inspection: typeof App.inspection !== "undefined" ? App.inspection : null
     visible: spec.shown
     enabled: spec.enabled
     implicitWidth: content.item ? content.item.implicitWidth : 0
@@ -501,7 +502,7 @@ Item {
                 TextArea {
                     id: textEdit
                     readonly property bool tokenReady: node.spec.kind === "prompt" && node.tokenProbe && node.tokenProbe.count >= 0
-                    readonly property var tokenStyle: App.inspection.tokenStyle(color.toString(), palette.base.toString(), selectionColor.toString())
+                    readonly property var tokenStyle: node.inspection ? node.inspection.tokenStyle(color.toString(), palette.base.toString(), selectionColor.toString()) : ({bands: []})
                     objectName: "layoutField_" + node.spec.title
                     width: textViewport.width - textBar.barW
                     height: Math.max(implicitHeight, textViewport.height - (textHBar.visible ? textHBar.height : 0))
@@ -521,25 +522,27 @@ Item {
                         colours: textEdit.tokenStyle.bands
                         marked: textEdit.tokenReady
                         highlighted: {
-                            App.inspection.nearby
-                            return node.spec.kind === "prompt" ? App.inspection.highlightedRanges(textEdit.text, node.bridge.regionIdentity) : []
+                            if (!node.inspection) return []
+                            node.inspection.nearby
+                            return node.spec.kind === "prompt" ? node.inspection.highlightedRanges(textEdit.text, node.bridge.regionIdentity) : []
                         }
                         z: -0.5
                     }
                     TapHandler {
-                        enabled: node.spec.kind === "prompt" && App.inspection.picking
+                        enabled: node.spec.kind === "prompt" && node.inspection && node.inspection.picking
                         acceptedButtons: Qt.LeftButton
-                        onTapped: App.inspection.pickToken(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
+                        onTapped: node.inspection.pickToken(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
                     }
                     HoverHandler {
-                        enabled: node.spec.kind === "prompt"
+                        enabled: node.spec.kind === "prompt" && !!node.inspection
                         onHoveredChanged: {
+                            if (!node.inspection) return
                             if (hovered)
-                                App.inspection.hoverRegion(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
-                            else App.inspection.endHover("region:" + node.bridge.regionIdentity)
+                                node.inspection.hoverRegion(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
+                            else node.inspection.endHover("region:" + node.bridge.regionIdentity)
                         }
                         onPointChanged: if (hovered)
-                            App.inspection.hoverRegion(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
+                            node.inspection.hoverRegion(textEdit.text, textEdit.positionAt(point.position.x, point.position.y), node.bridge.regionIdentity)
                     }
                 }
                 Spelling { target: textEdit; viewport: textViewport }

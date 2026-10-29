@@ -42,7 +42,7 @@ class LayoutUI(object):
         for title, fn in [('Lock', self.toggle_lock), ('Delete', lambda: self.model.delete()), ('Duplicate', lambda: self.model.duplicate())]:
             self.buttons[title] = u.button(tools, title, lambda fn=fn: self.command(fn))
         u.spacer(tools)
-        self.add(tools, 'enabled', 'Use layout for generation', 'iconcheck', ['dialog-ok-apply', 'dialog-cancel'])
+        self.add(tools, 'enabled', 'Use regions for generation', 'iconcheck', ['dialog-ok-apply', 'dialog-cancel'])
         self.preview_toggle = u.field(tools, 'Show layout preview', 'iconcheck', ['view-visible', 'view-hidden'], self.toggle_preview)
         u.set(self.preview_toggle, True)
         tabs = self.tabs = u.tabs(root)
@@ -50,7 +50,7 @@ class LayoutUI(object):
         u.tab_body(tabs, self.side)
         region = u.tab(tabs, 'Region')
         self.list = u.region_list(region, self.selection_changed, self.reorder)
-        scene_controls = u.row(region)
+        scene_controls = u.row(u.scene_root)
         self.add(scene_controls, 'summary.meta', 'Medium / genre tags', 'inline_entry')
         self.add(scene_controls, 'summary.palette', 'Scene palette', 'inline_palette')
         self.canvas = u.canvas(region, self)

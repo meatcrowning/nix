@@ -33,11 +33,13 @@ class CompactFields(Gtk.Bin):
 
 
 class Toolkit(object):
-    def __init__(self, parent, owner=None):
+    def __init__(self, parent, owner=None, scene_parent=None):
         self.window = owner if owner is not None else parent.get_toplevel()
         self.alive = True
         self.root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.root.connect('destroy', lambda *_: setattr(self, 'alive', False))
+        self.scene_root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        (scene_parent if scene_parent is not None else self.root).pack_start(self.scene_root, False, False, 0)
         self.root.set_border_width(0)
         parent.pack_start(self.root, True, True, 0)
 
@@ -575,8 +577,8 @@ class Toolkit(object):
         return Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_text() or ''
 
 
-def open_editor(parent, doc, accepted, owner=None):
-    toolkit = Toolkit(parent, owner)
+def open_editor(parent, doc, accepted, owner=None, scene_parent=None):
+    toolkit = Toolkit(parent, owner, scene_parent)
     editor = LayoutUI(toolkit, doc, accepted)
     from moss_gtk import TokenMarks
     marks = TokenMarks(editor.fields['item.caption'][1], editor.prompt_token_count,
@@ -589,6 +591,7 @@ def open_editor(parent, doc, accepted, owner=None):
         if key.startswith(('item.', 'type.', 'box.')):
             field[1]._text_history_scope = lambda: (toolkit.window.state.get('model'), tuple(editor.model.selected))
     toolkit.root.show_all()
+    toolkit.scene_root.show_all()
     toolkit.select_tab(editor.tabs, 0)
     editor.region_visibility()
     toolkit.root.editor = editor

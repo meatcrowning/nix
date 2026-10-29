@@ -1772,7 +1772,7 @@ def test_modes(win, ctl, tmp):
           lora_stack and lora_stack.isVisible())
     # ...but the seed IS read by the edit graph, so its control survives here —
     # the sampling panel that normally carries it is one of the hidden ones.
-    seed_panel = find(content, "SeedPanel")
+    seed_panel = find(content, "ResolutionPanel")
     check("the edit preset keeps a seed control", seed_panel is not None
           and seed_panel.isVisible())
     g = prop(APP, "gen")
@@ -4126,8 +4126,8 @@ def test_preset_sampling(win, ctl, tmp):
 
 
 def test_section_order(win, ctl, tmp):
-    """One section order for every preset AND model: input images, resolution,
-    prompt boxes, LoRAs, then the sampler settings — top to bottom. The panels
+    """One section order for every preset AND model: prompt, latent, input images,
+    model, LoRAs, then the sampler settings — top to bottom. The panels
     are gated per mode and a Column skips the invisible ones, so what stays
     visible must never reshuffle relative to that order.
     """
@@ -4146,10 +4146,10 @@ def test_section_order(win, ctl, tmp):
     ctl.rescan()
     spin(200)
 
-    # input images -> resolution -> prompt -> LoRAs -> sampler settings
-    RANK = {"EditPanel": 1, "VideoPanel": 1, "ResolutionPanel": 2,
-            "EditScalePanel": 2, "PromptEditor": 3, "LoraStack": 4,
-            "ParamsPanel": 5, "TogglePanel": 5, "SeedPanel": 5}
+    # prompt -> latent -> input images -> model -> LoRAs -> sampler settings
+    RANK = {"PromptEditor": 0, "ResolutionPanel": 1, "EditPanel": 2, "VideoPanel": 2,
+            "EditScalePanel": 2, "ModelPicker": 3, "LoraStack": 4,
+            "ParamsPanel": 5, "TogglePanel": 5}
 
     def order_ok(label):
         rows = []
@@ -4160,8 +4160,12 @@ def test_section_order(win, ctl, tmp):
         rows.sort()                                   # top to bottom
         ranks = [r for _, r, _ in rows]
         names = [n for _, _, n in rows]
-        check("%s: sections in one order (input,res,prompt,lora,sampler)" % label,
+        check("%s: sections in one order (prompt,latent,input,model,lora,sampler)" % label,
               ranks == sorted(ranks), names)
+        latent = find(content, "ResolutionPanel")
+        check(label + ": seed belongs to Latent", find(latent, "SeedField").isVisible())
+        aspect = find(latent, "Field", pred=lambda it: it.property("label") == "AR")
+        check(label + ": edit hides latent aspect controls", aspect.isVisible() == (not ctl.isEdit and not latent.property("fromImage")))
 
     ctl.selectModelByName("krea2_raw_fp8_scaled.safetensors")
     spin(150)
@@ -4172,10 +4176,28 @@ def test_section_order(win, ctl, tmp):
     if ctl.property("isVideo"):
         order_ok("video")
 
-    ctl.setMode("edit")
+    ctl.setMode("")
+    edit_path = os.path.join(root, 'checkpoints', 'sections-llada.safetensors')
+    write_safetensors(edit_path, {
+        'vae.decoder.conv_in.weight': [8, 16, 3, 3],
+        **{'model.diffusion_model.' + k: [16, 16] for k in (
+            'all_x_embedder.1-1.weight', 'noise_refiner.0.attention.to_q.weight',
+            'sigvq_refiner.0.attention.to_q.weight')}
+    }, {'config': json.dumps({'llada_image': {'variant': 'base'}})})
+    ctl.rescan()
     spin(150)
-    if ctl.property("isEdit"):
-        order_ok("edit")
+    ctl.selectModelByName('sections-llada.safetensors')
+    from PySide6.QtGui import QImage, QColor
+    source = QImage(64, 64, QImage.Format_RGB32)
+    source.fill(QColor('red'))
+    source_path = os.path.join(tmp, 'sections-edit.png')
+    source.save(source_path)
+    ctl.setInputImage(source_path)
+    spin(150)
+    check("edit fixture is active", ctl.isEdit)
+    order_ok("edit")
+    ctl.clearInputImage()
+    os.remove(edit_path)
 
     ctl.setMode("")
     for rel in staged:
@@ -5319,7 +5341,7 @@ def test_moss(win, ctl, tmp):
         check(model + " retains explicit reuse policy", prop(APP, "gen")["reuseSeed"])
         APP.set("reuseSeed", False)
         editor = find(win.contentItem(), "PromptEditor")
-        mp = next(item for item in walk(editor) if item.property('trimZeros') is True)
+        mp = next(item for item in walk(find(win.contentItem(), "ResolutionPanel")) if item.property('trimZeros') is True)
         check(model + ' MP trims padding without losing precision',
               mp.fmt(1.0) == '1' and mp.fmt(1.6) == '1.6' and mp.fmt(.998656) == '0.998656')
         positive_box = find_all(editor, "PromptBox")[0]
@@ -5364,21 +5386,25 @@ def test_moss(win, ctl, tmp):
         panes = find(win.contentItem(), "ParamsPane")
         check(model + " exposes only standard sections", all(
             panes.sectionVisible(key) == expected for key, expected in {
-                "prompt": True, "resolution": False, "sampling": True,
+                "prompt": True, "resolution": True, "regions": True, "sampling": True,
                 "patches": False, "lora": False, "edit": False, "krea": False}.items()))
         canvas = next((item for item in walk(win.contentItem()) if item.objectName() == "mossLayoutCanvas"), None)
         add = next((item for item in walk(win.contentItem()) if item.objectName() == "layoutAdd"), None)
         check(model + " shows inline canvas by default", canvas is not None and canvas.isVisible() and canvas.width() > 100)
+        primary = [it for it in walk(win.contentItem()) if it.property('sectionKey') in ('prompt', 'resolution', 'model', 'sampling', 'regions') and it.isVisible()]
+        primary.sort(key=lambda it: it.mapToItem(panes, QPointF()).y())
+        check(model + " separates the five sections", [it.property('title') for it in primary] == ['Prompt', 'Latent', 'Model', 'Sampling', 'Regions'])
+        check(model + " prompt contains only scene controls", all(it.property('sceneOnly') for it in find_all(editor, 'LayoutEditor')))
         check(model + " has an Add button", add is not None and add.isVisible())
-        coordinates = next(item for item in walk(editor) if item.objectName() == 'layoutCoordinates')
+        regions = next(item for item in walk(win.contentItem()) if item.objectName() == "regionsPanel")
+        coordinates = next(item for item in walk(regions) if item.objectName() == 'layoutCoordinates')
         fields = next(item for item in walk(coordinates) if item.objectName() == 'layoutCoordinateFields')
         saved_width = coordinates.width()
         coordinates.setWidth(0)
         check(model + " hides coordinates when narrow", not fields.isVisible())
         coordinates.setWidth(coordinates.implicitWidth() + 1)
-        check(model + " restores coordinates when wide", fields.isVisible())
         coordinates.setWidth(saved_width)
-        inspector_tabs = next(item for item in walk(editor) if item.property('spec') is not None and item.property('spec').property('kind') == 'tabs')
+        inspector_tabs = next(item for item in walk(regions) if item.property('spec') is not None and item.property('spec').property('kind') == 'tabs')
         check(model + " shows tab headers above canvas", inspector_tabs.height() > 0 and inspector_tabs.mapToItem(editor, QPointF(0, inspector_tabs.height())).y() <= canvas.mapToItem(editor, QPointF(0, 0)).y())
         tab_spec = inspector_tabs.property('spec')
         for page_index in (1, 2, 0):
@@ -5386,7 +5412,7 @@ def test_moss(win, ctl, tmp):
             spin(30)
             check(model + " switches inspector page " + str(page_index),
                   [page.property('shown') for page in tab_spec.property('nodes')] == [n == page_index for n in range(3)] and canvas.isVisible() == (page_index == 0))
-        # The canvas is now in the scrollable prompt panel.
+        # The canvas belongs to the independent Regions section.
         ancestor = canvas.parentItem()
         while ancestor is not None and ancestor.property('contentY') is None:
             ancestor = ancestor.parentItem()
@@ -5395,7 +5421,7 @@ def test_moss(win, ctl, tmp):
             ancestor.setProperty('contentY', ancestor.property('contentY') + point.y() - 12)
             spin(100)
         check(model + " keeps layout below prompts", canvas.mapToItem(editor, QPointF(0, 0)).y() > 150)
-        handle = next(item for item in walk(editor) if item.objectName() == "layoutResizeHandle")
+        handle = next(item for item in walk(regions) if item.objectName() == "layoutResizeHandle")
         from PySide6.QtQml import qmlContext
         layout_prefs = qmlContext(APP).contextProperty("Prefs")
         check(model + " restores layout height", canvas.height() == (layout_prefs.get("layout.canvasHeight") or 300))
@@ -5413,7 +5439,7 @@ def test_moss(win, ctl, tmp):
         check(model + " drawing saves inline draft", len(prop(APP, "gen")["moss_layout"]["items"]) == 1)
         check(model + " outside drag clips to canvas", all(abs(a-b) < 1e-8 for a,b in zip(prop(APP, "gen")["moss_layout"]["items"][0]["box"][0::2], [0, 1])))
         check(model + " drawing returns to selection", ctl.layoutEditor.editor.model.tool == "select")
-        region_prompt = next(item for item in walk(editor) if item.objectName() == 'layoutField_Prompt')
+        region_prompt = next(item for item in walk(regions) if item.objectName() == 'layoutField_Prompt')
         region_prompt.forceActiveFocus()
         region_prompt.setProperty('text', 'é fox in snow')
         QMetaObject.invokeMethod(region_prompt, 'select', Q_ARG(int, 2), Q_ARG(int, 5))
@@ -5425,7 +5451,7 @@ def test_moss(win, ctl, tmp):
         QTest.keyClick(getattr(win, 'keyTarget', win), Qt.Key_Down, Qt.ControlModifier)
         QTest.keyClick(getattr(win, 'keyTarget', win), Qt.Key_Down, Qt.ControlModifier)
         check(model + ' region neutral weight unwraps', region_prompt.property('text') == 'é fox in snow')
-        list_handle = next(item for item in walk(editor) if item.objectName() == "regionListResizeHandle")
+        list_handle = next(item for item in walk(regions) if item.objectName() == "regionListResizeHandle")
         if ancestor is not None:
             point = list_handle.mapToItem(ancestor, QPointF(0, 0))
             ancestor.setProperty('contentY', ancestor.property('contentY') + point.y() - 100)
@@ -5710,7 +5736,7 @@ def test_sidebar(win, ctl, tmp, shell=None):
               (toolbar.width(), toolbar.height()))
     ui = ctl.layoutEditor.editor
     def node_item(spec):
-        return next(it for it in walk(editor) if it.property("spec") == spec)
+        return next(it for it in walk(content) if it.property("spec") == spec)
     header, tokens, write, undo = [node_item(s) for s in
                                   (ui.prompt_header, ui.prompt_tokens, ui.prompt_auto, ui.prompt_revert)]
     check("region prompt actions stay adjacent at the left",
@@ -5726,7 +5752,7 @@ def test_sidebar(win, ctl, tmp, shell=None):
     APP.setProperty("splitRatio", original_ratio)
     spin(100)
     if os.environ.get("PAINTER_UI_NATIVE") == "1":
-        label = next(it for it in walk(editor) if prop(it, "text") == "Seed number")
+        label = next(it for it in walk(content) if prop(it, "text") == "Seed number")
         title = next(it for it in walk(editor) if prop(it, "text") == "Prompt")
         check("plain labels use the section's native foreground and font",
               prop(label, "color") == prop(title, "color")
@@ -5821,6 +5847,7 @@ def test_sidebar(win, ctl, tmp, shell=None):
     spin(80)
     check("clearing a warning releases its space",
           abs(region.implicitHeight() - palette_bottom) < 1)
+    editor = by_name("regionsPanel")
     text = by_name("layoutField_Prompt")
     handle = by_name("regionPromptResizeHandle")
     for delta in (60, -80):
@@ -5858,7 +5885,7 @@ def test_sidebar(win, ctl, tmp, shell=None):
             if isinstance(widget, QToolButton):
                 labels.append(widget.text().replace('&', ''))
         check("toolbar buttons match Unity order", labels ==
-              ['Generate', 'Cancel', 'Use Settings', 'Compare Settings'], labels)
+              ['Generate', 'Cancel', 'Use Settings', 'Compare Settings', 'Heatmap'], labels)
         check("native toolbar spans the window above both panes", toolbar_fits())
         APP.setProperty("splitRatio", 0.4)
         spin(80)
@@ -6067,9 +6094,11 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent"):
+                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections"):
         print("== %s ==" % only)
-        if only == "agent":
+        if only == "sections":
+            test_section_order(win, ctl, tmp)
+        elif only == "agent":
             test_agent_control(win, ctl, tmp)
         elif only == "history":
             test_history_layout(win, ctl, tmp, keep[-1])

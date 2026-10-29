@@ -132,7 +132,12 @@ worker queue; video posters are requested after delegate dwell. Use scan-time
 mtime/size cache keys and never stat sshfs paths on selection/scroll paths.
 Gate hidden PreviewPane media sources on `pane.open` to stop decoders.
 
-`ParamsPane.builtinOrder` and saved sections define one order across modes.
+`ParamsPane.builtinOrder` and saved `sections.v2` define one order across modes.
+Prompt, Latent, Model, Sampling and Regions are separate sections on Qt and GTK.
+Prompt owns wildcards, positive/negative text and MOSS scene medium/palette.
+Latent owns seed and aspect/resolution; Regions owns the spatial editor.
+The v2 order starts with Prompt and Latent; optional model/input panels keep their
+family gates.
 Move ListModel rows without replacing dragged delegates. `sectionVisible` owns
 visibility gates; deriving visibility from an effectively hidden child can latch
 it false. Collapsed sections retain pinned interactive rows. Park others in
@@ -329,12 +334,14 @@ scene text and editable regions for paste, output restore and comparison.
 `layout_ui.py` owns editor actions, with native GTK and Qt adapters in
 `layout_gtk.py` and `layout_qt.py`. Only `registry.build` compiles conditioning,
 using the actual output dimensions and current positive prompt as scene caption.
-Enabled layouts may contain no regions: scene medium/genre, palette and composition
-still enter the structured prompt. Disabling layout generation omits those settings.
+Scene medium/genre and palette enter the structured prompt even with regions
+disabled or absent. The region toggle gates region captions/geometry and layout
+composition only; with no scene values and regions off, send the plain prompt.
 Keep reference underlays, groups, locks and guides out of model-facing JSON.
-Layouts sit beneath the prompt boxes. The Region tab contains its list, a row
-for medium/genre tags and scene palette, then the
-canvas and region fields. Scene and Canvas retain their remaining settings.
+The Regions section contains the spatial editor. Its Region tab contains its
+list, canvas and region fields; Scene and Canvas retain their remaining settings.
+Shared layout toolkits expose a separate scene root for Prompt’s medium/palette
+controls, with one document and undo history across both sections.
 GTK embeds `layout_gtk.py`; Qt Quick renders the `layout_qt.py` descriptor tree
 through `LayoutNode.qml`.
 The Add toolbar ends with layout-generation and preview toggles, each with

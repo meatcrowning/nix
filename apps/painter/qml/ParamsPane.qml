@@ -93,15 +93,13 @@ Item {
     // ------------------------------------------------------------- sections
     //
     // ONE ORDER, NOT ONE PER MODE. The panels used to be declared in a fixed
-    // order and gated on the mode each belongs to; the order below is that same
-    // declaration order, and the same gating still hides what a mode does not
-    // have — so an edit preset still leads with its wells and a video preset
-    // with its frames, out of ONE list. He can drag any header to move a
-    // section, and where he leaves it is remembered
+    // order and gated on the mode each belongs to. Prompt and latent controls
+    // now lead in every mode; optional inputs and model-specific panels retain
+    // their mode gates. Dragged headers retain their order in sections.v2
     // (docs/painter-kde-layout.md phase 7).
     readonly property var builtinOrder: [
-        "model", "edit", "video", "resolution", "editscale",
-        "prompt", "krea", "lora", "sampling", "patches", "editseed"
+        "prompt", "resolution", "edit", "video", "editscale",
+        "model", "krea", "lora", "sampling", "patches", "regions"
     ]
 
     // WHICH SECTIONS THIS MODE HAS, in one table rather than a `visible:` on each
@@ -114,9 +112,9 @@ Item {
         return key === "edit" ? (App.isEdit || App.optionalEditImage || (App.referenceImages && root.gen.useReferences))
              : key === "krea" ? App.encoderControls
              : key === "editscale" ? App.isEdit
-             : key === "editseed" ? (App.isEdit && !App.editSampling)
+             : key === "regions" ? App.layoutSupport
              : key === "video" ? (App.isVideo && !App.isEdit)
-             : key === "resolution" ? (!App.isEdit && !App.layoutSupport)
+             : key === "resolution" ? true
              : key === "sampling" ? (!App.isEdit || App.editSampling)
              : key === "patches" ? (!App.isVideo && (!App.isEdit || App.editPatches) && App.supportsPatches)
              : key === "lora" ? App.supportsLoras
@@ -134,7 +132,7 @@ Item {
              : key === "lora" ? cLora
              : key === "sampling" ? cSampling
              : key === "patches" ? cPatches
-             : key === "editseed" ? cEditSeed
+             : key === "regions" ? cRegions
              : null
     }
 
@@ -149,7 +147,7 @@ Item {
     // present. Appending instead would quietly bury a new panel at the bottom.
     function buildSections() {
         var saved = []
-        try { saved = JSON.parse(Prefs.get("sections") || "[]") } catch (e) { saved = [] }
+        try { saved = JSON.parse(Prefs.get("sections.v2") || "[]") } catch (e) { saved = [] }
         var out = []
         for (var i = 0; i < saved.length; i++)
             if (root.builtinOrder.indexOf(saved[i]) >= 0 && out.indexOf(saved[i]) < 0)
@@ -198,11 +196,11 @@ Item {
     function dropSection() {
         var out = []
         for (var i = 0; i < sectionModel.count; i++) out.push(sectionModel.get(i).key)
-        Prefs.set("sections", JSON.stringify(out))
+        Prefs.set("sections.v2", JSON.stringify(out))
     }
 
     function resetOrder() {
-        Prefs.set("sections", "[]")
+        Prefs.set("sections.v2", "[]")
         root.buildSections()
     }
 
@@ -283,11 +281,18 @@ Item {
         }
     }
     Component {
-        id: cEditSeed
-        // The seed IS read by the edit graph, so the edit preset gets its own
-        // seed control — the sampling panel that normally holds it is hidden
-        // here. Same SeedField, so it behaves identically.
-        SeedPanel { width: parent.width; persistKey: "panel.editseed" }
+        id: cRegions
+        Panel {
+            title: "Regions"
+            objectName: "regionsPanel"
+            width: parent.width
+            persistKey: "panel.regions"
+            Loader {
+                width: parent.width
+                active: App.layoutSupport
+                sourceComponent: LayoutEditor { generation: root.gen }
+            }
+        }
     }
 
     // How much room the column gives up at the bottom to a status strip drawn

@@ -118,6 +118,7 @@ class Toolkit(QObject):
     def __init__(self):
         super().__init__()
         self.root = Node('column', parent=self)
+        self.scene_root = Node('column', parent=self)
         self._drawing = False
         self.model_name = ''
         self.tagger = None
@@ -222,6 +223,7 @@ class Bridge(QObject):
         self.toolkit.repaint.connect(self.regionChanged)
 
     root = Property(QObject, lambda s: s.toolkit.root, constant=True)
+    sceneRoot = Property(QObject, lambda s: s.toolkit.scene_root, constant=True)
     toolkitObject = Property(QObject, lambda s: s.toolkit, constant=True)
     regionPrompt = Property(str, lambda s: (s.editor.row() or {}).get('caption', ''), notify=regionChanged)
     regionIdentity = Property(str, lambda s: (s.editor.row() or {}).get('id', ''), notify=regionChanged)

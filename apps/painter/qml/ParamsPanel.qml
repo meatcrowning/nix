@@ -98,7 +98,6 @@ Panel {
         }
     }
 
-    SeedField { visible: !App.layoutSupport }
 
     Field {
         label: (App.isVideo || App.isEdit) ? "Count" : "Batch"
