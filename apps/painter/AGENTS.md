@@ -329,6 +329,8 @@ scene text and editable regions for paste, output restore and comparison.
 `layout_ui.py` owns editor actions, with native GTK and Qt adapters in
 `layout_gtk.py` and `layout_qt.py`. Only `registry.build` compiles conditioning,
 using the actual output dimensions and current positive prompt as scene caption.
+Enabled layouts may contain no regions: scene medium/genre, palette and composition
+still enter the structured prompt. Disabling layout generation omits those settings.
 Keep reference underlays, groups, locks and guides out of model-facing JSON.
 Layouts sit beneath the prompt boxes. The Region tab contains its list, a row
 for medium/genre tags and scene palette, then the

@@ -54,9 +54,9 @@ def core():
     assert abs(keep[2] * 2048 - .4 * 1024) < 1e-7
     assert abs(keep[3] * 512 - .2 * 1024) < 1e-7
     e.doc['items'][0]['enabled'] = False
-    try: M.compile(e.doc)
-    except ValueError: pass
-    else: raise AssertionError('empty layout accepted')
+    scene_only = json.loads(M.compile(e.doc))
+    assert scene_only['items'] == []
+    assert scene_only['summary'] == compiled['summary']
     e.doc['items'][0]['enabled'] = True
     e.duplicate()
     assert len(e.doc['items']) == 2 and len(set(r['id'] for r in e.doc['items'])) == 2
@@ -186,6 +186,22 @@ def core():
             assert json.loads(node['inputs']['text'])['summary']['caption'] == 'Overall scene'
             assert built['params']['moss_layout'] == e.doc
             assert built['params']['prompt_boxes']['positive'] == 'Overall scene'
+            scene = M.fresh()
+            scene['enabled'] = True
+            scene['summary'].update(meta=['watercolour'], palette=['blue', 'gold'])
+            params = dict(positive='A quiet harbour', negative='blur', width=1024, height=1024, moss_layout=scene)
+            built = reg.build(entry, params)
+            node = next(n for n in built['prompt'].values() if n['_meta']['painter_role'] == 'encode_pos')
+            prompt = json.loads(node['inputs']['text'])
+            assert prompt['items'] == []
+            assert prompt['summary'] == dict(caption='A quiet harbour', canvas='single', meta=['watercolour'], palette=['blue', 'gold'])
+            assert built['params']['moss_layout'] == scene
+            assert built['params']['prompt_boxes']['positive'] == 'A quiet harbour'
+            assert json.loads(M.compile(M.parse_prompt(node['inputs']['text']))) == prompt
+            scene['enabled'] = False
+            built = reg.build(entry, params)
+            node = next(n for n in built['prompt'].values() if n['_meta']['painter_role'] == 'encode_pos')
+            assert node['inputs']['text'] == 'A quiet harbour'
     draft = dict(width=1536, height=1024, bbox_coord_space='abs', bbox_format='xyxy',
                  summary=dict(caption='A campaign', canvas='single', meta=['poster']),
                  items=[dict(label='text', caption='Green title', text='旅へ\nEXPLORE',

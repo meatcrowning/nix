@@ -138,8 +138,6 @@ def compile(doc, width=None, height=None, caption=None):
             if item.get(key):
                 out[key] = item[key]
         items.append(out)
-    if not items:
-        raise ValueError('Include at least one region in the layout')
     return json.dumps(dict(summary=summary, items=items, bbox_coord_space='abs_centralized',
                            bbox_format='yxyx'), ensure_ascii=False, separators=(',', ':'))
 
