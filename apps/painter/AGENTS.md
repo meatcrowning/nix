@@ -197,7 +197,8 @@ and exports a labeled five-panel PNG to the platform Pictures directory in a wor
 The original spans the left side with its aspect ratio preserved; the right 2×2
 contains All tokens and Hottest/coldest above the two picked maps. Heatmap panels
 retain source resolution; the original is enlarged to match both rows.
-A title row uses the saved output’s model name and “token association heatmaps,”
+A title row uses the saved output’s model name and “token attention heatmaps”
+for saved attention-weight captures, or “token association heatmaps” for older maps,
 with equal small gaps above its ink and below it to the first column-header ink.
 The Original output header includes two smaller truncated lines of the saved scene
 prompt; its full text is retained in `PainterComparisonPrompt` PNG metadata.

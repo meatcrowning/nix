@@ -183,9 +183,10 @@ def annotations(painter, rect, ranking, doc, font, padding):
     painter.restore()
 
 
-def add_title(image, model):
+def add_title(image, model, method=''):
     """Fit the title and column headings with matching small gaps above/below."""
-    title = '%s — token association heatmaps' % (Path(model).stem if model else 'Unknown model')
+    kind = 'attention' if method == 'image-to-text attention weights' else 'association'
+    title = '%s — token %s heatmaps' % (Path(model).stem if model else 'Unknown model', kind)
     font = QFont('sans-serif')
     font.setPixelSize(max(16, min(72, image.width() // 65)))
     font.setBold(True)
@@ -323,7 +324,7 @@ def save_grid(source, data, tokens, folder):
         model = metadata.get('model', '')
     except (ValueError, TypeError, AttributeError):
         model = ''
-    canvas = add_title(canvas, model)
+    canvas = add_title(canvas, model, data[0].get('method', ''))
     destination = Path(folder)
     destination.mkdir(parents=True, exist_ok=True)
     path = destination / ('painter-heatmap-%s-%s.png' % (datetime.now().strftime('%Y%m%d-%H%M%S'), uuid4().hex[:8]))
