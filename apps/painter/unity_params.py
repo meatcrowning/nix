@@ -132,7 +132,7 @@ class ParameterForm(object):
         self.controls['seedPolicy'] = policy
         for widget in (randomize, fixed, policy): seed_actions.pack_start(widget, False, False, 0)
         self.rows['seedPolicy'] = (seed_actions,)
-        self.grid.attach(seed_actions, 0, self.grid_row, 2, 1)
+        self.grid.attach(seed_actions, 0, 1, 2, 1)
         self.grid_row += 1
         seed_label = label('Seed number')
         seed_label.set_alignment(0, .5)
@@ -156,7 +156,7 @@ class ParameterForm(object):
         self.aspect_label = label('AR')
         dimensions_row.pack_start(self.aspect_label, False, False, 0)
         dimensions_row.pack_start(aspect, False, False, 0)
-        self.grid.attach(dimensions_row, 0, self.grid_row, 2, 1)
+        self.grid.attach(dimensions_row, 0, 0, 2, 1)
         self.grid_row += 1
         self.rows['aspectW'] = self.rows['aspectH'] = (self.aspect_label, aspect)
         self.number('megapixels', 'MP', .1, 8, .1, 1)

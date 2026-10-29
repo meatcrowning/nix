@@ -26,9 +26,65 @@ Panel {
                                       && (root.gen.useInputImage || root.gen.useLastFrame)
     badge: App.isEdit ? "" : fromImage ? "from the image" : (root.gen.width + "x" + root.gen.height)
 
+    Field {
+        objectName: "latentDimensionsRow"
+        label: panel.fromImage ? "MP" : "AR"
+        labelWidth: 24
+        visible: !App.isEdit
+        hint: "Aspect ratio and target megapixels determine the generated dimensions."
+        RowLayout {
+            width: parent.width
+            spacing: 6
+            Spin {
+                visible: !panel.fromImage
+                Layout.preferredWidth: 52
+                value: root.gen.aspectW; from: 1; to: 999; step: 1
+                onEdited: function (v) {
+                    root.set("aspectW", Math.round(v))
+                    root.recomputeDims()
+                }
+            }
+            PixelText {
+                visible: !panel.fromImage
+                text: ":"
+                color: Theme.dim
+            }
+            Spin {
+                visible: !panel.fromImage
+                Layout.preferredWidth: 52
+                value: root.gen.aspectH; from: 1; to: 999; step: 1
+                onEdited: function (v) {
+                    root.set("aspectH", Math.round(v))
+                    root.recomputeDims()
+                }
+            }
+            PixelText {
+                visible: !panel.fromImage
+                text: "MP"
+                color: Theme.textDim
+            }
+            Spin {
+                trimZeros: App.layoutSupport
+                Layout.preferredWidth: App.layoutSupport ? 100 : 60
+                value: root.gen.megapixels; from: App.layoutSupport ? 0.05 : 0.1; to: App.layoutSupport ? 16 : 8; step: 0.1; decimals: App.layoutSupport ? 6 : 1
+                onEdited: function (v) {
+                    root.set("megapixels", v)
+                    root.recomputeDims()
+                }
+            }
+            PixelText {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                text: panel.fromImage ? "from the image" : (root.gen.width + "×" + root.gen.height)
+                color: Theme.textDim
+                elide: Text.ElideRight
+            }
+        }
+    }
+
     Column {
+        objectName: "latentSeedRow"
         width: parent.width
-        visible: App.layoutSupport
         spacing: 6
         function seedMode(random) {
             root.set("seed", random ? -1 : (root.gen.seed < 0 ? App.freshSeed() : root.gen.seed))
@@ -85,65 +141,4 @@ Panel {
         }
     }
 
-    SeedField { visible: !App.layoutSupport }
-
-    Field {
-        label: "AR"
-        // The inner Column skips invisible children, so this leaves no gap.
-        visible: !App.isEdit && !panel.fromImage
-        hint: "Any two whole numbers - 3:2, 5:3, 21:9. The pixel size comes from this and MP."
-        Row {
-            spacing: 6
-            Spin {
-                width: 52
-                value: root.gen.aspectW; from: 1; to: 999; step: 1
-                onEdited: function (v) {
-                    root.set("aspectW", Math.round(v))
-                    root.recomputeDims()
-                }
-            }
-            PixelText {
-                text: ":"
-                color: Theme.dim
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            Spin {
-                width: 52
-                value: root.gen.aspectH; from: 1; to: 999; step: 1
-                onEdited: function (v) {
-                    root.set("aspectH", Math.round(v))
-                    root.recomputeDims()
-                }
-            }
-        }
-    }
-
-    Field {
-        label: "MP"
-        visible: !App.isEdit
-        hint: "Target megapixels. Width and height are derived from this and the aspect, rounded to the family's step."
-        Row {
-            spacing: 6
-            Spin {
-                trimZeros: App.layoutSupport
-                width: App.layoutSupport ? 100 : 60
-                value: root.gen.megapixels; from: App.layoutSupport ? 0.05 : 0.1; to: App.layoutSupport ? 16 : 8; step: 0.1; decimals: App.layoutSupport ? 6 : 1
-                onEdited: function (v) {
-                    root.set("megapixels", v)
-                    root.recomputeDims()
-                }
-            }
-            // What the two controls actually produce, spelled out rather than
-            // left to the header badge alone — with the family's rounding step,
-            // which is why the size is rarely the round number you asked for
-            // (docs/DESIGN.md §10: report what will happen, not what was meant).
-            PixelText {
-                text: panel.fromImage
-                      ? "= the dropped image, at this budget"
-                      : ("= " + root.gen.width + "x" + root.gen.height + " /" + root.gen.multiple)
-                color: Theme.textDim
-                anchors.verticalCenter: parent.verticalCenter
-            }
-        }
-    }
 }

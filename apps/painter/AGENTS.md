@@ -135,7 +135,8 @@ Gate hidden PreviewPane media sources on `pane.open` to stop decoders.
 `ParamsPane.builtinOrder` and saved `sections.v2` define one order across modes.
 Prompt, Latent, Model, Sampling and Regions are separate sections on Qt and GTK.
 Prompt owns wildcards, positive/negative text and MOSS scene medium/palette.
-Latent owns seed and aspect/resolution; Regions owns the spatial editor.
+Latent puts aspect/megapixels on its first row and seed controls on its second;
+Regions owns the spatial editor.
 The v2 order starts with Prompt and Latent; optional model/input panels keep their
 family gates.
 Move ListModel rows without replacing dragged delegates. `sectionVisible` owns
