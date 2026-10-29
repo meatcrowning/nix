@@ -24,6 +24,8 @@ def main():
     comfy.cli_args.args.cpu = True
     comfy.cli_args.args.use_pytorch_cross_attention = True
     import torch
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from moss_capture import attention_weights
     import comfy.ops
     from comfy.ldm.moss_image.model import MOSSImage
     from comfy.text_encoders.moss_image import MOSSImageTokenizer
@@ -65,12 +67,7 @@ def main():
             # normalizes each image-query chunk over ALL keys, including image
             # keys; softmax over text alone would change the meaning of a map.
             reference = (qh @ kh.transpose(-1, -2) * scale).softmax(-1)
-            chunks = []
-            for start in range(0, image_len, 4):
-                end = min(start + 4, image_len)
-                scores = (qh[:, :, start:end] @ kh.transpose(-1, -2) * scale).softmax(-1)
-                chunks.append(scores[..., image_len:].mean(1))
-            maps = torch.cat(chunks, dim=1)
+            maps = attention_weights(q, k, heads, image_len, chunk_size=4).transpose(1, 2)
             expected = reference[:, :, :image_len, image_len:].mean(1)
             torch.testing.assert_close(maps, expected, atol=1e-7, rtol=1e-6)
             max_error = max(max_error, (maps - expected).abs().max().item())

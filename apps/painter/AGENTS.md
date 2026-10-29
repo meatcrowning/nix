@@ -169,15 +169,19 @@ MOSS tokenizer before wildcard/layout compilation and exclude template tokens.
 The tokenizer endpoint uses the existing backend connection; it never loads GPU
 weights or starts a backend on its own.
 
-`comfy_nodes/painter_moss.py` captures sparse layer-4/8 attention output similarity
+`comfy_nodes/painter_moss.py` captures sparse layer-4/8 image-to-text attention-weight
 maps from the last positive evaluation before actual sampler callbacks in the
 quarter-start window, retaining the middle-third capture count and stride of three,
-with capture provenance saved alongside the maps. Maps average raw
-layer associations, apply one separable binomial smoothing pass before token
-normalization, and retain native resolution up to 128 per axis. Long prompts
+with capture provenance saved alongside the maps. Image-query rows softmax over
+all image and text keys before retaining text columns, averaged across heads.
+Chunked queries bound temporary logits; capture allocations pause Comfy’s memory
+compiler when available. Maps average raw layer probabilities, apply one separable
+binomial smoothing pass before token normalization, and retain native resolution up to 128 per axis. Long prompts
 reduce map dimensions to keep planes within 20 MiB and the packet within 24 MiB;
-the reader still accepts version 1/2 maps. Version 3 packets also save word
-planes formed by averaging raw token pieces before normalization, and per-token
+the reader still accepts version 1/2 maps. Capture v5 marks attention weights;
+older feature-similarity maps retain their recorded method. Version 3 packets also
+save word planes formed by summing raw token-piece probabilities before
+normalization, and per-token
 mean pairwise spatial correlation across captured layers/steps on at most 16×16
 pooled maps. This agreement is consistency, not correctness or confidence. Capture runs
 during ordinary MOSS generation when both nodes are advertised. PPM keeps
@@ -261,10 +265,12 @@ Region prompt boxes share the debounce, count and decorations. Region hover uses
 IDs in saved `painter.moss_layout` metadata, skipping disabled regions when mapping
 to compiled `items`; duplicate captions and current reordering never choose a map
 by text alone. Old outputs without saved region IDs retain the dropdown picker.
-Maps are experimental associations, not causal
+Displayed maps are normalized experimental associations, not causal
 word attribution; never infer maps for old images from a current prompt.
 Verify capture/scoring with the CPU-only `tools/moss-capture-test.py` and
-`tools/moss-capture-tensor-test.py` (Comfy Python, CUDA hidden), plus
+`tools/moss-capture-tensor-test.py` (Comfy Python, CUDA hidden), and
+`tools/moss-attention-probe.py --comfy /path/to/ComfyUI` (random-weight CPU
+model, no semantic accuracy claim), plus
 `tools/moss-inspection-test.py` offscreen, `tools/moss-test.py`, and
 the Unity harness. Backend node installation is in `home/prog/painter.nix`. Both the MOSS node
 and its partial-stop sampler callback link to live repository source; changing

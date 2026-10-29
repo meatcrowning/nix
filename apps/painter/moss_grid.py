@@ -303,7 +303,7 @@ def save_grid(source, data, tokens, folder):
         'by displayed all-token map intensity. Not confidence or absolute activity. Two lines of complete entries.')
     canvas.setText('PainterExpandedLists', json.dumps(expanded, ensure_ascii=False))
     canvas.setText('PainterWordGrouping', json.dumps(dict(source=str(source), selected=selected,
-        words=words[0]['tokens'], method=('Mean raw token-piece scores before smoothing and per-word normalization; ' if data[0].get('words') else 'Legacy mean of saved normalized token planes per word occurrence; ')+
+        words=words[0]['tokens'], method=(data[0].get('capture', {}).get('word_reduction', 'Mean raw token-piece scores before smoothing and per-word normalization') + '; ' if data[0].get('words') else 'Legacy mean of saved normalized token planes per word occurrence; ')+
         'All-token reference excludes layout structure and includes descriptive prompt tokens.'), ensure_ascii=False))
     ranking['method'] = ('Saved normalized associations, not absolute activity. English function words and punctuation excluded; '
                          'layout rankings use descriptive string values only, excluding structural fields and coordinates; '
@@ -313,9 +313,9 @@ def save_grid(source, data, tokens, folder):
                          'repeated words, subpieces, plurals and close spelling variants deduplicated per panel; '
                          'Up to four hot and two cold areas. Cold percentages are regional means across eligible words; cold labels are local winning words.')
     canvas.setText('PainterHeatmapMethod', json.dumps(dict(
-        version=3, consistency=data[0].get('consistency'), consistency_method=data[0].get('consistency_method'), capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
+        version=3, method=data[0].get('method', 'attention output similarity'), consistency=data[0].get('consistency'), consistency_method=data[0].get('consistency_method'), capture=data[0].get('capture', {'version': 1, 'timing': 'legacy forward-count capture'}),
         aggregate='Mean of visible descriptive token maps; per-token 5–99% normalization already applied; aggregate stretched 5–95%',
-        limitation='Relative feature associations, not probabilities, raw activity or causal attribution'), ensure_ascii=False))
+        limitation='Relative normalized associations, not probabilities, raw activity or causal attribution'), ensure_ascii=False))
     canvas.setText('PainterRanking', json.dumps(ranking, ensure_ascii=False))
     import pngmeta
     try:

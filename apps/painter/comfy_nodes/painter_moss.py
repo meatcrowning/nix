@@ -1,4 +1,4 @@
-"""MOSS token inspection and generation-bound, portable token feature maps."""
+"""MOSS token inspection and generation-bound, portable token attention maps."""
 import asyncio
 from pathlib import Path
 import sys
@@ -14,7 +14,14 @@ from comfy_extras.nodes_custom_sampler import SamplerCustom
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import moss_data
 from moss_rank import word_groups
-from moss_capture import CaptureWindow, map_shape
+from moss_capture import CaptureWindow, map_shape, attention_weights
+
+# Saved captures outlive a compiler block; keep their allocations outside
+# its memory graph. Older Comfy backends have no memory compiler.
+try:
+    from comfy.model_prefetch import pause_malloc_graph
+except ImportError:
+    from contextlib import nullcontext as pause_malloc_graph
 
 _tokenizer = None
 _token_lock = threading.Lock()
@@ -119,29 +126,29 @@ class PainterMossSampler:
             out = original(q, k, v, heads, **kw)
             options = kw.get('transformer_options', {})
             branches = options.get('cond_or_uncond', [])
-            # Existing output features: sparse capture starting a quarter into sampling.
-            # No rivalry between tokens: adjectives and nouns may overlap.
+            # Read the positive branch without altering the attention output.
             if options.get('block_index') not in (4, 8) or 0 not in branches or not capture.wanted:
                 return out
-            h, w = state['shape']
-            n = h * w
-            batch = out.shape[0] // len(branches)
-            features = out.chunk(len(branches))[branches.index(0)].float()
-            if features.shape[1] != n + metadata['count']:
-                raise ValueError('MOSS conditioning/token alignment changed')
-            maps = features[:, n:] @ features[:, :n].transpose(1, 2)
-            maps = maps.reshape(batch, metadata['count'], h, w)
-            maps = torch.nn.functional.interpolate(maps, size=map_shape(h, w, metadata['count'] + len(groups)), mode='bilinear', align_corners=False)
-            if capture.pending is None:
-                capture.pending = maps
-            else:
-                capture.pending.add_(maps)
-            # Coarse spatial correlation measures agreement across layers/steps
-            # without retaining every full-resolution capture.
-            small = torch.nn.functional.adaptive_avg_pool2d(maps, (min(16, maps.shape[-2]), min(16, maps.shape[-1]))).flatten(2)
-            centered = small - small.mean(-1, keepdim=True)
-            unit = centered / centered.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-            state['pending_units'].append(unit)
+            with pause_malloc_graph():
+                h, w = state['shape']
+                n = h * w
+                batch = q.shape[0] // len(branches)
+                if q.shape[1] != n + metadata['count']:
+                    raise ValueError('MOSS conditioning/token alignment changed')
+                branch = branches.index(0)
+                maps = attention_weights(q.chunk(len(branches))[branch], k.chunk(len(branches))[branch], heads, n)
+                maps = maps.reshape(batch, metadata['count'], h, w)
+                maps = torch.nn.functional.interpolate(maps, size=map_shape(h, w, metadata['count'] + len(groups)), mode='bilinear', align_corners=False)
+                if capture.pending is None:
+                    capture.pending = maps
+                else:
+                    capture.pending.add_(maps)
+                # Coarse spatial correlation measures agreement across layers/steps
+                # without retaining every full-resolution capture.
+                small = torch.nn.functional.adaptive_avg_pool2d(maps, (min(16, maps.shape[-2]), min(16, maps.shape[-1]))).flatten(2)
+                centered = small - small.mean(-1, keepdim=True)
+                unit = centered / centered.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+                state['pending_units'].append(unit)
             return out
 
         def finish(step):
@@ -168,7 +175,7 @@ class PainterMossSampler:
             maps = maps / state['agreement_count']
             # Combine raw token pieces before spatial filtering and normalization.
             if groups:
-                words = torch.stack([maps[:, g['source_indices']].mean(1) for g in groups], dim=1)
+                words = torch.stack([maps[:, g['source_indices']].sum(1) for g in groups], dim=1)
                 maps = torch.cat((maps, words), dim=1)
             # Smooth raw associations, before each token's contrast stretch.
             padded = torch.nn.functional.pad(maps, (0, 0, 1, 1), mode='replicate')
@@ -187,18 +194,19 @@ class PainterMossSampler:
                 doc = dict(version=3, prompt=text, tokens=metadata['tokens'], words=groups, width=w, height=h,
                            consistency=agreement[batch_index],
                            consistency_method='Mean pairwise spatial correlation across captured layers and steps on at most 16x16 pooled raw maps; not correctness or confidence',
-                           method='attention output similarity', captured_calls=len(capture.captured),
-                           capture=dict(version=4, block_indices=[4, 8], sampler_steps=capture.captured,
+                           method='image-to-text attention weights', captured_calls=len(capture.captured),
+                           capture=dict(version=5, block_indices=[4, 8], sampler_steps=capture.captured,
                                         layer_evaluations=state['agreement_count'],
-                                        layer_reduction='mean raw associations', resolution_cap=128,
-                                        word_reduction='mean raw token-piece associations before normalization',
+                                        layer_reduction='mean head-averaged attention probabilities', resolution_cap=128,
+                                        word_reduction='sum raw token-piece attention probabilities before normalization',
+                                        attention_normalization='softmax over all image and text keys; image queries to text keys',
                                         schedule='quarter-start, middle-third capture budget, stride 3',
                                         smoothing='separable binomial [1,2,1]/4; edge padding; before token quantiles',
                                         step_index_base=0, total_steps=steps,
                                         evaluation='last positive evaluation before sampler callback',
                                         normalization='per-token 5th–99th percentile, clipped to uint8',
                                         latent_shape=list(state['shape']),
-                                        attribution='feature similarity, not attention probability or causal attribution'))
+                                        attribution='attention probabilities before display normalization; saved maps are relative contrast, not probabilities or causal attribution'))
                 packets.append(moss_data.encode(doc, (item * 255).byte().cpu().numpy().tobytes()))
         return sampled + (packets or [dict(reason='Sampling ended before a heatmap capture completed')],)
 

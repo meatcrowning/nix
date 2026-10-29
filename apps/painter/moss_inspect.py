@@ -106,6 +106,7 @@ class MossInspect(QObject):
         layers = capture.get('block_indices', [capture.get('block_index', 4)])
         text = 'Saved maps v%d · %d×%d · layers %s' % (doc.get('version',1),doc['width'],doc['height'],
                 ', '.join(str(i+1) for i in layers))
+        text += ' · ' + doc.get('method', 'attention output similarity')
         values = doc.get('consistency')
         if values and 0 <= self._selected < len(self._tokens):
             value = values[self._tokens[self._selected]['index']]
