@@ -550,9 +550,9 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         export_font = QFont('sans-serif')
         export_font.setPixelSize(max(16, min(48, original.width() // 35)))
         header = QFontMetrics(export_font).height() + 24
-        large_width = 2*original.width() + 12
-        large_height = round(large_width*original.height()/original.width())
-        assert grid.width() == large_width + 24
+        large_height = 2*original.height() + header + 12
+        large_width = round(large_height*original.width()/original.height())
+        assert grid.width() == large_width + original.width()*2 + 48  # Square: original beside the maps.
         assert 'focused' not in json.loads(grid.text('PainterRanking'))
         assert grid.text('Description').splitlines() == [
             'Original output', 'All tokens · relative association', 'Hottest & coldest areas',
@@ -574,8 +574,7 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         assert grid.text('Title') == 'saved-moss — token association heatmaps'
         image_y = title_height - int(grid.text('PainterComparisonTopTrim')) + 12 + header + 4
         assert grid.pixelColor(16, image_y) == original.pixelColor(4, 4)
-        grid_y = image_y + large_height + 12 + header
-        assert grid.pixelColor(16, grid_y) != original.pixelColor(4, 4)
+        assert grid.pixelColor(large_width + 28, image_y) != original.pixelColor(4, 4)
         ctl.inspection.toggleGrid()
         for choice in (0, 1):
             ctl.inspection.holdImage(.5, .5)

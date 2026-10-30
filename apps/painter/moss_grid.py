@@ -1,4 +1,5 @@
-"""Five-panel exports with an enlarged original above four thermal maps."""
+"""Five-panel exports: an enlarged original beside (square/portrait) or above
+(landscape) four thermal maps."""
 from datetime import datetime
 import json
 from pathlib import Path
@@ -250,10 +251,18 @@ def save_grid(source, data, tokens, folder):
     expanded = {}
     prompt_links = []
     hot = area_mask(words, ranking)
-    original_width = 2 * width + gap
-    original_height = round(original_width * height / width)
-    grid_top = gap + header + original_height + gap
-    canvas = QImage(original_width + gap * 2, grid_top + (height + header) * 2 + gap * 2, QImage.Format_RGB32)
+    stacked = width > height
+    if stacked:
+        original_width = 2 * width + gap
+        original_height = round(original_width * height / width)
+        grid_left, grid_top = gap, gap + header + original_height + gap
+        canvas_size = original_width + gap * 2, grid_top + (height + header) * 2 + gap * 2
+    else:
+        original_height = 2 * height + header + gap
+        original_width = round(original_height * width / height)
+        grid_left, grid_top = original_width + 2 * gap, gap
+        canvas_size = grid_left + width * 2 + gap * 2, (height + header) * 2 + gap * 3
+    canvas = QImage(*canvas_size, QImage.Format_RGB32)
     if canvas.isNull():
         raise ValueError('Not enough memory for the comparison')
     canvas.fill(QColor('#15191f'))
@@ -272,7 +281,7 @@ def save_grid(source, data, tokens, folder):
                 x, y = gap, gap
                 panel_width, panel_height = original_width, original_height
             else:
-                x = gap + ((i - 1) % 2) * (width + gap)
+                x = grid_left + ((i - 1) % 2) * (width + gap)
                 y = grid_top + ((i - 1) // 2) * (height + header + gap)
                 panel_width, panel_height = width, height
             heading = QRect(x + padding, y, panel_width - padding * 2, header)
