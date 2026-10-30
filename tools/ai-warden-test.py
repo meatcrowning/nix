@@ -15,6 +15,8 @@ machine, and neither failure is visible until it happens.
 """
 import os
 import sys
+import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 os.environ["AI_WARDEN_NO_NOTIFY"] = "1"
@@ -29,6 +31,12 @@ _SRC = (Path(__file__).resolve().parent.parent / "home" / "srvs"
 _spec = importlib.util.spec_from_file_location("aiwarden", _SRC)
 W = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(W)
+
+# No real logging, pressure snapshots, or user kill-switch state in a fixture.
+W.log = lambda *_a, **_k: None
+W.pressure_capture = lambda: None
+W.hogs_note = lambda: " (synthetic pressure)"
+W.OFF = SimpleNamespace(exists=lambda: False)
 
 GiB = W.GiB
 FAILS = []
@@ -405,6 +413,68 @@ try:
           str(controls))
 finally:
     W.unit_active, W.unit_control = old_active, old_control
+
+print("\nowned reservations cannot release another submission")
+w = World().install()
+check("first owned admission", w.reserve("comfy", hint=GiB, token="first")["ok"])
+check("second owned admission", w.reserve("comfy", hint=GiB, token="second")["ok"])
+w.done("comfy")
+check("legacy done leaves owned work alone", w.leased("comfy"))
+w.done("comfy", "first")
+check("one done leaves the other token alive", w.leased("comfy") and
+      w.renew("comfy", token="second")["ok"])
+check("cancelled token cannot renew", not w.renew("comfy", token="first")["ok"])
+w.done("comfy", "second")
+check("last token release clears busy lease", not w.leased("comfy"))
+check("release before reserve cancels that submission",
+      not w.reserve("comfy", hint=GiB, token="first")["ok"])
+
+print("\nadmissions serialize while heartbeats and cancellation remain responsive")
+w = World().install()
+entered, unblock = threading.Event(), threading.Event()
+second_entered = threading.Event()
+original_estimate = w.estimate
+results = {}
+
+def blocked_estimate(backend, model="", hint=0):
+    if model == "first":
+        entered.set()
+        if not unblock.wait(3):
+            raise RuntimeError("fixture timeout")
+    else:
+        second_entered.set()
+    return original_estimate(backend, model, hint)
+
+w.estimate = blocked_estimate
+w._take_lease("ollama", 60)
+first = threading.Thread(target=lambda: results.update(first=w.reserve(
+    "comfy", model="first", hint=GiB, token="waiting")))
+second = threading.Thread(target=lambda: results.update(second=w.reserve(
+    "comfy", model="second", hint=GiB, token="next")))
+first.start()
+check("first admission reached fixture", entered.wait(1))
+second.start()
+try:
+    check("second admission cannot inspect the same resource snapshot",
+          not second_entered.wait(.05))
+    check("heartbeat bypasses admission wait", w.renew("ollama")["ok"])
+    w.done("comfy", "waiting")
+finally:
+    unblock.set()
+    first.join(3)
+    second.join(3)
+check("cancel during admission prevents a late lease",
+      not results["first"]["ok"] and ("comfy", "waiting") not in w.reservations)
+check("next admission resumes", results["second"]["ok"])
+
+print("\nadmitted but unloaded models consume promised capacity")
+w = World(avail_gb=20, tags={"large": 18}).install()
+check("first cold backend fits", w.reserve("comfy", hint=12 * GiB, token="cold")["ok"])
+r = w.reserve("ollama", model="large", token="other")
+check("other cold backend cannot spend the same RAM", not r["ok"], r)
+w.done("comfy", "cold")
+check("released capacity is available again", w.reserve("ollama", model="large", token="retry")["ok"])
+
 
 print()
 if FAILS:

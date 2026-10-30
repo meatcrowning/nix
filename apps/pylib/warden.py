@@ -98,24 +98,33 @@ class Warden(QObject):
         try:
             box.clear()
             if reply.error() != QNetworkReply.NetworkError.NoError:
-                cb(True, "")               # fail open — see the module docstring
+                reason = "admission protection unavailable: " + (reply.errorString() or "network error")
+                box.update(ok=True, bypassed=True, reason=reason)
+                cb(True, reason)            # fail open, but expose the bypass
                 return
             try:
                 doc = json.loads(bytes(reply.readAll().data()) or b"{}")
+                if not isinstance(doc, dict) or not isinstance(doc.get("ok"), bool):
+                    raise ValueError("invalid admission response")
             except (ValueError, TypeError):
-                cb(True, "")
+                reason = "admission protection unavailable: invalid response"
+                box.update(ok=True, bypassed=True, reason=reason)
+                cb(True, reason)
                 return
-            box.update(doc if isinstance(doc, dict) else {})
+            box.update(doc)
             cb(bool(doc.get("ok", True)), str(doc.get("reason") or ""))
         finally:
             reply.deleteLater()
 
-    def reserve(self, backend, model="", nbytes=0, cb=None, lease=0):
+    def reserve(self, backend, model="", nbytes=0, cb=None, lease=0, token=""):
         """Ask for room before loading. `backend` is "ollama" or "comfy";
         `model` lets the warden size an ollama turn from its own catalogue,
         `nbytes` is painter's own weights figure. `lease` (seconds) overrides
         how long the reservation counts as busy without a `/done` — pass one
-        when the work is longer than the default and pair it with `renew`."""
+        when the work is longer than the default and pair it with `renew`.
+        Supply a unique `token` per submission and pass it to renew/done; a
+        release before admission completes cancels that token permanently for
+        the request window. Callers must still discard a cancelled callback."""
         body = {"backend": backend}
         if model:
             body["model"] = model
@@ -123,9 +132,12 @@ class Warden(QObject):
             body["bytes"] = int(nbytes)
         if lease:
             body["lease"] = int(lease)
-        self._post("/reserve", body, cb or (lambda ok, why: None))
+        if token:
+            body["token"] = str(token)
+        self._post("/reserve-owned" if token else "/reserve", body,
+                   cb or (lambda ok, why: None))
 
-    def renew(self, backend, lease=0):
+    def renew(self, backend, lease=0, token=""):
         """Still working — push the lease deadline out.
 
         Only extends a lease already held; it never takes one, so it cannot
@@ -137,9 +149,11 @@ class Warden(QObject):
         body = {"backend": backend}
         if lease:
             body["lease"] = int(lease)
-        self._post("/renew", body)
+        if token:
+            body["token"] = str(token)
+        self._post("/renew-owned" if token else "/renew", body)
 
-    def done(self, backend, cb=None):
+    def done(self, backend, cb=None, token=""):
         """The work is over — release the lease so the other app can have the
         memory. Safe to call twice, and safe to call having never reserved.
 
@@ -148,7 +162,11 @@ class Warden(QObject):
         fired together can arrive in either order — a reserve that overtakes the
         release sees a live lease and stands back from weights already given up.
         Chain the reserve off this instead."""
-        self._post("/done", {"backend": backend}, cb and (lambda ok, why: cb()))
+        body = {"backend": backend}
+        if token:
+            body["token"] = str(token)
+        self._post("/done-owned" if token else "/done", body,
+                   cb and (lambda ok, why: cb()))
 
     def client_acquire(self, backend, client_id, cb=None):
         """Register one live app process and start its backend if this is the

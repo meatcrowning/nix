@@ -490,7 +490,12 @@ def comfy_queue():
 class Warden:
     def __init__(self):
         self.lock = threading.RLock()
+        # Admission can wait for model unloading; heartbeats never wait on it.
+        self.admission_lock = threading.RLock()
+        self.reservations = {}   # (backend, token) -> (expiry, projected RAM)
+        self.cancelled = {}      # token tombstones for release-before-admit
         self.leases = {}          # backend -> unix ts the lease expires
+        self.lease_bytes = {}     # legacy admission promises
         self.clients = {b: {} for b in BACKENDS}  # backend -> id -> expiry
         self.client_idle = {}     # backend -> when its no-client grace ends
         # Only a backend claimed since this daemon started is ours to stop. A
@@ -530,7 +535,7 @@ class Warden:
         """(bool, why). Work in flight is never interrupted, so this is the one
         reading that can turn a reserve into a refusal."""
         with self.lock:
-            until = self.leases.get(backend, 0)
+            until = self._lease_until(backend)
         if until > time.time():
             return True, "%s is mid-reply" % NICE[backend]
         if backend == "comfy":
@@ -553,7 +558,7 @@ class Warden:
         words that this work is in flight? The hard half of `busy`, and the only
         half rule 2 protects; the rest of `busy` is inference."""
         with self.lock:
-            return self.leases.get(backend, 0) > time.time()
+            return self._lease_until(backend) > time.time()
 
     def wait_idle(self, backend, wait=None):
         """Wait, briefly, for an ADVISORY busy to clear. Returns whether it is
@@ -588,7 +593,7 @@ class Warden:
                 else unit_active("comfy-painter.service", user=True)
             bsy, why = self.busy(b)
             with self.lock:
-                lease = max(0, int(self.leases.get(b, 0) - time.time()))
+                lease = max(0, int(self._lease_until(b) - time.time()))
                 clients = sum(until > time.time()
                               for until in self.clients[b].values())
                 idle = max(0, int(self.client_idle.get(b, 0) - time.time()))
@@ -651,6 +656,10 @@ class Warden:
                 unit_active("comfy-painter.service", user=True))
 
     def client_lifecycle(self):
+        with self.admission_lock:
+            self._client_lifecycle()
+
+    def _client_lifecycle(self):
         """Expire dead GUI claims and stop only a managed, idle backend."""
         now = time.time()
         due = []
@@ -683,7 +692,7 @@ class Warden:
                 # that fresh claim. Its acquire waits a moment instead, sees the
                 # stopped unit, and starts it normally.
                 if (self.clients[backend] or
-                        self.leases.get(backend, 0) > time.time()):
+                        self._lease_until(backend) > time.time()):
                     self.client_idle[backend] = time.time() + CLIENT_GRACE
                     continue
                 if self._unit_up(backend):
@@ -748,6 +757,10 @@ class Warden:
     # -- freeing ----------------------------------------------------------
 
     def free(self, backend, wait=25):
+        with self.admission_lock:
+            return self._free(backend, wait)
+
+    def _free(self, backend, wait=25):
         """Drop a backend's weights, leaving the daemon up. Returns bytes
         released, measured rather than assumed."""
         before = self.reclaimable(backend)
@@ -776,16 +789,55 @@ class Warden:
 
     # -- the answer -------------------------------------------------------
 
-    def reserve(self, backend, model="", hint=0, lease=None):
+    def _lease_until(self, backend):
+        """Read under the state lock; legacy and owned leases stay separate."""
+        now = time.time()
+        for key, (until, _ram) in list(self.reservations.items()):
+            if until <= now:
+                self.reservations.pop(key, None)
+        for key, until in list(self.cancelled.items()):
+            if until <= now:
+                self.cancelled.pop(key, None)
+        return max([self.leases.get(backend, 0)] +
+                   [until for (b, _), (until, _) in self.reservations.items()
+                    if b == backend])
+
+    def _available_for(self, backend):
+        # MemAvailable cannot see a model that has been admitted but has not
+        # loaded yet. Charge outstanding promises on the other backend, less
+        # the footprint already visible there. Jobs within Comfy execute serially.
+        other = "ollama" if backend == "comfy" else "comfy"
+        with self.lock:
+            self._lease_until(other)
+            legacy = (self.lease_bytes.get(other, 0)
+                      if self.leases.get(other, 0) > time.time() else 0)
+            projected = max([legacy] + [ram for (b, _), (_, ram)
+                                       in self.reservations.items() if b == other])
+        return mem_available() - max(0, projected - self.footprint(other))
+
+    def reserve(self, backend, model="", hint=0, lease=None, token=""):
+        token = str(token or "")
+        if len(token) > 128:
+            return {"ok": False, "reason": "reservation token is too long"}
+        with self.admission_lock:
+            with self.lock:
+                self._lease_until(backend)
+                if (backend, token) in self.cancelled:
+                    return {"ok": False, "reason": "reservation cancelled"}
+                if token and (backend, token) in self.reservations:
+                    return {"ok": True, "reason": "", "token": token, "freed": []}
+            return self._reserve(backend, model, hint, lease, token)
+
+    def _reserve(self, backend, model="", hint=0, lease=None, token=""):
         if backend not in BACKENDS:
             return {"ok": True, "reason": "unknown backend %r — not gated" % backend,
-                    "freed": []}
+                    "freed": [], "bypassed": True}
         if OFF.exists():
-            return {"ok": True, "reason": "warden is off", "freed": []}
+            return {"ok": True, "reason": "warden is off", "freed": [], "bypassed": True}
 
         other = "comfy" if backend == "ollama" else "ollama"
         need, hard = self.estimate(backend, model, hint)
-        avail = mem_available()
+        avail = self._available_for(backend)
         vf, vt = vram()
         freed = []
 
@@ -833,23 +885,23 @@ class Warden:
                                 "%s needed the room" % NICE[backend])
                     notify("unloaded %s (%s)" % (NICE[other], gb(released)),
                            why_room)
-                avail = mem_available()
+                avail = self._available_for(backend)
                 vf, vt = vram()
                 ram_ok = need == 0 or (avail - need) >= RAM_FLOOR
                 vram_ok = vt == 0 or need == 0 or (vf - min(need, vt)) >= VRAM_FLOOR
 
         if ram_ok and vram_ok:
-            return self._admit(backend, lease, freed, need, avail, "room for it")
+            return self._admit(backend, lease, freed, need, avail, token, "room for it")
 
         held = self.reclaimable(other)
         if held < 1 * GiB:
             # Nothing of ours to give back. Refuse only if RAM is the problem —
             # a VRAM squeeze still goes ahead.
             if ram_ok:
-                return self._admit(backend, lease, freed, need, avail,
+                return self._admit(backend, lease, freed, need, avail, token,
                                    "ram fine, nothing of ours holds the gpu")
             if (avail - hard) >= HARD_FLOOR:
-                return self._admit(backend, lease, freed, need, avail,
+                return self._admit(backend, lease, freed, need, avail, token,
                                    "over the hard floor, nothing to unload")
             return self._refuse(
                 "not enough memory: needs %s, %s free, nothing to unload"
@@ -858,10 +910,10 @@ class Warden:
         bsy, why = self.busy(other)
         if bsy:
             if ram_ok:
-                return self._admit(backend, lease, freed, need, avail,
+                return self._admit(backend, lease, freed, need, avail, token,
                                    "ram fine, but " + why)
             if (avail - hard) >= HARD_FLOOR:
-                return self._admit(backend, lease, freed, need, avail,
+                return self._admit(backend, lease, freed, need, avail, token,
                                    "over the hard floor, but " + why)
             return self._refuse(
                 "%s, %s stuck under it" % (why, gb(held)), need, avail, freed)
@@ -871,7 +923,7 @@ class Warden:
             freed.append(other)
             notify("unloaded %s (%s)" % (NICE[other], gb(released)),
                    "%s needed the room" % NICE[backend])
-        avail = mem_available()
+        avail = self._available_for(backend)
         # Refuse on `hard`, never on `need` — see estimate(). Everything of ours
         # has already been given back at this point, so a shortfall here means
         # something outside the two backends is holding the machine.
@@ -886,10 +938,10 @@ class Warden:
                 "%sneeds %s plus a %s floor, only %s free%s"
                 % (gave, gb(hard), gb(HARD_FLOOR), gb(avail), hogs_note()),
                 need, avail, freed)
-        return self._admit(backend, lease, freed, need, avail,
+        return self._admit(backend, lease, freed, need, avail, token,
                            "room after unloading " + NICE[other])
 
-    def _admit(self, backend, lease, freed, need, avail, why):
+    def _admit(self, backend, lease, freed, need, avail, token, why):
         """Say yes — and LOG it. Until 2026-08-25 only frees and refusals were
         written down, so a reserve that was admitted while doing nothing left no
         trace at all: the video that died on a full GPU looked, from the log,
@@ -897,12 +949,22 @@ class Warden:
         per decision is what makes "why did it not free anything" answerable.
         """
         vf, _vt = vram()
+        projected = self.footprint(backend) + need
+        with self.lock:
+            if (backend, token) in self.cancelled:
+                return {"ok": False, "reason": "reservation cancelled", "freed": freed}
+            if token:
+                seconds = LEASE_DEFAULT.get(backend, 300) if lease is None else int(lease)
+                self.reservations[(backend, token)] = (
+                    time.time() + max(1, seconds), projected)
+            else:
+                self._take_lease(backend, lease)
+                self.lease_bytes[backend] = projected
         log("ADMIT %s: %s (need %s, avail %s, vram free %s%s)"
             % (NICE[backend], why, gb(need), gb(avail), gb(vf),
                ", freed " + ",".join(freed) if freed else ""))
-        self._take_lease(backend, lease)
         return {"ok": True, "reason": "", "freed": freed,
-                "need": need, "available": avail}
+                "need": need, "available": avail, "token": token}
 
     def _refuse(self, reason, need, avail, freed=None):
         log("REFUSED: " + reason)
@@ -915,7 +977,7 @@ class Warden:
             with self.lock:
                 self.leases[backend] = time.time() + secs
 
-    def renew(self, backend, lease=None):
+    def renew(self, backend, lease=None, token=""):
         """Extend a lease that is ALREADY held. Never takes one.
 
         A long job — chatter's video generation is up to an hour — has to keep
@@ -931,20 +993,42 @@ class Warden:
         if backend not in BACKENDS:
             return {"ok": False, "reason": "unknown backend %r" % backend}
         with self.lock:
+            if token:
+                key = (backend, str(token))
+                until, ram = self.reservations.get(key, (0, 0))
+                if until <= time.time():
+                    self.reservations.pop(key, None)
+                    return {"ok": False, "reason": "no reservation to renew"}
+                secs = LEASE_DEFAULT.get(backend, 300) if lease is None else int(lease)
+                self.reservations[key] = (time.time() + max(1, secs), ram)
+                return {"ok": True, "lease_s": secs}
             if self.leases.get(backend, 0) <= time.time():
                 return {"ok": False, "reason": "no lease to renew"}
             secs = LEASE_DEFAULT.get(backend, 300) if lease is None else int(lease)
             self.leases[backend] = time.time() + max(1, secs)
             return {"ok": True, "lease_s": secs}
 
-    def done(self, backend):
+    def done(self, backend, token=""):
         with self.lock:
-            self.leases.pop(backend, None)
+            if token:
+                key = (backend, str(token))
+                self.reservations.pop(key, None)
+                # A release can overtake a queued HTTP reserve, or arrive while
+                # admission is waiting. Remember it beyond the request timeout.
+                self._lease_until(backend)
+                self.cancelled[key] = time.time() + 300
+            else:
+                self.leases.pop(backend, None)
+                self.lease_bytes.pop(backend, None)
         return {"ok": True}
 
     # -- the net behind it ------------------------------------------------
 
     def watchdog(self):
+        with self.admission_lock:
+            self._watchdog()
+
+    def _watchdog(self):
         """For the memory admission control cannot see coming — an agent's nix
         build, a browser, cte. Frees the idle backend when the machine is
         already in trouble; never touches a busy one. Snapshots the top memory
@@ -1041,14 +1125,17 @@ class Handler(BaseHTTPRequestHandler):
             doc = {}
         path = self.path.rstrip("/")
         backend = str(doc.get("backend") or "")
-        if path == "/reserve":
+        if path.endswith("-owned") and not doc.get("token"):
+            self._send({"ok": False, "reason": "reservation token required"}, 400)
+            return
+        if path in ("/reserve", "/reserve-owned"):
             self._send(WARDEN.reserve(backend, str(doc.get("model") or ""),
                                       int(doc.get("bytes") or 0),
-                                      doc.get("lease")))
-        elif path == "/renew":
-            self._send(WARDEN.renew(backend, doc.get("lease")))
-        elif path == "/done":
-            self._send(WARDEN.done(backend))
+                                      doc.get("lease"), str(doc.get("token") or "")))
+        elif path in ("/renew", "/renew-owned"):
+            self._send(WARDEN.renew(backend, doc.get("lease"), str(doc.get("token") or "")))
+        elif path in ("/done", "/done-owned"):
+            self._send(WARDEN.done(backend, str(doc.get("token") or "")))
         elif path == "/free":
             self._send({"ok": True, "released": WARDEN.free(backend)})
         elif path == "/client/acquire":
