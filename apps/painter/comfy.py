@@ -758,6 +758,9 @@ class ComfyClient(QtCore.QObject):
             try:
                 doc = self._read_json(reply)
                 rows = doc.get("queue_running", []) + doc.get("queue_pending", [])
+                if job.cancelled and any(len(row) > 1 and row[1] == job.prompt_id for row in rows):
+                    self.cancel(job)
+                    return
                 running = doc.get("queue_running", [])
                 if any(len(row) > 1 and row[1] == job.prompt_id for row in running) and self._active is not job:
                     self._active = job
@@ -787,7 +790,10 @@ class ComfyClient(QtCore.QObject):
                         handed_off = True
                         self._get("/queue", queue)
                     elif missing_is_unknown:
-                        self._terminal(job, f"Job {job.prompt_id} is absent from queue/history; retained for recovery.", preserve=True)
+                        if job.cancelled:
+                            self._terminal(job, "cancelled")
+                        else:
+                            self._terminal(job, f"Job {job.prompt_id} is absent from queue/history; retained for recovery.", preserve=True)
                     return
                 err = extract_history_error(entry)
                 if err:

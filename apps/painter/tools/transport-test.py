@@ -123,6 +123,17 @@ c._find_pending(unknown)
 check(unknown.prompt_id == 'accepted' and unknown not in c._pending, 'lost submission acknowledgement resolves by request identity')
 check(not any(path == '/prompt' for path, _, _ in posts), 'recovery never blindly resubmits')
 
+cancelled = comfy.Job({}, parent=c)
+cancelled.prompt_id, cancelled.owner_id, cancelled.cancelled = 'cancel-recover', 'old-client', True
+c._jobs[cancelled.prompt_id] = cancelled
+cancel_row = [0, cancelled.prompt_id, {}, {'client_id': cancelled.owner_id}]
+def cancel_get(path, cb):
+    cb(Reply({'queue_running': [cancel_row], 'queue_pending': []} if path == '/queue'
+             else {'ownership_version': 1} if path == '/painter/control' else {}))
+c._get = cancel_get
+c._reconcile(cancelled, check_queue=True)
+check(cancelled.terminal and any(path == '/painter/interrupt' and body['prompt_id'] == cancelled.prompt_id
+      for path, body, _ in posts), 'recovery retries cancellation only for the recorded owned job')
 failed = []
 c.jobFailed.connect(lambda job, error: failed.append(error))
 c._get = lambda path, cb: cb(Reply({}))
