@@ -1,4 +1,4 @@
-"""Five-panel exports with an enlarged original beside four thermal maps."""
+"""Five-panel exports with an enlarged original above four thermal maps."""
 from datetime import datetime
 import json
 from pathlib import Path
@@ -250,9 +250,10 @@ def save_grid(source, data, tokens, folder):
     expanded = {}
     prompt_links = []
     hot = area_mask(words, ranking)
-    original_height = 2 * height + header + gap
-    original_width = round(original_height * width / height)
-    canvas = QImage(original_width + width * 2 + gap * 4, (height + header) * 2 + gap * 3, QImage.Format_RGB32)
+    original_width = 2 * width + gap
+    original_height = round(original_width * height / width)
+    grid_top = gap + header + original_height + gap
+    canvas = QImage(original_width + gap * 2, grid_top + (height + header) * 2 + gap * 2, QImage.Format_RGB32)
     if canvas.isNull():
         raise ValueError('Not enough memory for the comparison')
     canvas.fill(QColor('#15191f'))
@@ -271,8 +272,8 @@ def save_grid(source, data, tokens, folder):
                 x, y = gap, gap
                 panel_width, panel_height = original_width, original_height
             else:
-                x = original_width + 2 * gap + ((i - 1) % 2) * (width + gap)
-                y = gap + ((i - 1) // 2) * (height + header + gap)
+                x = gap + ((i - 1) % 2) * (width + gap)
+                y = grid_top + ((i - 1) // 2) * (height + header + gap)
                 panel_width, panel_height = width, height
             heading = QRect(x + padding, y, panel_width - padding * 2, header)
             if i == 0:
