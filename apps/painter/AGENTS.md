@@ -23,6 +23,9 @@ read-only state before using them.
 | Wildcards/prompt representation | `main.py`, QML prompt controls | `wildcards-test.py`, `promptdoc-test.py` |
 | Tag completion | shared `pylib/boorutags.py`, QML prompt controls | `anima-test.py` |
 | Backend transport | `comfy.py` | inspect matching client/UI stubs |
+| Submission lifecycle/output saves | `submission.py`, `output_save.py`, `media_work.py` | `submission-test.py`, UI `drag`/`notifications` |
+| Recovery/ownership | `comfy.py`, `job_journal.py` | `transport-test.py` |
+| Remote catalogue | `catalogue.py`, `catalogue_index.py`, backend node | `catalogue-test.py`, `catalogue-gallery-test.py` |
 | Book launcher/forward/mounts | `tools/comfy-tunnel.sh` | `tunnel-test.sh` is a live integration test |
 | Retained resources | `tools/resource-fixture.py` | synthetic offscreen fixture |
 
@@ -162,6 +165,15 @@ Muted video copies are cached derivatives; never overwrite the original or
 insert the derivative into generation history. Output PNG/MP4 metadata uses
 the shared `pngmeta.py`/`mp4meta.py` implementations. Metadata failure must not
 discard an otherwise valid downloaded output.
+
+`submission.py` freezes form/model/LoRA state before asynchronous work and validates
+the whole batch before submission. GUI and headless paths share `build_job`.
+Warden reservation tokens belong to submissions; cancellation invalidates delayed
+callbacks. `output_save.py` bounds transfers and metadata workers, publishes by
+atomic rename, and acknowledges transport jobs only after saves finish. Failed
+saves remain in the recovery journal. Derivative preparation never waits on the
+UI thread; drag payloads activate when ready. Preview decoding retains only the
+active and newest frame.
 
 ## MOSS token inspection
 
@@ -472,6 +484,22 @@ and hosts. Closing one window must not stop another client's work. Preserve
 reservation/refusal/status reporting and asynchronous unit commands. On book,
 backend commands follow the resolved SSH/control route; do not target a
 nonexistent local top-only service.
+
+GUI jobs journal beneath the Painter state directory's `jobs/`; advisory locks
+exclude live windows from recovery. Reconnect reconciles queue/history; uncertain
+submissions are never blindly retried. Stop requests require the backend's
+`/painter/control` ownership capability; an old backend refuses safely. Backend
+PNG saves receive Painter metadata directly, with frontend enrichment retained.
+
+Book defaults to the versioned loopback catalogue for model fingerprints, output
+metadata and thumbnails. Cached catalogues remain available offline; full-size
+output access still uses the peer mount. `PAINTER_CATALOGUE=0` selects legacy
+model SSHFS discovery. Backend node installation requires a Top rebuild and
+takes effect on its next start. `tools/backend-manifest.py` records environment
+revisions and checks package/node availability without importing GPU libraries.
+`tools/capture-bench.py` requires a separately identified, memory-capped backend
+with scratch input/output/user/database paths and its own warden reservation.
+The `moss_capture` graph option defaults true; benchmarks never change defaults.
 
 Book uses read-only model/peer-output mounts where available. Model discovery
 reads tensor headers off the GUI thread and retries while mounts settle.
