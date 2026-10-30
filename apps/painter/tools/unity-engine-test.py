@@ -6,6 +6,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
+import time
 
 assert os.environ['HOME'] == '/home/test'
 assert os.environ['QT_QPA_PLATFORM'] == 'offscreen'
@@ -221,7 +222,15 @@ from PySide6.QtCore import QBuffer, QIODevice
 buf = QBuffer()
 buf.open(QIODevice.WriteOnly)
 image.save(buf, 'PNG')
+preview_tick = ctl._preview_tick
 ctl._on_preview(None, bytes(buf.data()), 'png')
+# Preview decoding is asynchronous and coalesced; wait for its published frame,
+# not merely for the sampler signal to return.
+deadline = time.monotonic() + 5
+while ctl._preview_tick == preview_tick and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(.005)
+assert ctl._preview_tick > preview_tick, 'preview decode did not complete'
 media = engine.snapshot({})['media']
 assert media['data'] and media['path'] == 'live://generating'
 assert not engine.snapshot({'frameTick': media['tick']})['media']['data']
