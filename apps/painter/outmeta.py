@@ -38,6 +38,10 @@ VIDEO_SUFFIXES = {".mp4", ".webm", ".mkv", ".mov"}
 def params_for(path) -> dict | None:
     """The generation behind this output, or None if it kept none."""
     p = Path(str(path).replace("file://", ""))
+    import catalogue
+    remote = catalogue.output(str(p)) if catalogue.enabled() else None
+    if remote is not None:
+        return remote.get("params") or None
     try:
         if p.suffix.lower() in VIDEO_SUFFIXES:
             tags = mp4meta.read_tags_path(p)
@@ -48,7 +52,7 @@ def params_for(path) -> dict | None:
                 except ValueError:
                     return None
             return params_from_graph(tags.get("prompt"))
-        text = pngmeta.read_text(p.read_bytes())
+        text = pngmeta.read_text_path(p)
         own = text.get("painter")
         if own:
             try:

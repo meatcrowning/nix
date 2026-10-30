@@ -35,7 +35,7 @@ check() { if [ "$1" = "0" ]; then pass "$2"; else fail "$2 ${3:-}"; fi; }
 # The launcher's own environment, minus anything that could reach him: no
 # notify-send on this PATH, so a failure cannot toast his desktop mid-test.
 run_launcher() {
-    env PATH=/usr/bin:/bin:/usr/sbin timeout 120 bash "$TUNNEL" "$@" 2>&1
+    env PAINTER_CATALOGUE=0 PATH=/usr/bin:/bin:/usr/sbin timeout 120 bash "$TUNNEL" "$@" 2>&1
 }
 
 # What the APP does: an HTTP GET on the forwarded port. This is the assertion —

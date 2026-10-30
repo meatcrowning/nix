@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Run painter on book against top's loopback ComfyUI through SSH. The `air`
 # launcher invokes this as `comfy-tunnel.sh -- python3 main.py`: it forwards
-# ComfyUI (8188) and ai-warden (top 8199), mounts top's model/output roots
-# read-only, starts the app as soon as ports bind, and cleans up. The backend
+# ComfyUI (8188) and ai-warden (top 8199), mounts top's full outputs read-only,
+# starts the app as soon as ports bind, and cleans up. Model discovery and
+# thumbnails use the cached catalogue; PAINTER_CATALOGUE=0 restores model SSHFS. The backend
 # lease handles warm-up; the window opens immediately. Without `--`, this holds
 # a forward and starts the user unit. `PAINTER_NO_TUNNEL=1` is the local/UI
 # override. ComfyUI has no auth, so SSH is the only remote path; candidates are
@@ -170,6 +171,9 @@ say "reaching top as '$HOST'"
 # control fails, backend running or not. Hand the app the host we resolved and
 # the master socket we already opened, so it drives systemd where the backend
 # actually is. main.py's unit_cmd() reads exactly these three.
+export PAINTER_CATALOGUE="${PAINTER_CATALOGUE:-1}"
+export PAINTER_CATALOGUE_ID="$HOST"
+export PAINTER_MODELS="$MODELS_LOCAL"
 export PAINTER_BACKEND_SSH="$HOST"
 export PAINTER_BACKEND_SSH_BIN="$SSH"
 export PAINTER_BACKEND_SSH_CTL="$SSH_CTL"
@@ -266,7 +270,7 @@ stop_backend_ours() {
     STARTED_BACKEND=""
 }
 
-if [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
+if [ "$PAINTER_CATALOGUE" != 1 ] && [ -z "${PAINTER_NO_MODELS_MOUNT:-}" ] && [ ${#APP[@]} -gt 0 ]; then
     # The path is known before the mount exists.  Start the mount in parallel;
     # main.py retries its scan while it arrives instead of making the window
     # wait through this SSHFS round trip.

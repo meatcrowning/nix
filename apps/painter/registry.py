@@ -16,6 +16,7 @@ import re
 
 import fingerprint as fp
 import graph as G
+import catalogue
 from dimensions import calc_dims
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -160,11 +161,11 @@ class Entry:
         self.size = res.get("size", 0)
         self.error = res.get("error")
         self.overridden = overridden
-        self.keys = None
-        self.targets = None
-        self.kohya = False
-        self.patches_clip = False
-        self.declared = None
+        self.keys = set(res["keys"]) if "keys" in res else None
+        self.targets = set(res["targets"]) if "targets" in res else None
+        self.kohya = bool(res.get("kohya"))
+        self.patches_clip = bool(res.get("patches_clip"))
+        self.declared = self.dims.get("declared")
 
     def __repr__(self):
         return f"<Entry {self.name} {self.role}/{self.family}>"
@@ -183,7 +184,8 @@ class Registry:
     # -- discovery ---------------------------------------------------------
 
     def scan(self, use_cache: bool = True):
-        results = fp.scan([self.root], use_cache=use_cache)
+        results = (catalogue.models(self.root) if catalogue.enabled() and self.root == MODEL_ROOT
+                   else fp.scan([self.root], use_cache=use_cache))
         self.entries = []
         for res in results:
             ov = self.overrides.for_file(res["path"])
@@ -662,7 +664,8 @@ class Registry:
         g.set_input("save", "filename_prefix", p.get("filename_prefix", "painter"))
 
         p.pop("moss_heatmaps", None)
-        if (fam["id"] == "moss_image" and not g.has("negpip") and object_info
+        if (fam["id"] == "moss_image" and p.get("moss_capture", True)
+                and not g.has("negpip") and object_info
                 and "PainterMossSampler" in object_info and "PainterMossSaveImage" in object_info):
             g.node("sampler")["class_type"] = "PainterMossSampler"
             g.set_inputs("sampler", {"clip": list(g.node("encode_pos")["inputs"]["clip"]), "text": pos})

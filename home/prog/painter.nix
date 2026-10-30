@@ -44,13 +44,10 @@ let
 
   painter =
     if hostProfile.isBook then
-      # book has no backend of its own — no NVIDIA, no 246G of weights — so it
-      # borrows top's, over the ssh forward. The launcher probes top, starts
-      # comfy-painter there if it is not already up, waits for it to answer and
-      # only then opens the window; unreachable top is fatal with a
-      # notification, because a painter that cannot generate is worse than one
-      # that did not open. Live source, so it is fixable on book with no
-      # home-manager rebuild.
+      # Book borrows Top's loopback backend through SSH. The window opens once
+      # the forward binds, then warms up asynchronously. Model discovery and
+      # gallery thumbnails use the cached catalogue; full outputs retain the
+      # read-only peer mount. PAINTER_CATALOGUE=0 selects legacy model SSHFS.
       pkgs.writeShellScriptBin "painter" ''
         export PAINTER_TAG_LLAMA=${tagLlama}/bin/llama-completion
         export PAINTER_TAG_MODEL=${tagModel}
@@ -126,6 +123,8 @@ in
   home.activation.painterPartialStopNode = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     if [ -d ${comfyDir}/custom_nodes ]; then
       # Live app source, like the Painter frontend; loaded on backend start.
+      $DRY_RUN_CMD ln -sfn /home/lam/nix/apps/painter/comfy_nodes/painter_catalogue.py \
+        ${comfyDir}/custom_nodes/painter_catalogue.py
       $DRY_RUN_CMD ln -sfn /home/lam/nix/apps/painter/comfy_nodes/painter_moss.py \
         ${comfyDir}/custom_nodes/painter_moss.py
       $DRY_RUN_CMD ln -sfn /home/lam/nix/apps/painter/comfy_nodes/painter_partial_stop.py \
@@ -178,6 +177,9 @@ in
       ExecStart = pkgs.writeShellScript "comfy-painter-start" ''
         cd ${comfyDir}
         exec nix-shell shell.nix --run '
+          python /home/lam/nix/apps/painter/tools/backend-manifest.py \
+            --comfy /home/lam/comfy --check \
+            --write "$HOME/.cache/painter/backend-manifest.json" || exit $?
           exec python main.py \
             --disable-api-nodes \
             --preview-method auto \

@@ -11,6 +11,7 @@ from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, QProcess,
 from PySide6.QtGui import QImageReader
 
 import outmeta
+import catalogue
 
 # Book downloads its own copy of each result, but also sees top's backend output
 # over the read-only sshfs peer root. Local stays first in `load_existing`: its
@@ -72,6 +73,10 @@ class _ThumbJob(QRunnable):
     def run(self):
         out = ""
         try:
+            if catalogue.enabled() and catalogue.output(self.path) is not None:
+                if catalogue.thumbnail(self.path, self.dest):
+                    self.sig.done.emit(self.path, str(self.dest))
+                    return
             rd = QImageReader(self.path)
             rd.setAutoTransform(True)
             dims = rd.size()
@@ -124,6 +129,23 @@ def _history_rows(roots, limit=0):
     return [_history_row(p, st) for p, st in files]
 
 
+def _catalogue_rows(local):
+    if not PEER_OUTS:
+        return local
+    found = {r["key"]: r for r in local}
+    for entry in catalogue.outputs(PEER_OUTS[0]):
+        row = _history_row(entry["path"], (entry["mtime"], entry["size"]))
+        row["ck"] = entry["stamp"]
+        dest = CACHE / "thumbs" / f"{Path(entry["path"]).stem}-{entry["stamp"]}.jpg"
+        row["thumb"] = (QUrl.fromLocalFile(str(dest)).toString()
+                        if not row["is_video"] and dest.exists() else "")
+        row["hay"] = " ".join([row["name"]] + [str(entry.get("params", {}).get(k, ""))
+                          for k in ("positive", "negative", "model", "family")]).lower()
+        row["mtime"] = entry["mtime"]
+        found.setdefault(row["key"], row)
+    return sorted(found.values(), key=lambda r: r.get("mtime", 0), reverse=True)
+
+
 def _history_row(path, st):
     p = Path(path)
     ck = "" if st is None else f"{int(st[0])}-{int(st[1])}"
@@ -136,7 +158,8 @@ def _history_row(path, st):
         except OSError:
             pass
     return dict(path=str(p), url=QUrl.fromLocalFile(str(p)).toString(), name=p.name,
-                is_video=video, poster="", key=p.name, ck=ck, thumb=thumb)
+                is_video=video, poster="", key=p.name, ck=ck, thumb=thumb,
+                mtime=st[0] if st else 0)
 
 
 class _HistorySignals(QObject):
@@ -154,7 +177,11 @@ class _HistoryScan(QRunnable):
         local = _history_rows([OUT_DIR])
         self.sig.done.emit(self.serial, local, not PEER_OUTS)
         if PEER_OUTS:
-            self.sig.done.emit(self.serial, _history_rows([OUT_DIR, *PEER_OUTS]), True)
+            try:
+                rows = _catalogue_rows(local) if catalogue.enabled() else _history_rows([OUT_DIR, *PEER_OUTS])
+            except (OSError, ValueError, TypeError, KeyError):
+                rows = local
+            self.sig.done.emit(self.serial, rows, True)
 
 
 class Gallery(QAbstractListModel):
@@ -383,7 +410,9 @@ class Gallery(QAbstractListModel):
 
     def load_existing(self, limit=0):
         self._scan_serial += 1
-        self._install_history(_history_rows([OUT_DIR, *PEER_OUTS], limit))
+        rows = (_catalogue_rows(_history_rows([OUT_DIR], limit)) if catalogue.enabled()
+                else _history_rows([OUT_DIR, *PEER_OUTS], limit))
+        self._install_history(rows[:limit] if limit else rows)
 
     def load_background(self):
         if self._history_job is not None:
@@ -437,6 +466,17 @@ class Gallery(QAbstractListModel):
         return CACHE / "posters" / f"{Path(path).stem}-{ck}.jpg"
 
     def _want_poster(self, path):
+        if catalogue.enabled() and catalogue.output(path) is not None:
+            dest = self._thumb_path(path)
+            if dest and dest.exists():
+                self._poster_ready(path, dest)
+            elif path not in self._thumb_busy:
+                if path in self._thumb_queue:
+                    self._thumb_queue.remove(path)
+                self._thumb_queue.append(path)
+                del self._thumb_queue[:-24]
+                self._next_thumb()
+            return
         try:
             dest = self._poster_path(path)
         except OSError:
@@ -577,7 +617,10 @@ class Gallery(QAbstractListModel):
     def _thumb_done(self, path, dest):
         self._thumb_busy.pop(path, None)
         if dest:
-            self._thumb_ready(path, Path(dest))
+            if Path(path).suffix.lower() in VIDEO_SUFFIXES:
+                self._poster_ready(path, Path(dest))
+            else:
+                self._thumb_ready(path, Path(dest))
         self._next_thumb()
 
     @Slot(str)
