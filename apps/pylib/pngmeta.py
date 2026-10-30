@@ -14,6 +14,7 @@ filer's metadata filter READS them, along with whatever ComfyUI (`prompt`,
 from __future__ import annotations
 
 import json
+import shutil
 import struct
 import zlib
 
@@ -45,6 +46,52 @@ def _chunk(ctype: bytes, body: bytes) -> bytes:
 
 
 TEXT_TYPES = (b"tEXt", b"zTXt", b"iTXt")
+
+
+def upsert_text_file(source, destination, values):
+    """Copy a PNG with updated text, streaming pixel and inspection chunks.
+
+    The destination must be a temporary file owned by the caller. In particular
+    a failure must never truncate the source or publish an incomplete output.
+    """
+    keys = {str(k) for k in values}
+    with open(source, "rb") as src, open(destination, "wb") as dst:
+        if src.read(8) != SIG:
+            raise ValueError("not a PNG")
+        dst.write(SIG)
+        inserted = False
+        while True:
+            header = src.read(8)
+            if len(header) != 8:
+                raise ValueError("truncated PNG")
+            length, kind = struct.unpack(">I4s", header)
+            # Metadata is inserted before pixel data so metadata-only readers
+            # need not visit potentially thousands of IDAT chunks.
+            if not inserted and kind in (b"IDAT", b"IEND"):
+                for key, value in values.items():
+                    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+                    dst.write(_chunk(b"iTXt", str(key).encode("latin-1") + b"\0\0\0\0\0" + text.encode("utf-8")))
+                inserted = True
+            if kind in TEXT_TYPES and length <= 4 * 1024 * 1024:
+                body = src.read(length + 4)
+                if len(body) != length + 4:
+                    raise ValueError("truncated PNG metadata")
+                key = body[:length].split(b"\0", 1)[0].decode("latin-1")
+                if key not in keys:
+                    dst.write(header)
+                    dst.write(body)
+            else:
+                dst.write(header)
+                remaining = length + 4
+                while remaining:
+                    chunk = src.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise ValueError("truncated PNG chunk")
+                    dst.write(chunk)
+                    remaining -= len(chunk)
+            if kind == b"IEND":
+                shutil.copyfileobj(src, dst, 1024 * 1024)
+                return
 
 
 def _decode_text(ctype: bytes, body: bytes, out: dict) -> None:

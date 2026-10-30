@@ -168,7 +168,8 @@ def _meta_box(tags: dict) -> bytes:
     return _box(b"meta", b"\x00\x00\x00\x00" + _HDLR + _keys_ilst(tags))
 
 
-def _patch_offsets(data: bytearray, moov_start: int, moov_end: int, delta: int) -> None:
+def _patch_offsets(data: bytearray, moov_start: int, moov_end: int, delta: int,
+                   threshold=None) -> None:
     """Add `delta` to every chunk offset pointing past `moov_start`.
 
     Called only when `moov` grew ahead of the media data, so everything after
@@ -177,10 +178,12 @@ def _patch_offsets(data: bytearray, moov_start: int, moov_end: int, delta: int) 
     """
     if not delta:
         return
+    if threshold is None:
+        threshold = moov_start
     for ctype, off, hdr, stop in _boxes(data, moov_start, moov_end):
         if ctype in _CONTAINERS:
             inner = off + hdr
-            _patch_offsets(data, inner, stop, delta)
+            _patch_offsets(data, inner, stop, delta, threshold)
         elif ctype in (b"stco", b"co64"):
             wide = ctype == b"co64"
             step = 8 if wide else 4
@@ -191,11 +194,11 @@ def _patch_offsets(data: bytearray, moov_start: int, moov_end: int, delta: int) 
                     break
                 if wide:
                     (val,) = struct.unpack(">Q", data[pos:pos + step])
-                    if val >= moov_start:
+                    if val >= threshold:
                         data[pos:pos + step] = struct.pack(">Q", val + delta)
                 else:
                     (val,) = struct.unpack(">I", data[pos:pos + step])
-                    if val >= moov_start:
+                    if val >= threshold:
                         data[pos:pos + step] = struct.pack(">I", val + delta)
                 pos += step
 
@@ -209,7 +212,7 @@ def _resize(data: bytearray, box_start: int, delta: int) -> None:
         data[box_start:box_start + 4] = struct.pack(">I", size + delta)
 
 
-def upsert_tags(data: bytes, values: dict) -> bytes:
+def upsert_tags(data: bytes, values: dict, *, _offset_threshold=None) -> bytes:
     """Return the MP4 with `values` written as `mdta` tags, replacing existing keys.
 
     The whole `meta` box is rebuilt from the tags already in it plus these, so a
@@ -253,8 +256,52 @@ def upsert_tags(data: bytes, values: dict) -> bytes:
         out[cut_start:cut_end] = new_udta
         delta = len(new_udta)
     _resize(out, m_start, delta)
-    _patch_offsets(out, m_start, m_end + delta, delta)
+    _patch_offsets(out, m_start, m_end + delta, delta, _offset_threshold)
     return bytes(out)
+
+
+def upsert_tags_file(source, destination, values):
+    """Rewrite only the bounded moov in memory; stream all media unchanged."""
+    with open(source, "rb") as src, open(destination, "wb") as dst:
+        src.seek(0, 2)
+        total = src.tell()
+        src.seek(0)
+        found = False
+        while src.tell() < total:
+            start = src.tell()
+            header = src.read(8)
+            if len(header) != 8:
+                raise ValueError("truncated MP4")
+            size, kind = struct.unpack(">I4s", header)
+            if size == 1:
+                extra = src.read(8)
+                if len(extra) != 8:
+                    raise ValueError("truncated MP4 size")
+                header += extra
+                size = struct.unpack(">Q", extra)[0]
+            elif size == 0:
+                size = total - start
+            if size < len(header) or start + size > total:
+                raise ValueError("invalid MP4 box size")
+            if kind == b"moov":
+                if found or size > 64 * 1024 * 1024:
+                    raise ValueError("unsupported MP4 metadata size/layout")
+                found = True
+                body = header + src.read(size - len(header))
+                # Sample offsets are absolute in the original file. Only
+                # media beyond this box moves when the new moov grows.
+                dst.write(upsert_tags(body, values, _offset_threshold=start + size))
+            else:
+                dst.write(header)
+                remaining = size - len(header)
+                while remaining:
+                    chunk = src.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise ValueError("truncated MP4 media")
+                    dst.write(chunk)
+                    remaining -= len(chunk)
+        if not found:
+            raise ValueError("no moov box")
 
 
 # ------------------------------------------------------- painter's own key

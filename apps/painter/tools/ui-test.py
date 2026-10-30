@@ -60,6 +60,7 @@ os.environ["PAINTER_SYNC_SCAN"] = "1"       # deterministic model assertions
 os.environ.setdefault("DESK_SESSION", "hypr")
 os.environ.pop("PAINTER_BACKEND_SSH", None)   # never drive top's systemd
 os.environ.pop("PAINTER_COMFY_URL", None)
+os.environ["PAINTER_CATALOGUE"] = "0"
 
 PAINTER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APPS = os.path.dirname(PAINTER)
@@ -79,16 +80,36 @@ class StubWarden:
 
     last = {}
 
-    def reserve(self, _backend, model="", nbytes=0, cb=None, lease=0):
+    def reserve(self, _backend, model="", nbytes=0, cb=None, lease=0, token=None):
         if cb:
             cb(True, "")
 
-    def renew(self, _backend, lease=0):
+    def renew(self, _backend, lease=0, token=None):
         pass
 
-    def done(self, _backend, cb=None):
+    def done(self, _backend, cb=None, token=None):
         if cb:
             cb()
+
+
+def stub_transfers(ctl):
+    ctl.client.download = lambda image, callback: callback(None)
+    def upload_fixture(path, callback):
+        refs = dict(ctl._edit_uploads)
+        refs.update({p: ref for p, ref in (ctl._uploaded, ctl._uploaded_last) if p})
+        callback(refs.get(path, "painter/" + os.path.basename(path)), None)
+    ctl.client.upload_image = upload_fixture
+    def download_fixture(image, path, callback):
+        def got(data):
+            if data:
+                Path(path).write_bytes(data)
+                callback(str(path), "")
+            else:
+                callback(None, "download failed")
+        ctl.client.download(image, got)
+    ctl.client.download_to_file = download_fixture
+    # Synthetic test jobs are ordinary Python objects, not transport Jobs.
+    ctl.client.acknowledge = lambda job, saved=True: None
 
 
 def check(name, cond, detail=""):
@@ -324,6 +345,7 @@ def build_window(engine_only=False):
 
     ctl = P.Painter()
     ctl.warden = StubWarden()
+    stub_transfers(ctl)
     ctl._unit_poll.stop()
     ctl._probe.stop()
     engine = QQmlApplicationEngine()
@@ -405,6 +427,15 @@ def build(tmp):
 
     # Never reach the backend: no systemctl anywhere, local or over ssh.
     P.unit_cmd = lambda *verb: ["true"]
+    P.C.ComfyClient.connect_ws = lambda self: None
+    P.C.ComfyClient.fetch_object_info = lambda self, callback=None: callback(None) if callback else None
+    P.C.ComfyClient.fetch_stats = lambda self, callback: callback(None)
+    # Any unanticipated request must fail the fixture instead of reaching a
+    # user's backend. Tests replace submit/transfer methods explicitly.
+    def no_request(*args, **kwargs):
+        raise AssertionError("UI fixture attempted a backend request")
+    P.C.ComfyClient._get = no_request
+    P.C.ComfyClient._post = no_request
 
     # ...and NEVER LAUNCH ANYTHING. A left-click in the gallery opens the output
     # in viewer, which is a window on HIS screen — this harness spawned two
@@ -448,7 +479,7 @@ def build(tmp):
 
     def recorded(self, argv, done=None):
         if any(os.path.basename(a) == "clipfile.py" for a in argv) \
-           or os.path.basename(argv[0]) in ("wl-copy", "ffmpeg"):
+           or os.path.basename(argv[0]) in ("wl-copy", "ffmpeg", "notify-send"):
             RAN.append(list(argv))
             if done:
                 done(0, "")
@@ -457,6 +488,7 @@ def build(tmp):
     P.Painter._run_async = recorded
     ctl = P.Painter()
     ctl.warden = StubWarden()
+    stub_transfers(ctl)
     ctl._unit_poll.stop()
     ctl._probe.stop()
 
@@ -1950,6 +1982,9 @@ def test_drag_out(win, ctl, tmp):
 
     RAN.clear()
     payload = ctl.dragUriList(clip, False)
+    check("an uncached video drag returns without waiting for ffmpeg", payload == "")
+    spin(200)
+    payload = ctl.dragUriList(clip, False)
     made = [a for a in RAN if os.path.basename(a[0]) == "ffmpeg"]
     check("a clip drags out MUTED, remuxed rather than re-encoded",
           payload.strip().endswith("drag_00001_-muted.mp4")
@@ -2115,6 +2150,10 @@ def test_selection_and_collage(win, ctl, tmp):
 
     # --- what a drag of that set hands over ---------------------------------
     payload = ctl.dragUriListFor([order[0], order[2], order[3]], False)
+    deadline = time.monotonic() + 10
+    while not payload and time.monotonic() < deadline:
+        spin(40)
+        payload = ctl.dragUriListFor([order[0], order[2], order[3]], False)
     check("a selection drags as ONE uri, not three",
           payload.count("file://") == 1 and payload.endswith("\r\n"), payload)
     out = payload.strip().replace("file://", "")
@@ -4863,7 +4902,7 @@ def test_live_row(win, ctl, tmp):
     APP.setProperty("gen", g)
     spin(80)
     class HeldWarden(StubWarden):
-        def reserve(self, _backend, model="", nbytes=0, cb=None, lease=0):
+        def reserve(self, _backend, model="", nbytes=0, cb=None, lease=0, token=None):
             self.cb = cb
 
     old_warden = ctl.warden
@@ -5613,6 +5652,7 @@ def test_region_wildcard_submission(ctl, tmp):
         ctl._start_jobs(ctl.reg.find('moss-base-int8.safetensors'), params, 2, reserved=True)
         check('region wildcards submit each batch job', len(sent) == 2)
         for index, (graph, metadata) in enumerate(sent):
+            metadata = metadata['params']
             colour = W.expand('__colour__', 42 + index, root, params['wildcard_options'])
             check('disabled lines never reach the graph', colour == 'red')
             check('generation metadata contains the full line selection', metadata['wildcard_options'] == params['wildcard_options'])
@@ -6094,9 +6134,12 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections"):
+                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections", "drag"):
         print("== %s ==" % only)
-        if only == "sections":
+        if only == "drag":
+            test_drag_out(win, ctl, tmp)
+            test_selection_and_collage(win, ctl, tmp)
+        elif only == "sections":
             test_section_order(win, ctl, tmp)
         elif only == "agent":
             test_agent_control(win, ctl, tmp)

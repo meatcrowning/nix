@@ -364,7 +364,8 @@ def main(argv=None):
             raise SystemExit(f"backend unreachable at {args.url}: {exc}")
 
     try:
-        built = reg.build(entry, params, object_info=oi)
+        from submission import build_job
+        built = build_job(reg, entry, params, object_info=oi)
     except G.ValidationError as exc:
         print("graph rejected before submit:", file=sys.stderr)
         for p in exc.problems:

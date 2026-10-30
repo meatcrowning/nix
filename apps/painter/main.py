@@ -30,8 +30,8 @@ import shutil
 import struct
 import subprocess
 import sys
-import threading
 import time
+import uuid
 from pathlib import Path
 
 # Headless SSH entry point: inherit top's packaged model paths without opening
@@ -93,6 +93,9 @@ from gallery import (CACHE, OUT_DIR, PEER_OUTS, Gallery, LIVE_PATH, MUTED_TAG,
 import registry as R  # noqa: E402
 import boorutags  # noqa: E402  (pylib; Danbooru's vocabulary, for the completer)
 import wildcards as Wildcards  # noqa: E402  (__name__ prompt expansion)
+from submission import Submission, build_batch
+from output_save import OutputSaver
+from media_work import Derivatives, PreviewDecoder
 
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "painter"
 PREFS = STATE / "prefs.json"
@@ -671,6 +674,7 @@ class Tags(QObject):
 
 
 class Painter(QObject):
+    dragReady = Signal()
     layoutEdited = Signal(str, "QVariantMap")
     editStateChanged = Signal()
     statusChanged = Signal()
@@ -786,6 +790,9 @@ class Painter(QObject):
         self._windows = []
         self._object_info = None
         self._jobs = 0
+        self._submissions = {}
+        self._cancel_epoch = 0
+        self._preview_serial = 0
         self._unit_state = "unknown"
         self._job_start = 0.0             # when the running job started, for the clock
         self._last_elapsed = 0.0          # ...and how long the last one took, which
@@ -810,11 +817,11 @@ class Painter(QObject):
         self._edit_uploads = {}           # {local path: ref} for those extras
         self._mode = ""                   # anime / real / edit / video, or "" for the list
         self._want_mode = ""              # a remembered mode, until the rows land
-        # Collages built for a dragged selection, keyed by the files that went
-        # into them. The work is on a thread; the dict is what stops two presses
-        # building the same picture twice.
-        self._collage_lock = threading.Lock()
-        self._collage_jobs = {}
+        # Two active derivative workers and two newest pending selections.
+        self._derivatives = Derivatives(self)
+        self._derivatives.ready.connect(self.dragReady)
+        self._preview_decoder = PreviewDecoder(self)
+        self._preview_decoder.ready.connect(self._preview_decoded)
 
         # A batch he is not watching finishes as a desktop toast (see
         # `_maybe_notify`). The window is what decides that, so main() hands it
@@ -845,6 +852,10 @@ class Painter(QObject):
         # construction: no warden, no gate. See apps/pylib/warden.py.
         self.warden = Warden(self)
         self.client = C.ComfyClient()
+        if QGuiApplication.instance() is not None:
+            QGuiApplication.instance().aboutToQuit.connect(self.client.close)
+        if hasattr(self.client, "enable_journal"):
+            self.client.enable_journal(STATE / "jobs")
         from moss_inspect import MossInspect
         self._inspection = MossInspect(self.client, self)
         self.client.statusChanged.connect(self._on_queue)
@@ -853,10 +864,14 @@ class Painter(QObject):
         self.client.jobNode.connect(self._on_node)
         self.client.jobPreview.connect(self._on_preview)
         self.client.jobFinished.connect(self._on_finished)
+        if hasattr(self.client, "jobRecovered"):
+            self.client.jobRecovered.connect(self._on_recovered)
         self.client.jobFailed.connect(self._on_failed)
         self.client.connected.connect(self._on_ws_connected)
         self.client.logged.connect(self._on_log)
         self.gallery.posterReady.connect(self._on_poster)
+        self._output_saver = OutputSaver(self.client, OUT_DIR, self._keep_before, self)
+        self._output_saver.finished.connect(self._on_saved)
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         if self._sync_scan:
@@ -1404,6 +1419,9 @@ class Painter(QObject):
         # A restarted backend may have added or removed custom nodes. Refresh
         # even when this window still holds the previous process's catalog.
         self.client.fetch_object_info(self._on_object_info)
+        if os.environ.get("PAINTER_CATALOGUE") == "1":
+            self.gallery.load_background()
+            self.rescan()
 
     def _on_log(self, line):
         self._log.append(time.strftime("%H:%M:%S") + "  " + line)
@@ -1456,7 +1474,7 @@ class Painter(QObject):
     def _scan_finished(self, reg, rows, error):
         self._scan_job = None
         if error:
-            self._set_status("model scan failed")
+            self._set_status("model scan failed: " + error.splitlines()[0][:180])
             self._on_log(f"model scan failed: {error}")
             if self._scan_again:
                 self._scan_again = False
@@ -1795,70 +1813,65 @@ class Painter(QObject):
         if self._object_info is None:
             self.toast.emit("backend is not ready yet", True)
             return
-        # ONE PRESS, ONE GRAB of the preview pane (see `_start_jobs`). Here
-        # rather than in `_start_jobs`, which is also re-entered per batch and
-        # by the warden's callback, and which cannot tell a fresh press from a
-        # queue that is already running.
-        self._live_grab = True
-
-        # EDITING NEEDS THE PICTURE, and it is the one input with no default —
-        # so it is checked before anything is uploaded rather than failing as a
-        # node error with an empty filename in it.
-        if self.referenceImages and params.get("use_reference_images"):
+        params = copy.deepcopy(params)
+        references = self.referenceImages and params.get("use_reference_images")
+        if references or params.get("edit") or params.get("use_input_image"):
             if not self._input_image:
-                self.toast.emit("add a reference image or turn references off", True)
+                self.toast.emit("add an input image before generating", True)
                 return
-            paths = [self._input_image] + [p for p in self._edit_extra if p]
-            self._upload_edit_then_start(entry, dict(params), count, paths)
-            return
-
-        if params.get("edit"):
-            if not self._input_image:
-                self.toast.emit("drop an image to edit first", True)
-                return
-            paths = [self._input_image]
-            if self.editMultipleImages:
-                paths += [p for p in self._edit_extra if p]
-            self._upload_edit_then_start(entry, params, count, paths)
-            return
-
-        # A dropped frame lives on THIS machine and the graph names a file in
-        # ComfyUI's input directory, so it has to be uploaded before the graph
-        # that refers to it can be built. Uploading once per file, not once per
-        # job: the same drop queued ten times is one upload.
-        if params.get("use_input_image") and not self._input_image:
-            self.toast.emit("drop an image first, or turn the first frame off", True)
-            return
         if params.get("use_last_frame") and not self._last_image:
             self.toast.emit("drop a last frame, or turn the last frame off", True)
             return
-
+        params.setdefault("wildcard_options", copy.deepcopy(self._wildcard_options))
+        sub = Submission.freeze(params, entry, self.reg, self._object_info, count,
+                                self.loras.active(), self._last_seed)
+        self._submissions[sub.id] = sub
+        params = dict(sub.params, _submission_id=sub.id)
+        self._live_grab = True
+        if references or params.get("edit"):
+            paths = [self._input_image]
+            if references or self.editMultipleImages:
+                paths += [p for p in self._edit_extra if p]
+            self._upload_edit_then_start(sub.entry, params, sub.count, paths)
+            return
         pending = []
         if params.get("use_input_image"):
+            params["input_image_local"] = self._input_image
             pending.append(("input_image", self._input_image, "_uploaded", "first frame"))
         if params.get("use_last_frame"):
-            pending.append(("last_image", self._last_image, "_uploaded_last", "last frame"))
-        # The LOCAL path of each frame, alongside the uploaded ref the graph
-        # takes — the same pair an edit job records. Injecting a clip's settings
-        # puts its frames back with them, and a toggle whose file has since gone
-        # comes back off rather than arming a generate that can only refuse.
-        params = dict(params)
-        if params.get("use_input_image"):
-            params["input_image_local"] = self._input_image
-        if params.get("use_last_frame"):
             params["last_image_local"] = self._last_image
-        self._upload_then_start(entry, params, count, pending)
+            pending.append(("last_image", self._last_image, "_uploaded_last", "last frame"))
+        self._upload_then_start(sub.entry, params, sub.count, pending)
+
+    def _submission_cancelled(self, params):
+        sid = params.get("_submission_id")
+        sub = self._submissions.get(sid)
+        return bool(sid and (sub is None or sub.cancelled))
+
+    def _preparation_failed(self, params, message):
+        sub = self._submissions.pop(params.get("_submission_id"), None)
+        if sub:
+            sub.state = "failed"
+            self._release_submission(sub)
+        self._set_status("ready")
+        self.toast.emit(message, True)
+
+    def _release_submission(self, sub):
+        if not sub.reservation_released:
+            sub.reservation_released = True
+            self.warden.done("comfy", token=sub.id)
 
     def _upload_edit_then_start(self, entry, params, count, paths, refs=None):
         """Upload an edit job's images — primary plus every reference — then go.
 
-        Same re-entrant walk as `_upload_then_start`, but over a LIST of edit
-        images rather than the two fixed frame slots. The primary (index 0)
-        reuses the shared single-image cache so a picture already sent for a
-        video first frame is not sent again; extras cache in `_edit_uploads`.
+        Same re-entrant walk as `_upload_then_start`, but over a list of edit
+        images rather than the two fixed frame slots. Each submission uploads
+        immutable references, so later edits cannot replace queued inputs.
         Passes both `input_image` (the primary ref) and `input_images` (all of
         them, in order) so the graph can chain a ReferenceLatent per image.
         """
+        if self._submission_cancelled(params):
+            return
         refs = refs or []
         i = len(refs)
         if i == len(paths):
@@ -1875,20 +1888,14 @@ class Painter(QObject):
             self._start_jobs(entry, uploaded, count)
             return
         path = paths[i]
-        if i == 0 and self._uploaded[0] == path and self._uploaded[1]:
-            cached = self._uploaded[1]
-        else:
-            cached = self._edit_uploads.get(path)
-        if cached:
-            self._upload_edit_then_start(entry, params, count, paths, refs + [cached])
-            return
         label = "image" if len(paths) == 1 else f"image {i + 1} of {len(paths)}"
         self._set_status(f"uploading the {label}...")
 
         def uploaded(ref, error):
+            if self._submission_cancelled(params):
+                return
             if not ref:
-                self._set_status("ready")
-                self.toast.emit(f"could not send the {label}: {error}", True)
+                self._preparation_failed(params, f"could not send the {label}: {error}")
                 return
             if i == 0:
                 self._uploaded = (path, ref)
@@ -1904,21 +1911,19 @@ class Painter(QObject):
         Uploads are async, so this walks the list by re-entering itself from the
         callback rather than waiting on each one.
         """
+        if self._submission_cancelled(params):
+            return
         if not pending:
             self._start_jobs(entry, params, count)
             return
         key, path, slot, label = pending[0]
-        cached = getattr(self, slot)
-        if cached[0] == path and cached[1]:
-            self._upload_then_start(entry, dict(params, **{key: cached[1]}),
-                                    count, pending[1:])
-            return
         self._set_status(f"uploading the {label}...")
 
         def uploaded(ref, error):
+            if self._submission_cancelled(params):
+                return
             if not ref:
-                self._set_status("ready")
-                self.toast.emit(f"could not send the {label}: {error}", True)
+                self._preparation_failed(params, f"could not send the {label}: {error}")
                 return
             setattr(self, slot, (path, ref))
             self._upload_then_start(entry, dict(params, **{key: ref}),
@@ -1926,7 +1931,7 @@ class Painter(QObject):
 
         self.client.upload_image(path, uploaded)
 
-    def _weight_bytes(self, entry, params):
+    def _weight_bytes(self, entry, params, registry=None):
         """Weight-memory estimate, normally raw checkpoint plus enabled LoRAs.
 
         A measured offloaded AIO can use its CPU working set instead. The
@@ -1942,129 +1947,106 @@ class Painter(QObject):
         if (entry.family == "llada_image_ckpt" and entry.quant == "comfy_quant"
                 and 25 * 1024**3 < total < 27 * 1024**3):
             total = 20 * 1024**3
-        for row in self.loras.active():
-            lora = self.reg.find(row.get("name", "")) if self.reg else None
+        for row in params.get("loras", self.loras.active()):
+            reg = registry or self.reg
+            lora = reg.find(row.get("name", "")) if reg else None
             total += int(getattr(lora, "size", 0) or 0)
         return total
 
     def _start_jobs(self, entry, params, count, reserved=False):
-        # ASK FOR THE MEMORY FIRST. Everything that generates funnels through
-        # here, so this is the one place the question has to be asked. A refusal
-        # is DRAWN and the batch does not start (docs/DESIGN.md §10 — never
-        # silently do nothing); the warden raises its own toast when it frees
-        # chatter's weights, so there is nothing to announce on this side.
+        if self._submission_cancelled(params):
+            return
+        sid = params.get("_submission_id")
+        sub = self._submissions.get(sid)
+        if sub is None:
+            values = copy.deepcopy(params)
+            values.setdefault("wildcard_options", copy.deepcopy(self._wildcard_options))
+            sub = Submission.freeze(values, entry, self.reg, self._object_info, count,
+                                    self.loras.active(), self._last_seed)
+            self._submissions[sub.id] = sub
+            params = dict(sub.params, _submission_id=sub.id)
+        # Uploaded refs belong to this submission, while its original form and
+        # registry remain frozen throughout asynchronous preparation.
+        sub.params.update({k: v for k, v in params.items() if k != "_submission_id"})
+        if not hasattr(sub, "plan"):
+            try:
+                sub.plan = build_batch(sub)
+            except (G.ValidationError, G.GraphError, ValueError) as exc:
+                self._preparation_failed(params, str(exc))
+                return
         if not reserved:
-            # Reservation can legitimately wait while chatter finishes a turn
-            # and gives the GPU back.  `busy` cannot begin here — cancel does
-            # not cancel this HTTP request and a second press is not queued yet
-            # — but the status bar must still say what the first press is doing.
+            sub.state = "reserving"
             self._set_status("making room...")
 
-            def _go(ok, reason):
-                if not ok:
-                    self._set_status("ready")
-                    self.toast.emit(reason, True)
+            def go(ok, reason):
+                if sub.cancelled or sub.id not in self._submissions:
+                    self.warden.done("comfy", token=sub.id)
                     return
-                self._set_status("queueing...")
-                self._start_jobs(entry, params, count, True)
+                if not ok:
+                    self._preparation_failed(params, reason)
+                    return
+                if reason:
+                    self._on_log(reason)
+                self._start_jobs(sub.entry, params, sub.count, True)
 
-            self.warden.reserve("comfy",
-                                nbytes=self._weight_bytes(entry, params), cb=_go)
+            self.warden.reserve("comfy", nbytes=self._weight_bytes(sub.entry, sub.params, sub.registry),
+                                cb=go, token=sub.id)
             return
 
-        if self._jobs == 0:
-            # A fresh batch. Its clock starts HERE and not at the last job's own
-            # start: four images asked for in one press are one wait to the
-            # person who pressed it, and the toast at the end reports that wait.
+        if self._jobs == 0 and self._batch_pending == 0:
             self._batch_start = time.time()
             self._batch_saved = []
-            self._batch_pending = 0
             self._batch_toasted = False
-        from moss_layout import import_prompt
-        base = import_prompt(params) if self.reg.family_of(entry).get("id") == "moss_image" else dict(params)
-        base["wildcard_options"] = copy.deepcopy(base.get("wildcard_options", self._wildcard_options))
-        base["loras"] = self.loras.active()
-        seed = int(base.get("seed", 0))
-        randomise = bool(base.pop("randomSeed", False))
-        # "reuse last seed": re-run at the exact base seed the previous batch
-        # used (captured below), so an image can be reproduced. It wins over a
-        # random/negative seed. `reuse_base` is read before the loop rewrites it.
-        reuse = bool(base.pop("reuseSeed", False)) and self._last_seed >= 0
-        reuse_base = self._last_seed
-
-        for n in range(max(1, int(count))):
-            p = dict(base)
-            if reuse:
-                p["seed"] = reuse_base + n
-            elif randomise or seed < 0:
-                import secrets
-
-                # Match rgthree Seed's randomMax. Keeping generated values at
-                # 2**50 also survives QML's JS-number boundary exactly.
-                p["seed"] = secrets.randbelow(2**50)
-            else:
-                p["seed"] = seed + n
-            # Remember the base seed this batch ran at, so the UI can offer to
-            # reproduce it. The first job's seed IS the base; the rest walk from
-            # it (or are independently random, in which case only the base is
-            # recoverable — which is what "reuse" then reproduces).
-            if n == 0 and p["seed"] != self._last_seed:
-                self._last_seed = p["seed"]
+        sub.state = "queued"
+        for n, built in enumerate(sub.plan):
+            if n == 0 and built["params"]["seed"] != self._last_seed:
+                self._last_seed = built["params"]["seed"]
                 self.lastSeedChanged.emit()
-            # Resolve prompt tokens only after this job has its concrete seed.
-            # Keep the literal boxes separately so injecting the output restores
-            # what he typed rather than baking one resolved variation into them.
-            raw_boxes = {
-                "positive": p.get("positive", ""),
-                "negative": p.get("negative", ""),
-            }
-            raw_layout = p.get("moss_layout")
-            try:
-                positive, negative = Wildcards.expand_prompts(
-                    raw_boxes["positive"], raw_boxes["negative"], p["seed"], options=p['wildcard_options'])
-                p["positive"] = positive
-                if "negative" in p:
-                    p["negative"] = negative
-                if raw_layout:
-                    p["moss_layout"] = Wildcards.expand_layout(raw_layout, p["seed"], options=p['wildcard_options'])
-                built = self.reg.build(entry, p, object_info=self._object_info)
-            except G.ValidationError as exc:
-                self._set_status("ready")
-                self.toast.emit(exc.problems[0], True)
-                return
-            except (G.GraphError, ValueError) as exc:
-                self._set_status("ready")
-                self.toast.emit(str(exc), True)
-                return
-            built["params"]["prompt_boxes"] = raw_boxes
-            built["params"]["wildcard_options"] = copy.deepcopy(p["wildcard_options"])
-            if raw_layout:
-                # Execution conditioning contains the resolved descriptions;
-                # restoring/comparing the layout must retain its wildcard tokens.
-                built["params"]["moss_layout"] = raw_layout
-            job = self.client.submit(built["prompt"], built["params"])
-            job.meta = {"params": built["params"], "pairing": built["pairing"]}
+            meta = {"params": built["params"], "pairing": built["pairing"],
+                    "submission_id": sub.id}
+            job = self.client.submit(built["prompt"], meta)
+            job.meta = meta
+            job._controller_epoch = self._cancel_epoch
+            sub.pending_jobs += 1
             self._jobs += 1
-        # THE ROW APPEARS AT THE PRESS, not when the backend gets round to
-        # starting it, and QUEUEING SOMETHING NEW TAKES THE PREVIEW whatever was
-        # being looked at [his, 2026-08-28]. A prompt queued behind another job
-        # would otherwise leave him watching the old output with nothing saying
-        # his had been taken. `_live_grab` is armed once per `generate()` — one
-        # press — so the second and third jobs of a batch of four do not yank
-        # him off an output he chose to look at while it ran; `_on_started` then
-        # re-keys this row with the prompt id.
         self.gallery.begin_live("", grab=self._live_grab)
         self._live_grab = False
         self._busy = True
         self._set_status("ready")
         self.busyChanged.emit()
 
+    def _job_submission(self, job):
+        return self._submissions.get((getattr(job, "meta", None) or {}).get("submission_id"))
+
+    def _job_terminal(self, job):
+        sub = self._job_submission(job)
+        if sub:
+            sub.pending_jobs = max(0, sub.pending_jobs - 1)
+            if not sub.pending_jobs:
+                self._release_submission(sub)
+                sub.state = "saving" if sub.pending_saves else "complete"
+                if not sub.pending_saves:
+                    self._submissions.pop(sub.id, None)
+        return sub
+
+    def _on_recovered(self, job):
+        job._controller_epoch = self._cancel_epoch
+        self._jobs += 1
+        self._busy = True
+        self._batch_toasted = False
+        self.busyChanged.emit()
+        self._on_log("recovering unfinished output " + str(job.prompt_id))
+
     @Slot()
     def cancel(self):
+        self._cancel_epoch += 1
+        for sub in list(self._submissions.values()):
+            sub.cancel()
+            self._release_submission(sub)
+        self._submissions.clear()
         self.client.cancel_all()
         self.gallery.end_live()
         self._jobs = 0
-        self.warden.done("comfy")
         # A cancelled batch has nothing to announce, and nothing of its may
         # leak into the next one's toast.
         self._batch_toasted = True
@@ -2108,6 +2090,9 @@ class Painter(QObject):
         self.statusChanged.emit()
 
     def _on_started(self, job):
+        if getattr(job, "_controller_epoch", self._cancel_epoch) != self._cancel_epoch:
+            return
+        self._preview_serial += 1
         # THE JOB TAKES A ROW IN THE HISTORY while it samples, and the output it
         # produces takes that row over (`Gallery.begin_live`). That is what lets
         # the preview viewport follow the SELECTION and still have a way back to
@@ -2162,8 +2147,14 @@ class Painter(QObject):
             if int(m.get("frame", 1) or 1) > 1:
                 return
             m = {}
-        img = QImage()
-        if not img.loadFromData(data, fmt.upper()):
+        epoch = getattr(_job, "_controller_epoch", self._cancel_epoch)
+        if epoch != self._cancel_epoch:
+            return
+        self._preview_decoder.submit(data, fmt, (epoch, self._preview_serial, m))
+
+    def _preview_decoded(self, img, payload):
+        epoch, serial, m = payload
+        if epoch != self._cancel_epoch or serial != self._preview_serial or self.preview is None:
             return
         self.preview.image = img
         self._preview_tick += 1
@@ -2179,55 +2170,24 @@ class Painter(QObject):
         self.statusChanged.emit()
 
     def _on_finished(self, job):
-        pending = []
-        for img in job.images:
-            pending.append(img)
-
-        def save_one(img):
-            def got(data):
-                # The toast at the end of the batch carries a thumbnail, so it
-                # cannot be sent until the file it points at is on disk. Every
-                # exit from here — no data, a write that failed — decrements,
-                # or a batch that lost one download would never toast at all.
-                try:
-                    if not data:
-                        return
-                    # BOTH shapes carry the job that made them, in the place
-                    # their own format keeps text: a PNG in a tEXt chunk, an MP4
-                    # as an `mdta` tag beside the graph SaveVideo already wrote
-                    # there. A clip keeps the subfolder the backend filed it
-                    # under (video/), which is where the gallery looks for it.
-                    #
-                    # A file that cannot take the tag is written VERBATIM rather
-                    # than not written: an output on disk without its parameters
-                    # beats a finished generation lost to a metadata writer.
-                    name = str(img["filename"]).lower()
-                    described = pngmeta.describe(job.meta.get("params", {}),
-                                                 job.meta.get("pairing"))
-                    try:
-                        if name.endswith(".png"):
-                            data = pngmeta.upsert_text(data, described)
-                        elif Path(name).suffix in VIDEO_SUFFIXES:
-                            data = mp4meta.upsert_tags(data, described)
-                    except (ValueError, struct.error):
-                        pass
-                    dest = OUT_DIR / (img.get("subfolder") or "") / img["filename"]
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(data)
-                    # An edit keeps a copy of what it was an edit OF, beside the
-                    # result, so the before/after survives the source moving.
-                    self._keep_before(dest, job.meta.get("params", {}))
-                    self.gallery.add(str(dest), getattr(job, "prompt_id", "") or "")
-                    self._batch_saved.append(str(dest))
-                finally:
-                    self._batch_pending = max(0, self._batch_pending - 1)
-                    self._maybe_notify()
-
-            self.client.download(img, got)
-
-        self._batch_pending += len(pending)
+        pending = list(job.images)
+        sub = self._job_submission(job)
+        if sub:
+            sub.pending_saves += len(pending)
+        job._save_remaining = len(pending)
+        job._save_failed = False
+        job._save_epoch = getattr(job, "_controller_epoch", self._cancel_epoch)
+        current = job._save_epoch == self._cancel_epoch
+        if current:
+            self._preview_serial += 1
+            self._batch_pending += len(pending)
+        self._job_terminal(job)
         for img in pending:
-            save_one(img)
+            self._output_saver.enqueue(job, img)
+        if not pending and hasattr(self.client, "acknowledge"):
+            self.client.acknowledge(job, saved=False)
+        if not current:
+            return
 
         self._jobs = max(0, self._jobs - 1)
         if self._jobs == 0:
@@ -2250,7 +2210,6 @@ class Painter(QObject):
                 self.gallery.end_live(getattr(job, "prompt_id", "") or "")
             # The batch is over — hand the lease back so chatter can
             # have the memory without waiting it out.
-            self.warden.done("comfy")
             self._clock.stop()
             self._progress = 0.0
             self._current = ""
@@ -2264,21 +2223,58 @@ class Painter(QObject):
                                    if self._batch_start else self._last_elapsed)
             self.previewChanged.emit()
             self.busyChanged.emit()
-        took = f" in {job.duration:.1f}s" if job.duration else ""
-        self.jobCompleted.emit(f"done{took}")
         self.statusChanged.emit()
-        # A job with no images at all reaches zero here rather than in a
-        # download callback, so the last word on the batch is asked for twice.
         self._maybe_notify()
 
+    def _on_saved(self, job, image, path, error):
+        sub = self._job_submission(job)
+        current = job._save_epoch == self._cancel_epoch
+        if path:
+            self.gallery.add(path, getattr(job, "prompt_id", "") or "")
+            if current:
+                self._batch_saved.append(path)
+            if sub:
+                sub.saved.append(path)
+        else:
+            job._save_failed = True
+            if sub:
+                sub.errors.append(error)
+            self.toast.emit("could not save output: " + error + "; it can be recovered on the next launch", True)
+        job._save_remaining = max(0, job._save_remaining - 1)
+        if sub:
+            sub.pending_saves = max(0, sub.pending_saves - 1)
+            if not sub.pending_saves and not sub.pending_jobs:
+                sub.state = "failed" if sub.errors else "complete"
+                self._submissions.pop(sub.id, None)
+        if current:
+            self._batch_pending = max(0, self._batch_pending - 1)
+            self._maybe_notify()
+        if not job._save_remaining:
+            if hasattr(self.client, "acknowledge"):
+                self.client.acknowledge(job, saved=not job._save_failed)
+            if not job._save_failed and current:
+                took = f" in {job.duration:.1f}s" if job.duration else ""
+                self.jobCompleted.emit(f"done{took}")
+
     def _on_failed(self, job, message):
+        self._job_terminal(job)
+        if getattr(job, "_controller_epoch", self._cancel_epoch) != self._cancel_epoch:
+            return
+        self._preview_serial += 1
+        if hasattr(self.client, "acknowledge"):
+            self.client.acknowledge(job)
         self._jobs = max(0, self._jobs - 1)
+        if getattr(job, "cancelled", False):
+            if not self._jobs:
+                self._busy = False
+                self._clock.stop()
+                self.busyChanged.emit()
+            return
         self.gallery.end_live(getattr(job, "prompt_id", "") or "")
         if self._jobs == 0:
             self._busy = False
             # The batch is over — hand the lease back so chatter can
             # have the memory without waiting it out.
-            self.warden.done("comfy")
             self._clock.stop()
             self.previewChanged.emit()
             self.busyChanged.emit()
@@ -2385,10 +2381,7 @@ class Painter(QObject):
         if urgent:
             args += ["-u", "critical"]
         args += [summary, body]
-        try:
-            subprocess.run(args, capture_output=True, timeout=2)
-        except (OSError, subprocess.SubprocessError):
-            pass   # no notification daemon, or no notify-send: nothing to say
+        self._run_async(args)
 
     # -- the words that made it, on the clipboard ---------------------------
 
@@ -2526,57 +2519,29 @@ class Painter(QObject):
 
     @Slot(str, bool, result=str)
     def dragUriList(self, path, original=False):
-        """The `text/uri-list` payload for dragging one output to another app.
-
-        A CLIP GOES OUT MUTED, unless the drag was started with Shift held
-        ([his] choice, 2026-08-06): the model generates sound with the picture,
-        and dropping a clip into surfer — the case he named — is a page that
-        starts playing it. The silent copy is the same `<name>-muted.mp4` the
-        right-click action makes, reused when it is already there.
-
-        Wayland cannot tell what is under the cursor, so the choice is made
-        HERE, at the press, and the file has to exist by then: a payload naming
-        a file that is still being written is a drop that lands on nothing.
-        Hence the one synchronous ffmpeg in this app — a `-c copy` remux of a
-        clip this size is tens of milliseconds, it happens only on a press on a
-        video tile, and it is bounded so a pathological file cannot wedge the
-        window. If it fails at all, the original goes out with its sound and
-        the toast says so rather than the drag quietly doing nothing.
-
-        CRLF-terminated per RFC 2483, and percent-encoded by QUrl — never by
-        hand in QML (docs/DESIGN.md §13).
-        """
+        """Return a ready payload; missing derivatives prepare asynchronously."""
         src = Path(str(path).replace("file://", ""))
-        if not src.exists():
+        if not self.gallery.cache_stamp(str(src)) and not src.exists():
             return ""
         out = src
         if (src.suffix.lower() in VIDEO_SUFFIXES and not original
                 and not is_muted_copy(src)):
             out = self._mute_for_drag(src)
+            if not out:
+                return ""
         return QUrl.fromLocalFile(str(out)).toString() + "\r\n"
 
     # -- dragging SEVERAL outputs: one collage ------------------------------
 
     @Slot("QVariantList", bool, result=str)
     def dragUriListFor(self, paths, original=False):
-        """The payload for dragging a SELECTION out: one file, always.
-
-        One output drags as itself (a clip muted — `dragUriList`). Two or more
-        drag as a COLLAGE of them, under 4MB, because five files land five
-        different ways depending on what catches them while one picture lands
-        the same way everywhere ([his] ask, 2026-08-06).
-
-        The collage is normally already built: `prepareCollage` starts it on a
-        thread the moment the selection changes, which is seconds before any
-        press. This joins that thread rather than racing it, and builds
-        synchronously if the press somehow got there first.
-        """
+        """A selection drags as one prepared collage, never a partial selection."""
         paths = [str(p) for p in paths if str(p)]
         if len(paths) <= 1:
             return self.dragUriList(paths[0] if paths else "", original)
         path = self._collage_for(paths, wait=True)
         if not path:
-            return self.dragUriList(paths[0], original)
+            return ""
         return QUrl.fromLocalFile(path).toString() + "\r\n"
 
     @Slot("QVariantList")
@@ -2590,6 +2555,8 @@ class Painter(QObject):
         paths = [str(p) for p in paths if str(p)]
         if len(paths) > 1:
             self._collage_for(paths, wait=False)
+        elif paths and Path(paths[0]).suffix.lower() in VIDEO_SUFFIXES:
+            self._mute_for_drag(Path(paths[0]))
 
     def _collage_key(self, paths):
         """Identity of a selection AND of its files: a re-generated output at
@@ -2611,29 +2578,14 @@ class Painter(QObject):
         return h.hexdigest()[:16]
 
     def _collage_for(self, paths, wait):
-        """The collage file for `paths`, building it if need be.
-
-        `wait=False` starts the work and returns "" — the caller is warming the
-        cache. `wait=True` blocks on whatever is in flight (bounded) and
-        returns the path, or "" if it could not be made.
-        """
+        """Return the cached collage or schedule bounded preparation; never wait."""
         key = self._collage_key(paths)
         dest = CACHE / "collage" / key / ("painter-collage-%d.jpg" % len(paths))
         if dest.exists():
             return str(dest)
-        with self._collage_lock:
-            thread = self._collage_jobs.get(key)
-            if thread is None:
-                thread = threading.Thread(target=self._build_collage,
-                                          args=(list(paths), dest, key), daemon=True)
-                self._collage_jobs[key] = thread
-                thread.start()
-        if not wait:
-            return ""
-        # Bounded: a drag must not be able to hang the window on a pathological
-        # set of files. Past it the caller falls back to the single-file path.
-        thread.join(timeout=25)
-        return str(dest) if dest.exists() else ""
+        self._derivatives.prepare("collage:" + key,
+                                  lambda: self._build_collage(list(paths), dest, key))
+        return ""
 
     def _build_collage(self, paths, dest, key):
         """Decode, lay out, fit under the budget, write. Worker thread only.
@@ -2660,14 +2612,11 @@ class Painter(QObject):
                                 % res.get("reason", "?"), True)
                 return
             dest.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dest.with_suffix(".part")
+            tmp = dest.with_name("." + dest.name + "." + uuid.uuid4().hex + ".part")
             tmp.write_bytes(res["bytes"])
             os.replace(tmp, dest)       # never a half-written file for a drag
         except Exception as exc:        # noqa: BLE001 - a thread that raises is silent
             self.toast.emit("could not make the collage: %s" % exc, True)
-        finally:
-            with self._collage_lock:
-                self._collage_jobs.pop(key, None)
 
     def _poster_now(self, path):
         """A clip's poster frame, extracted synchronously (worker thread)."""
@@ -2687,36 +2636,32 @@ class Painter(QObject):
             return ""
         return str(dest) if rc == 0 and dest.exists() else ""
 
-    def _mute_for_drag(self, src: Path) -> Path:
-        """A silent copy of `src` to hand to the drag, made now if need be.
-
-        The clipboard's copy sits BESIDE the original because he asked for a
-        file; this one is plumbing, so a fresh sibling is reused when there is
-        one and otherwise the copy goes in the CACHE, keeping its name (the
-        receiving app shows it) without leaving a second file in the gallery
-        folder for every clip he happens to drag.
-        """
+    def _mute_for_drag(self, src: Path):
+        """Return a prepared local derivative, scheduling missing work only."""
         sibling = self._muted_dest(src)
-        if self._muted_fresh(src, sibling):
+        if str(src).startswith(str(OUT_DIR) + os.sep) and self._muted_fresh(src, sibling):
             return sibling
-        try:
-            st = src.stat()
-            dest = (CACHE / "muted" / f"{int(st.st_mtime)}-{st.st_size}"
-                    / sibling.name)
-        except OSError:
-            return src
-        if dest.exists() and dest.stat().st_size > 0:
+        stamp = self.gallery.cache_stamp(str(src))
+        key = hashlib.sha256((str(src) + "|" + stamp).encode()).hexdigest()[:24]
+        dest = CACHE / "muted" / key / self._muted_dest(src).name
+        if dest.exists():
             return dest
+        self._derivatives.prepare("muted:" + key, lambda: self._prepare_muted(src, dest))
+        return None
+
+    def _prepare_muted(self, src, dest):
+        tmp = dest.with_name("." + dest.stem + "." + uuid.uuid4().hex + ".part" + dest.suffix)
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            rc = subprocess.run(self._mute_argv(src, dest),
-                                capture_output=True, timeout=60).returncode
-        except (OSError, subprocess.SubprocessError):
-            rc = 1
-        if rc != 0 or not dest.exists():
-            self.toast.emit("could not mute it - dragging the original", True)
-            return src
-        return dest
+            rc = subprocess.run(self._mute_argv(src, tmp), capture_output=True,
+                                timeout=60).returncode
+            if rc != 0 or not tmp.exists() or not tmp.stat().st_size:
+                raise ValueError("video remux failed")
+            os.replace(tmp, dest)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            self.toast.emit("could not prepare muted video; use the original-video drag action", True)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def _clip_file(self, path):
         """Put `path` on the clipboard as a FILE, via `pylib/clipfile.py`.

@@ -314,7 +314,7 @@ Item {
             // and copy rows — may act on the running job's row, and the way it
             // is kept honest is that its "path" is a sentinel that exists
             // nowhere (main.py `LIVE_PATH`).
-            Drag.active: !tile.live && tileMa.drag.active
+            Drag.active: !tile.live && tileMa.drag.active && tile.dragPayload !== ""
             Drag.dragType: Drag.Automatic
             Drag.supportedActions: Qt.CopyAction
             Drag.hotSpot.x: 6
@@ -361,6 +361,18 @@ Item {
             // What the press decided this drag carries — the selection when the
             // tile is part of one, otherwise this file alone.
             property var dragPaths: []
+            property string dragPayload: ""
+            function refreshDragPayload() {
+                tile.dragPayload = App.dragUriListFor(tile.dragPaths, tile.dragOriginal)
+                tile.Drag.mimeData = { "text/uri-list": tile.dragPayload }
+            }
+            Connections {
+                target: App
+                function onDragReady() {
+                    if (tileMa.pressed && !tile.live && tile.dragPayload === "")
+                        tile.refreshDragPayload()
+                }
+            }
             // Metadata is only read when this tile is hovered. Half the history
             // may be over sshfs, so asking every realised tile for its seed
             // just to hide most of the answers would make scrolling expensive.
@@ -608,10 +620,7 @@ Item {
                         // the payload has to name a file that exists by the time
                         // the drop lands.
                         tile.dragPaths = view.dragPathsFor(path)
-                        tile.Drag.mimeData = {
-                            "text/uri-list": App.dragUriListFor(tile.dragPaths,
-                                                                tile.dragOriginal)
-                        }
+                        tile.refreshDragPayload()
                         // Staged now; ready by the time the drag passes the
                         // threshold and Drag.active turns on.
                         dragBadge.grabToImage(function (res) {
