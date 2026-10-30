@@ -55,9 +55,53 @@ class _State:
 STATE = _State()
 
 
+def _owned_request(doc, action):
+    """Validate under the queue lock so a stale client cannot stop its successor."""
+    pid, client = doc.get("prompt_id"), doc.get("client_id")
+    if not pid or not client:
+        return False
+    queue = PromptServer.instance.prompt_queue
+    # These are Comfy's queue mutation lock and running-item snapshot. Refuse
+    # safely if a backend update changes that contract.
+    lock = getattr(queue, "mutex", None)
+    running = getattr(queue, "currently_running", None)
+    if lock is None or not isinstance(running, dict):
+        return False
+    with lock:
+        for row in running.values():
+            if len(row) > 3 and row[1] == pid and (row[3] or {}).get("client_id") == client:
+                return action()
+    return False
+
+
+async def _stop_request(request, hard):
+    try:
+        doc = await request.json()
+        if not isinstance(doc, dict):
+            raise ValueError("expected object")
+    except (ValueError, TypeError):
+        return web.json_response({"stopping": False, "error": "invalid stop request"}, status=400)
+    def interrupt():
+        comfy.model_management.interrupt_current_processing()
+        return True
+    stopped = _owned_request(doc, interrupt if hard else STATE.request)
+    return web.json_response({"stopping": stopped,
+                              "error": "" if stopped else "The requested job is not running for this client."})
+
+
+@PromptServer.instance.routes.get("/painter/control")
+async def control_capabilities(_request):
+    return web.json_response({"ownership_version": 1})
+
+
 @PromptServer.instance.routes.post("/painter/stop")
-async def stop_and_save(_request):
-    return web.json_response({"stopping": STATE.request()})
+async def stop_and_save(request):
+    return await _stop_request(request, False)
+
+
+@PromptServer.instance.routes.post("/painter/interrupt")
+async def interrupt_owned(request):
+    return await _stop_request(request, True)
 
 
 def _callback(model, steps, x0_output):

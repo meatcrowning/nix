@@ -1,7 +1,7 @@
 """Talk to a headless ComfyUI over its HTTP + websocket API.
 
-Everything runs on the Qt event loop, so this works unchanged in the GUI and in
-the headless tools (which just spin a QCoreApplication).
+Transport callbacks run on the Qt event loop, with bounded file-download workers.
+The same client works in GUI and headless tools with a QCoreApplication.
 
 Deliberate differences from the way cte drove ComfyUI:
 
@@ -15,9 +15,14 @@ Deliberate differences from the way cte drove ComfyUI:
 from __future__ import annotations
 
 import json
+import copy
+from pathlib import Path
 import os
+import re
 import time
 import uuid
+import tempfile
+import urllib.request
 
 from PySide6 import QtCore, QtNetwork, QtWebSockets
 
@@ -36,13 +41,40 @@ def _host_of(url: str) -> str:
     return url.split("://", 1)[-1].rstrip("/")
 
 
+def _upload_name(path):
+    suffix = Path(path).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+        suffix = ""
+    return uuid.uuid4().hex + suffix
+
+
+def _journal_meta(meta):
+    """Store output metadata, not registry Entry objects or tensor key sets."""
+    result = copy.deepcopy(meta)
+    pairing = result.pop("pairing", None)
+    if pairing and isinstance(result.get("params"), dict):
+        params = result["params"]
+        params["family"] = pairing.get("family_id")
+        for key in ("model", "encoder", "vae"):
+            entry = pairing.get(key)
+            params[key] = entry.get("name") if isinstance(entry, dict) else getattr(entry, "name", None)
+    return result
+
+
 class Job(QtCore.QObject):
     """One submitted prompt and whatever came back for it."""
 
     def __init__(self, prompt: dict, meta: dict | None = None, parent=None):
         super().__init__(parent)
-        self.prompt = prompt
-        self.meta = meta or {}
+        self.prompt = copy.deepcopy(prompt)
+        self.meta = copy.deepcopy(meta or {})
+        self.request_id = str(uuid.uuid4())
+        self.owner_id = ""
+        self.terminal = False
+        self.cancelled = False
+        self.reconciling = False
+        self.recovery_required = False
+        self.needs_poll = False
         self.prompt_id = None
         self.images = []          # [{filename, subfolder, type, node, role}]
         self.error = None
@@ -64,6 +96,53 @@ class Job(QtCore.QObject):
         return (node.get("_meta") or {}).get("painter_role", node_id)
 
 
+class _DownloadSignals(QtCore.QObject):
+    done = QtCore.Signal(object, str)
+
+
+class _Download(QtCore.QRunnable):
+    """Bounded streaming I/O outside the Qt event loop."""
+    def __init__(self, url, path):
+        super().__init__()
+        self.url, self.path = url, Path(path)
+        self.signals = _DownloadSignals()
+
+    def run(self):
+        temporary = None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix='.' + self.path.name, suffix='.part', dir=self.path.parent)
+            deadline = time.monotonic() + 600
+            with os.fdopen(fd, 'wb') as output, urllib.request.urlopen(self.url, timeout=30) as response:
+                expected = response.headers.get('Content-Length')
+                written = 0
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError('output download exceeded ten minutes')
+                    chunk = response.read(256 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    written += len(chunk)
+                if expected is not None and written != int(expected):
+                    raise OSError('incomplete output download')
+                if not written:
+                    raise OSError('empty output download')
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, self.path)
+            temporary = None
+            self.signals.done.emit(str(self.path), '')
+        except Exception as exc:
+            self.signals.done.emit(None, str(exc))
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+
+
 class ComfyClient(QtCore.QObject):
     """A single connection to one ComfyUI instance."""
 
@@ -78,9 +157,10 @@ class ComfyClient(QtCore.QObject):
     jobPreview = QtCore.Signal(object, bytes, str, dict)
     jobFinished = QtCore.Signal(object)                # Job
     jobFailed = QtCore.Signal(object, str)             # Job, message
+    jobRecovered = QtCore.Signal(object)
     logged = QtCore.Signal(str)
 
-    def __init__(self, url: str = DEFAULT_URL, parent=None):
+    def __init__(self, url: str = DEFAULT_URL, parent=None, journal_dir=None):
         super().__init__(parent)
         self.url = url.rstrip("/")
         self.client_id = str(uuid.uuid4())
@@ -100,8 +180,18 @@ class ComfyClient(QtCore.QObject):
         self._reconnect.setSingleShot(True)
         self._reconnect.timeout.connect(self.connect_ws)
         self._want_ws = False
+        self._recovery_timer = QtCore.QTimer(self)
+        self._recovery_timer.setInterval(5000)
+        self._recovery_timer.timeout.connect(self._poll_recovery)
         self.queue_remaining = 0
         self.object_info = None
+        self._download_pool = QtCore.QThreadPool(self)
+        self._download_pool.setMaxThreadCount(2)
+        self._downloads = set()
+        self._journal = None
+        self._recovery_started = False
+        if journal_dir is not None:
+            self.enable_journal(journal_dir)
 
     # -- connection ---------------------------------------------------------
 
@@ -112,9 +202,66 @@ class ComfyClient(QtCore.QObject):
         ws_url = f"ws://{_host_of(self.url)}/ws?clientId={self.client_id}"
         self.ws.open(QtCore.QUrl(ws_url))
 
+    def enable_journal(self, path):
+        from job_journal import JobJournal
+        if self._journal is None:
+            backend = os.environ.get("PAINTER_BACKEND_SSH") or self.url
+            self._journal = JobJournal(path, self.client_id, backend)
+
+    def _remember(self, job):
+        if self._journal is not None:
+            try:
+                self._journal.put(job.request_id, dict(request_id=job.request_id,
+                    prompt_id=job.prompt_id, owner_id=job.owner_id, prompt=job.prompt,
+                    meta=_journal_meta(job.meta), cancelled=job.cancelled))
+            except (OSError, TypeError, ValueError) as exc:
+                self.logged.emit(f"job recovery journal unavailable: {exc}")
+
+    def _forget(self, job):
+        if self._journal is not None:
+            try:
+                self._journal.remove(job.request_id)
+            except OSError as exc:
+                self.logged.emit(f"job recovery journal unavailable: {exc}")
+
+    def acknowledge(self, job, saved=True):
+        """Release a terminal job after saves; retain its journal when saves failed."""
+        if saved and not job.recovery_required:
+            self._forget(job)
+        if job.terminal:
+            job.setParent(None)
+            job.deleteLater()
+
+    def _terminal(self, job, error=None, preserve=False):
+        if job.terminal:
+            return
+        job.terminal = True
+        job.recovery_required = preserve
+        job.finished_at = time.time()
+        self._jobs.pop(job.prompt_id, None)
+        if job in self._pending:
+            self._pending.remove(job)
+        if self._active is job:
+            self._active = None
+        # Python consumers hold the object through their save callbacks. Removing
+        # Qt ownership bounds legacy clients too; no delete while saves use it.
+        job.setParent(None)
+        if error:
+            job.error = error
+            if not preserve:
+                self._forget(job)
+            self.jobFailed.emit(job, error)
+        else:
+            self.jobFinished.emit(job)
+
     def close(self):
         self._want_ws = False
+        self._reconnect.stop()
+        self._recovery_timer.stop()
         self.ws.close()
+        # Keep the recovery lock for this client's object/process lifetime.
+        # aboutToQuit can run before download/save workers finish; releasing
+        # here would let another window recover and publish the same job.
 
     def _on_connected(self):
         self._backoff = 500
@@ -129,6 +276,22 @@ class ComfyClient(QtCore.QObject):
         }))
         self.logged.emit("websocket connected")
         self.connected.emit()
+        if self._journal is not None and not self._recovery_started:
+            self._recovery_started = True
+            for row in self._journal.recover():
+                job = Job(row.get("prompt", {}), row.get("meta", {}), self)
+                job.request_id = row["request_id"]
+                job.owner_id = row.get("owner_id", "")
+                job.prompt_id = row.get("prompt_id")
+                job.cancelled = bool(row.get("cancelled"))
+                job.needs_poll = True
+                self._recovery_timer.start()
+                if job.prompt_id:
+                    self._jobs[job.prompt_id] = job
+                else:
+                    self._pending.append(job)
+                self.jobRecovered.emit(job)
+        self.reconcile_outstanding()
 
     def _on_disconnected(self):
         self.logged.emit("websocket disconnected")
@@ -141,6 +304,7 @@ class ComfyClient(QtCore.QObject):
 
     def _request(self, path: str) -> QtNetwork.QNetworkRequest:
         req = QtNetwork.QNetworkRequest(QtCore.QUrl(f"{self.url}{path}"))
+        req.setTransferTimeout(30000)
         req.setHeader(QtNetwork.QNetworkRequest.KnownHeaders.ContentTypeHeader,
                       "application/json")
         return req
@@ -168,6 +332,9 @@ class ComfyClient(QtCore.QObject):
                         callback(self.object_info)
                 elif callback:
                     callback(None)
+            except (ValueError, TypeError):
+                if callback:
+                    callback(None)
             finally:
                 reply.deleteLater()
 
@@ -190,34 +357,51 @@ class ComfyClient(QtCore.QObject):
 
     def submit(self, prompt: dict, meta: dict | None = None) -> Job:
         job = Job(prompt, meta, parent=self)
+        job.owner_id = self.client_id
+        saved_meta = _journal_meta(job.meta)
         payload = {
+            "extra_data": {"painter_request_id": job.request_id,
+                           "extra_pnginfo": {"painter": saved_meta.get("params", saved_meta)}},
             "prompt": {k: {kk: vv for kk, vv in v.items() if kk != "_meta"}
                        for k, v in prompt.items()},
             "client_id": self.client_id,
         }
         # Keep _meta for ourselves; ComfyUI ignores it but there is no reason to ship it.
         self._pending.append(job)
+        self._remember(job)
 
         def done(reply):
             try:
                 raw = bytes(reply.readAll()).decode("utf-8", "replace")
                 if reply.error() != QtNetwork.QNetworkReply.NetworkError.NoError:
-                    msg = self._explain_submit_error(raw, job) or raw or "submit failed"
-                    if job in self._pending:
-                        self._pending.remove(job)
-                    job.error = msg
-                    self.jobFailed.emit(job, msg)
+                    # A lost response does not prove rejection. Never resubmit:
+                    # find our request marker in queue/history on reconnection.
+                    status = reply.attribute(QtNetwork.QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+                    if status and int(status) in (400, 401, 403, 404, 422):
+                        self._terminal(job, self._explain_submit_error(raw, job) or raw or "submit failed")
+                    else:
+                        self.logged.emit("submission acknowledgement lost; checking queue/history")
+                        job.needs_poll = True
+                    self._recovery_timer.start()
+                    self._find_pending(job)
                     return
                 doc = json.loads(raw)
                 job.prompt_id = doc.get("prompt_id")
+                if not job.prompt_id:
+                    self._find_pending(job)
+                    return
                 if job in self._pending:
                     self._pending.remove(job)
-                if job.prompt_id:
-                    self._jobs[job.prompt_id] = job
-                    self.logged.emit(f"queued {job.prompt_id}")
-            except Exception as exc:  # noqa: BLE001
-                job.error = f"{exc}"
-                self.jobFailed.emit(job, job.error)
+                self._jobs[job.prompt_id] = job
+                self._remember(job)
+                self.logged.emit(f"queued {job.prompt_id}")
+                if job.cancelled:
+                    self.cancel(job)
+                else:
+                    self._reconcile(job, check_queue=True)
+            except (ValueError, TypeError) as exc:
+                self.logged.emit(f"submission reply unreadable: {exc}; checking queue/history")
+                self._find_pending(job)
             finally:
                 reply.deleteLater()
 
@@ -249,39 +433,71 @@ class ComfyClient(QtCore.QObject):
 
     # -- cancelling ---------------------------------------------------------
 
-    def interrupt(self):
-        self._post("/interrupt", {})
-
-    def stop_and_save(self, callback=None):
-        """End the active painter sampler at its last completed step and save it."""
+    def _owned_stop(self, job, hard, callback=None):
+        if job is None or not job.prompt_id:
+            if callback:
+                callback(False, "no owned job is running")
+            return
         def done(reply):
             try:
                 ok = reply.error() == QtNetwork.QNetworkReply.NetworkError.NoError
                 doc = json.loads(bytes(reply.readAll()).decode("utf-8")) if ok else {}
+                stopped = bool(doc.get("stopping"))
+                detail = doc.get("error", "") if ok else "Backend cannot safely stop this job; update Painter's backend node."
                 if callback:
-                    callback(bool(doc.get("stopping")), "" if ok else reply.errorString())
+                    callback(stopped, detail)
+                elif detail:
+                    self.logged.emit(detail)
             except (ValueError, TypeError):
                 if callback:
-                    callback(False, "bad reply")
+                    callback(False, "bad stop reply")
             finally:
                 reply.deleteLater()
+        def capability(reply):
+            try:
+                doc = self._read_json(reply)
+                if doc.get("ownership_version") != 1:
+                    raise ValueError("unsupported ownership protocol")
+            except (ValueError, TypeError, AttributeError):
+                detail = "Backend cannot safely stop this job; update Painter's backend node."
+                if callback:
+                    callback(False, detail)
+                else:
+                    self.logged.emit(detail)
+                return
+            finally:
+                reply.deleteLater()
+            self._post("/painter/interrupt" if hard else "/painter/stop",
+                       {"prompt_id": job.prompt_id, "client_id": job.owner_id}, done)
+        # Older /painter/stop accepts any body and stops the global sampler.
+        # Never call it until the server advertises ownership enforcement.
+        self._get("/painter/control", capability)
 
-        self._post("/painter/stop", {}, done)
+    def interrupt(self):
+        self._owned_stop(self._active, True)
+
+    def stop_and_save(self, callback=None):
+        self._owned_stop(self._active, False, callback)
 
     def cancel(self, job: Job):
-        if job.prompt_id and self._active is job:
-            self.interrupt()
-        elif job.prompt_id:
-            self._post("/queue", {"delete": [job.prompt_id]})
-            self._jobs.pop(job.prompt_id, None)
+        job.cancelled = True
+        self._remember(job)
+        if not job.prompt_id:
+            return  # acknowledgement/reconciliation will delete only this job
+        self._post("/queue", {"delete": [job.prompt_id]})
+        # Backend checks both identifiers atomically, including queue-to-running
+        # races; it refuses to interrupt any different job.
+        def stopped(ok, detail):
+            if ok:
+                self._forget(job)
+            elif detail:
+                self.logged.emit(detail)
+        self._owned_stop(job, True, stopped)
+        self._terminal(job, "cancelled", preserve=True)
 
     def cancel_all(self):
-        ours = [pid for pid in self._jobs]
-        if ours:
-            self._post("/queue", {"delete": ours})
-        self.interrupt()
-        self._jobs.clear()
-        self._active = None
+        for job in list(self._pending) + list(self._jobs.values()):
+            self.cancel(job)
 
     def free(self, unload_models: bool = True, callback=None):
         """Ask ComfyUI to drop its loaded weights.
@@ -308,8 +524,8 @@ class ComfyClient(QtCore.QObject):
 
     def _job_for(self, data: dict):
         pid = data.get("prompt_id")
-        if pid and pid in self._jobs:
-            return self._jobs[pid]
+        if pid:
+            return self._jobs.get(pid)
         return self._active
 
     def _on_text(self, text: str):
@@ -317,8 +533,12 @@ class ComfyClient(QtCore.QObject):
             msg = json.loads(text)
         except ValueError:
             return
+        if not isinstance(msg, dict):
+            return
         kind = msg.get("type")
         data = msg.get("data") or {}
+        if not isinstance(data, dict):
+            return
 
         if kind == "status":
             info = ((data.get("status") or {}).get("exec_info") or {})
@@ -402,13 +622,8 @@ class ComfyClient(QtCore.QObject):
                 tb = data.get("traceback")
                 if isinstance(tb, list) and tb:
                     msg += "\n" + "".join(tb[-3:])
-            job.error = msg
-            job.finished_at = time.time()
-            self._jobs.pop(job.prompt_id, None)
-            if self._active is job:
-                self._active = None
             self.logged.emit(f"error: {msg}")
-            self.jobFailed.emit(job, msg)
+            self._terminal(job, msg)
             return
 
     def _on_binary(self, payload: QtCore.QByteArray):
@@ -441,6 +656,8 @@ class ComfyClient(QtCore.QObject):
             meta = json.loads(raw[8:8 + mlen].decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             meta = {}
+        if not isinstance(meta, dict):
+            return
         # Modern ComfyUI previews name their prompt in event-4 metadata. Use it
         # rather than trusting `_active`: a delayed `executing` completion for
         # another queued job can clear `_active` while this job is still sending
@@ -452,49 +669,147 @@ class ComfyClient(QtCore.QObject):
         self.jobPreview.emit(job, raw[8 + mlen:], fmt, meta)
 
     def _complete(self, job: Job):
-        job.finished_at = time.time()
-        self._jobs.pop(job.prompt_id, None)
-        if self._active is job:
-            self._active = None
-        if job.images:
-            self.logged.emit(f"finished {job.prompt_id} ({len(job.images)} image(s))")
-            self.jobFinished.emit(job)
+        if job.terminal:
             return
-        # No images seen on the socket: reconcile once against history, which also
-        # covers the case where the websocket dropped mid-run.
-        self._reconcile(job)
+        if job.images:
+            self._terminal(job)
+        else:
+            self._reconcile(job)
 
-    def _reconcile(self, job: Job):
-        def done(reply):
+    @staticmethod
+    def _read_json(reply):
+        if reply.error() != QtNetwork.QNetworkReply.NetworkError.NoError:
+            raise ValueError(reply.errorString())
+        return json.loads(bytes(reply.readAll()).decode("utf-8"))
+
+    def _poll_recovery(self):
+        jobs = [j for j in self._jobs.values() if j.needs_poll]
+        if not jobs and not self._pending:
+            self._recovery_timer.stop()
+            return
+        for job in jobs:
+            self._reconcile(job, check_queue=True)
+        for job in list(self._pending):
+            self._find_pending(job)
+
+    def reconcile_outstanding(self):
+        for job in list(self._jobs.values()):
+            self._reconcile(job, check_queue=True)
+        for job in list(self._pending):
+            self._find_pending(job)
+
+    def _find_pending(self, job):
+        if job.terminal or job.reconciling:
+            return
+        job.reconciling = True
+        job.needs_poll = True
+        self._recovery_timer.start()
+        def accept(rows):
+            for row in rows:
+                if not isinstance(row, (list, tuple)) or len(row) < 4:
+                    continue
+                extra = row[3] or {}
+                if extra.get("painter_request_id") == job.request_id and extra.get("client_id") == job.owner_id:
+                    job.prompt_id = row[1]
+                    if job in self._pending:
+                        self._pending.remove(job)
+                    self._jobs[job.prompt_id] = job
+                    self._remember(job)
+                    job.reconciling = False
+                    if job.cancelled:
+                        self.cancel(job)
+                    else:
+                        self._reconcile(job, check_queue=True)
+                    return True
+            return False
+        def history(reply):
+            handed_off = False
             try:
-                raw = bytes(reply.readAll()).decode("utf-8", "replace")
-                doc = json.loads(raw) if raw else {}
-                entry = doc.get(job.prompt_id) or {}
-                err = extract_history_error(entry)
-                if err:
-                    job.error = err
-                    self.jobFailed.emit(job, err)
-                    return
-                for node_id, out in (entry.get("outputs") or {}).items():
-                    for img in out.get("images") or []:
-                        job.images.append({
-                            "filename": img.get("filename"),
-                            "subfolder": img.get("subfolder", ""),
-                            "type": img.get("type", "output"),
-                            "node": node_id,
-                            "role": job.role_of(node_id),
-                        })
-                if job.images:
-                    self.jobFinished.emit(job)
-                else:
-                    job.error = "finished with no images"
-                    self.jobFailed.emit(job, job.error)
-            except Exception as exc:  # noqa: BLE001
-                job.error = f"history read failed: {exc}"
-                self.jobFailed.emit(job, job.error)
+                doc = self._read_json(reply)
+                handed_off = accept([entry.get("prompt") for entry in doc.values()])
+                if not handed_off:
+                    # Keep the record: history may have been evicted, or the
+                    # accepted request may not yet be visible. No blind retry.
+                    self._terminal(job, "Submission outcome unknown; retained for recovery, not resubmitted.", preserve=True)
+            except (ValueError, TypeError, AttributeError) as exc:
+                self.logged.emit(f"submission recovery deferred: {exc}")
+            finally:
+                if not handed_off:
+                    job.reconciling = False
+                reply.deleteLater()
+        def queue(reply):
+            try:
+                doc = self._read_json(reply)
+                if not accept(doc.get("queue_running", []) + doc.get("queue_pending", [])):
+                    self._get("/history?max_items=1000", history)
+            except (ValueError, TypeError, AttributeError) as exc:
+                job.reconciling = False
+                self.logged.emit(f"submission recovery deferred: {exc}")
             finally:
                 reply.deleteLater()
+        self._get("/queue", queue)
 
+    def _reconcile(self, job: Job, check_queue=False, missing_is_unknown=False):
+        if job.terminal or job.reconciling:
+            return
+        job.reconciling = True
+        def queue(reply):
+            handed_off = False
+            try:
+                doc = self._read_json(reply)
+                rows = doc.get("queue_running", []) + doc.get("queue_pending", [])
+                running = doc.get("queue_running", [])
+                if any(len(row) > 1 and row[1] == job.prompt_id for row in running) and self._active is not job:
+                    self._active = job
+                    if job.started_at is None:
+                        job.started_at = time.time()
+                        self.jobStarted.emit(job)
+                if not any(len(row) > 1 and row[1] == job.prompt_id for row in rows):
+                    # Completion can land between our first history read and
+                    # this queue snapshot. Check history once more before
+                    # declaring the outcome unknown.
+                    job.reconciling = False
+                    handed_off = True
+                    self._reconcile(job, missing_is_unknown=True)
+            except (ValueError, TypeError) as exc:
+                self.logged.emit(f"queue recovery deferred: {exc}")
+            finally:
+                if not handed_off:
+                    job.reconciling = False
+                reply.deleteLater()
+        def done(reply):
+            handed_off = False
+            try:
+                doc = self._read_json(reply)
+                entry = doc.get(job.prompt_id) or {}
+                if not entry:
+                    if check_queue:
+                        handed_off = True
+                        self._get("/queue", queue)
+                    elif missing_is_unknown:
+                        self._terminal(job, f"Job {job.prompt_id} is absent from queue/history; retained for recovery.", preserve=True)
+                    return
+                err = extract_history_error(entry)
+                if err:
+                    self._terminal(job, err)
+                    return
+                known = {(i.get("node"), i.get("filename"), i.get("subfolder", "")) for i in job.images}
+                for node_id, out in (entry.get("outputs") or {}).items():
+                    for img in out.get("images") or []:
+                        key = (node_id, img.get("filename"), img.get("subfolder", ""))
+                        if key not in known:
+                            job.images.append(dict(img, node=node_id, role=job.role_of(node_id)))
+                            known.add(key)
+                if job.images:
+                    self._terminal(job)
+                elif (entry.get("status") or {}).get("completed"):
+                    self._terminal(job, "finished with no images")
+            except (ValueError, TypeError, AttributeError) as exc:
+                self.logged.emit(f"history recovery deferred: {exc}")
+            finally:
+                if not handed_off:
+                    job.reconciling = False
+                reply.deleteLater()
         self._get(f"/history/{job.prompt_id}", done)
 
     # -- fetching results ---------------------------------------------------
@@ -527,16 +842,17 @@ class ComfyClient(QtCore.QObject):
             callback(None, f"{exc}")
             return
 
+        upload_name = _upload_name(path)
         multipart = QtNetwork.QHttpMultiPart(
             QtNetwork.QHttpMultiPart.ContentType.FormDataType)
         image_part = QtNetwork.QHttpPart()
         image_part.setHeader(
             QtNetwork.QNetworkRequest.KnownHeaders.ContentDispositionHeader,
-            f'form-data; name="image"; filename="{os.path.basename(path)}"')
+            f'form-data; name="image"; filename="{upload_name}"')
         image_part.setBodyDevice(fh)
         fh.setParent(multipart)          # the device must outlive the request
         multipart.append(image_part)
-        for name, value in (("overwrite", "true"), ("subfolder", subfolder)):
+        for name, value in (("overwrite", "false"), ("subfolder", subfolder)):
             part = QtNetwork.QHttpPart()
             part.setHeader(QtNetwork.QNetworkRequest.KnownHeaders.ContentDispositionHeader,
                            f'form-data; name="{name}"')
@@ -551,7 +867,7 @@ class ComfyClient(QtCore.QObject):
                     return
                 doc = json.loads(raw)
                 sub = doc.get("subfolder") or ""
-                name = doc.get("name") or os.path.basename(path)
+                name = doc.get("name") or upload_name
                 callback(f"{sub}/{name}" if sub else name, None)
             except Exception as exc:  # noqa: BLE001
                 callback(None, f"{exc}")
@@ -559,9 +875,24 @@ class ComfyClient(QtCore.QObject):
                 reply.deleteLater()
 
         req = QtNetwork.QNetworkRequest(QtCore.QUrl(f"{self.url}/upload/image"))
+        req.setTransferTimeout(120000)
         reply = self.net.post(req, multipart)
         multipart.setParent(reply)
         reply.finished.connect(lambda r=reply: done(r))
+
+    def download_to_file(self, image: dict, path, callback):
+        """Stream into a caller-owned scratch file; callback(path_or_None, error).
+
+        Two workers bound memory and disk/network concurrency. The final path
+        appears only after the complete response is flushed and renamed.
+        """
+        work = _Download(self.view_url(image), path)
+        self._downloads.add(work)
+        def done(result, error):
+            self._downloads.discard(work)
+            callback(result, error)
+        work.signals.done.connect(done)
+        self._download_pool.start(work)
 
     def download(self, image: dict, callback):
         """Fetch one output image's bytes."""
@@ -573,6 +904,7 @@ class ComfyClient(QtCore.QObject):
                 reply.deleteLater()
 
         req = QtNetwork.QNetworkRequest(QtCore.QUrl(self.view_url(image)))
+        req.setTransferTimeout(120000)
         reply = self.net.get(req)
         reply.finished.connect(lambda r=reply: done(r))
 
