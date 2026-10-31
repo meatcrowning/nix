@@ -1,6 +1,6 @@
 { pkgs, lib, config, host, ... }:
 
-# The stock appmenu imports native DBus menus. This adjacent applet supplies
+# The embedded stock appmenu imports native DBus menus. This applet supplies
 # desktop menus, a Window fallback, and Vivaldi's own menus over a loopback
 # WebSocket restricted to the packaged browser UI origin. Vivaldi's resource
 # injection lives in home/pkgs/desktop/net.nix (top only; book uses Flatpak).
@@ -98,16 +98,8 @@ in
   ];
   xdg.dataFile."plasma/plasmoids/${pkgId}".source = package;
 
-  # Installing a plasmoid package never instantiates it, and Plasma has no
-  # declarative panel layout. Add exactly one, to whichever panel already holds
-  # the stock appmenu applet (that is the bar this belongs beside), falling back
-  # to the top panel. The scan makes logins and rebuilds idempotent.
-  #
-  # The scripting API can only APPEND — there is no reorder in
-  # `shell/scripting/containment.h` — so a first-ever install lands it at the
-# end of the panel and its place after the appmenu is set once, by hand, in
-  # AppletOrder. The one obsolete fixed spacer directly before this applet is
-  # removed: it is a blank gutter between Kickoff and the first menu label.
+  # Keep one shared menu/title area. Remove the former standalone native
+  # appmenu only from the panel containing our replacement.
   systemd.user.services.plasma-menubar = {
     Unit = {
       Description = "Add the always-visible menu bar to the Plasma panel";
@@ -123,29 +115,25 @@ in
         for attempt in $(seq 1 60); do
           if qdbus org.kde.plasmashell /PlasmaShell \
               org.kde.PlasmaShell.evaluateScript ${lib.escapeShellArg ''
-                var present = false;
-                var menuPanel = null;
-                var menuIndex = -1;
-                var beside = -1;
-                var top = -1;
+                var target = null;
                 for (var i = 0; i < panelIds.length; ++i) {
                     var panel = panelById(panelIds[i]);
-                    if (panel.location === "top" && top < 0) top = panelIds[i];
+                    if (panel.location === "top" && !target) target = panel;
                     var widgets = panel.widgets();
                     for (var j = 0; j < widgets.length; ++j) {
-                        if (widgets[j].type === "${pkgId}") {
-                            present = true;
-                            menuPanel = panel;
-                            menuIndex = j;
-                        }
-                        if (widgets[j].type === "org.kde.plasma.appmenu") beside = panelIds[i];
+                        if (widgets[j].type === "${pkgId}") target = panel;
                     }
                 }
-                var target = beside >= 0 ? beside : top;
-                if (!present && target >= 0) panelById(target).addWidget("${pkgId}");
-                if (present && menuIndex > 0) {
-                    var before = menuPanel.widgets()[menuIndex - 1];
-                    if (before.type === "org.kde.plasma.panelspacer") before.remove();
+                if (target) {
+                    var widgets = target.widgets();
+                    var present = false;
+                    for (var j = 0; j < widgets.length; ++j) {
+                        if (widgets[j].type === "${pkgId}") present = true;
+                    }
+                    if (!present) target.addWidget("${pkgId}");
+                    for (var j = 0; j < widgets.length; ++j) {
+                        if (widgets[j].type === "org.kde.plasma.appmenu") widgets[j].remove();
+                    }
                 }
               ''} >/dev/null 2>&1; then
             exit 0

@@ -3,6 +3,9 @@
 #include <functional>
 
 #include <KPluginFactory>
+#include <Plasma/PluginLoader>
+#include <PlasmaQuick/AppletQuickItem>
+#include <KConfigGroup>
 
 #include <QAction>
 #include <QGuiApplication>
@@ -21,6 +24,42 @@ MenuBarApplet::MenuBarApplet(QObject *parent, const KPluginMetaData &data, const
     if (!bridge) bridge = new BrowserMenuBridge(qApp);
     m_bridge = bridge;
     connect(m_bridge, &BrowserMenuBridge::changed, this, &MenuBarApplet::browserMenusChanged);
+}
+
+// Embed the real applet instead of copying its private model/importer API.
+// It inherits the outer containment through QObject ownership, but is not a
+// second panel entry and is never persisted in the panel's widget order.
+QQuickItem *MenuBarApplet::createNativeMenu(QQuickItem *host)
+{
+    if (!host || !containment()) return nullptr;
+    if (m_nativeItem) return m_nativeItem;
+    auto *applet = Plasma::PluginLoader::self()->loadApplet(QStringLiteral("org.kde.plasma.appmenu"));
+    if (!applet) return nullptr;
+    applet->setParent(this);
+    applet->config().writeEntry("compactView", false);
+    applet->init();
+    m_nativeApplet = applet;
+    connect(applet, &Plasma::Applet::statusChanged, this, &MenuBarApplet::nativeMenuOpenChanged);
+    connect(this, &Plasma::Applet::formFactorChanged, applet, [applet] {
+        applet->updateConstraints(Plasma::Applet::FormFactorConstraint);
+    });
+    auto *item = PlasmaQuick::AppletQuickItem::itemForApplet(applet);
+    if (!item || applet->failedToLaunch()) {
+        delete item;
+        delete applet;
+        return nullptr;
+    }
+    item->setParent(this);
+    item->setParentItem(host);
+    m_nativeItem = item;
+    applet->updateConstraints(Plasma::Applet::AllConstraints);
+    applet->flushPendingConstraintsEvents();
+    return item;
+}
+
+bool MenuBarApplet::nativeMenuOpen() const
+{
+    return m_nativeApplet && m_nativeApplet->status() == Plasma::Types::NeedsAttentionStatus;
 }
 
 QVariantList MenuBarApplet::browserMenus() const { return m_bridge->menus(); }

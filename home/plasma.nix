@@ -100,7 +100,6 @@ in
             name = "org.kde.plasma.panelspacer";
             config.General = { expanding = false; length = 6; };
           }
-          "org.kde.plasma.appmenu"
           "org.kde.lam.menubar"
           "org.kde.plasma.panelspacer"
           {

@@ -1,47 +1,8 @@
 /*
-    org.kde.lam.menubar — the always-there half of a macOS menu bar.
-
-    Plasma's own `org.kde.plasma.appmenu` reports HiddenStatus whenever the
-    focused window exports no DBus menu, and a panel drops a hidden applet
-    entirely. Vivaldi supplies its own menus through our browser bridge; the
-    fallback covers other apps without exported menus and any time focus
-    is on nothing. macOS has no such state: the bar always names an owner and
-    always has menus under it.
-
-    This applet supplies the part Plasma has no source for, and nothing else.
-    It sits immediately AFTER the stock appmenu applet, which is absent unless
-    a focused window exports real menus:
-
-        [kickoff] [ File Edit View … ] [ ]            app exports a menu
-        [kickoff] [ Window ]                          it does not
-        [kickoff] [ File Edit Go Window Help ]        nothing focused
-
-    so when the real menus exist they are still the stock applet's, drawn by
-    the stock DBusMenu importer, and we only add the bold app-name button macOS
-    puts to their left.
-
-    The desktop state folds Finder's actions into File, Edit, Go, Window and
-    Help — [his, 2026-09-05] *"desktop one should have the same entires and
-    options as the mac os one"*. The Desktop title is deliberately absent;
-    it was a window-title-shaped button, not a menu category. Two departures,
-    both forced:
-
-      - VIEW is absent. Every item in Finder's View menu addresses a Finder
-        window's chrome or a desktop icon arrangement, and the Plasma desktop
-        containment exposes neither on D-Bus — its sort order, icon size and
-        toolbox live in the containment's own config, reachable only from its
-        right-click menu. A View menu here would be items that do nothing.
-      - Items that are macOS services with no counterpart on this machine
-        (AirDrop, iCloud Drive, Recents, Dictation, Services) are dropped
-        rather than shown greyed for ever.
-
-    Every remaining entry does something real — no placeholder that silently
-    fails (docs/DESIGN.md §10.3).
-
-    Labels are Title Case, against §7.2's lowercase rule: these buttons sit
-    inches from Dolphin's own "File Edit View", drawn by the KDE style in a KDE
-    session (§"In a PLASMA session none of this applies"), and a lowercase
-    "window" beside them would read as a bug, not as a house style.
+    One shared panel area for native app menus, browser/desktop fallbacks,
+    and the maximized window title. The native menus remain Plasma's stock
+    applet, embedded by our interface so its importer and keyboard handling
+    stay intact on both NixOS and Fedora.
 */
 
 import QtQml
@@ -61,16 +22,8 @@ PlasmoidItem {
 
     readonly property bool vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
 
-    // The stock delegate supplies its own inner margin. Add no outer desktop
-    // spacer: File and Edit must keep their exact glyph origins on a focus
-    // change between the desktop and a native-menu application.
-    readonly property int desktopGutter: 0
-    readonly property int appGutter: 1
-
-    // Keep one representation alive across focus changes. Replacing the
-    // compact and full trees while TasksModel removes delegates can crash
-    // Plasma's QQmlDelegateModel; an empty full grid after native menus costs
-    // only its invisible trailing applet slot.
+    // Keep one representation alive across task changes. Recreating its
+    // delegates while TasksModel removes rows can crash QQmlDelegateModel.
     Plasmoid.status: PlasmaCore.Types.ActiveStatus
     preferredRepresentation: fullRepresentation
 
@@ -86,8 +39,7 @@ PlasmoidItem {
         && !shown.fullScreen && !shown.minimized && !vertical
 
     readonly property bool onDesktop: shown === null
-    // Non-empty means the stock applet is about to draw this window's real
-    // menus to our right, so we must not draw menus of our own beside them.
+    // Native menus are embedded in the shared area; suppress fallback menus.
     readonly property bool appExportsMenu: !onDesktop && shown.menuService.length > 0
 
     // Keep the desktop delegates alive.  Returning from a DBus menu then only
@@ -99,7 +51,7 @@ PlasmoidItem {
     // makes KWin drop the active task — without this the bar would flip to
     // "Desktop" the moment you clicked it. Upstream guards the same way on the
     // containment's own input status; ours has to cover the popup too.
-    readonly property bool panelHasFocus: popup.visible || popup.switching
+    readonly property bool panelHasFocus: popup.visible || popup.switching || Plasmoid.nativeMenuOpen
         || Plasmoid.containment.status === PlasmaCore.Types.AcceptingInputStatus
 
     onPanelHasFocusChanged: if (!panelHasFocus) retrack()
@@ -455,104 +407,128 @@ PlasmoidItem {
         onHoveredChanged: if (hovered && popup.visible && !isOpen) openMine()
     }
 
-    // The stock appmenu has GridLayout as its representation root. Keeping
-    // that contract lets Plasma give every label the panel's full line box.
-    fullRepresentation: GridLayout {
+    fullRepresentation: Item {
         id: bar
-
-        LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
+        readonly property bool revealed: !root.folded || hover.hovered
+            || root.panelHasFocus || menuGrid.activeFocus
+        readonly property var nativeItem: nativeHost.menuItem
+        readonly property var nativeRepresentation: nativeItem ? nativeItem.fullRepresentationItem : null
+        implicitWidth: Math.max(menuGrid.implicitWidth,
+            root.folded ? Math.min(titleLabel.implicitWidth + 12, 320) : 0)
+        implicitHeight: Math.max(menuGrid.implicitHeight, 22)
         Layout.minimumWidth: implicitWidth
         Layout.minimumHeight: implicitHeight
-        flow: root.vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
-        rowSpacing: 0
-        columnSpacing: 0
+        LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
 
-        Item {
-            Layout.preferredWidth: root.onDesktop
-                ? root.desktopGutter : root.appGutter
-            Layout.preferredHeight: 0
-            Layout.fillHeight: true
+        HoverHandler { id: hover }
+
+        PlasmaComponents3.Label {
+            id: titleLabel
+            anchors.fill: parent
+            anchors.leftMargin: 4
+            anchors.rightMargin: 8
+            text: root.folded ? root.shown.title : ""
+            textFormat: Text.PlainText
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+            opacity: bar.revealed ? 0 : 1
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.InOutQuad } }
         }
 
-        // KWin removes the decoration only while fully maximized. Keep its
-        // controls in the same stable representation as the global menus.
-        RowLayout {
-            visible: root.folded
-            spacing: 0
-            Layout.fillHeight: true
+        GridLayout {
+            id: menuGrid
+            anchors.fill: parent
+            flow: root.vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
+            rowSpacing: 0
+            columnSpacing: 0
+            opacity: bar.revealed ? 1 : 0
+            enabled: bar.revealed
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.InOutQuad } }
 
-            PlasmaComponents3.ToolButton {
-                icon.name: "window-close"
-                Accessible.name: qsTr("Close Window")
-                enabled: root.folded && root.shown.closable
-                implicitHeight: 22
-                implicitWidth: 22
-                padding: 2
-                icon.width: 16
-                icon.height: 16
-                focusPolicy: Qt.NoFocus
-                Layout.preferredWidth: 22
+            Item {
+                id: nativeHost
+                property var menuItem: null
+                visible: root.appExportsMenu
+                implicitWidth: bar.nativeRepresentation ? bar.nativeRepresentation.implicitWidth : 0
+                implicitHeight: bar.nativeRepresentation ? bar.nativeRepresentation.implicitHeight : 22
+                Layout.preferredWidth: implicitWidth
                 Layout.fillHeight: true
-                onClicked: if (root.folded) tasksModel.requestClose(root.activeIndex())
-                PlasmaComponents3.ToolTip.text: Accessible.name
-            }
-            PlasmaComponents3.ToolButton {
-                icon.name: "window-minimize"
-                Accessible.name: qsTr("Minimize")
-                enabled: root.folded && root.shown.minimizable
-                implicitHeight: 22
-                implicitWidth: 22
-                padding: 2
-                icon.width: 16
-                icon.height: 16
-                focusPolicy: Qt.NoFocus
-                Layout.preferredWidth: 22
-                Layout.fillHeight: true
-                onClicked: if (root.folded) tasksModel.requestToggleMinimized(root.activeIndex())
-                PlasmaComponents3.ToolTip.text: Accessible.name
-            }
-            PlasmaComponents3.ToolButton {
-                icon.name: "window-restore"
-                Accessible.name: qsTr("Restore")
-                enabled: root.folded && root.shown.maximizable
-                implicitHeight: 22
-                implicitWidth: 22
-                padding: 2
-                icon.width: 16
-                icon.height: 16
-                focusPolicy: Qt.NoFocus
-                Layout.preferredWidth: 22
-                Layout.fillHeight: true
-                onClicked: if (root.folded) tasksModel.requestToggleMaximized(root.activeIndex())
-                PlasmaComponents3.ToolTip.text: Accessible.name
-            }
-            PlasmaComponents3.Label {
-                text: root.folded ? root.shown.title : ""
-                Layout.preferredWidth: Math.min(implicitWidth, 220)
-                Layout.fillHeight: true
-                Layout.leftMargin: 4
-                Layout.rightMargin: 8
-                verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
-                MouseArea {
-                    anchors.fill: parent
-                    onDoubleClicked: if (root.folded && root.shown.maximizable)
-                        tasksModel.requestToggleMaximized(root.activeIndex())
+                Component.onCompleted: menuItem = Plasmoid.createNativeMenu(this)
+                // Plasma defers its representation until it has a nonzero size.
+                onWidthChanged: if (menuItem) menuItem.width = Math.max(1, width)
+                onHeightChanged: if (menuItem) menuItem.height = Math.max(1, height)
+                onMenuItemChanged: if (menuItem) {
+                    menuItem.width = Math.max(1, width);
+                    menuItem.height = Math.max(1, height);
                 }
             }
-        }
-
-        Repeater {
-            model: root.desktopBarMenus
-            delegate: BarButton {
-                visible: root.showDesktopMenus
-                menu: modelData
+            Repeater {
+                model: root.desktopBarMenus
+                delegate: BarButton {
+                    visible: root.showDesktopMenus
+                    menu: modelData
+                }
             }
-        }
 
-        Repeater {
-            model: root.showDesktopMenus ? [] : root.appBarMenus
-            delegate: BarButton { menu: modelData }
+            Repeater {
+                model: root.showDesktopMenus ? [] : root.appBarMenus
+                delegate: BarButton { menu: modelData }
+            }
+
+            Item { Layout.fillWidth: true; visible: root.folded }
+            RowLayout {
+                visible: root.folded
+                spacing: 0
+                Layout.fillHeight: true
+
+                PlasmaComponents3.ToolButton {
+                    icon.name: "window-close"
+                    Accessible.name: qsTr("Close Window")
+                    enabled: root.folded && root.shown.closable
+                    implicitHeight: 22
+                    implicitWidth: 22
+                    padding: 2
+                    icon.width: 14
+                    icon.height: 14
+                    focusPolicy: Qt.NoFocus
+                    Layout.preferredWidth: 22
+                    Layout.fillHeight: true
+                    onClicked: if (root.folded) tasksModel.requestClose(root.activeIndex())
+                    PlasmaComponents3.ToolTip.text: Accessible.name
+                }
+                PlasmaComponents3.ToolButton {
+                    icon.name: "window-minimize"
+                    Accessible.name: qsTr("Minimize")
+                    enabled: root.folded && root.shown.minimizable
+                    implicitHeight: 22
+                    implicitWidth: 22
+                    padding: 2
+                    icon.width: 14
+                    icon.height: 14
+                    focusPolicy: Qt.NoFocus
+                    Layout.preferredWidth: 22
+                    Layout.fillHeight: true
+                    onClicked: if (root.folded) tasksModel.requestToggleMinimized(root.activeIndex())
+                    PlasmaComponents3.ToolTip.text: Accessible.name
+                }
+                PlasmaComponents3.ToolButton {
+                    icon.name: "window-restore"
+                    Accessible.name: qsTr("Restore")
+                    enabled: root.folded && root.shown.maximizable
+                    implicitHeight: 22
+                    implicitWidth: 22
+                    padding: 2
+                    icon.width: 14
+                    icon.height: 14
+                    focusPolicy: Qt.NoFocus
+                    Layout.preferredWidth: 22
+                    Layout.fillHeight: true
+                    onClicked: if (root.folded) tasksModel.requestToggleMaximized(root.activeIndex())
+                    PlasmaComponents3.ToolTip.text: Accessible.name
+                }
+            }
         }
     }
 

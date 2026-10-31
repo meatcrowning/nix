@@ -8,11 +8,12 @@ include(KDEInstallDirs)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Widgets WebSockets)
 find_package(Plasma REQUIRED)
+find_package(PlasmaQuick REQUIRED)
 find_package(KF6 REQUIRED COMPONENTS Config CoreAddons)
 
 add_library(org.kde.lam.menubar MODULE menubarapplet.cpp browsermenubridge.cpp)
 target_link_libraries(org.kde.lam.menubar PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Quick Qt6::Widgets Qt6::WebSockets Plasma::Plasma KF6::CoreAddons)
+    Qt6::Core Qt6::Gui Qt6::Quick Qt6::Widgets Qt6::WebSockets Plasma::Plasma Plasma::PlasmaQuick KF6::CoreAddons KF6::ConfigCore)
 set_target_properties(org.kde.lam.menubar PROPERTIES PREFIX "")
 target_compile_features(org.kde.lam.menubar PRIVATE cxx_std_20)
 install(TARGETS org.kde.lam.menubar DESTINATION ${KDE_INSTALL_PLUGINDIR}/plasma/applets)
