@@ -418,7 +418,8 @@ PlasmoidItem {
 
     fullRepresentation: Item {
         id: bar
-        readonly property bool revealed: !root.folded || hover.hovered
+        property bool restoredHover: false
+        readonly property bool revealed: !root.folded || hover.hovered || restoredHover
             || root.panelHasFocus || menuGrid.activeFocus
         readonly property var nativeItem: nativeHost.menuItem
         readonly property var nativeRepresentation: nativeItem ? nativeItem.fullRepresentationItem : null
@@ -429,7 +430,28 @@ PlasmoidItem {
         Layout.minimumHeight: implicitHeight
         LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
 
+        // Popup grabs can clear HoverHandler without sending a new enter
+        // when dismissed over the panel. Recover from the actual pointer,
+        // then stop checking as soon as the pointer leaves the bar.
         HoverHandler { id: hover }
+        Connections {
+            target: root
+            function onPanelHasFocusChanged() {
+                if (!root.panelHasFocus) {
+                    bar.restoredHover = root.folded && Plasmoid.pointerInside(bar);
+                }
+            }
+        }
+        Timer {
+            interval: 50
+            repeat: true
+            running: bar.restoredHover
+            onTriggered: {
+                if (!root.folded || !Plasmoid.pointerInside(bar)) {
+                    bar.restoredHover = false;
+                }
+            }
+        }
 
         PlasmaComponents3.Label {
             id: titleLabel

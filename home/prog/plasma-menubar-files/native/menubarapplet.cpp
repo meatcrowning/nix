@@ -9,6 +9,7 @@
 #include <KConfigGroup>
 
 #include <QAction>
+#include <QCursor>
 #include <QGuiApplication>
 #include <QMenu>
 #include <QQuickItem>
@@ -70,6 +71,12 @@ bool MenuBarApplet::nativeMenuOpen() const
 
 QVariantList MenuBarApplet::browserMenus() const { return m_bridge->menus(); }
 QString MenuBarApplet::browserTitle() const { return m_bridge->title(); }
+
+bool MenuBarApplet::pointerInside(QQuickItem *item) const
+{
+    return item && item->window() && item->isVisible()
+        && item->contains(item->mapFromGlobal(QCursor::pos()));
+}
 
 void MenuBarApplet::closeMenu()
 {

@@ -23,6 +23,7 @@ public:
     bool nativeMenuOpen() const;
     Q_INVOKABLE void openMenu(QQuickItem *button, const QVariantList &entries);
     Q_INVOKABLE void closeMenu();
+    Q_INVOKABLE bool pointerInside(QQuickItem *item) const;
     QVariantList browserMenus() const;
     QString browserTitle() const;
 
