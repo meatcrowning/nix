@@ -447,37 +447,6 @@ PlasmoidItem {
             visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: Kirigami.Units.longDuration; easing.type: Easing.InOutQuad } }
 
-            Item {
-                id: nativeHost
-                property var menuItem: null
-                visible: root.appExportsMenu
-                implicitWidth: bar.nativeRepresentation ? bar.nativeRepresentation.implicitWidth : 0
-                implicitHeight: bar.nativeRepresentation ? bar.nativeRepresentation.implicitHeight : 22
-                Layout.preferredWidth: implicitWidth
-                Layout.fillHeight: true
-                Component.onCompleted: menuItem = Plasmoid.createNativeMenu(this)
-                // Plasma defers its representation until it has a nonzero size.
-                onWidthChanged: if (menuItem) menuItem.width = Math.max(1, width)
-                onHeightChanged: if (menuItem) menuItem.height = Math.max(1, height)
-                onMenuItemChanged: if (menuItem) {
-                    menuItem.width = Math.max(1, width);
-                    menuItem.height = Math.max(1, height);
-                }
-            }
-            Repeater {
-                model: root.desktopBarMenus
-                delegate: BarButton {
-                    visible: root.showDesktopMenus
-                    menu: modelData
-                }
-            }
-
-            Repeater {
-                model: root.showDesktopMenus ? [] : root.appBarMenus
-                delegate: BarButton { menu: modelData }
-            }
-
-            Item { Layout.fillWidth: true; visible: root.folded }
             RowLayout {
                 visible: root.folded
                 spacing: 0
@@ -529,6 +498,38 @@ PlasmoidItem {
                     PlasmaComponents3.ToolTip.text: Accessible.name
                 }
             }
+
+            Item {
+                id: nativeHost
+                property var menuItem: null
+                visible: root.appExportsMenu
+                implicitWidth: bar.nativeRepresentation ? bar.nativeRepresentation.implicitWidth : 0
+                implicitHeight: bar.nativeRepresentation ? bar.nativeRepresentation.implicitHeight : 22
+                Layout.preferredWidth: implicitWidth
+                Layout.fillHeight: true
+                Component.onCompleted: menuItem = Plasmoid.createNativeMenu(this)
+                // Plasma defers its representation until it has a nonzero size.
+                onWidthChanged: if (menuItem) menuItem.width = Math.max(1, width)
+                onHeightChanged: if (menuItem) menuItem.height = Math.max(1, height)
+                onMenuItemChanged: if (menuItem) {
+                    menuItem.width = Math.max(1, width);
+                    menuItem.height = Math.max(1, height);
+                }
+            }
+            Repeater {
+                model: root.desktopBarMenus
+                delegate: BarButton {
+                    visible: root.showDesktopMenus
+                    menu: modelData
+                }
+            }
+
+            Repeater {
+                model: root.showDesktopMenus ? [] : root.appBarMenus
+                delegate: BarButton { menu: modelData }
+            }
+
+            Item { Layout.fillWidth: true; visible: root.folded }
         }
     }
 
