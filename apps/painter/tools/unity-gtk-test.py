@@ -243,16 +243,39 @@ def test():
             sent_queue = []
             real_send = window.send
             window.send = lambda op, **kw: sent_queue.append((op, kw))
-            window.update_queue([dict(id='fixture-job', label='abc123', promptLabel='Prompt 1',
-                                      prompt='fox', details='fox, seed 42', seed='42', state='Waiting',
-                                      canUp=True, canDown=False, canStop=True)])
+            fixture = dict(id='fixture-job', label='abc123', number=2, promptLabel='Prompt 1',
+                           prompt='fox', details='fox, seed 42', seed='42', state='Waiting',
+                           canDrag=True, canUp=True, canDown=False, canStop=True)
+            window.update_queue([fixture, dict(fixture, id='target-job', number=3)])
             box = window.queue_box.get_children()[1]
-            buttons = box.get_children()[-1].get_children()
-            assert buttons[0].get_sensitive() and not buttons[1].get_sensitive()
+            header, actions, details = box.get_children()
+            lines = header.get_child().get_children()
+            assert lines[0].get_text().decode('utf-8') == '#2 · fox'
+            assert lines[1].get_text().decode('utf-8') == '42 · abc123'
+            buttons = actions.get_children()
+            assert [b.get_label() for b in buttons] == ['Stop', 'Details']
             buttons[0].clicked()
-            buttons[2].clicked()
-            assert sent_queue == [('queue_move', dict(id='fixture-job', direction=-1)),
-                                  ('queue_stop', dict(id='fixture-job', direction=0))]
+            buttons[1].clicked()
+            assert details.get_visible()
+            buttons[1].clicked()
+            assert not details.get_visible()
+            assert header.drag_source_get_target_list() is not None
+            assert box.drag_dest_get_target_list() is not None
+            class DropData(object):
+                def get_text(self): return 'fixture-job'
+            real_finish = Gtk.drag_finish
+            drops = []
+            Gtk.drag_finish = lambda *args: drops.append(args[1])
+            window.queue_drop(box, None, 1, 0, DropData(), 0, 0, 'target-job')
+            Gtk.drag_finish = real_finish
+            assert drops == [True]
+            assert sent_queue == [('queue_stop', dict(id='fixture-job')),
+                                  ('queue_move', dict(id='fixture-job', target='target-job', after=False))]
+            window.queue_dragging = True
+            window.update_queue([])
+            assert window.queue_rows
+            window.queue_drag_end()
+            assert not window.queue_rows
             window.send = real_send
             window.update_queue([])
             print('PASS: GTK queue placement, resize, per-job controls and frozen details')

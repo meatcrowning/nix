@@ -242,10 +242,13 @@ class Window(Gtk.Window, ParameterForm):
         self.queue_split.connect_after('accept-position', self.queue_resized)
         self.queue_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.queue_rows = None
+        self.queue_dragging = False
+        self.queue_deferred = None
         viewport = Gtk.Viewport()
         viewport.set_shadow_type(Gtk.ShadowType.NONE)
         viewport.add(self.queue_box)
         queue_scroll = scroll(viewport)
+        self.queue_scroll = queue_scroll
         queue_scroll.set_size_request(-1, 36)
         self.queue_split.pack1(queue_scroll, False, False)
         self.queue_split.pack2(self.history_scroll, True, False)
@@ -284,7 +287,50 @@ class Window(Gtk.Window, ParameterForm):
         if self.heights_loaded and not self.closing:
             self.send('settings', queueHeight=self.queue_split.get_position())
 
+    def queue_drag_end(self, *_):
+        self.queue_dragging = False
+        if self.queue_deferred is not None:
+            rows, self.queue_deferred = self.queue_deferred, None
+            self.update_queue(rows)
+
+    def queue_drag_motion(self, widget, context, x, y, time):
+        widget.queue_drop_after = y > widget.get_allocated_height() / 2
+        widget.queue_draw()
+        _, viewport_y = widget.translate_coordinates(self.queue_scroll, x, y)
+        adjustment = self.queue_scroll.get_vadjustment()
+        step = -12 if viewport_y < 24 else 12 if viewport_y > self.queue_scroll.get_allocated_height() - 24 else 0
+        adjustment.set_value(max(adjustment.get_lower(), min(
+            adjustment.get_upper() - adjustment.get_page_size(), adjustment.get_value() + step)))
+        return False
+
+    def queue_drag_leave(self, widget, *_):
+        widget.queue_drop_after = None
+        widget.queue_draw()
+
+    def queue_drag_marker(self, widget, cr):
+        after = getattr(widget, 'queue_drop_after', None)
+        if after is not None:
+            color = widget.get_style_context().get_background_color(Gtk.StateFlags.SELECTED)
+            cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
+            cr.rectangle(0, widget.get_allocated_height() - 2 if after else 0,
+                         widget.get_allocated_width(), 2)
+            cr.fill()
+        return False
+
+    def queue_drop(self, widget, context, x, y, data, info, time, target):
+        self.queue_drag_leave(widget)
+        identity = data.get_text()
+        valid = bool(identity and identity != target and
+                     any(r['id'] == identity and r['canDrag'] for r in self.queue_rows))
+        if valid:
+            self.send('queue_move', id=identity, target=target,
+                      after=y > widget.get_allocated_height() / 2)
+        Gtk.drag_finish(context, valid, False, time)
+
     def update_queue(self, rows):
+        if self.queue_dragging:
+            self.queue_deferred = rows
+            return
         if rows == self.queue_rows:
             return
         self.queue_rows = rows
@@ -295,34 +341,47 @@ class Window(Gtk.Window, ParameterForm):
             self.queue_box.pack_start(label('No queued jobs'), False, False, 0)
         for row in rows:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-            box.pack_start(label('%s · %s' % (row['state'], row['promptLabel'])), False, False, 0)
-            prompt = label(row['prompt'].replace('\n', ' ') or '(empty prompt)')
+            header = Gtk.EventBox()
+            header.set_visible_window(False)
+            summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            prompt = label('#%s · %s' % (row['number'], ' '.join(row['prompt'].split()) or '(empty prompt)'))
             from gi.repository import Pango
             prompt.set_ellipsize(Pango.EllipsizeMode.END)
-            prompt.set_tooltip_text(row['details'])
-            box.pack_start(prompt, False, False, 0)
-            box.pack_start(label('Seed ' + row['seed'] + ' · ' + row['label']), False, False, 0)
-            details = Gtk.Expander(label='Details')
-            text = Gtk.TextView()
-            text.set_editable(False)
-            text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-            text.get_buffer().set_text(row['details'])
-            detail_scroll = scroll(text)
-            detail_scroll.set_size_request(-1, 120)
-            details.add(detail_scroll)
-            box.pack_start(details, False, False, 0)
+            summary.pack_start(prompt, False, False, 0)
+            summary.pack_start(label(row['seed'] + ' · ' + row['label']), False, False, 0)
+            header.add(summary)
+            header.set_tooltip_text(row['state'] + '\n' + row['details'])
+            box.pack_start(header, False, False, 0)
+            detail_text = Gtk.TextView()
+            detail_text.set_editable(False)
+            detail_text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            detail_text.get_buffer().set_text(row['state'] + '\n' + row['details'])
+            details = scroll(detail_text)
+            details.set_size_request(-1, 120)
+            details.set_no_show_all(True)
+            detail_text.show()
             actions = Gtk.Box(spacing=4)
-            for title, flag, op, direction in [('Up', 'canUp', 'queue_move', -1),
-                                               ('Down', 'canDown', 'queue_move', 1),
-                                               ('Stop', 'canStop', 'queue_stop', 0)]:
-                button = Gtk.Button(label=title)
-                button.set_sensitive(row[flag])
-                button.connect('clicked', lambda _, ident=row['id'], op=op, direction=direction:
-                               self.send(op, id=ident, direction=direction))
-                if op == 'queue_stop':
-                    button.set_tooltip_text('Cancel this job without saving')
-                actions.pack_start(button, False, False, 0)
+            stop = Gtk.Button(label='Stop')
+            stop.set_sensitive(row['canStop'])
+            stop.set_tooltip_text('Cancel this job without saving')
+            stop.connect('clicked', lambda _, ident=row['id']: self.send('queue_stop', id=ident))
+            actions.pack_start(stop, False, False, 0)
+            toggle = Gtk.ToggleButton(label='Details')
+            toggle.connect('toggled', lambda button, panel=details: panel.set_visible(button.get_active()))
+            actions.pack_start(toggle, False, False, 0)
             box.pack_start(actions, False, False, 0)
+            box.pack_start(details, False, False, 0)
+            if row['canDrag']:
+                targets = [Gtk.TargetEntry.new('application/x-painter-job', Gtk.TargetFlags.SAME_APP, 0)]
+                header.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, targets, Gdk.DragAction.MOVE)
+                header.connect('drag-begin', lambda *_: setattr(self, 'queue_dragging', True))
+                header.connect('drag-end', self.queue_drag_end)
+                header.connect('drag-data-get', lambda w, c, data, info, time, ident=row['id']: data.set_text(ident, -1))
+                box.drag_dest_set(Gtk.DestDefaults.MOTION | Gtk.DestDefaults.DROP, targets, Gdk.DragAction.MOVE)
+                box.connect('drag-motion', self.queue_drag_motion)
+                box.connect('drag-leave', self.queue_drag_leave)
+                box.connect_after('draw', self.queue_drag_marker)
+                box.connect('drag-data-received', self.queue_drop, row['id'])
             self.queue_box.pack_start(box, False, False, 4)
         self.queue_box.show_all()
 

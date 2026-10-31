@@ -5941,6 +5941,7 @@ def test_sidebar(win, ctl, tmp, shell=None):
 
 
 def test_job_queue(win, ctl, tmp):
+    from PySide6.QtCore import QPointF
     import comfy
     from PySide6.QtQml import qmlContext
     ctl.jobQueue._timer.stop()
@@ -5958,8 +5959,42 @@ def test_job_queue(win, ctl, tmp):
     ctl.jobQueue.publish()
     spin(150)
     check("queue is above history", pane.isVisible() and gallery.y() >= pane.y() + pane.height() + handle.height())
-    check("job rows show prompt and concrete seeds", any(str(it.property('text')).startswith('Seed 101 ·') for it in walk(pane)))
+    check("job rows show prompt and concrete seeds", any(str(it.property('text')).startswith('101 ·') for it in walk(pane)))
     check("running and waiting jobs stay distinct", ctl.jobQueue.rows[0]['state'] == 'Running' and ctl.jobQueue.rows[1]['canDown'])
+    check("job number and prompt share one truncated line", any(str(it.property('text')).startswith('#2 · A fox') for it in walk(pane)))
+    labels = [str(it.property('label')) for it in walk(pane)]
+    check("queue actions contain Stop and Details without reorder buttons", '[ Stop ]' in labels and '[ Details ]' in labels and '[ Up ]' not in labels and '[ Down ]' not in labels)
+    # Show all four rows, then exercise real MouseArea drag/release offscreen.
+    pane.setProperty('savedHeight', 400)
+    spin(100)
+    areas = [it for it in walk(pane) if it.objectName() == 'queueJobDrag']
+    areas.sort(key=lambda it: it.mapToScene(QPointF(0, 0)).y())
+    requests = []
+    ctl.client._post = lambda path, body, cb=None: requests.append((path, body, cb))
+    start, target = areas[3], areas[1]
+    end = start.mapFromItem(target, QPointF(10, 3))
+    drag(win, start, 10, 5, end.x(), end.y())
+    check("drag inserts a waiting job before its target", bool(requests) and requests[-1][1]['prompt_ids'] == ['3', '1', '2'], requests)
+    check("drag releases delegate freeze", not ctl.jobQueue._dragging)
+    ctl.jobQueue._moving = False
+    ctl.jobQueue.publish()
+    pane.setProperty('savedHeight', 150)
+    spin(100)
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    list_item = next(it for it in walk(pane) if it.objectName() == 'queueList')
+    areas = sorted([it for it in walk(pane) if it.objectName() == 'queueJobDrag'],
+                   key=lambda it: it.mapToScene(QPointF(0, 0)).y())
+    source = areas[1].mapToScene(QPointF(10, 5))
+    edge = list_item.mapToScene(QPointF(10, list_item.height() - 2))
+    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, QPoint(int(source.x()), int(source.y())))
+    QTest.mouseMove(win, QPoint(int(edge.x()), int(edge.y())))
+    spin(450)
+    check("dragging near the edge scrolls the queue", list_item.property('contentY') > 0)
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, QPoint(int(edge.x()), int(edge.y())))
+    spin(80)
+    ctl.jobQueue._moving = False
+    ctl.jobQueue.publish()
     before = pane.height()
     drag(win, handle, handle.width()/2, 4, handle.width()/2, 44)
     spin(100)

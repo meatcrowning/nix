@@ -60,9 +60,11 @@ the width cannot hold both panes.
 
 The owned job queue sits above history on Qt and GTK; its bottom handle saves
 `queue.height`. `job_queue.py` projects frozen inputs and backend queue order.
-Prompt labels group identical positive/negative/layout drafts across seed rerolls.
-Reordering swaps waiting jobs atomically through `/painter/reorder`; never delete
-and resubmit graphs to change their order. Running jobs cannot move.
+Queue rows show stable job number and elided prompt, then bare seed and short ID,
+then Stop and Details. Drag waiting rows to insert before/after another row.
+Reordering applies the affected range atomically through `/painter/reorder`; never
+delete and resubmit graphs. Freeze delegates during drags, then revalidate job
+state on drop. Running jobs cannot move.
 
 Keep the content background MouseArea at `z: -1000`: unclaimed presses must not
 turn into Oxygen window drags. Native chrome retains its own dragging. Under

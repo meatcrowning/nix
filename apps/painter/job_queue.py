@@ -15,6 +15,9 @@ class JobQueue(QObject):
         self.client = controller.client
         self._prompts = collections.OrderedDict()
         self._prompt_serial = 0
+        self._numbers = collections.OrderedDict()
+        self._job_serial = 0
+        self._dragging = False
         self._rows = []
         self._snapshot = None
         self._fetching = False
@@ -66,7 +69,25 @@ class JobQueue(QObject):
             self._prompts.popitem(last=False)
         return self._prompts[key]
 
+    def job_number(self, request_id):
+        if request_id not in self._numbers:
+            self._job_serial += 1
+            self._numbers[request_id] = self._job_serial
+        self._numbers.move_to_end(request_id)
+        while len(self._numbers) > 4096:
+            self._numbers.popitem(last=False)
+        return self._numbers[request_id]
+
+    @Slot(bool)
+    def setDragging(self, dragging):
+        # Keep delegates alive until release; validate against live jobs on drop.
+        self._dragging = dragging
+        if not dragging:
+            self.publish()
+
     def publish(self):
+        if self._dragging:
+            return
         snapshot = self._snapshot or {}
         pending = [r[1] for r in sorted(snapshot.get('queue_pending', []), key=lambda r: r[0])]
         running = {r[1] for r in snapshot.get('queue_running', [])}
@@ -84,12 +105,13 @@ class JobQueue(QObject):
                      'Submitting' if not job.prompt_id else 'Checking status')
             i = waiting.index(job) if job in waiting else -1
             rows.append(dict(id=job.request_id, label=job.request_id[:8], prompt=prompt,
-                             promptLabel=self.prompt_label(p),
+                             promptLabel=self.prompt_label(p), number=self.job_number(job.request_id),
                              seed=str(p.get('seed', '?')), model=model,
                              details='Positive: ' + prompt + '\n\nNegative: ' + p.get('negative', '')
                              + '\n\nSeed: ' + str(p.get('seed', '?')) + '\nModel: ' + model
                              + '\nSize: %s × %s · Steps: %s' % (p.get('width', '?'), p.get('height', '?'), p.get('steps', '?')),
                              state=state, canStop=not job.cancelled,
+                             canDrag=not self._moving and i >= 0 and not job.cancelled,
                              canUp=not self._moving and i > 0 and waiting[i-1].owner_id == job.owner_id,
                              canDown=not self._moving and 0 <= i < len(waiting)-1 and waiting[i+1].owner_id == job.owner_id))
         for sub in self.controller._submissions.values():
@@ -98,11 +120,11 @@ class JobQueue(QObject):
             p = sub.params
             prompt = p.get('positive', '')
             rows.append(dict(id=sub.id, label=sub.id[:8], prompt=prompt,
-                             promptLabel=self.prompt_label(p),
+                             promptLabel=self.prompt_label(p), number=self.job_number(sub.id),
                              seed='assigning' if p.get('randomSeed') else str(p.get('seed', '?')),
                              model=getattr(sub.entry, 'name', ''), details=prompt,
                              state=('Preparing %d jobs' % sub.count if sub.count > 1 else 'Preparing'),
-                             canStop=True, canUp=False, canDown=False))
+                             canStop=True, canDrag=False, canUp=False, canDown=False))
         if rows != self._rows:
             self._rows = rows
             self.changed.emit()
@@ -133,6 +155,32 @@ class JobQueue(QObject):
         other = waiting[waiting.index(row) + direction]
         jobs = {j.request_id: j for j in self.jobs()}
         job, peer = jobs[request_id], jobs[other['id']]
+        self._reorder(job, [peer.prompt_id, job.prompt_id] if direction > 0
+                      else [job.prompt_id, peer.prompt_id])
+
+    @Slot(str, str, bool)
+    def moveTo(self, request_id, target_id, after):
+        if self._moving or request_id == target_id:
+            return
+        self.publish()
+        waiting = [r for r in self._rows if r['state'] == 'Waiting' and r['canDrag']]
+        ids = [r['id'] for r in waiting]
+        if request_id not in ids or target_id not in ids:
+            return
+        original = list(ids)
+        ids.remove(request_id)
+        ids.insert(ids.index(target_id) + int(after), request_id)
+        changed = [i for i in range(len(ids)) if ids[i] != original[i]]
+        if not changed:
+            return
+        segment = ids[min(changed):max(changed) + 1]
+        jobs = {j.request_id: j for j in self.jobs()}
+        job = jobs.get(request_id)
+        if not job or any(key not in jobs or jobs[key].owner_id != job.owner_id for key in segment):
+            return
+        self._reorder(job, [jobs[key].prompt_id for key in segment])
+
+    def _reorder(self, job, order):
         self._moving = True
         self._revision += 1
         self.publish()
@@ -142,12 +190,13 @@ class JobQueue(QObject):
                 doc = self.client._read_json(reply)
                 if not doc.get('reordered'):
                     raise ValueError(doc.get('error', 'Queue changed; try again.'))
-                # Reflect the acknowledged move before allowing another click;
-                # a second Up must use the new neighbor, not undo this swap.
+                # Reflect the acknowledged order before allowing another drag.
                 pending = [list(r) for r in (self._snapshot or {}).get('queue_pending', [])]
-                selected = [r for r in pending if r[1] in (job.prompt_id, peer.prompt_id)]
-                if len(selected) == 2:
-                    selected[0][0], selected[1][0] = selected[1][0], selected[0][0]
+                selected = {r[1]: r for r in pending if r[1] in order}
+                if len(selected) == len(order):
+                    priorities = sorted(r[0] for r in selected.values())
+                    for pid, priority in zip(order, priorities):
+                        selected[pid][0] = priority
                     self._snapshot = dict(self._snapshot, queue_pending=pending)
             except (ValueError, TypeError) as exc:
                 self.controller.toast.emit('Could not reorder jobs: %s' % exc, True)
@@ -156,7 +205,7 @@ class JobQueue(QObject):
                 self._moving = False
             self.refresh()
 
-        # This endpoint only swaps two waiting, owned jobs under the queue lock.
+        # This endpoint only reorders waiting, owned jobs under the queue lock.
         # An older backend returns 404 without changing or resubmitting anything.
         self.client._post('/painter/reorder', dict(client_id=job.owner_id,
-                          prompt_ids=[job.prompt_id, peer.prompt_id]), received)
+                          prompt_ids=order, ordered=True), received)

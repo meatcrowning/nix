@@ -231,6 +231,18 @@ check(not reorder({'prompt_ids': ['one', 'ours'], 'client_id': 'owner'}) and que
       'queue-to-running race refuses reorder without mutation')
 check(not reorder({'prompt_ids': ['one', 'one'], 'client_id': 'owner'}), 'duplicate IDs cannot corrupt the heap')
 
+queue.queue = [(1, 'one', {}, {'client_id': 'owner'}),
+               (2, 'foreign', {}, {'client_id': 'other'}),
+               (3, 'two', {}, {'client_id': 'owner'}),
+               (4, 'three', {}, {'client_id': 'owner'})]
+check(reorder({'prompt_ids': ['three', 'one', 'two'], 'client_id': 'owner', 'ordered': True}),
+      'drag can reorder an owned range atomically')
+check([r[1] for r in sorted(queue.queue)] == ['three', 'foreign', 'one', 'two'],
+      'insertion preserves intervening job order and foreign priority slots')
+before = list(queue.queue)
+check(not reorder({'prompt_ids': ['one', 'two', 'ours'], 'client_id': 'owner', 'ordered': True})
+      and queue.queue == before, 'a started job rejects the whole dragged range without partial changes')
+
 from job_queue import JobQueue
 class Controller(QtCore.QObject):
     toast = QtCore.Signal(str, bool)
@@ -269,6 +281,25 @@ model.move(jobs[2].request_id, -1)
 controller.client._get = lambda *args: None  # delay the next queue snapshot
 requests[-1][2](Reply({'reordered': True}))
 check([r['seed'] for r in model.rows] == ['17', '19', '18'], 'acknowledged reorder updates neighbors before the next click')
+numbers = {r['id']: r['number'] for r in model.rows}
+model._fetching = False
+model.moveTo(jobs[1].request_id, jobs[2].request_id, False)
+check(requests[-1][1]['prompt_ids'] == ['1', '2'] and requests[-1][1]['ordered'],
+      'drop names the desired order using stable IDs')
+requests[-1][2](Reply({'reordered': True}))
+check(numbers == {r['id']: r['number'] for r in model.rows}, 'job numbers survive reordering')
+count = len(requests)
+model.moveTo(jobs[0].request_id, jobs[1].request_id, True)
+check(len(requests) == count, 'running jobs cannot be dragged into the waiting queue')
+model.setDragging(True)
+rows = model.rows
+model._snapshot = {'queue_running': [], 'queue_pending': []}
+model.publish()
+check(model.rows == rows, 'polling does not destroy delegates during a drag')
+model.setDragging(False)
+check(all(r['state'] == 'Checking status' for r in model.rows), 'drag release reconciles fresh status')
+model._snapshot = snapshot()
+model.publish()
 # Cancelling preparation invalidates delayed upload/reservation callbacks.
 from submission import Submission
 sub = Submission.freeze({'positive': 'pending', 'seed': 12}, types.SimpleNamespace(name='fixture'), None, {}, 1, [], -1)

@@ -92,8 +92,10 @@ async def _stop_request(request, hard):
 
 def _reorder_owned(doc):
     ids, client = doc.get("prompt_ids"), doc.get("client_id")
-    if (not isinstance(ids, list) or len(ids) != 2 or ids[0] == ids[1]
-            or not all(isinstance(pid, str) for pid in ids) or not client):
+    if (not isinstance(ids, list) or len(ids) < 2
+            or not all(isinstance(pid, str) for pid in ids)
+            or len(set(ids)) != len(ids) or not client
+            or (not doc.get("ordered") and len(ids) != 2)):
         return False
     queue = PromptServer.instance.prompt_queue
     lock = getattr(queue, "mutex", None)
@@ -102,14 +104,19 @@ def _reorder_owned(doc):
     with lock:
         rows = [(i, row) for i, row in enumerate(queue.queue)
                 if len(row) > 3 and row[1] in ids and (row[3] or {}).get("client_id") == client]
-        if len(rows) != 2:
+        if len(rows) != len(ids):
             return False  # one started, disappeared, or belongs to someone else
-        (a, first), (b, second) = rows
-        if first[0] == second[0]:
-            return False  # equal priorities cannot be swapped without moving other jobs
+        priorities = sorted(row[0] for _, row in rows)
+        if len(set(priorities)) != len(priorities):
+            return False  # ambiguous slots cannot move without affecting other jobs
+        if doc.get("ordered"):
+            positions = dict(zip(ids, priorities))
+        else:
+            # Preserve the original two-job swap protocol for older frontends.
+            positions = {rows[0][1][1]: rows[1][1][0], rows[1][1][1]: rows[0][1][0]}
         # Preserve every graph, metadata field, ID, and foreign queue position.
-        queue.queue[a] = (second[0], *first[1:])
-        queue.queue[b] = (first[0], *second[1:])
+        for index, row in rows:
+            queue.queue[index] = (positions[row[1]], *row[1:])
         heapq.heapify(queue.queue)
         queue.server.queue_updated()
     return True
