@@ -2040,6 +2040,16 @@ class Painter(QObject):
         self._on_log("recovering unfinished output " + str(job.prompt_id))
 
     @Slot()
+    def cancelQueued(self):
+        for sub in list(self._submissions.values()):
+            if sub.state in ("preparing", "reserving"):
+                sub.cancel()
+                self._release_submission(sub)
+                self._submissions.pop(sub.id, None)
+        self.client.cancel_queued()
+        self._job_queue.refresh()
+
+    @Slot()
     def cancel(self):
         self._cancel_epoch += 1
         for sub in list(self._submissions.values()):

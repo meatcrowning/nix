@@ -422,7 +422,7 @@ class Engine:
         elif op == 'queue_move':
             c.jobQueue.moveTo(request.get('id', ''), request.get('target', ''), bool(request.get('after', False)))
         elif op == 'cancel':
-            c.stopAndSave()
+            c.cancelQueued()
         elif op == 'hard_stop':
             c.cancel()
         elif op == 'rescan':

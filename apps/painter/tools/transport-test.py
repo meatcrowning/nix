@@ -333,4 +333,56 @@ model.cancel(jobs[1].request_id)
 check(cancelled == [jobs[1]], 'cancel targets only the selected job')
 controller.client.close()
 c.close()
+# Queue clearing never interrupts, including a queue-to-running race.
+q = comfy.ComfyClient()
+requests = []
+queue_rows = {'queue_running': [[0, 'running']], 'queue_pending': []}
+history_rows = {}
+def queue_get(path, cb):
+    cb(Reply(queue_rows if path == '/queue' else history_rows))
+def queue_post(path, body, cb=None):
+    requests.append((path, body))
+    if cb:
+        cb(Reply({}))
+q._get, q._post = queue_get, queue_post
+running = comfy.Job({}, parent=q)
+running.prompt_id, running.owner_id = 'running', q.client_id
+waiting = comfy.Job({}, parent=q)
+waiting.prompt_id, waiting.owner_id = 'waiting', q.client_id
+q._jobs = {'running': running, 'waiting': waiting}
+q._active = running
+q.cancel_queued()
+check(not running.cancelled and not running.terminal and q._active is running,
+      'queue clearing preserves a job that is already running or wins the start race')
+check(waiting.cancelled and waiting.terminal and waiting.error == 'cancelled',
+      'confirmed queue deletion retires waiting jobs without an error toast')
+check(all(path == '/queue' for path, body in requests), 'queue clearing sends no interrupt requests')
+# The submit callback is captured separately to exercise a late acknowledgement.
+callbacks = []
+q._post = lambda path, body, cb=None: callbacks.append((path, body, cb))
+late = q.submit({}, {})
+submit_callback = callbacks.pop()[2]
+q.cancel_queued_job(late)
+check(not callbacks and not late.cancelled, 'unacknowledged queue cancellation waits without discarding results')
+q._post = queue_post
+submit_callback(Reply({'prompt_id': 'late'}))
+check(late.terminal and late.cancelled and requests[-1] == ('/queue', {'delete': ['late']}),
+      'late acknowledgement deletes only that queued job')
+completed = comfy.Job({}, parent=q)
+completed.prompt_id, completed.owner_id = 'completed', q.client_id
+q._jobs['completed'] = completed
+history_rows = {'completed': {'outputs': {'1': {'images': [{'filename': 'saved.png'}]}}}}
+q.cancel_queued_job(completed)
+check(completed.terminal and completed.images and not completed.cancelled,
+      'a job that finishes during queue clearing keeps its output')
+hard_waiting = comfy.Job({}, parent=q)
+hard_waiting.prompt_id, hard_waiting.owner_id = 'hard-waiting', q.client_id
+q._jobs['hard-waiting'] = hard_waiting
+q._get = lambda path, cb: cb(Reply({'ownership_version': 1}))
+q.cancel_all()
+check(running.cancelled and running.terminal and hard_waiting.cancelled and hard_waiting.terminal,
+      'hard stop cancels both running and queued jobs')
+check(any(path == '/painter/interrupt' and body['prompt_id'] == 'running' for path, body in requests),
+      'hard stop interrupts the owned running job explicitly')
+q.close()
 print('%d transport checks passed' % checks)

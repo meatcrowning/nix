@@ -817,8 +817,8 @@ Item {
           menuText: App.busy ? "Queue" : "Generate",
           menu: "file", icon: App.busy ? "list-add" : "media-playback-start",
           bar: true, barText: (App.busy ? "Queue" : "Generate") + " " + root.gen.count, shortcut: "Ctrl+Return" },
-        { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
-          tip: "Cancel", barText: "Cancel", menu: "file", icon: "process-stop",
+        { id: "stop", label: "x",    tb: true, state: App.busy || App.jobQueue.rows.length > 0 ? 0 : 2,
+          tip: "Cancel queued jobs", barText: "Cancel", menu: "file", icon: "process-stop",
           bar: true, shortcut: "Ctrl+." },
         "-",
         { id: "open", tip: "Open in Viewer", menu: "file",
@@ -1024,7 +1024,7 @@ Item {
             return
         }
         if (id === "gen") root.submit()
-        else if (id === "stop") App.stopAndSave()
+        else if (id === "stop") App.cancelQueued()
         else if (id === "p") root.view = 0
         else if (id === "g") root.view = 1
         else if (id === "pv") root.showPreview = !root.showPreview

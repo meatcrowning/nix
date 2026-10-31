@@ -142,7 +142,7 @@ class Controller:
 for name in ('generate', '_submission_cancelled', '_preparation_failed',
              '_release_submission', '_upload_edit_then_start', '_upload_then_start',
              '_weight_bytes', '_start_jobs', '_job_submission', '_job_terminal',
-             '_on_finished', '_on_saved', '_on_failed', '_on_recovered', 'cancel', '_collage_key',
+             '_on_finished', '_on_saved', '_on_failed', '_on_recovered', 'cancel', 'cancelQueued', '_collage_key',
              '_collage_for', '_mute_for_drag', '_muted_dest', 'dragUriListFor',
              'dragUriList', 'prepareCollage'):
     setattr(Controller, name, getattr(P.Painter, name))
@@ -422,9 +422,25 @@ def test_media_workers():
     print('PASS preview drops superseded frames; derivatives execute only active and newest pending tasks')
 
 
+def test_clear_queue():
+    ctl = Controller()
+    calls = []
+    ctl.client.cancel_queued = lambda: calls.append('clear')
+    ctl._job_queue = SimpleNamespace(refresh=lambda: None)
+    ctl.generate(params(), 2)
+    sub = next(iter(ctl._submissions.values()))
+    ctl.cancelQueued()
+    assert sub.cancelled and sub.id not in ctl._submissions
+    assert calls == ['clear'] and ctl._cancel_epoch == 0
+    ctl.warden.requests[0][1](True, '')
+    assert not ctl.client.jobs
+    print('PASS clear queue cancels preparation and late reservation without invalidating running outputs')
+
+
 with tempfile.TemporaryDirectory(prefix='painter-submission-test-') as scratch:
     tmp = Path(scratch)
     test_lifecycle()
+    test_clear_queue()
     test_late_saves()
     test_files(tmp)
     test_saver(tmp / 'saved')

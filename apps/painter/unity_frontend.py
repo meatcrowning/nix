@@ -129,7 +129,7 @@ class Window(Gtk.Window, ParameterForm):
                        ('older', '_Previous Output', 'Page_Up', lambda: self.walk(-1)),
                        ('newer', '_Next Output', 'Page_Down', lambda: self.walk(1)),
                        ('refresh', '_Refresh', 'F5', lambda: self.send('rescan'))]),
-            ('_Generation', [('cancel', '_Cancel and Save', None, lambda: self.send('cancel')),
+            ('_Generation', [('cancel', '_Cancel Queued Jobs', None, lambda: self.send('cancel')),
                               ('hard_stop', '_Hard Stop', None, lambda: self.send('hard_stop'))])]:
             top = Gtk.MenuItem.new_with_mnemonic(title)
             menu = Gtk.Menu()
@@ -741,7 +741,7 @@ class Window(Gtk.Window, ParameterForm):
             elif key == 'generate':
                 enabled = enabled and bool(self.state.get('ready')) and bool(self.state.get('model'))
             elif key in ('cancel', 'hard_stop'):
-                enabled = enabled and bool(self.state.get('busy') or self.state.get('queue'))
+                enabled = enabled and bool(self.state.get('busy') or self.state.get('queue') or self.state.get('jobs'))
             elif key == 'heatmap':
                 heatmap = self.state.get('heatmap', {})
                 enabled = self.heatmap_open or (enabled and heatmap.get('available', False) and heatmap.get('path') == self.selection)

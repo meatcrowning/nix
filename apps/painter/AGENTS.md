@@ -54,9 +54,10 @@ settings, layout state, LoRAs and preference writes separate from the live panel
 Comparison edits are temporary; model/asset selection and generation remain in
 the current panel. Never resize the viewport or apply settings when comparing.
 `parameter_compare.snapshot` projects metadata with the saved model’s defaults
-for unrecorded fields, labelled in the panel; never substitute current settings. Cancel uses stop-and-save; its Hard stop
-context action interrupts without decoding. F7/showParams must switch view when
-the width cannot hold both panes.
+for unrecorded fields, labelled in the panel; never substitute current settings.
+The toolbar Cancel action clears queued/preparing jobs while preserving running
+jobs; its Hard stop context action clears queued and running jobs without decoding.
+F7/showParams must switch view when the width cannot hold both panes.
 
 The owned job queue sits above history on Qt and GTK; its bottom handle saves
 `queue.height`. `job_queue.py` projects frozen inputs and backend queue order.

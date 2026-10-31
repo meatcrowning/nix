@@ -6242,6 +6242,15 @@ def test_queue_button(ctl, shell):
         button.click()
         spin(80)
         check("busy button still queues jobs", sent == [3, 7, 7], sent)
+        cleared = []
+        original_clear = ctl.cancelQueued
+        ctl.cancelQueued = lambda: cleared.append(True)
+        try:
+            shell._bar_buttons["stop"].click()
+            spin(80)
+            check("regular Cancel clears the queue", cleared == [True])
+        finally:
+            ctl.cancelQueued = original_clear
         ctl._busy = was_busy
         ctl.busyChanged.emit()
     finally:

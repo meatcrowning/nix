@@ -72,6 +72,8 @@ class Job(QtCore.QObject):
         self.owner_id = ""
         self.terminal = False
         self.cancelled = False
+        self.cancel_queued_requested = False
+        self.queue_delete_confirmed = False
         self.reconciling = False
         self.recovery_required = False
         self.needs_poll = False
@@ -397,6 +399,8 @@ class ComfyClient(QtCore.QObject):
                 self.logged.emit(f"queued {job.prompt_id}")
                 if job.cancelled:
                     self.cancel(job)
+                elif job.cancel_queued_requested:
+                    self.cancel_queued_job(job)
                 else:
                     self._reconcile(job, check_queue=True)
             except (ValueError, TypeError) as exc:
@@ -497,6 +501,33 @@ class ComfyClient(QtCore.QObject):
                 self.logged.emit(detail)
         self._owned_stop(job, True, stopped)
         self._terminal(job, "cancelled", preserve=True)
+
+    def cancel_queued_job(self, job):
+        if job.terminal:
+            return
+        job.cancel_queued_requested = True
+        if not job.prompt_id:
+            return  # delete after acknowledgement or request-marker recovery
+
+        def deleted(reply):
+            try:
+                if reply.error() != QtNetwork.QNetworkReply.NetworkError.NoError:
+                    self.logged.emit("Could not clear queued job: " + reply.errorString())
+                    return
+                job.queue_delete_confirmed = True
+                job.needs_poll = True
+                self._recovery_timer.start()
+                self._reconcile(job, check_queue=True)
+            finally:
+                reply.deleteLater()
+
+        # Queue deletion is atomic on the backend and cannot interrupt a job
+        # that has started in the meantime. Never call an interrupt endpoint.
+        self._post("/queue", {"delete": [job.prompt_id]}, deleted)
+
+    def cancel_queued(self):
+        for job in list(self._pending) + list(self._jobs.values()):
+            self.cancel_queued_job(job)
 
     def cancel_all(self):
         for job in list(self._pending) + list(self._jobs.values()):
@@ -721,6 +752,8 @@ class ComfyClient(QtCore.QObject):
                     job.reconciling = False
                     if job.cancelled:
                         self.cancel(job)
+                    elif job.cancel_queued_requested:
+                        self.cancel_queued_job(job)
                     else:
                         self._reconcile(job, check_queue=True)
                     return True
@@ -793,7 +826,8 @@ class ComfyClient(QtCore.QObject):
                         handed_off = True
                         self._get("/queue", queue)
                     elif missing_is_unknown:
-                        if job.cancelled:
+                        if job.cancelled or job.queue_delete_confirmed:
+                            job.cancelled = True
                             self._terminal(job, "cancelled")
                         else:
                             self._terminal(job, f"Job {job.prompt_id} is absent from queue/history; retained for recovery.", preserve=True)
