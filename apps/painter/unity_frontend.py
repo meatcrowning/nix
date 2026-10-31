@@ -348,7 +348,6 @@ class Window(Gtk.Window, ParameterForm):
             from gi.repository import Pango
             prompt.set_ellipsize(Pango.EllipsizeMode.END)
             summary.pack_start(prompt, False, False, 0)
-            summary.pack_start(label(row['seed'] + ' · ' + row['label']), False, False, 0)
             header.add(summary)
             header.set_tooltip_text(row['state'] + '\n' + row['details'])
             box.pack_start(header, False, False, 0)
@@ -361,14 +360,23 @@ class Window(Gtk.Window, ParameterForm):
             details.set_no_show_all(True)
             detail_text.show()
             actions = Gtk.Box(spacing=4)
+            seed = label(row['seed'] + ' · ' + row['label'])
+            seed.set_ellipsize(Pango.EllipsizeMode.END)
+            seed.set_tooltip_text(seed.get_text())
+            actions.pack_start(seed, True, True, 0)
             stop = Gtk.Button(label='Stop')
             stop.set_sensitive(row['canStop'])
-            stop.set_tooltip_text('Cancel this job without saving')
+            stop.set_tooltip_text('Stop sampling and decode/save the current latent')
             stop.connect('clicked', lambda _, ident=row['id']: self.send('queue_stop', id=ident))
             actions.pack_start(stop, False, False, 0)
             toggle = Gtk.ToggleButton(label='Details')
             toggle.connect('toggled', lambda button, panel=details: panel.set_visible(button.get_active()))
             actions.pack_start(toggle, False, False, 0)
+            cancel = Gtk.Button(label='Cancel')
+            cancel.set_sensitive(row['canCancel'])
+            cancel.set_tooltip_text('Discard this job without decoding or saving')
+            cancel.connect('clicked', lambda _, ident=row['id']: self.send('queue_cancel', id=ident))
+            actions.pack_start(cancel, False, False, 0)
             box.pack_start(actions, False, False, 0)
             box.pack_start(details, False, False, 0)
             if row['canDrag']:
@@ -751,6 +759,10 @@ class Window(Gtk.Window, ParameterForm):
                 enabled = True
             for widget in widgets:
                 widget.set_sensitive(bool(enabled))
+                if key == 'generate':
+                    text = 'Queue' if self.state.get('busy') else 'Generate'
+                    widget.set_label(text if isinstance(widget, Gtk.ToolButton) else '_' + text)
+                    widget.set_tooltip_text(text)
 
 
     def page_switched(self, notebook, page, number):

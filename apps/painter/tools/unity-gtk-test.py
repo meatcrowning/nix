@@ -240,21 +240,29 @@ def test():
             assert window.history_scroll.get_parent() == window.queue_split
             window.queue_split.set_position(240)
             window.queue_split.emit('accept-position')
+            was_busy = window.state.get('busy')
+            window.state['busy'] = True
+            window.update_actions()
+            assert all(w.get_label().replace('_', '') == 'Queue' for w in window.actions['generate'])
+            window.state['busy'] = was_busy
+            window.update_actions()
             sent_queue = []
             real_send = window.send
             window.send = lambda op, **kw: sent_queue.append((op, kw))
             fixture = dict(id='fixture-job', label='abc123', number=2, promptLabel='Prompt 1',
                            prompt='fox', details='fox, seed 42', seed='42', state='Waiting',
-                           canDrag=True, canUp=True, canDown=False, canStop=True)
+                           canDrag=True, canUp=True, canDown=False, canStop=False, canCancel=True)
             window.update_queue([fixture, dict(fixture, id='target-job', number=3)])
             box = window.queue_box.get_children()[1]
             header, actions, details = box.get_children()
             lines = header.get_child().get_children()
             assert lines[0].get_text().decode('utf-8') == '#2 · fox'
-            assert lines[1].get_text().decode('utf-8') == '42 · abc123'
-            buttons = actions.get_children()
-            assert [b.get_label() for b in buttons] == ['Stop', 'Details']
-            buttons[0].clicked()
+            assert len(lines) == 1
+            seed, buttons = actions.get_children()[0], actions.get_children()[1:]
+            assert seed.get_text().decode('utf-8') == '42 · abc123'
+            assert [b.get_label() for b in buttons] == ['Stop', 'Details', 'Cancel']
+            assert not buttons[0].get_sensitive() and buttons[2].get_sensitive()
+            buttons[2].clicked()
             buttons[1].clicked()
             assert details.get_visible()
             buttons[1].clicked()
@@ -269,7 +277,7 @@ def test():
             window.queue_drop(box, None, 1, 0, DropData(), 0, 0, 'target-job')
             Gtk.drag_finish = real_finish
             assert drops == [True]
-            assert sent_queue == [('queue_stop', dict(id='fixture-job')),
+            assert sent_queue == [('queue_cancel', dict(id='fixture-job')),
                                   ('queue_move', dict(id='fixture-job', target='target-job', after=False))]
             window.queue_dragging = True
             window.update_queue([])

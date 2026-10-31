@@ -5945,6 +5945,13 @@ def test_job_queue(win, ctl, tmp):
     import comfy
     from PySide6.QtQml import qmlContext
     ctl.jobQueue._timer.stop()
+    ctl._busy = True
+    ctl.busyChanged.emit()
+    spin(60)
+    gen = next(action for action in prop(APP, 'tbButtons') if action.get('id') == 'gen')
+    check("busy generation action is simply Queue", gen['tip'] == 'Queue' and gen['menuText'] == 'Queue' and gen['barText'] == 'Queue')
+    ctl._busy = False
+    ctl.busyChanged.emit()
     content = win.contentItem()
     pane = next(it for it in walk(content) if it.objectName() == "jobQueuePane")
     handle = next(it for it in walk(content) if it.objectName() == "queueSplitHandle")
@@ -5963,7 +5970,7 @@ def test_job_queue(win, ctl, tmp):
     check("running and waiting jobs stay distinct", ctl.jobQueue.rows[0]['state'] == 'Running' and ctl.jobQueue.rows[1]['canDown'])
     check("job number and prompt share one truncated line", any(str(it.property('text')).startswith('#2 · A fox') for it in walk(pane)))
     labels = [str(it.property('label')) for it in walk(pane)]
-    check("queue actions contain Stop and Details without reorder buttons", '[ Stop ]' in labels and '[ Details ]' in labels and '[ Up ]' not in labels and '[ Down ]' not in labels)
+    check("queue actions contain Stop and Details without reorder buttons", '[ Stop ]' in labels and '[ Details ]' in labels and '[ Cancel ]' in labels and '[ Up ]' not in labels and '[ Down ]' not in labels)
     # Show all four rows, then exercise real MouseArea drag/release offscreen.
     pane.setProperty('savedHeight', 400)
     spin(100)
@@ -5995,6 +6002,9 @@ def test_job_queue(win, ctl, tmp):
     spin(80)
     ctl.jobQueue._moving = False
     ctl.jobQueue.publish()
+    seed = next(it for it in walk(pane) if it.objectName() == 'queueJobSeed')
+    cancel_button = next(it for it in walk(seed.parentItem()) if it.property('label') == '[ Cancel ]')
+    check("seed and three buttons share the second line", abs(seed.mapToScene(QPointF(0, seed.height()/2)).y() - cancel_button.mapToScene(QPointF(0, cancel_button.height()/2)).y()) < 1)
     before = pane.height()
     drag(win, handle, handle.width()/2, 4, handle.width()/2, 44)
     spin(100)
@@ -6004,8 +6014,8 @@ def test_job_queue(win, ctl, tmp):
     ctl.client.cancel = calls.append
     ctl.client._get = lambda *args: None  # isolated queue refresh; transport replies tested separately
     target = ctl.jobQueue.rows[1]['id']
-    ctl.jobQueue.stop(target)
-    check("queue stop targets one job", len(calls) == 1 and calls[0].request_id == target)
+    ctl.jobQueue.cancel(target)
+    check("queue cancel targets one job", len(calls) == 1 and calls[0].request_id == target)
     waiting = calls[0]
     waiting.cancelled = True
     ctl._jobs = 4

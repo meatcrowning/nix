@@ -69,6 +69,10 @@ check(len(posts) == before, 'old backend soft-stop endpoint is never called with
 c._get = lambda path, cb: cb(Reply({'ownership_version': 1}))
 c.stop_and_save()
 check(posts[-1][0] == '/painter/stop' and posts[-1][1]['prompt_id'] == 'ours', 'soft stop carries explicit owner and prompt')
+c._active = None
+c.stop_job_and_save(j)
+check(posts[-1][0] == '/painter/stop' and posts[-1][1]['prompt_id'] == 'ours',
+      'per-job Stop uses owned soft-stop endpoint even if another job is active')
 c.cancel_all()
 check(all(p != '/interrupt' for p, _, _ in posts), 'cancellation never calls global interrupt')
 check(j.terminal and not c._jobs and j.parent() is None, 'cancel releases tracking and QObject ownership')
@@ -267,6 +271,18 @@ check(model.rows[1]['prompt'] == 'fox' and model.rows[1]['seed'] == '18', 'rerol
 check(model.rows[2]['prompt'] == 'wolf', 'edited prompt identifies its own job')
 check(model.rows[0]['promptLabel'] == model.rows[1]['promptLabel'] != model.rows[2]['promptLabel'],
       'prompt revisions share labels across seed rerolls but distinguish edits')
+soft = []
+controller.client.stop_job_and_save = lambda job, cb: soft.append((job, cb))
+check(model.rows[0]['canStop'] and not model.rows[1]['canStop'] and model.rows[1]['canCancel'],
+      'only running jobs offer Stop; waiting jobs offer Cancel')
+model.stop(jobs[1].request_id)
+check(not soft, 'Stop never cancels a waiting job')
+model.stop(jobs[0].request_id)
+check(soft[0][0] is jobs[0] and not jobs[0].cancelled and not jobs[0].terminal,
+      'Stop sends a soft stop for this job and retains its output lifecycle')
+check(not model.rows[0]['canStop'] and model.rows[0]['canCancel'], 'stop request disables duplicate soft stops but retains Cancel')
+soft[0][1](False, 'Not sampling')
+check(model.rows[0]['canStop'], 'refused soft stop restores the control')
 requests = []
 controller.client._post = lambda path, body, cb=None: requests.append((path, body, cb))
 model.move(jobs[2].request_id, -1)
@@ -308,13 +324,13 @@ released = []
 controller._release_submission = released.append
 model.publish()
 check(any(r['id'] == sub.id and r['state'] == 'Preparing' for r in model.rows), 'preparing submissions are visible and stoppable')
-model.stop(sub.id)
+model.cancel(sub.id)
 check(sub.cancelled and released == [sub] and sub.id not in controller._submissions,
       'stopping preparation releases its lease and invalidates delayed callbacks')
 cancelled = []
 controller.client.cancel = cancelled.append
-model.stop(jobs[1].request_id)
-check(cancelled == [jobs[1]], 'stop targets only the selected job')
+model.cancel(jobs[1].request_id)
+check(cancelled == [jobs[1]], 'cancel targets only the selected job')
 controller.client.close()
 c.close()
 print('%d transport checks passed' % checks)

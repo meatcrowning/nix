@@ -101,12 +101,6 @@ Item {
                             color: row.modelData.state === "Running" ? Theme.accent : Theme.text
                             elide: Text.ElideRight
                         }
-                        PixelText {
-                            width: parent.width
-                            text: row.modelData.seed + " · " + row.modelData.label
-                            elide: Text.ElideRight
-                            color: Theme.textDim
-                        }
                     }
                     MouseArea {
                         id: dragArea
@@ -141,20 +135,46 @@ Item {
                         text: row.modelData.state + "\n" + row.modelData.details
                     }
                 }
-                Row {
-                    spacing: 4
-                    TextButton {
-                        label: "[ Stop ]"
-                        winActive: pane.winActive
-                        enabled: row.modelData.canStop
-                        onClicked: App.jobQueue.stop(row.modelData.id)
-                        ToolTipArea { anchors.fill: parent; text: "Cancel this job without saving" }
+                Item {
+                    width: parent.width
+                    height: Math.max(seedText.implicitHeight, actions.implicitHeight)
+                    PixelText {
+                        id: seedText
+                        objectName: "queueJobSeed"
+                        anchors.left: parent.left
+                        anchors.right: actions.left
+                        anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: row.modelData.seed + " · " + row.modelData.label
+                        elide: Text.ElideRight
+                        color: Theme.textDim
+                        ToolTipArea { anchors.fill: parent; text: seedText.text }
                     }
-                    TextButton {
-                        label: "[ Details ]"
-                        winActive: pane.winActive
-                        lit: pane.expanded === row.modelData.id
-                        onClicked: pane.expanded = pane.expanded === row.modelData.id ? "" : row.modelData.id
+                    Row {
+                        id: actions
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 4
+                        TextButton {
+                            label: "[ Stop ]"
+                            winActive: pane.winActive
+                            enabled: row.modelData.canStop
+                            onClicked: App.jobQueue.stop(row.modelData.id)
+                            ToolTipArea { anchors.fill: parent; text: "Stop sampling and decode/save the current latent" }
+                        }
+                        TextButton {
+                            label: "[ Details ]"
+                            winActive: pane.winActive
+                            lit: pane.expanded === row.modelData.id
+                            onClicked: pane.expanded = pane.expanded === row.modelData.id ? "" : row.modelData.id
+                        }
+                        TextButton {
+                            label: "[ Cancel ]"
+                            winActive: pane.winActive
+                            enabled: row.modelData.canCancel
+                            onClicked: App.jobQueue.cancel(row.modelData.id)
+                            ToolTipArea { anchors.fill: parent; text: "Discard this job without decoding or saving" }
+                        }
                     }
                 }
                 PixelText {

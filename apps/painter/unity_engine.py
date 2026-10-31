@@ -417,6 +417,8 @@ class Engine:
                     self.player.play()
         elif op == 'queue_stop':
             c.jobQueue.stop(request.get('id', ''))
+        elif op == 'queue_cancel':
+            c.jobQueue.cancel(request.get('id', ''))
         elif op == 'queue_move':
             c.jobQueue.moveTo(request.get('id', ''), request.get('target', ''), bool(request.get('after', False)))
         elif op == 'cancel':

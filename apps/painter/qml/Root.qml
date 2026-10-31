@@ -813,10 +813,10 @@ Item {
         // QAction swallows its shortcut), so a second job could not be asked
         // for at all. The word changes instead: what the press does is queue.
         { id: "gen",  label: "gen",  tb: true, state: 0,
-          tip: App.busy ? "Queue another generation" : "Generate",
-          menuText: App.busy ? "Queue Another Generation" : "Generate",
+          tip: App.busy ? "Queue" : "Generate",
+          menuText: App.busy ? "Queue" : "Generate",
           menu: "file", icon: App.busy ? "list-add" : "media-playback-start",
-          bar: true, barText: "Generate", shortcut: "Ctrl+Return" },
+          bar: true, barText: App.busy ? "Queue" : "Generate", shortcut: "Ctrl+Return" },
         { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
           tip: "Cancel", barText: "Cancel", menu: "file", icon: "process-stop",
           bar: true, shortcut: "Ctrl+." },

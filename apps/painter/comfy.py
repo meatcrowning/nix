@@ -476,8 +476,11 @@ class ComfyClient(QtCore.QObject):
     def interrupt(self):
         self._owned_stop(self._active, True)
 
+    def stop_job_and_save(self, job, callback=None):
+        self._owned_stop(job, False, callback)
+
     def stop_and_save(self, callback=None):
-        self._owned_stop(self._active, False, callback)
+        self.stop_job_and_save(self._active, callback)
 
     def cancel(self, job: Job):
         job.cancelled = True

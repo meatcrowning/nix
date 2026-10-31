@@ -18,6 +18,7 @@ class JobQueue(QObject):
         self._numbers = collections.OrderedDict()
         self._job_serial = 0
         self._dragging = False
+        self._stopping = set()
         self._rows = []
         self._snapshot = None
         self._fetching = False
@@ -92,6 +93,7 @@ class JobQueue(QObject):
         pending = [r[1] for r in sorted(snapshot.get('queue_pending', []), key=lambda r: r[0])]
         running = {r[1] for r in snapshot.get('queue_running', [])}
         jobs = self.jobs()
+        self._stopping.intersection_update(j.request_id for j in jobs)
         jobs.sort(key=lambda j: (-1 if j.prompt_id in running else
                                 pending.index(j.prompt_id) if j.prompt_id in pending else len(pending)))
         rows = []
@@ -100,7 +102,8 @@ class JobQueue(QObject):
             p = job.meta.get('params', {})
             prompt = p.get('prompt_boxes', {}).get('positive', p.get('positive', ''))
             model = str(p.get('model') or getattr(job.meta.get('pairing', {}).get('model'), 'name', ''))
-            state = ('Stopping' if job.cancelled else 'Running' if job.prompt_id in running
+            state = ('Stopping and saving' if job.request_id in self._stopping else
+                     'Cancelling' if job.cancelled else 'Running' if job.prompt_id in running
                      else 'Waiting' if job.prompt_id in pending else
                      'Submitting' if not job.prompt_id else 'Checking status')
             i = waiting.index(job) if job in waiting else -1
@@ -110,7 +113,7 @@ class JobQueue(QObject):
                              details='Positive: ' + prompt + '\n\nNegative: ' + p.get('negative', '')
                              + '\n\nSeed: ' + str(p.get('seed', '?')) + '\nModel: ' + model
                              + '\nSize: %s × %s · Steps: %s' % (p.get('width', '?'), p.get('height', '?'), p.get('steps', '?')),
-                             state=state, canStop=not job.cancelled,
+                             state=state, canStop=state == 'Running', canCancel=not job.cancelled,
                              canDrag=not self._moving and i >= 0 and not job.cancelled,
                              canUp=not self._moving and i > 0 and waiting[i-1].owner_id == job.owner_id,
                              canDown=not self._moving and 0 <= i < len(waiting)-1 and waiting[i+1].owner_id == job.owner_id))
@@ -124,13 +127,31 @@ class JobQueue(QObject):
                              seed='assigning' if p.get('randomSeed') else str(p.get('seed', '?')),
                              model=getattr(sub.entry, 'name', ''), details=prompt,
                              state=('Preparing %d jobs' % sub.count if sub.count > 1 else 'Preparing'),
-                             canStop=True, canDrag=False, canUp=False, canDown=False))
+                             canStop=False, canCancel=True, canDrag=False, canUp=False, canDown=False))
         if rows != self._rows:
             self._rows = rows
             self.changed.emit()
 
     @Slot(str)
     def stop(self, request_id):
+        job = next((j for j in self.jobs() if j.request_id == request_id), None)
+        running = {r[1] for r in (self._snapshot or {}).get('queue_running', [])}
+        if (not job or job.cancelled or request_id in self._stopping
+                or (job.prompt_id not in running and self.client._active is not job)):
+            return
+        self._stopping.add(request_id)
+        self.publish()
+
+        def stopped(ok, detail):
+            if not ok:
+                self._stopping.discard(request_id)
+                self.controller.toast.emit(detail or 'This job is not sampling.', True)
+            self.refresh()
+
+        self.client.stop_job_and_save(job, stopped)
+
+    @Slot(str)
+    def cancel(self, request_id):
         sub = self.controller._submissions.get(request_id)
         if sub and sub.state in ('preparing', 'reserving'):
             sub.cancel()

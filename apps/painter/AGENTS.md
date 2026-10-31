@@ -60,8 +60,10 @@ the width cannot hold both panes.
 
 The owned job queue sits above history on Qt and GTK; its bottom handle saves
 `queue.height`. `job_queue.py` projects frozen inputs and backend queue order.
-Queue rows show stable job number and elided prompt, then bare seed and short ID,
-then Stop and Details. Drag waiting rows to insert before/after another row.
+Queue rows show stable job number and elided prompt, then bare seed, short ID,
+and Stop/Details/Cancel on one line. Stop decodes/saves the running latent; Cancel
+discards the job without decoding. Waiting/preparing jobs offer Cancel only.
+Drag waiting rows to insert before/after another row.
 Reordering applies the affected range atomically through `/painter/reorder`; never
 delete and resubmit graphs. Freeze delegates during drags, then revalidate job
 state on drop. Running jobs cannot move.
