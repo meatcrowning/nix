@@ -5940,6 +5940,49 @@ def test_sidebar(win, ctl, tmp, shell=None):
         check("narrow view clears the full-width toolbar", toolbar_fits())
 
 
+def test_job_queue(win, ctl, tmp):
+    import comfy
+    from PySide6.QtQml import qmlContext
+    ctl.jobQueue._timer.stop()
+    content = win.contentItem()
+    pane = next(it for it in walk(content) if it.objectName() == "jobQueuePane")
+    handle = next(it for it in walk(content) if it.objectName() == "queueSplitHandle")
+    gallery = find(content, "GalleryView")
+    APP.setProperty("showPreview", True)
+    for n in range(4):
+        job = comfy.Job({}, {'params': {'positive': 'A fox in snow' if n < 3 else 'A wolf in rain',
+                                        'seed': 100 + n, 'negative': 'blur', 'model': 'fixture'}}, parent=ctl.client)
+        job.prompt_id, job.owner_id = str(n), ctl.client.client_id
+        ctl.client._jobs[str(n)] = job
+    ctl.jobQueue._snapshot = {'queue_running': [[0, '0']], 'queue_pending': [[n, str(n)] for n in range(1, 4)]}
+    ctl.jobQueue.publish()
+    spin(150)
+    check("queue is above history", pane.isVisible() and gallery.y() >= pane.y() + pane.height() + handle.height())
+    check("job rows show prompt and concrete seeds", any(str(it.property('text')).startswith('Seed 101 ·') for it in walk(pane)))
+    check("running and waiting jobs stay distinct", ctl.jobQueue.rows[0]['state'] == 'Running' and ctl.jobQueue.rows[1]['canDown'])
+    before = pane.height()
+    drag(win, handle, handle.width()/2, 4, handle.width()/2, 44)
+    spin(100)
+    prefs = qmlContext(APP).contextProperty('Prefs')
+    check("queue handle resizes and persists height", pane.height() > before and prefs.get('queue.height') > before)
+    calls = []
+    ctl.client.cancel = calls.append
+    ctl.client._get = lambda *args: None  # isolated queue refresh; transport replies tested separately
+    target = ctl.jobQueue.rows[1]['id']
+    ctl.jobQueue.stop(target)
+    check("queue stop targets one job", len(calls) == 1 and calls[0].request_id == target)
+    waiting = calls[0]
+    waiting.cancelled = True
+    ctl._jobs = 4
+    serial = ctl._preview_serial
+    ctl._on_failed(waiting, 'cancelled')
+    check("stopping a waiting job preserves the running preview", ctl._jobs == 3 and ctl._preview_serial == serial)
+    ctl.client._jobs.clear()
+    ctl.jobQueue.publish()
+    spin(100)
+    check("empty queue remains resizable above history", pane.isVisible() and handle.isVisible() and not ctl.jobQueue.rows)
+
+
 def test_history_layout(win, ctl, tmp, shell):
     from PySide6.QtCore import Q_ARG
     from PySide6.QtQml import qmlContext
@@ -5954,8 +5997,9 @@ def test_history_layout(win, ctl, tmp, shell):
     check("Plasma history sits to the right of the full-height preview",
           gallery.x() > preview.x() + preview.width()
           and abs(preview.height() - results.height() + 10) < 2)
-    check("history starts at the top without an inline column control",
-          gallery.y() == 0 and not any(it.objectName() == "historyColumns" for it in walk(content)))
+    queue = next(it for it in walk(content) if it.objectName() == "jobQueuePane")
+    check("queue sits above history without an inline column control",
+          queue.y() == 0 and gallery.y() > queue.y() + queue.height() and not any(it.objectName() == "historyColumns" for it in walk(content)))
     menu_actions = shell.window.menuBar().actions()
     menu = next(action.menu() for action in menu_actions
                 if action.text().replace("&", "") == "View")
@@ -6133,10 +6177,12 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("seed", "preview", "live", "llada", "modes", "compare",
+    if only in ("queue", "seed", "preview", "live", "llada", "modes", "compare",
                 "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections", "drag"):
         print("== %s ==" % only)
-        if only == "drag":
+        if only == "queue":
+            test_job_queue(win, ctl, tmp)
+        elif only == "drag":
             test_drag_out(win, ctl, tmp)
             test_selection_and_collage(win, ctl, tmp)
         elif only == "sections":

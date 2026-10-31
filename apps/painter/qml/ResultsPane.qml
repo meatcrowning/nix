@@ -152,6 +152,50 @@ Item {
         onReleased: Prefs.set("plasma.historyWidth", root.historyWidth)
     }
 
+    JobQueue {
+        id: jobQueue
+        winActive: root.winActive
+        visible: !root.inView || root.heatmap
+        anchors.left: root.sideBySide ? historyDivider.right : parent.left
+        anchors.right: parent.right
+        anchors.top: !root.sideBySide && preview.visible ? preview.bottom : parent.top
+        anchors.leftMargin: root.sideBySide ? 0 : root.inset
+        anchors.rightMargin: root.inset
+        anchors.topMargin: !root.sideBySide && preview.visible ? 8 : 0
+        property real savedHeight: Prefs.get("queue.height") > 0 ? Prefs.get("queue.height") : 200
+        height: Math.min(savedHeight, Math.max(36, (root.height - y) * 0.65))
+    }
+
+    MouseArea {
+        id: queueDivider
+        objectName: "queueSplitHandle"
+        visible: jobQueue.visible
+        anchors.left: jobQueue.left
+        anchors.right: jobQueue.right
+        anchors.top: jobQueue.bottom
+        height: 8
+        cursorShape: Qt.SplitVCursor
+        preventStealing: true
+        property real startY: 0
+        property real startHeight: 0
+        onPressed: function(m) {
+            startY = mapToItem(root, m.x, m.y).y
+            startHeight = jobQueue.height
+        }
+        onPositionChanged: function(m) {
+            if (pressed) jobQueue.savedHeight = Math.max(36, Math.min(
+                (root.height - jobQueue.y) * 0.65,
+                startHeight + mapToItem(root, m.x, m.y).y - startY))
+        }
+        onReleased: Prefs.set("queue.height", jobQueue.savedHeight)
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(32, parent.width)
+            height: 2
+            color: Theme.border
+        }
+    }
+
     GalleryView {
         id: galleryView
         visible: !root.inView || root.heatmap
@@ -159,14 +203,14 @@ Item {
         columns: root.app ? root.app.gridColumns : 0
         anchors.left: root.sideBySide ? historyDivider.right : parent.left
         anchors.right: parent.right
-        anchors.top: !root.sideBySide && preview.visible ? preview.bottom : parent.top
+        anchors.top: queueDivider.bottom
         anchors.bottom: parent.bottom
         anchors.margins: root.inset
         anchors.leftMargin: root.sideBySide ? 0 : root.inset
         // FLUSH WITH THE CHROME when there is no preview above it: the grid's
         // own top gap read as a band of nothing between the toolbar and the
         // outputs, and there is nothing for it to separate.
-        anchors.topMargin: !root.sideBySide && preview.visible ? 8 : 0
+        anchors.topMargin: 0
         // ...and flush with the status bar at the other end. The hint line sits
         // at the bottom of this view (GalleryView), so a margin under it is a
         // band of view background with nothing in it.

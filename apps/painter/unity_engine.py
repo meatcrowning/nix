@@ -76,6 +76,7 @@ class Engine:
         self._restored = False
         self.sampling_expanded = prefs.get('unity.samplingExpanded') is not False
         width = prefs.get('unity.previewWidth')
+        self.queue_height = max(36, min(1200, int(prefs.get('queue.height') or 200)))
         self.history_width = max(0, min(10000, int(prefs.get('unity.historyWidth') or 0)))
         self.preview_width = max(0, min(10000, int(400 if width is None else width)))
         self.sidebar_width = max(200, min(10000, int(prefs.get('unity.sidebarWidth') or 380)))
@@ -154,6 +155,7 @@ class Engine:
                        loras=json.dumps(self.ctl.lorasSnapshot()))
         doc.update({pref: self.heights[key] for key, pref in HEIGHT_KEYS.items()})
         doc['unity.samplingExpanded'] = self.sampling_expanded
+        doc['queue.height'] = self.queue_height
         doc['unity.historyWidth'] = self.history_width
         doc['unity.previewWidth'] = self.preview_width
         doc['unity.sidebarWidth'] = self.sidebar_width
@@ -170,6 +172,7 @@ class Engine:
     def update(self, request):
         for key, attr, low, high in [('sidebarWidth', 'sidebar_width', 200, 10000),
                                      ('historyWidth', 'history_width', 0, 10000),
+                                     ('queueHeight', 'queue_height', 36, 1200),
                                      ('layoutHeight', 'layout_height', 140, 1200),
                                      ('regionListHeight', 'region_list_height', 28, 600),
                                      ('regionPromptHeight', 'region_prompt_height', 40, 600),
@@ -412,6 +415,10 @@ class Engine:
                     self.player.pause()
                 else:
                     self.player.play()
+        elif op == 'queue_stop':
+            c.jobQueue.stop(request.get('id', ''))
+        elif op == 'queue_move':
+            c.jobQueue.move(request.get('id', ''), int(request.get('direction', 0)))
         elif op == 'cancel':
             c.stopAndSave()
         elif op == 'hard_stop':
@@ -549,6 +556,7 @@ class Engine:
                     heatmap=self.heatmap_state(),
                     flags={key: getattr(c, key) for key in FLAGS},
                     ready=c.ready, busy=c.busy, status=c.status, progress=c.progress,
+                    jobs=c.jobQueue.rows, queueHeight=self.queue_height,
                     queue=c.queue, elapsed=c.elapsed, rate=c.rate, messages=messages,
                     wildcards=c.wildcardNames, wildcardTooltips=c.wildcardTooltips, wildcardOptions=c.wildcardOptions,
                     samplers=c.samplers, schedulers=c.schedulers, curves=c.curves, outsideWindows=c.outsideWindows,

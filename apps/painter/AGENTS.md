@@ -58,6 +58,12 @@ for unrecorded fields, labelled in the panel; never substitute current settings.
 context action interrupts without decoding. F7/showParams must switch view when
 the width cannot hold both panes.
 
+The owned job queue sits above history on Qt and GTK; its bottom handle saves
+`queue.height`. `job_queue.py` projects frozen inputs and backend queue order.
+Prompt labels group identical positive/negative/layout drafts across seed rerolls.
+Reordering swaps waiting jobs atomically through `/painter/reorder`; never delete
+and resubmit graphs to change their order. Running jobs cannot move.
+
 Keep the content background MouseArea at `z: -1000`: unclaimed presses must not
 turn into Oxygen window drags. Native chrome retains its own dragging. Under
 Plasma, QueueBar has zero height and statusLine/statusProgress carry its state.

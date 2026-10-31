@@ -236,6 +236,26 @@ def test():
             assert window.model_info.get_visible() == bool(selected_model.get('problem'))
             window.sidebar_split.set_position(440)
             window.sidebar_split.emit('accept-position')
+            assert window.queue_split.get_orientation() == Gtk.Orientation.VERTICAL
+            assert window.history_scroll.get_parent() == window.queue_split
+            window.queue_split.set_position(240)
+            window.queue_split.emit('accept-position')
+            sent_queue = []
+            real_send = window.send
+            window.send = lambda op, **kw: sent_queue.append((op, kw))
+            window.update_queue([dict(id='fixture-job', label='abc123', promptLabel='Prompt 1',
+                                      prompt='fox', details='fox, seed 42', seed='42', state='Waiting',
+                                      canUp=True, canDown=False, canStop=True)])
+            box = window.queue_box.get_children()[1]
+            buttons = box.get_children()[-1].get_children()
+            assert buttons[0].get_sensitive() and not buttons[1].get_sensitive()
+            buttons[0].clicked()
+            buttons[2].clicked()
+            assert sent_queue == [('queue_move', dict(id='fixture-job', direction=-1)),
+                                  ('queue_stop', dict(id='fixture-job', direction=0))]
+            window.send = real_send
+            window.update_queue([])
+            print('PASS: GTK queue placement, resize, per-job controls and frozen details')
             assert window.browse_pane.get_orientation() == Gtk.Orientation.HORIZONTAL
             window.browse_pane.set_position(360)
             window.browse_pane.emit('button-release-event', Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE))

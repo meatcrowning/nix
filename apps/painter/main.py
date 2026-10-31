@@ -856,6 +856,8 @@ class Painter(QObject):
             QGuiApplication.instance().aboutToQuit.connect(self.client.close)
         if hasattr(self.client, "enable_journal"):
             self.client.enable_journal(STATE / "jobs")
+        from job_queue import JobQueue
+        self._job_queue = JobQueue(self)
         from moss_inspect import MossInspect
         self._inspection = MossInspect(self.client, self)
         self.client.statusChanged.connect(self._on_queue)
@@ -2082,6 +2084,10 @@ class Painter(QObject):
         self.client.free(True, done)
 
     @Property(QObject, constant=True)
+    def jobQueue(self):
+        return self._job_queue
+
+    @Property(QObject, constant=True)
     def inspection(self):
         return self._inspection
 
@@ -2260,11 +2266,14 @@ class Painter(QObject):
         self._job_terminal(job)
         if getattr(job, "_controller_epoch", self._cancel_epoch) != self._cancel_epoch:
             return
-        self._preview_serial += 1
+        if getattr(job, "started_at", None):
+            self._preview_serial += 1
         if hasattr(self.client, "acknowledge"):
             self.client.acknowledge(job)
         self._jobs = max(0, self._jobs - 1)
         if getattr(job, "cancelled", False):
+            if getattr(job, "started_at", None) or not self._jobs:
+                self.gallery.end_live(getattr(job, "prompt_id", "") or "")
             if not self._jobs:
                 self._busy = False
                 self._clock.stop()

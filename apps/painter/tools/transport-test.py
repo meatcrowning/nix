@@ -211,5 +211,79 @@ check(not request({'prompt_id': 'ours', 'client_id': 'foreign'}, lambda: called.
 check(not request({'prompt_id': 'old', 'client_id': 'owner'}, lambda: called.append(1)), 'backend refuses stale prompt')
 check(request({'prompt_id': 'ours', 'client_id': 'owner'}, lambda: True), 'backend accepts exact running job ownership')
 check(not called, 'rejected ownership executes no interrupt')
+# Reordering preserves IDs and payloads, and cannot race a job starting.
+import heapq
+fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == '_reorder_owned')
+namespace['heapq'] = heapq
+exec(compile(ast.Module(body=[fn], type_ignores=[]), str(source), 'exec'), namespace)
+queue.server = types.SimpleNamespace(queue_updated=lambda: None)
+queue.queue = [(1, 'one', {'graph': 1}, {'client_id': 'owner'}),
+               (2, 'foreign', {}, {'client_id': 'other'}),
+               (3, 'two', {'graph': 2}, {'client_id': 'owner'})]
+reorder = namespace['_reorder_owned']
+check(reorder({'prompt_ids': ['one', 'two'], 'client_id': 'owner'}), 'owned pending jobs can swap')
+check([r[1] for r in sorted(queue.queue)] == ['two', 'foreign', 'one'], 'foreign queue position is preserved')
+check(next(r for r in queue.queue if r[1] == 'one')[2] == {'graph': 1}, 'reorder preserves exact graph identity')
+before = list(queue.queue)
+check(not reorder({'prompt_ids': ['one', 'foreign'], 'client_id': 'owner'}) and queue.queue == before,
+      'reorder refuses another window without mutation')
+check(not reorder({'prompt_ids': ['one', 'ours'], 'client_id': 'owner'}) and queue.queue == before,
+      'queue-to-running race refuses reorder without mutation')
+check(not reorder({'prompt_ids': ['one', 'one'], 'client_id': 'owner'}), 'duplicate IDs cannot corrupt the heap')
+
+from job_queue import JobQueue
+class Controller(QtCore.QObject):
+    toast = QtCore.Signal(str, bool)
+controller = Controller()
+controller.client = comfy.ComfyClient()
+controller._submissions = {}
+model = JobQueue(controller)
+model._timer.stop()
+jobs = []
+for index, seed in enumerate([17, 18, 19]):
+    j = comfy.Job({}, {'params': {'positive': 'fox' if index < 2 else 'wolf', 'seed': seed}}, parent=controller.client)
+    j.prompt_id, j.owner_id = str(index), controller.client.client_id
+    controller.client._jobs[j.prompt_id] = j
+    jobs.append(j)
+def snapshot():
+    return {'queue_running': [[0, '0']], 'queue_pending': [[2, '2'], [1, '1']]}
+controller.client._get = lambda path, cb: cb(Reply(snapshot()))
+model.refresh()
+check([r['seed'] for r in model.rows] == ['17', '18', '19'], 'queue uses backend priority order, not heap order')
+check(model.rows[0]['state'] == 'Running' and not model.rows[0]['canDown'], 'running job cannot move')
+check(model.rows[1]['prompt'] == 'fox' and model.rows[1]['seed'] == '18', 'rerolls retain frozen prompt and distinct seed')
+check(model.rows[2]['prompt'] == 'wolf', 'edited prompt identifies its own job')
+check(model.rows[0]['promptLabel'] == model.rows[1]['promptLabel'] != model.rows[2]['promptLabel'],
+      'prompt revisions share labels across seed rerolls but distinguish edits')
+requests = []
+controller.client._post = lambda path, body, cb=None: requests.append((path, body, cb))
+model.move(jobs[2].request_id, -1)
+check(requests[-1][0] == '/painter/reorder' and requests[-1][1]['prompt_ids'] == ['2', '1'],
+      'move addresses stable job IDs')
+check(not any(r['canUp'] or r['canDown'] for r in model.rows), 'overlapping moves are disabled until acknowledged')
+errors = []
+controller.toast.connect(lambda message, bad: errors.append(message))
+requests[-1][2](Reply({}, error=True))
+check(errors and len(requests) == 1, 'old backend refusal is visible and never resubmits jobs')
+model.move(jobs[2].request_id, -1)
+controller.client._get = lambda *args: None  # delay the next queue snapshot
+requests[-1][2](Reply({'reordered': True}))
+check([r['seed'] for r in model.rows] == ['17', '19', '18'], 'acknowledged reorder updates neighbors before the next click')
+# Cancelling preparation invalidates delayed upload/reservation callbacks.
+from submission import Submission
+sub = Submission.freeze({'positive': 'pending', 'seed': 12}, types.SimpleNamespace(name='fixture'), None, {}, 1, [], -1)
+controller._submissions[sub.id] = sub
+released = []
+controller._release_submission = released.append
+model.publish()
+check(any(r['id'] == sub.id and r['state'] == 'Preparing' for r in model.rows), 'preparing submissions are visible and stoppable')
+model.stop(sub.id)
+check(sub.cancelled and released == [sub] and sub.id not in controller._submissions,
+      'stopping preparation releases its lease and invalidates delayed callbacks')
+cancelled = []
+controller.client.cancel = cancelled.append
+model.stop(jobs[1].request_id)
+check(cancelled == [jobs[1]], 'stop targets only the selected job')
+controller.client.close()
 c.close()
 print('%d transport checks passed' % checks)

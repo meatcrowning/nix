@@ -5,6 +5,7 @@ never run.  This node instead catches a stop request at the sampler callback,
 returns that callback's x0 latent, and lets the normal graph finish.
 """
 import threading
+import heapq
 
 from aiohttp import web
 
@@ -89,9 +90,47 @@ async def _stop_request(request, hard):
                               "error": "" if stopped else "The requested job is not running for this client."})
 
 
+def _reorder_owned(doc):
+    ids, client = doc.get("prompt_ids"), doc.get("client_id")
+    if (not isinstance(ids, list) or len(ids) != 2 or ids[0] == ids[1]
+            or not all(isinstance(pid, str) for pid in ids) or not client):
+        return False
+    queue = PromptServer.instance.prompt_queue
+    lock = getattr(queue, "mutex", None)
+    if lock is None or not isinstance(getattr(queue, "queue", None), list):
+        return False
+    with lock:
+        rows = [(i, row) for i, row in enumerate(queue.queue)
+                if len(row) > 3 and row[1] in ids and (row[3] or {}).get("client_id") == client]
+        if len(rows) != 2:
+            return False  # one started, disappeared, or belongs to someone else
+        (a, first), (b, second) = rows
+        if first[0] == second[0]:
+            return False  # equal priorities cannot be swapped without moving other jobs
+        # Preserve every graph, metadata field, ID, and foreign queue position.
+        queue.queue[a] = (second[0], *first[1:])
+        queue.queue[b] = (first[0], *second[1:])
+        heapq.heapify(queue.queue)
+        queue.server.queue_updated()
+    return True
+
+
+@PromptServer.instance.routes.post("/painter/reorder")
+async def reorder_owned(request):
+    try:
+        doc = await request.json()
+        if not isinstance(doc, dict):
+            raise ValueError("expected object")
+    except (ValueError, TypeError):
+        return web.json_response({"reordered": False, "error": "Invalid queue request."}, status=400)
+    ok = _reorder_owned(doc)
+    return web.json_response({"reordered": ok, "error": "" if ok else
+                              "Queue changed; only waiting jobs owned by this window can move."})
+
+
 @PromptServer.instance.routes.get("/painter/control")
 async def control_capabilities(_request):
-    return web.json_response({"ownership_version": 1})
+    return web.json_response({"ownership_version": 1, "reorder_version": 1})
 
 
 @PromptServer.instance.routes.post("/painter/stop")

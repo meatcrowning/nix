@@ -236,7 +236,20 @@ class Window(Gtk.Window, ParameterForm):
         self.preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.browse_pane.pack1(self.preview_box, True, False)
         self.history_scroll = scroll(self.gallery)
-        self.browse_pane.pack2(self.history_scroll, False, False)
+        self.queue_split = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
+        self.queue_split.set_position(200)
+        self.queue_split.connect_after('button-release-event', self.queue_resized)
+        self.queue_split.connect_after('accept-position', self.queue_resized)
+        self.queue_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.queue_rows = None
+        viewport = Gtk.Viewport()
+        viewport.set_shadow_type(Gtk.ShadowType.NONE)
+        viewport.add(self.queue_box)
+        queue_scroll = scroll(viewport)
+        queue_scroll.set_size_request(-1, 36)
+        self.queue_split.pack1(queue_scroll, False, False)
+        self.queue_split.pack2(self.history_scroll, True, False)
+        self.browse_pane.pack2(self.queue_split, False, False)
         self.history_scroll.get_vadjustment().connect('value-changed', self.history_scrolled)
         self.pages.append_page(self.browse_pane, Gtk.Label(label='Browse'))
         self.full_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -266,6 +279,52 @@ class Window(Gtk.Window, ParameterForm):
         self.send('hello')
         GLib.timeout_add(40, self.poll)
         self.poll_count = 0
+
+    def queue_resized(self, *_):
+        if self.heights_loaded and not self.closing:
+            self.send('settings', queueHeight=self.queue_split.get_position())
+
+    def update_queue(self, rows):
+        if rows == self.queue_rows:
+            return
+        self.queue_rows = rows
+        for child in self.queue_box.get_children():
+            self.queue_box.remove(child)
+        self.queue_box.pack_start(label('Job queue · %d' % len(rows)), False, False, 0)
+        if not rows:
+            self.queue_box.pack_start(label('No queued jobs'), False, False, 0)
+        for row in rows:
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            box.pack_start(label('%s · %s' % (row['state'], row['promptLabel'])), False, False, 0)
+            prompt = label(row['prompt'].replace('\n', ' ') or '(empty prompt)')
+            from gi.repository import Pango
+            prompt.set_ellipsize(Pango.EllipsizeMode.END)
+            prompt.set_tooltip_text(row['details'])
+            box.pack_start(prompt, False, False, 0)
+            box.pack_start(label('Seed ' + row['seed'] + ' · ' + row['label']), False, False, 0)
+            details = Gtk.Expander(label='Details')
+            text = Gtk.TextView()
+            text.set_editable(False)
+            text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            text.get_buffer().set_text(row['details'])
+            detail_scroll = scroll(text)
+            detail_scroll.set_size_request(-1, 120)
+            details.add(detail_scroll)
+            box.pack_start(details, False, False, 0)
+            actions = Gtk.Box(spacing=4)
+            for title, flag, op, direction in [('Up', 'canUp', 'queue_move', -1),
+                                               ('Down', 'canDown', 'queue_move', 1),
+                                               ('Stop', 'canStop', 'queue_stop', 0)]:
+                button = Gtk.Button(label=title)
+                button.set_sensitive(row[flag])
+                button.connect('clicked', lambda _, ident=row['id'], op=op, direction=direction:
+                               self.send(op, id=ident, direction=direction))
+                if op == 'queue_stop':
+                    button.set_tooltip_text('Cancel this job without saving')
+                actions.pack_start(button, False, False, 0)
+            box.pack_start(actions, False, False, 0)
+            self.queue_box.pack_start(box, False, False, 4)
+        self.queue_box.show_all()
 
     def cancel_menu(self, widget, event):
         if event.button != 3:
@@ -532,6 +591,7 @@ class Window(Gtk.Window, ParameterForm):
         if not self.heights_loaded:
             self.sampling.set_expanded(state.get('samplingExpanded', True))
             self.browse_pane.set_position(state['previewWidth'])
+            self.queue_split.set_position(state.get('queueHeight', 200))
             self.restore_history_width = state.get('historyWidth', 0)
             self.browse_pane.queue_resize()
             self.sidebar_split.set_position(state['sidebarWidth'])
@@ -548,6 +608,7 @@ class Window(Gtk.Window, ParameterForm):
         self.loading = False
         self.visibility()
         self.update_actions()
+        self.update_queue(state.get('jobs', []))
         if state.get('flags', {}).get('layoutSupport'):
             self.sync_layout()
         status = '%s   |   %s queued' % (state['status'], state['queue'])
