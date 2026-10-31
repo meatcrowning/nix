@@ -541,6 +541,7 @@ def build(tmp):
     if native:
         assert shell.load(os.path.join(PAINTER, "qml/Root.qml")), shell.errors()
         shell.bind_chrome(None)
+        P.bind_queue_button(shell)
         shell.window.show()
         shell.view.setFocus()
         roots = [shell.view.quickWindow()]
@@ -6209,6 +6210,44 @@ def test_agent_control(win, ctl, tmp):
     check("agent shutdown removes its socket and discovery directory", not endpoint.directory.exists())
 
 
+def test_queue_button(ctl, shell):
+    from PySide6.QtWidgets import QSpinBox, QToolButton
+    button = shell._bar_buttons["gen"]
+    count = button.menu().findChild(QSpinBox, "queueCount")
+    check("queue uses a native split button", button.popupMode() == QToolButton.MenuButtonPopup)
+    sent = []
+    original_generate, original_info = ctl.generate, ctl._object_info
+    ctl.generate = lambda params, number: sent.append(number)
+    ctl._object_info = {"stub": True}
+    try:
+        count.setValue(3)
+        spin(80)
+        check("choosing a count does not submit", not sent and prop(APP, "gen")["count"] == 3)
+        check("button shows the selected count", button.text().endswith(" 3"), button.text())
+        button.click()
+        spin(80)
+        check("main button submits selected job count", sent == [3], sent)
+        APP.metaObject().invokeMethod(APP, "set", Q_ARG("QVariant", "count"), Q_ARG("QVariant", 7))
+        spin(80)
+        check("restored settings update the dropdown", count.value() == 7)
+        shell._actions["gen"].trigger()
+        spin(80)
+        check("shared menu and shortcut action uses the same count", sent == [3, 7], sent)
+        check("count retains existing bounds", count.minimum() == 1 and count.maximum() == 100)
+        was_busy = ctl._busy
+        ctl._busy = True
+        ctl.busyChanged.emit()
+        spin(80)
+        check("busy state retains count and split menu", button.text() == "Queue 7" and button.menu() is not None)
+        button.click()
+        spin(80)
+        check("busy button still queues jobs", sent == [3, 7, 7], sent)
+        ctl._busy = was_busy
+        ctl.busyChanged.emit()
+    finally:
+        ctl.generate, ctl._object_info = original_generate, original_info
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="painter-ui-test-")
     os.environ["PAINTER_MODELS"] = fake_models(os.path.join(tmp, "models"))
@@ -6222,10 +6261,12 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("queue", "seed", "preview", "live", "llada", "modes", "compare",
+    if only in ("queue-button", "queue", "seed", "preview", "live", "llada", "modes", "compare",
                 "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections", "drag"):
         print("== %s ==" % only)
-        if only == "queue":
+        if only == "queue-button":
+            test_queue_button(ctl, keep[-1])
+        elif only == "queue":
             test_job_queue(win, ctl, tmp)
         elif only == "drag":
             test_drag_out(win, ctl, tmp)

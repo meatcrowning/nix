@@ -816,7 +816,7 @@ Item {
           tip: App.busy ? "Queue" : "Generate",
           menuText: App.busy ? "Queue" : "Generate",
           menu: "file", icon: App.busy ? "list-add" : "media-playback-start",
-          bar: true, barText: App.busy ? "Queue" : "Generate", shortcut: "Ctrl+Return" },
+          bar: true, barText: (App.busy ? "Queue" : "Generate") + " " + root.gen.count, shortcut: "Ctrl+Return" },
         { id: "stop", label: "x",    tb: true, state: App.busy ? 0 : 2,
           tip: "Cancel", barText: "Cancel", menu: "file", icon: "process-stop",
           bar: true, shortcut: "Ctrl+." },

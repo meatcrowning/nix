@@ -2917,6 +2917,54 @@ class Titlebar(QObject):
                 pass
 
 
+def bind_queue_button(shell):
+    """Use the native split-button affordance for submission and job count."""
+    from PySide6.QtCore import Q_ARG, QMetaObject
+    from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QSpinBox,
+                                   QToolButton, QWidget, QWidgetAction)
+
+    root = shell.root
+    button = shell._bar_buttons["gen"]
+    menu = QMenu(button)
+    row = QWidget(menu)
+    layout = QHBoxLayout(row)
+    label = QLabel("Jobs to queue:", row)
+    count = QSpinBox(row)
+    count.setObjectName("queueCount")
+    count.setRange(1, 100)
+    count.setKeyboardTracking(False)
+    label.setBuddy(count)
+    layout.addWidget(label)
+    layout.addWidget(count)
+    action = QWidgetAction(menu)
+    action.setDefaultWidget(row)
+    menu.addAction(action)
+    button.setMenu(menu)
+    button.setPopupMode(QToolButton.MenuButtonPopup)
+
+    def sync():
+        value = root.property("gen")
+        if hasattr(value, "toVariant"):
+            value = value.toVariant()
+        blocked = count.blockSignals(True)
+        count.setValue(int(value.get("count", 1)))
+        count.blockSignals(blocked)
+        button.setText(button.defaultAction().text() + " " + str(count.value()))
+
+    def edited(value):
+        QMetaObject.invokeMethod(root, "set", Qt.DirectConnection,
+                                 Q_ARG("QVariant", "count"),
+                                 Q_ARG("QVariant", value))
+
+    count.valueChanged.connect(edited)
+    root.genChanged.connect(sync)
+    button.defaultAction().changed.connect(sync)
+    menu.aboutToShow.connect(sync)
+    count.editingFinished.connect(menu.close)
+    sync()
+    return count
+
+
 def main():
     selftest = "--selftest" in sys.argv
     resource_fixture = os.environ.get("PAINTER_RESOURCE_FIXTURE") == "1"
@@ -3046,6 +3094,7 @@ def main():
         # `menuOrder`, and kdeshell keeps File first and Settings/Help last
         # whatever an app says (pylib/kdeshell.py MENU_ORDER).
         shell.bind_chrome(bar)
+        bind_queue_button(shell)
         def bind_stop_menu():
             button = shell._bar_buttons.get("stop")
             if button is None or button.property("painterStopMenu"):
