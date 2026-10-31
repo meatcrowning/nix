@@ -17,6 +17,10 @@ environment, and during activation there is no XDG_CURRENT_DESKTOP, so what it
 does depends on the machine and on whether kde-config/kwriteconfig happen to be
 on PATH. This does exactly one deterministic thing everywhere.
 
+--only-missing seeds keys without overwriting a saved choice. --remove-matching
+removes exact legacy defaults, with --once NAME recording successful migration
+in XDG_STATE_HOME so later user choices are untouched.
+
 Contract: only the named keys in the named section are touched. Every other
 section (notably [Added Associations]), every other key, comments and ordering
 survive verbatim. Rewrites the file only when something actually changed, so
@@ -32,6 +36,9 @@ def main(argv):
     filename = "mimeapps.list"
     section = "[Default Applications]"
     only_if_exists = False
+    only_missing = False
+    remove_matching = False
+    once = None
 
     pairs = {}
     rest = list(argv)
@@ -43,6 +50,12 @@ def main(argv):
             section = rest.pop(0)
         elif a == "--only-if-exists":
             only_if_exists = True
+        elif a == "--only-missing":
+            only_missing = True
+        elif a == "--remove-matching":
+            remove_matching = True
+        elif a == "--once" and rest:
+            once = rest.pop(0)
         elif "=" in a:
             k, v = a.split("=", 1)
             pairs[k.strip()] = v.strip()
@@ -55,6 +68,13 @@ def main(argv):
 
     cfg = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
     path = cfg / filename
+
+    marker = None
+    if once:
+        state = Path(os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local/state"))
+        marker = state / "mime-defaults" / once / filename
+        if marker.exists():
+            return 0
 
     try:
         lines = path.read_text().splitlines()
@@ -74,6 +94,8 @@ def main(argv):
         if ln.strip() == section:
             start = i
             break
+    if start is None and remove_matching:
+        start = len(lines)
     if start is None:
         if lines and lines[-1].strip():
             lines.append("")
@@ -92,19 +114,29 @@ def main(argv):
         if not s or s.startswith("#") or "=" not in s:
             continue
         key = s.split("=", 1)[0].strip()
-        if key in remaining:
-            lines[i] = f"{key}={remaining.pop(key)}"
+        if key in pairs:
+            value = pairs[key]
+            remaining.pop(key, None)
+            if remove_matching:
+                if s.split("=", 1)[1].strip().rstrip(";") == value.rstrip(";"):
+                    lines[i] = None
+            elif not only_missing:
+                lines[i] = f"{key}={value}"
 
     # Anything not already present is appended at the end of the section, after
     # the last non-blank line so we don't grow a run of blanks on every switch.
-    if remaining:
+    if remaining and not remove_matching:
         insert = end
         while insert > start + 1 and not lines[insert - 1].strip():
             insert -= 1
         new = [f"{k}={v}" for k, v in remaining.items()]
         lines[insert:insert] = new
 
+    lines = [line for line in lines if line is not None]
     if lines == original:
+        if marker:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch()
         return 0
 
     text = "\n".join(lines) + "\n"
@@ -119,6 +151,9 @@ def main(argv):
         except OSError:
             pass
         return 1
+    if marker:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
     print(f"mime-defaults: updated {path}")
     return 0
 

@@ -1,13 +1,7 @@
 { pkgs, lib, host, ... }:
 
-# The desktop's default handlers, shared by `top` and `book`. App `.desktop`
-# files make handlers eligible; this module makes the named types default.
-# `mime-files/set-defaults.py` edits only those keys in place, preserving the
-# user's other associations and remaining idempotent across activation.
-#
-# This intentionally replaces the previous defaults on `top`. The old entries
-# remain in `[Added Associations]`, so they are still available through
-# "Open with"; change the tables below to revert.
+# Distribution fallbacks shared by top and book. User choices in ~/.config
+# take precedence and are never rewritten on subsequent activations.
 let
   filerTypes = [ "inode/directory" ];
 
@@ -71,18 +65,15 @@ let
     ++ (map (t: "${t}=reader.desktop") readerTypes)
     ++ (map (t: "${t}=editor.desktop") editorTypes);
 
-  # Plasma gets a separate `kde-mimeapps.list`, selected by XDG's
-  # `$desktop-mimeapps.list` precedence. Hyprland never reads it, and Plasma
-  # never reads the generic table. Only the types claimed by the vendored apps
-  # are overridden: video uses Haruna, source/markdown uses Kate, PDF uses
-  # Okular, and links use the host's installed Vivaldi desktop entry.
+  # Desktop-specific distribution fallbacks preserve Plasma's native defaults
+  # without masking the generic mimeapps.list written by settings GUIs.
   vivaldiDesktop =
     if host == "air" then "com.vivaldi.Vivaldi.desktop" else "vivaldi-stable.desktop";
 
   kdeAssoc =
     (map (t: "${t}=org.kde.dolphin.desktop") filerTypes)
     ++ (map (t: "${t}=${if lib.hasPrefix "video/" t
-                        then "org.kde.haruna.desktop"
+                        then (if t == "video/mp4" then "mpv.desktop" else "org.kde.haruna.desktop")
                         else "org.kde.gwenview.desktop"}") viewerTypes)
     ++ (map (t: "${t}=org.kde.elisa.desktop") playerTypes)
     ++ (map (t: "${t}=${vivaldiDesktop}") surferTypes)
@@ -93,17 +84,21 @@ let
 
   setDefaults = "${pkgs.python3}/bin/python3 ${./mime-files/set-defaults.py}";
 
-  # Plasma's in-app browser comes from `kdeglobals` rather than the scheme
-  # handler, and that file has no per-session variant. The same idempotent
-  # helper runs from Hyprland autostart or Plasma's autostart entry, choosing
-  # Vivaldi for KDE and surfer otherwise.
+  defaultsFile = entries: "[Default Applications]\n" + lib.concatStringsSep "\n" entries + "\n";
+  fallbackDefaults = pkgs.runCommand "desktop-mime-fallbacks" {} ''
+    mkdir -p "$out/share/applications"
+    cp ${pkgs.writeText "mimeapps.list" (defaultsFile assoc)} "$out/share/applications/mimeapps.list"
+    cp ${pkgs.writeText "kde-mimeapps.list" (defaultsFile kdeAssoc)} "$out/share/applications/kde-mimeapps.list"
+  '';
+
+  # BrowserApplication is also user-owned: only seed an absent key.
   sessionDefaults = pkgs.writeShellScriptBin "desktop-session-defaults" ''
     set -u
     case ":$(printf '%s' "''${XDG_CURRENT_DESKTOP:-}" | tr '[:lower:]' '[:upper:]'):" in
       *:KDE:*) browser=${vivaldiDesktop} ;;
       *)       browser=surfer.desktop ;;
     esac
-    exec ${setDefaults} --file kdeglobals --section General --only-if-exists \
+    exec ${setDefaults} --file kdeglobals --section General --only-if-exists --only-missing \
       "BrowserApplication=$browser"
   '';
 in
@@ -115,7 +110,7 @@ in
   # shell profile for `top`; `filer.nix` and `reader.nix` also put it in the
   # wrapper PATH so graphical `xdg-open` calls get the same result on both
   # hosts.
-  home.packages = [ pkgs.perlPackages.FileMimeInfo sessionDefaults ];
+  home.packages = [ pkgs.perlPackages.FileMimeInfo sessionDefaults fallbackDefaults ];
 
   # Plasma's autostart counterpart to the `hl.exec_cmd` in Hyprland's
   # `hyprland.lua`; each session reads only its own startup mechanism.
@@ -123,7 +118,7 @@ in
     [Desktop Entry]
     Type=Application
     Name=Desktop session defaults
-    Comment=Point KDE's BrowserApplication at this session's browser
+    Comment=Seed an unset default browser
     Exec=${sessionDefaults}/bin/desktop-session-defaults
     NoDisplay=true
     X-GNOME-Autostart-enabled=true
@@ -131,13 +126,14 @@ in
 
   home.activation.desktopDefaults =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      run ${setDefaults} ${lib.escapeShellArgs assoc}
+      # Retire only the exact defaults previously forced by this module, once.
+      # Preserve custom choices, Added Associations, and all unrelated content.
+      run ${setDefaults} --remove-matching --once mime-fallbacks-v1 ${lib.escapeShellArgs assoc}
+      run ${setDefaults} --file kde-mimeapps.list --remove-matching --once mime-fallbacks-v1 \
+        ${lib.escapeShellArgs (map (entry: if entry == "video/mp4=mpv.desktop"
+          then "video/mp4=org.kde.haruna.desktop" else entry) kdeAssoc)}
 
-      # Keep Plasma's answers in a separate file; XDG reads it only in KDE.
-      run ${setDefaults} --file kde-mimeapps.list ${lib.escapeShellArgs kdeAssoc}
-
-      # BrowserApplication is per-session, so the startup helper owns it;
-      # activation only refreshes the current session after a switch.
+      # An existing browser choice survives activation and session startup.
       run ${sessionDefaults}/bin/desktop-session-defaults || true
 
       # Refresh the cache used by "Open with…" for the local app entries.
@@ -145,8 +141,5 @@ in
         "''${XDG_DATA_HOME:-$HOME/.local/share}/applications" || true
     '';
 
-  # For anything that consults $BROWSER rather than the MIME database (git,
-  # some CLI tools). Lands in hm-session-vars.sh, so it applies to shells and
-  # sessions started after the next login.
-  home.sessionVariables.BROWSER = "surfer";
+  # Leave BROWSER unset so callers can use the current MIME association.
 }
