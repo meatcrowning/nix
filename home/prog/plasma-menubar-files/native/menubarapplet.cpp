@@ -1,5 +1,6 @@
 #include "menubarapplet.h"
 #include "browsermenubridge.h"
+#include "menuhoverfilter.h"
 #include <functional>
 
 #include <KPluginFactory>
@@ -20,6 +21,11 @@ K_PLUGIN_CLASS_WITH_JSON(MenuBarApplet, "metadata.json")
 MenuBarApplet::MenuBarApplet(QObject *parent, const KPluginMetaData &data, const QVariantList &args)
     : Plasma::Applet(parent, data, args)
 {
+    m_hover = new MenuHoverFilter(this);
+    // Switching can delete a submenu; finish dispatching its event first.
+    connect(m_hover, &MenuHoverFilter::moved, this, [this](const QPointF &position) {
+        if (m_menu && m_menu->isVisible()) Q_EMIT menuPointerMoved(position);
+    }, Qt::QueuedConnection);
     static QPointer<BrowserMenuBridge> bridge;
     if (!bridge) bridge = new BrowserMenuBridge(qApp);
     m_bridge = bridge;
@@ -78,16 +84,22 @@ void MenuBarApplet::openMenu(QQuickItem *button, const QVariantList &entries)
         return;
     }
 
-    closeMenu();
-    auto *menu = new QMenu;
-    m_menu = menu;
-    connect(menu, &QMenu::aboutToHide, this, [this, menu] {
-        if (m_menu == menu) {
-            m_menu = nullptr;
-        }
-        Q_EMIT menuClosed();
-        menu->deleteLater();
-    });
+    auto *menu = m_menu.data();
+    if (!menu) {
+        menu = new QMenu;
+        m_menu = menu;
+        m_hover->watch(menu);
+        connect(menu, &QMenu::aboutToHide, this, [this, menu] {
+            if (m_menu == menu) {
+                m_menu = nullptr;
+            }
+            Q_EMIT menuClosed();
+            menu->deleteLater();
+        });
+    } else {
+        // Keep the Wayland popup and its grab alive while changing headings.
+        menu->clear();
+    }
 
     const int browserWindow = m_bridge->windowId();
     std::function<void(QMenu *, const QVariantList &)> populate;
@@ -100,6 +112,7 @@ void MenuBarApplet::openMenu(QQuickItem *button, const QVariantList &entries)
             if (entry.value("browser").toBool()) label.replace("&", "&&");
             if (entry.contains("children")) {
                 auto *child = parent->addMenu(label);
+                m_hover->watch(child);
                 child->setEnabled(entry.value("enabled", true).toBool());
                 populate(child, entry.value("children").toList());
                 continue;
@@ -128,7 +141,8 @@ void MenuBarApplet::openMenu(QQuickItem *button, const QVariantList &entries)
     menu->setAttribute(Qt::WA_TranslucentBackground);
     menu->winId();
     menu->windowHandle()->setTransientParent(button->window());
-    menu->popup(position);
+    if (menu->isVisible()) menu->move(position);
+    else menu->popup(position);
 }
 
 #include "menubarapplet.moc"

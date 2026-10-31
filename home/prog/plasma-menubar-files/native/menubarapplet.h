@@ -5,6 +5,7 @@
 #include <QPointer>
 
 class BrowserMenuBridge;
+class MenuHoverFilter;
 class QMenu;
 class QQuickItem;
 
@@ -30,10 +31,12 @@ Q_SIGNALS:
     void nativeMenuOpenChanged();
     void menuTriggered(int index);
     void menuClosed();
+    void menuPointerMoved(const QPointF &globalPosition);
 
 private:
     QPointer<Plasma::Applet> m_nativeApplet;
     QPointer<QQuickItem> m_nativeItem;
     QPointer<QMenu> m_menu;
     BrowserMenuBridge *m_bridge;
+    MenuHoverFilter *m_hover;
 };

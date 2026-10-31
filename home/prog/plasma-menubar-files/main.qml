@@ -403,7 +403,16 @@ PlasmoidItem {
                 openMine();
             }
         }
-        // macOS slides from menu to menu once one is open; so do we.
+        Connections {
+            target: Plasmoid
+            function onMenuPointerMoved(globalPosition) {
+                if (!popup.visible || button.isOpen || !button.visible || !button.enabled) return;
+                const point = button.mapFromGlobal(globalPosition.x, globalPosition.y);
+                if (button.contains(point)) button.openMine();
+            }
+        }
+
+        // Normal hover still handles motion delivered directly to the panel.
         onHoveredChanged: if (hovered && popup.visible && !isOpen) openMine()
     }
 
@@ -575,7 +584,6 @@ PlasmoidItem {
 
         function openFor(button, list) {
             switching = true;
-            Plasmoid.closeMenu();
             ++serial;
             root.nativeEntries = list;
             owner = button;
