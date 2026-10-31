@@ -38,7 +38,9 @@ def layout(sizes):
     aspect = statistics.median(width / height for width, height in sizes)
     aspect = max(0.5, min(2.0, aspect))
     choices = []
-    for cols in range(1, count + 1):
+    # Four selections form a 2x2 grid; landscape scoring otherwise prefers
+    # three across with two empty cells for square sources.
+    for cols in ((2,) if count == 4 else range(1, count + 1)):
         rows = math.ceil(count / cols)
         canvas_aspect = cols * aspect / rows
         empty = cols * rows - count
