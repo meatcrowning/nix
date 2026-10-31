@@ -1,0 +1,34 @@
+    // Keep the tray's full-size click cells and pressed animation; constrain
+    // only their icon containers. Hidden popup entries retain Plasma's size.
+    Instantiator {
+        model: root.containment?.plasmoid?.applets ?? []
+        delegate: QtObject {
+            id: trayInset
+            required property var modelData
+            readonly property bool enabled: root.containment?.plasmoid?.location === PlasmaCore.Types.TopEdge
+                && modelData.pluginName === "org.kde.plasma.systemtray"
+            readonly property var tray: modelData.pluginName === "org.kde.plasma.systemtray"
+                ? root.containment.itemFor(modelData) : null
+            readonly property var grid: tray?.visibleLayout ?? null
+
+            property Instantiator icons: Instantiator {
+                model: trayInset.grid?.contentItem.children ?? []
+                delegate: QtObject {
+                    required property var modelData
+                    readonly property var icon: modelData instanceof Loader
+                        ? modelData.item?.iconContainer ?? null : null
+                    // A separate transform composes with Plasma's pressed
+                    // scale and disappears with this delegate on reparenting.
+                    property Scale inset: Scale {
+                        origin.x: icon ? icon.width / 2 : 0
+                        origin.y: icon ? icon.height / 2 : 0
+                        xScale: trayInset.enabled && icon?.inVisibleLayout
+                            ? Math.min(1, 16 / Math.max(1, icon.width)) : 1
+                        yScale: trayInset.enabled && icon?.inVisibleLayout
+                            ? Math.min(1, 16 / Math.max(1, icon.height)) : 1
+                    }
+                    onIconChanged: if (icon) icon.transform.push(inset)
+                }
+            }
+        }
+    }

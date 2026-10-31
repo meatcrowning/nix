@@ -80,14 +80,20 @@ let
       # Kickoff rounds its icon down inside the narrow panel's content area.
       # Scale only its compact button, preserving the selected Oxygen artwork.
       perl -0pi -e 's/(    property Item compactRepresentation\n)/$1\n    Binding {\n        target: root.compactRepresentation\n        property: "scale"\n        value: 1.4\n        when: root.compactRepresentation !== null \&\& root.location === PlasmaCore.Types.LeftEdge \&\& Plasmoid.pluginName === "org.kde.plasma.kickoff"\n        restoreMode: Binding.RestoreBindingOrValue\n    }\n/' $out/contents/applet/CompactApplet.qml
+      # Give the top bar's standalone status icons the same vertical inset
+      # as the tray, without shrinking the surrounding tooltip/click area.
+      perl -0pi -e 's/(    property Item compactRepresentation\n)/$1\n    Binding {\n        target: root.compactRepresentation\n        property: "anchors.topMargin"\n        value: 3\n        when: root.compactRepresentation !== null \&\& root.location === PlasmaCore.Types.TopEdge \&\& ["org.kde.plasma.weather", "org.kde.plasma.mediacontroller"].includes(Plasmoid.pluginName)\n        restoreMode: Binding.RestoreBindingOrValue\n    }\n    Binding {\n        target: root.compactRepresentation\n        property: "anchors.bottomMargin"\n        value: 3\n        when: root.compactRepresentation !== null \&\& root.location === PlasmaCore.Types.TopEdge \&\& ["org.kde.plasma.weather", "org.kde.plasma.mediacontroller"].includes(Plasmoid.pluginName)\n        restoreMode: Binding.RestoreBindingOrValue\n    }\n/' $out/contents/applet/CompactApplet.qml
       panel_qml=$out/contents/views/Panel.qml
       perl -0pi -e 's/(id: opaqueItem.*?opacity:) root\.panelOpacity/$1 0/s' $panel_qml
       perl -0pi -e 's/(id: translucentItem\n)/$1        opacity: containment?.plasmoid?.location === PlasmaCore.Types.LeftEdge ? 0 : 1\n/' $panel_qml
       perl -0pi -e 's|(import QtQml\n)|$1import Qt.labs.folderlistmodel\n|' $panel_qml
-      awk -v surface=${./plasma-panel-gradient-files/Surface.qmlfrag} '
+      awk -v surface=${./plasma-panel-gradient-files/Surface.qmlfrag} \
+          -v tray=${./plasma-panel-gradient-files/TrayIconInsets.qmlfrag} '
         /^    Keys.onEscapePressed: \{$/ {
           while ((getline line < surface) > 0) print line
           close(surface)
+          while ((getline line < tray) > 0) print line
+          close(tray)
           print
           next
         }
