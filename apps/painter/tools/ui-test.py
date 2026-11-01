@@ -5692,6 +5692,7 @@ def test_text_history_actions(win):
 
 
 def test_snapshot_families(win, ctl):
+    from PySide6.QtCore import QCoreApplication, QEvent
     from PySide6.QtQml import qmlContext
     comparison = next(item for item in walk(win.contentItem()) if item.objectName() == 'parameterCompare')
     current, selected = prop(APP, 'gen'), ctl.selectedName
@@ -5703,6 +5704,7 @@ def test_snapshot_families(win, ctl):
         saved = dict(model=row['name'], positive='Saved family prompt', seed=42,
                      edit=bool(family.get('edit')), loras=[dict(name='saved.safetensors', strength=.75)])
         comparison.setProperty('params', saved)
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         spin(30)
         pane = find(comparison, 'ParamsPane')
         context = qmlContext(pane)
@@ -5716,8 +5718,18 @@ def test_snapshot_families(win, ctl):
     comparison.setProperty('params', dict(model='Unavailable model', positive='Old output'))
     spin(30)
     check('unavailable model retains full panel', find(comparison, 'ParamsPane') is not None)
+    retired = list(ctl._parameter_comparisons.values())
+    destroyed = []
+    for owner in retired:
+        owner.item.destroyed.connect(lambda: destroyed.append('panel'))
+        owner.context.destroyed.connect(lambda: destroyed.append('context'))
+        owner.app.destroyed.connect(lambda: destroyed.append('app'))
     APP.setProperty('showParameterCompare', False)
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     spin(30)
+    check('closing comparison releases its panel', find(comparison, 'ParamsPane') is None)
+    check('panel is destroyed before its context and settings',
+          destroyed == ['panel', 'context', 'app'], destroyed)
 
 
 def test_sidebar(win, ctl, tmp, shell=None):
@@ -6271,7 +6283,7 @@ def main():
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
     if only in ("queue-button", "queue", "seed", "preview", "live", "llada", "modes", "compare",
-                "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections", "drag"):
+                "snapshots", "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections", "drag"):
         print("== %s ==" % only)
         if only == "queue-button":
             test_queue_button(ctl, keep[-1])
@@ -6295,6 +6307,8 @@ def main():
         elif only == "notifications":
             test_done_toast(win, ctl, tmp)
             test_preview_zoom(win, ctl, tmp)
+        elif only == "snapshots":
+            test_snapshot_families(win, ctl)
         elif only == "moss":
             test_moss(win, ctl, tmp)
             test_snapshot_families(win, ctl)

@@ -138,6 +138,10 @@ class Comparison(QObject):
         state = snapshot(params, ctl)
         if not state:
             return
+        # QObject deletes children in insertion order. Tear down the QML tree
+        # before its context and settings: layout destruction can reevaluate
+        # bindings, which must still have live context properties to read.
+        self.view_owner = QObject(self)
         outer = qmlContext(host)
         self.context = QQmlContext(outer, self)
         self.app = SnapshotApp(state, self)
@@ -155,7 +159,7 @@ class Comparison(QObject):
         self.item = self.component.create(self.context)
         if self.item is None:
             raise RuntimeError('\n'.join(e.toString() for e in self.component.errors()))
-        self.item.setParent(self)
+        self.item.setParent(self.view_owner)
         self.item.setParentItem(host)
         self.item.setWidth(host.width())
         self.item.setHeight(host.height())
@@ -172,5 +176,4 @@ class Comparison(QObject):
             self.parent().widthChanged.disconnect(self.resize)
             self.parent().heightChanged.disconnect(self.resize)
             self.item.setParentItem(None)
-        self.setParent(None)
         self.deleteLater()
