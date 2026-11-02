@@ -154,13 +154,14 @@ assert snapshot(dict(seed=2**64-1), ctl)['settings']['seed'] == 2**64-1
 assert snapshot({}, ctl) is None
 assert snapshot(dict(width=1024, height=1024, aspectW=7, aspectH=7, megapixels=1.05), ctl)['settings']['aspectW'] == 7
 stop_calls = []
-real_soft, real_hard = ctl.stopAndSave, ctl.cancel
+real_soft, real_hard, real_queued = ctl.stopAndSave, ctl.cancel, ctl.cancelQueued
 ctl.stopAndSave = lambda: stop_calls.append('decode')
 ctl.cancel = lambda: stop_calls.append('hard')
+ctl.cancelQueued = lambda: stop_calls.append('queued')
 engine.dispatch(dict(op='cancel'))
 engine.dispatch(dict(op='hard_stop'))
-assert stop_calls == ['decode', 'hard']
-ctl.stopAndSave, ctl.cancel = real_soft, real_hard
+assert stop_calls == ['queued', 'hard']
+ctl.stopAndSave, ctl.cancel, ctl.cancelQueued = real_soft, real_hard, real_queued
 
 # Layout state survives settings persistence and is cleared by an older output.
 import moss_layout
