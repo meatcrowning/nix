@@ -134,3 +134,51 @@ class CatalogueIndex:
                                     '-y', str(tmp)], check=True, timeout=20, capture_output=True)
                 tmp.replace(dest)
             return dest
+
+    def display_image(self, relative, stamp):
+        """Copy PNG pixel/colour chunks verbatim, omitting text and token maps."""
+        import struct
+        from catalogue import trim_display_cache
+        path = self.output_root / safe_relative(relative)
+        if not path.resolve().is_relative_to(self.output_root.resolve()) or path.suffix.lower() != '.png':
+            raise ValueError('Output outside catalogue root or not a PNG')
+        st = path.stat()
+        if stamp != '%d-%d' % (st.st_mtime_ns, st.st_size):
+            raise ValueError('Output changed; refresh the catalogue')
+        folder = self.cache / 'display'
+        dest = folder / (hashlib.sha256((relative + ':' + stamp).encode()).hexdigest() + '.png')
+        with self.thumb_slots:
+            if dest.is_file():
+                dest.touch()
+                return dest
+            folder.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=folder) as work:
+                tmp = Path(work) / 'display.png'
+                with path.open('rb') as src, tmp.open('wb') as dst:
+                    signature = src.read(8)
+                    if signature != b'\x89PNG\r\n\x1a\n':
+                        raise ValueError('Not a PNG')
+                    dst.write(signature)
+                    while True:
+                        header = src.read(8)
+                        if len(header) != 8:
+                            raise ValueError('Truncated PNG')
+                        length, kind = struct.unpack('>I4s', header)
+                        if kind in (b'paHm', b'tEXt', b'zTXt', b'iTXt'):
+                            src.seek(length + 4, 1)
+                        else:
+                            if dst.tell() + length + 12 > 64 * 1024 * 1024:
+                                raise ValueError('Display image exceeds byte limit')
+                            dst.write(header)
+                            remaining = length + 4
+                            while remaining:
+                                part = src.read(min(remaining, 1024 * 1024))
+                                if not part:
+                                    raise ValueError('Truncated PNG chunk')
+                                dst.write(part)
+                                remaining -= len(part)
+                        if kind == b'IEND':
+                            break
+                tmp.replace(dest)
+            trim_display_cache(folder)
+            return dest

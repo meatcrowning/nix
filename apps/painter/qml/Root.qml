@@ -55,7 +55,7 @@ Item {
     // `cols*` rows in `actions` and `GalleryView.columns`.
     property int gridColumns: 0
     readonly property bool canCompare: root.inView
-        ? (!root.selIsVideo && root.selOne !== "" && App.compareSource(root.selOne) !== "")
+        ? (!root.selIsVideo && root.selOne !== "" && (App.compareRevision, App.compareSource(root.selOne)) !== "")
         : results.preview.canCompare
     readonly property bool canStep: Gallery.count > 1
 
@@ -625,8 +625,9 @@ Item {
     }
 
     readonly property var inspection: typeof App.inspection !== "undefined" ? App.inspection : null
-    readonly property string inspectionPath: root.inView ? root.selOne
+    readonly property string inspectionTarget: root.inView ? root.selOne
         : (results.preview.open && !results.preview.showLive ? results.preview.source : "")
+    readonly property string inspectionPath: showHeatmap ? inspectionTarget : ""
     property bool showHeatmap: false
     onShowHeatmapChanged: {
         if (inspection) inspection.setViewing(showHeatmap)
@@ -847,7 +848,7 @@ Item {
           checkable: true, state: root.showParameterCompare ? 1 : root.selOne !== "" ? 0 : 2 },
         { id: "heatmap", label: "map", menuText: "Token Heatmap", tip: root.inspection ? root.inspection.status : "Token Heatmap", menu: "view",
           icon: "view-preview", bar: true, barText: "Heatmap", tb: true, checkable: true,
-          state: root.showHeatmap ? 1 : root.inspection && root.inspection.available ? 0 : 2 },
+          state: root.showHeatmap ? 1 : root.inspectionTarget.toLowerCase().endsWith(".png") ? 0 : 2 },
         { id: "injprompt", tip: "Reuse Prompt", menu: "edit",
           state: root.selParams ? 0 : 2 },
         { id: "injparams", tip: "Reuse Parameters", menu: "edit",

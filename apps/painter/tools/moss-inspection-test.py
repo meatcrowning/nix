@@ -258,13 +258,52 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         gate.set()
         cache_probe.close()
     print('PASS map cache reuse, file invalidation and loading during an export')
+    # Identical words in the two boxes must select different saved planes.
+    pos = dict(doc, version=3, consistency=[.2, .3], capture={})
+    pos['words'], _ = moss_rank.word_groups(pos)
+    pp = bytes([0,255,0,255,255,0,255,0] * 2)
+    neg = dict(pos)
+    joined = moss_data.combine_branches((pos, pp), (neg, bytes(255-v for v in pp)))
+    joined = moss_data.decode(moss_data.encode(*joined))
+    joined[0]['_aggregate'] = moss_data.descriptive_aggregate(*joined)
+    joined[0]['_content_tokens'] = moss_rank.content_tokens(joined[0])
+    negative_probe = MossInspect(None)
+    try:
+        negative_probe._accept(0, joined)
+        negative_probe.setViewing(True)
+        negative_probe.hoverPrompt('red sphere', 1)
+        positive_index = negative_probe.selected
+        positive_mask = negative_probe.mask.copy()
+        negative_probe.hoverRegion('red sphere', 1, '@negative')
+        assert negative_probe.selected != positive_index
+        assert negative_probe.tokens[negative_probe.selected]['branch'] == 'negative'
+        assert 'Negative' in negative_probe.tokens[negative_probe.selected]['label']
+        assert 'not amount removed' in negative_probe.status
+        assert negative_probe.mask != positive_mask
+        negative_probe.endHover('region:@negative')
+        assert negative_probe.selected == -1
+        negative_probe.hoverRegion('different draft', 1, '@negative')
+        assert negative_probe.selected == -1
+        negative_probe.toggleGrid()
+        negative_probe.pickToken('red sphere', 1, '@negative')
+        assert negative_probe._picks == [2]
+        from moss_grid import save_grid
+        exported = save_grid(str(output), joined, [joined[0]['tokens'][0], joined[0]['tokens'][2]], tmp)
+        grid = QImage(str(exported))
+        assert grid.text('PainterComparisonPrompt') == 'red sphere'
+        assert grid.text('PainterNegativePrompt') == 'red sphere'
+        assert 'Negative' in grid.text('Description')
+        assert all(i < 2 for t in json.loads(grid.text('PainterPromptLinks'))['words'] for i in t['source_indices'])
+        assert moss_data.decode(moss_data.encode(*joined))[1] == joined[1]
+    finally:
+        negative_probe.close()
+    print('PASS negative hover/pick, identical-text branch isolation, stale drafts and v4 maps')
+
     gallery = u.find(win.contentItem(), 'GalleryView')
     gallery.setProperty('selection', [str(output)])
     root.setProperty('inView', True)
-    for _ in range(100):
-        u.spin(10)
-        if ctl.inspection.available: break
-    assert ctl.inspection.available
+    u.spin(50)
+    assert not ctl.inspection.available, 'ordinary selection eagerly loads heatmaps'
     root.setProperty('showHeatmap', True)
     for _ in range(100):
         u.spin(10)

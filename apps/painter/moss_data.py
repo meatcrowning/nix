@@ -1,4 +1,4 @@
-"""Portable MOSS token maps in a private ancillary PNG chunk (paHm), versions 1–3."""
+"""Portable MOSS token maps in a private ancillary PNG chunk (paHm), versions 1–4."""
 import json
 import re
 import struct
@@ -30,9 +30,8 @@ def aggregate(document, pixels):
 
 def descriptive_aggregate(document, pixels):
     """Combine prompt content, excluding compiled layout keys/coordinates."""
-    from moss_rank import descriptive_spans
-    spans = descriptive_spans(document.get('prompt', ''))
-    tokens = [t for t in document['tokens'] if t['visible'] and
+    spans = descriptive_spans(document)
+    tokens = [t for t in document['tokens'] if t['visible'] and t.get('branch') != 'negative' and
               any(a < t.get('end', -1) and b > t.get('start', -1) for a, b in spans)]
     return aggregate(dict(document, tokens=tokens), pixels)
 
@@ -157,13 +156,20 @@ def _decode(blob):
     if type(doc.get('height')) is not int or type(doc.get('width')) is not int:
         raise ValueError('Invalid map dimensions')
     n, h, w = len(doc['tokens']), int(doc['height']), int(doc['width'])
-    cap = {1: 64, 2: 128, 3: 128}.get(doc.get('version'), 0)
-    if not (0 < n <= 4096 and 0 < h <= cap and 0 < w <= cap):
+    cap = {1: 64, 2: 128, 3: 128, 4: 128}.get(doc.get('version'), 0)
+    if not (0 < n <= (8192 if doc.get('version') == 4 else 4096) and 0 < h <= cap and 0 < w <= cap):
         raise ValueError('Unsupported token maps')
     if any(not isinstance(t, dict) or t.get('index') != i or not isinstance(t.get('text'), str)
            or not isinstance(t.get('visible'), bool) for i, t in enumerate(doc['tokens'])):
         raise ValueError('Invalid token metadata')
-    words = doc.get('words', []) if doc.get('version') == 3 else []
+    if doc.get('version') == 4:
+        positive, negative = doc.get('positive_prompt'), doc.get('negative_prompt')
+        if (not isinstance(positive, str) or not isinstance(negative, str)
+                or doc.get('prompt') != positive + '\n' + negative
+                or doc.get('negative_offset') != len(positive) + 1
+                or any(t.get('branch') not in ('positive', 'negative') for t in doc['tokens'])):
+            raise ValueError('Invalid CFG branch metadata')
+    words = doc.get('words', []) if doc.get('version') in (3, 4) else []
     if not isinstance(words, list) or len(words) > n:
         raise ValueError('Invalid word metadata')
     if words:
@@ -205,3 +211,37 @@ def read(path):
             if kind == b'IEND':
                 return None
             f.seek(size + 4, 1)
+
+
+def combine_branches(positive, negative):
+    """Pack independently normalized CFG branches with disjoint text offsets."""
+    from moss_rank import word_groups
+    pos, pp = positive
+    neg, np = negative
+    if (pos['width'], pos['height']) != (neg['width'], neg['height']):
+        raise ValueError('CFG map dimensions differ')
+    count, offset = len(pos['tokens']), len(pos['prompt']) + 1
+    tokens = [dict(t, branch='positive') for t in pos['tokens']]
+    tokens += [dict(t, index=t['index'] + count, branch='negative',
+                    start=t.get('start', -1) + offset if t.get('start', -1) >= 0 else -1,
+                    end=t.get('end', -1) + offset if t.get('end', -1) >= 0 else -1)
+               for t in neg['tokens']]
+    doc = dict(pos, version=4, prompt=pos['prompt'] + '\n' + neg['prompt'],
+               positive_prompt=pos['prompt'], negative_prompt=neg['prompt'],
+               negative_offset=offset, tokens=tokens,
+               consistency=pos['consistency'] + neg['consistency'],
+               negative_capture=dict(neg['capture'], evaluation='last negative evaluation before sampler callback'))
+    doc['words'], _ = word_groups(doc)
+    area = pos['width'] * pos['height']
+    # Input packets include word planes after token planes; retain that order
+    # across the combined packet so saved raw-word reductions stay exact.
+    pn, nn = count * area, len(neg['tokens']) * area
+    return doc, pp[:pn] + np[:nn] + pp[pn:] + np[nn:]
+
+
+def descriptive_spans(document):
+    from moss_rank import descriptive_spans as spans
+    if document.get('version') == 4:
+        offset = document['negative_offset']
+        return spans(document['positive_prompt']) + [(offset, len(document['prompt']))]
+    return spans(document.get('prompt', ''))

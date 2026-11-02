@@ -95,6 +95,33 @@ def main():
             assert reply['version'] == 1
             reply = asyncio.run(routes['/painter/catalogue/models'](types.SimpleNamespace(query={})))
             assert reply['models']
+        # Display derivatives retain the exact pixel/colour chunks, including
+        # alpha, while excluding bulky inspection data and prompt metadata.
+        from PIL import Image
+        import pngmeta
+        rgba = outputs / 'rgba.png'
+        image = Image.new('RGBA', (13, 7), (12, 100, 200, 77))
+        image.save(rgba)
+        raw = rgba.read_bytes()
+        bulky = pngmeta._chunk(b'paHm', b'x' * 100000)
+        rgba.write_bytes(upsert_text(raw[:-12] + bulky + raw[-12:], {'painter': {'positive': 'fixture'}}))
+        stat = rgba.stat()
+        stamp = '%d-%d' % (stat.st_mtime_ns, stat.st_size)
+        shown = idx.display_image('rgba.png', stamp)
+        assert shown.read_bytes() == raw
+        assert Image.open(shown).tobytes() == image.tobytes()
+        assert idx.display_image('rgba.png', stamp) == shown
+        C._outputs['peer-rgba.png'] = dict(relative='rgba.png', stamp=stamp)
+        with patch.object(C, '_get', return_value=shown.read_bytes()) as fetch:
+            local = C.display_image('peer-rgba.png')
+            assert Path(local).read_bytes() == raw
+            assert C.display_image('peer-rgba.png') == local
+            assert fetch.call_count == 1
+        for relative, bad_stamp in [('../rgba.png', stamp), ('rgba.png', 'old')]:
+            try: idx.display_image(relative, bad_stamp)
+            except ValueError: pass
+            else: raise AssertionError('accepted invalid display path/stamp')
+        print('PASS lossless display PNG, unchanged alpha/chunks, metadata removal, cache and validation')
         print('catalogue: routes, revision/delta/delete, offline cache, remote metadata, header facts, thumbnail, traversal passed')
 
 

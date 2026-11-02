@@ -115,7 +115,9 @@ on selection changes and window close. Keep frame polling separate from
 gallery/settings snapshots. Unity history scrolls through a maximum 180-row
 window, requesting previews near the visible rows; the GTK decoder queue and
 image cache each cap at 64 entries. Keep paging independent of the selected
-preview and preserve scroll position when replacing the window.
+preview and preserve scroll position when replacing the window. The still decoder
+reuses up to three images/64 MiB; late comparison metadata preserves zoom and the
+already decoded output.
 
 GTK 3.6 text history lives in `text_history_gtk.py`, with a separate bounded
 stack per focused editable widget. Global Edit Undo/Redo and Ctrl+Z /
@@ -145,6 +147,14 @@ Tiles use cached JPEGs, not full outputs. Still thumbnails have a bounded LIFO
 worker queue; video posters are requested after delegate dwell. Use scan-time
 mtime/size cache keys and never stat sshfs paths on selection/scroll paths.
 Gate hidden PreviewPane media sources on `pane.open` to stop decoders.
+Visible tiles retry requests dropped by the bounded queues. Failed catalogue
+thumbnails fall back to mounted sources. Comparison-source lookups are coalesced
+worker tasks, cached until the gallery resets; `compareRevision` updates both faces.
+Book's selected stills show a thumbnail while fetching a lossless display PNG through
+`/painter/catalogue/display`. The backend copies pixel/colour chunks verbatim,
+omitting text and `paHm`; originals remain the source for maps, metadata and exports.
+Server/client display caches each cap at 256 MiB. Older/offline backends fall back
+to the peer mount. `tools/output-loading-test.py` verifies these selection paths.
 
 `ParamsPane.builtinOrder` and saved `sections.v2` define one order across modes.
 Prompt, Latent, Model, Sampling and Regions are separate sections on Qt and GTK.
@@ -199,15 +209,19 @@ The tokenizer endpoint uses the existing backend connection; it never loads GPU
 weights or starts a backend on its own.
 
 `comfy_nodes/painter_moss.py` captures sparse layer-4/8 image-to-text attention-weight
-maps from the last positive evaluation before actual sampler callbacks in the
-quarter-start window, retaining the middle-third capture count and stride of three,
+maps independently from the last positive and negative evaluations before actual
+sampler callbacks in the quarter-start window, retaining the middle-third capture count and stride of three,
 with capture provenance saved alongside the maps. Image-query rows softmax over
 all image and text keys before retaining text columns, averaged across heads.
 Chunked queries bound temporary logits; capture allocations pause Comfy’s memory
 compiler when available. Maps average raw layer probabilities, apply one separable
 binomial smoothing pass before token normalization, and retain native resolution up to 128 per axis. Long prompts
 reduce map dimensions to keep planes within 20 MiB and the packet within 24 MiB;
-the reader still accepts version 1/2 maps. Capture v5 marks attention weights;
+the reader still accepts version 1/2 maps. Version 4 packets add independently
+normalized negative planes, disjoint text offsets and branch provenance. Negative
+capture requires a nonempty prompt and an evaluated CFG negative branch; CFG 1
+can skip it. Never force an extra model evaluation to manufacture a map. Negative
+maps show concept association, not suppression strength. Capture v5 marks attention weights;
 older feature-similarity maps retain their recorded method. Version 3 packets also
 save word planes formed by summing raw token-piece probabilities before
 normalization, and per-token
@@ -216,8 +230,9 @@ pooled maps. This agreement is consistency, not correctness or confidence. Captu
 during ordinary MOSS generation when both nodes are advertised. PPM keeps
 its existing sampler because it changes tokenization/attention. Existing files
 without maps cannot display a heatmap. The toolbar token picker and matching
-positive-prompt hovers share the selected token. Entry defaults to All tokens:
-mean the saved descriptive prompt-token scores (excluding layout structure)
+positive/negative-prompt hovers share the selected token; negative choices are labeled.
+Entry defaults to All positive tokens (All tokens for older outputs):
+mean the saved positive descriptive prompt-token scores (excluding layout structure)
 before a single 5–95% contrast stretch and
 thermal colour mapping; stored per-token normalization cannot recover raw model
 activity. Hover temporarily shows one token, then restores the dropdown choice.
@@ -271,8 +286,8 @@ saved maps. Heatmap mode leaves history accessible and survives output changes.
 Qt paints transparent masks over the existing image, preserving fit/zoom and
 keeping it visible while maps load. `moss_inspect.py` caches at most 64 small RGBA
 masks; token changes never decode or save the full output.
-Map loading has its own worker, independent of grid exports, and caches up to
-three files/24 MiB of saved planes by path, modification time and size.
+Map loading starts only in heatmap mode on its own worker, independent of grid
+exports, and caches up to three files/24 MiB of saved planes by path, modification time and size.
 Word grouping and full rankings are reused for repeat exports; summed-area
 tables compute neighborhood means without repeatedly scanning each box. Caption-offset
 mapping is cached and resolved in one pass; nearby-list notifications are separate

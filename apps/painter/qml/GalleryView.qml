@@ -293,6 +293,17 @@ Item {
             Component.onCompleted: if (!tile.live && isVideo === false && thumb === "")
                                        Gallery.requestThumb(path)
 
+            // Requests dropped by the bounded queue must be retried while a
+            // tile remains in the viewport; construction runs only once.
+            Timer {
+                interval: 1000
+                repeat: true
+                running: tile.visible && !tile.live && (isVideo === true ? poster === "" : isVideo === false && thumb === "")
+                         && tile.y + tile.height > grid.contentY
+                         && tile.y < grid.contentY + grid.height
+                onTriggered: isVideo === true ? Gallery.requestPoster(path) : Gallery.requestThumb(path)
+            }
+
             Timer {
                 id: posterDwell
                 interval: 250

@@ -36,3 +36,12 @@ async def thumbnail(request):
 
 
 NODE_CLASS_MAPPINGS = {}
+
+
+@PromptServer.instance.routes.get('/painter/catalogue/display')
+async def display_image(request):
+    try:
+        path = await asyncio.to_thread(_index.display_image, request.query.get('path', ''), request.query.get('stamp', ''))
+    except (OSError, ValueError):
+        raise web.HTTPNotFound(text='Output unavailable or changed')
+    return web.FileResponse(path, headers={'Cache-Control': 'private, max-age=86400'})

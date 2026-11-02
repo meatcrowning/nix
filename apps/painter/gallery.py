@@ -74,9 +74,14 @@ class _ThumbJob(QRunnable):
         out = ""
         try:
             if catalogue.enabled() and catalogue.output(self.path) is not None:
-                if catalogue.thumbnail(self.path, self.dest):
-                    self.sig.done.emit(self.path, str(self.dest))
-                    return
+                try:
+                    if catalogue.thumbnail(self.path, self.dest):
+                        self.sig.done.emit(self.path, str(self.dest))
+                        return
+                except (OSError, ValueError):
+                    # A stale catalogue stamp or unavailable endpoint must not
+                    # strand a readable mounted output as a blank tile.
+                    pass
             rd = QImageReader(self.path)
             rd.setAutoTransform(True)
             dims = rd.size()
@@ -465,8 +470,8 @@ class Gallery(QAbstractListModel):
             raise OSError("no cache key")
         return CACHE / "posters" / f"{Path(path).stem}-{ck}.jpg"
 
-    def _want_poster(self, path):
-        if catalogue.enabled() and catalogue.output(path) is not None:
+    def _want_poster(self, path, local_only=False):
+        if not local_only and catalogue.enabled() and catalogue.output(path) is not None:
             dest = self._thumb_path(path)
             if dest and dest.exists():
                 self._poster_ready(path, dest)
@@ -483,6 +488,8 @@ class Gallery(QAbstractListModel):
             return
         if dest.exists():
             self._poster_ready(path, dest)
+            return
+        if self._poster_proc is not None and self._poster_proc.property('sourcePath') == path:
             return
         if any(p == path for p, _d in self._poster_queue):
             return          # already waiting; a delegate rebuilt is not a job
@@ -512,6 +519,7 @@ class Gallery(QAbstractListModel):
         dest.parent.mkdir(parents=True, exist_ok=True)
         proc = QProcess(self)
         self._poster_proc = proc
+        proc.setProperty('sourcePath', path)
 
         def finished(*_):
             # Defensive at both ends, like _run_async: at teardown the C++ side
@@ -621,6 +629,8 @@ class Gallery(QAbstractListModel):
                 self._poster_ready(path, Path(dest))
             else:
                 self._thumb_ready(path, Path(dest))
+        elif Path(path).suffix.lower() in VIDEO_SUFFIXES:
+            self._want_poster(path, local_only=True)
         self._next_thumb()
 
     @Slot(str)

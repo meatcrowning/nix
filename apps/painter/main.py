@@ -818,6 +818,16 @@ class Painter(QObject):
         self._mode = ""                   # anime / real / edit / video, or "" for the list
         self._want_mode = ""              # a remembered mode, until the rows land
         # Two active derivative workers and two newest pending selections.
+        self._output_cache = {}
+        self._output_revision = 0
+        self._output_work = Derivatives(self)
+        self._outputDone.connect(self._output_done)
+        self._compare_cache = {}
+        self._compare_revision = 0
+        self._compare_epoch = 0
+        self._compare_work = Derivatives(self)
+        self._compareDone.connect(self._compare_done)
+        self.gallery.modelReset.connect(self._invalidate_comparisons)
         self._derivatives = Derivatives(self)
         self._derivatives.ready.connect(self.dragReady)
         self._preview_decoder = PreviewDecoder(self)
@@ -2771,11 +2781,89 @@ class Painter(QObject):
         except OSError:
             subprocess.Popen(["xdg-open", p], start_new_session=True)
 
+    outputReady = Signal()
+    _outputDone = Signal(str, str, str)
+
+    @Property(int, notify=outputReady)
+    def outputRevision(self):
+        return self._output_revision
+
+    @Slot(str, str, str)
+    def _output_done(self, path, stamp, result):
+        self._output_cache[(path, stamp)] = result
+        while len(self._output_cache) > 32:
+            self._output_cache.pop(next(iter(self._output_cache)))
+        self._output_revision += 1
+        self.outputReady.emit()
+
+    @Slot(str, result=bool)
+    def outputPending(self, path):
+        import catalogue
+        return (catalogue.output(path) is not None and
+                (path, self.gallery.cache_stamp(path)) not in self._output_cache)
+
+    @Slot(str, result=str)
+    def outputSource(self, path):
+        import catalogue
+        if not path:
+            return ''
+        if catalogue.output(path) is None:
+            return QUrl.fromLocalFile(path).toString()
+        stamp = self.gallery.cache_stamp(path)
+        key = (path, stamp)
+        if key in self._output_cache:
+            cached = self._output_cache[key]
+            if cached == path or os.path.isfile(cached):
+                return QUrl.fromLocalFile(cached).toString()
+            del self._output_cache[key]
+        def prepare():
+            try:
+                result = catalogue.display_image(path)
+            except (OSError, ValueError):
+                # Older/offline backends still use the peer mount.
+                result = path
+            self._outputDone.emit(path, stamp, result)
+        self._output_work.prepare(path + ':' + stamp, prepare)
+        row = next((r for r in self.gallery._all if r['path'] == path), {})
+        return row.get('thumb', '')
+
+    compareReady = Signal()
+    _compareDone = Signal(str, str, str)
+
+    @Property(int, notify=compareReady)
+    def compareRevision(self):
+        return self._compare_revision
+
+    def _invalidate_comparisons(self):
+        self._compare_epoch += 1
+        self._compare_cache.clear()
+        self._compare_revision += 1
+        self.compareReady.emit()
+
+    @Slot(str, str, str)
+    def _compare_done(self, path, stamp, result):
+        self._compare_cache[(path, stamp)] = result
+        while len(self._compare_cache) > 64:
+            self._compare_cache.pop(next(iter(self._compare_cache)))
+        self._compare_revision += 1
+        self.compareReady.emit()
+
     @Slot(str, result=str)
     def compareSource(self, path):
-        """The before-image for an output, for the single-output view's
-        compare slider — "" when there is nothing to compare it against."""
-        return self._compare_source(str(path).replace("file://", ""))
+        """Resolve before-images on workers; selection never waits on disk/SSHFS."""
+        path = str(path).replace("file://", "")
+        stamp = self.gallery.cache_stamp(path) + ':' + str(self._compare_epoch)
+        key = (path, stamp)
+        if key in self._compare_cache:
+            return self._compare_cache[key]
+        def resolve():
+            try:
+                result = self._compare_source(path)
+            except (OSError, ValueError):
+                result = ''
+            self._compareDone.emit(path, stamp, result)
+        self._compare_work.prepare(path + ':' + stamp, resolve)
+        return ''
 
     @staticmethod
     def _compare_source(png_path):

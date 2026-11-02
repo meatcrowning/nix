@@ -28,13 +28,13 @@ def label_positions(items, height, metrics):
 
 def draw(p, rect, words):
     wd, wp = words
-    prompt = wd.get('prompt', '')
+    prompt = wd.get('positive_prompt', wd.get('prompt', ''))
     try:
         lo, hi = moss_data.json_value_span(prompt, ('summary', 'caption'))
         lo, hi = (lo + 1, hi - 1)
     except (ValueError, IndexError):
         lo, hi = (0, len(prompt))
-    items = [t for t in wd['tokens'] if t['start'] < hi and t['end'] > lo and moss_rank.WORD.search(t['text'])]
+    items = [t for t in wd['tokens'] if t.get('branch') != 'negative' and t['start'] < hi and t['end'] > lo and moss_rank.WORD.search(t['text'])]
     if not items:
         return []
     w, h = (rect.width(), rect.height())

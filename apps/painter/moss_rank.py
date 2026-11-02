@@ -35,6 +35,8 @@ def word_groups(document):
             groups[key] = dict(index=len(groups), text=text, start=start, end=end, visible=True,
                                pieces=[t['text'].strip() for t in pieces],
                                source_indices=[t['index'] for t in pieces])
+            if token.get('branch'):
+                groups[key]['branch'] = token['branch']
         lookup[token['index']] = groups[key]
     return list(groups.values()), lookup
 
@@ -85,7 +87,7 @@ def area_sum(table, width, x0, y0, x1, y1):
 
 def word_label(token):
     pieces = token['pieces']
-    return '%s - %s: %s' % (token['text'], 'token' if len(pieces) == 1 else 'tokens',
+    return '%s - %s: %s' % (('Negative · ' if token.get('branch') == 'negative' else '') + token['text'], 'token' if len(pieces) == 1 else 'tokens',
                             ', '.join('[%s]' % piece.replace('\n', '↵') for piece in pieces))
 
 
@@ -120,7 +122,8 @@ def descriptive_spans(prompt):
 
 def content_tokens(document):
     prompt = document.get('prompt', '')
-    spans = descriptive_spans(prompt)
+    from moss_data import descriptive_spans as document_spans
+    spans = document_spans(document)
     layout = spans != [(0, len(prompt))]
     words = [(m.start(), m.end(), m.group().casefold()) for m in WORD.finditer(prompt)
              if any(a < m.end() and b > m.start() for a, b in spans)]
@@ -138,6 +141,8 @@ def content_tokens(document):
             display = token['text'].strip().replace('\n', '↵')
             if len(matched) == 1 and display.casefold() != matched[0]:
                 display = '%s [%s]' % (matched[0], display)
+            if token.get('branch') == 'negative':
+                display = 'Negative · ' + display
             identity = ' '.join(word for word in matched if word not in STOP_WORDS)
             result.append(dict(token, display=display, identity=identity))
     return result

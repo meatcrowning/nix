@@ -12,7 +12,7 @@ import moss_rank
 
 
 def scene_prompt(document):
-    prompt = document.get('prompt', '')
+    prompt = document.get('positive_prompt', document.get('prompt', ''))
     try:
         layout = json.loads(prompt)
         if isinstance(layout, dict) and isinstance(layout.get('summary'), dict):
@@ -94,7 +94,7 @@ def ranked_header(painter, rect, label, entries, font, padding):
         runs[0].append((prefix, strong))
         widths[0] = QFontMetrics(bold if strong else small).horizontalAdvance(prefix)
     for entry in entries:
-        text = '%s %.1f%%' % (' '.join(entry['token']['text'].split()), entry['percentage'])
+        text = '%s%s %.1f%%' % ('Negative · ' if entry['token'].get('branch') == 'negative' else '', ' '.join(entry['token']['text'].split()), entry['percentage'])
         sep = ' · ' if runs[line] and (not prefix or len(runs[line]) > 1 or line > 0) else ''
         advance = QFontMetrics(small).horizontalAdvance(sep + text)
         if widths[line] + advance > remaining.width():
@@ -246,6 +246,7 @@ def save_grid(source, data, tokens, folder):
     full_ranking = moss_rank.rank(*words, limit=None, image_size=(width, height), extremes=True)
     ranking = dict(areas=full_ranking['areas'])
     all_tokens, related = moss_rank.association_lists(*words, selected, data[0]['_aggregate'])
+    all_tokens = [entry for entry in all_tokens if entry['token'].get('branch') != 'negative']
     lists = {1: all_tokens, 2: full_ranking['area_headers'],
              3: related[0], 4: related[1]}
     expanded = {}
@@ -272,7 +273,7 @@ def save_grid(source, data, tokens, folder):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setFont(font)
         painter.setPen(QColor('#f4f5f7'))
-        labels = ['Original output', 'All tokens · relative association', 'Hottest & coldest areas',
+        labels = ['Original output', ('All positive tokens' if data[0].get('version') == 4 else 'All tokens') + ' · relative association', 'Hottest & coldest areas',
                   moss_rank.word_label(selected[0]), moss_rank.word_label(selected[1])]
         masks = [QImage(), token_mask(*data, -1), hot,
                  token_mask(*words, selected[0]['index']), token_mask(*words, selected[1]['index'])]
@@ -308,6 +309,8 @@ def save_grid(source, data, tokens, folder):
     canvas.setText('PainterPromptLinks', json.dumps(dict(words=prompt_links, method='Saved whole-word maxima; ties resolved by local mean, then nearest tied point to centroid. Circular endpoints.')))
     canvas.setText('Description', '\n'.join(labels))
     canvas.setText('PainterComparisonPrompt', scene_prompt(data[0]))
+    if data[0].get('negative_prompt'):
+        canvas.setText('PainterNegativePrompt', data[0]['negative_prompt'])
     expanded['method'] = ('Eligible whole words; duplicate and close variants omitted. Ranked headers exclude words '
         'annotated on their panel. Hot percentages: local winning word association; cold percentages: regional mean across eligible word maps. Related percentages: positive Pearson '
         'spatial correlation, not semantic or causal relatedness. All-token percentages: word-map mean weighted '

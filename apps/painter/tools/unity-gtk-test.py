@@ -109,6 +109,14 @@ def test():
             marks.picking = True
             assert marks.pick(PickView(), PickEvent())
             assert sent[-1] == (('heatmap_pick',), dict(text='red cube', position=4, region=''))
+            marks.region = lambda: '@negative'
+            assert marks.pick(PickView(), PickEvent())
+            assert sent[-1][1]['region'] == '@negative'
+            marks.highlight(dict(highlights={'@negative': dict(text='red cube', ranges=[dict(start=4, end=8)])}))
+            assert buf.get_iter_at_offset(4).has_tag(marks.highlight_tag)
+            marks.leave()
+            assert sent[-1] == (('heatmap_hover_end',), dict(owner='region:@negative'))
+            marks.region = None
             marks.picking = False
             assert not marks.pick(PickView(), PickEvent())
             token_view.get_buffer().set_text('red sphere')

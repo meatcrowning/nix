@@ -3005,6 +3005,11 @@ def test_compare_and_columns(win, ctl, tmp):
     check("an edit files a copy of its source beside the output", kept.is_file(),
           str(kept))
     os.remove(before)
+    ctl.gallery.load_existing()
+    ctl.compareSource(edit)
+    for _ in range(100):
+        spin(10)
+        if ctl.compareSource(edit) == str(kept): break
     check("...and the slider still finds a before when the source has gone",
           ctl.compareSource(edit) == str(kept), ctl.compareSource(edit))
     check("a plain output still compares against nothing",

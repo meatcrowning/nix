@@ -5,6 +5,7 @@ in-memory snapshot. Output paths retain the peer mount for full-resolution opens
 """
 from __future__ import annotations
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -61,8 +62,11 @@ def _get(route, query=None, limit=MAX_REPLY):
     url = base + '/painter/catalogue/' + route
     if query:
         url += '?' + urllib.parse.urlencode(query)
-    with urllib.request.urlopen(url, timeout=8) as response:
-        raw = response.read(limit + 1)
+    try:
+        with urllib.request.urlopen(url, timeout=8) as response:
+            raw = response.read(limit + 1)
+    except http.client.HTTPException as exc:
+        raise OSError('Incomplete catalogue response') from exc
     if len(raw) > limit:
         raise ValueError('Catalogue response exceeds its byte limit')
     return raw
@@ -140,3 +144,49 @@ def thumbnail(path, dest):
     finally:
         Path(tmp).unlink(missing_ok=True)
     return True
+
+
+def trim_display_cache(folder, budget=256 * 1024 * 1024):
+    """Bound only our disposable display PNGs; never touch source outputs."""
+    rows = []
+    for path in Path(folder).glob('*.png'):
+        try:
+            st = path.stat()
+            rows.append((st.st_mtime_ns, st.st_size, path))
+        except OSError:
+            continue
+    total = sum(size for _, size, _ in rows)
+    for _, size, path in sorted(rows):
+        if total <= budget:
+            break
+        try:
+            path.unlink()
+            total -= size
+        except OSError:
+            pass
+
+
+def display_image(path):
+    """Fetch a lossless, metadata-free display copy on a worker, if supported."""
+    row = output(path)
+    if row is None:
+        return path
+    key = hashlib.sha256((row['relative'] + ':' + row['stamp']).encode()).hexdigest()
+    folder = cache_root() / 'display'
+    dest = folder / (key + '.png')
+    if dest.is_file():
+        dest.touch()
+        return str(dest)
+    raw = _get('display', {'path': row['relative'], 'stamp': row['stamp']}, 64 * 1024 * 1024)
+    if not raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        raise ValueError('Invalid display image')
+    folder.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix='.display-', dir=folder)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(raw)
+        os.replace(tmp, dest)
+        trim_display_cache(folder)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+    return str(dest)

@@ -383,9 +383,9 @@ Rectangle {
                 colours: box.tokenStyle.bands
                 marked: box.tokenMarksReady
                 highlighted: {
-                    if (box.negative || !App.inspection) return []
+                    if (!App.inspection) return []
                     App.inspection.nearby
-                    return App.inspection.highlightedRanges(input.text, "")
+                    return App.inspection.highlightedRanges(input.text, box.negative ? "@negative" : "")
                 }
             }
             selectByMouse: true
@@ -499,16 +499,17 @@ Rectangle {
             // temporarily captures them; right clicks retain the context menu.
             MouseArea {
                 anchors.fill: parent
-                acceptedButtons: Qt.RightButton | ((!box.negative && App.inspection && App.inspection.picking) ? Qt.LeftButton : Qt.NoButton)
-                hoverEnabled: box.tokenMarksReady && !box.negative
-                onExited: if (!box.negative && typeof App.inspection !== "undefined" && App.inspection) App.inspection.endHover("prompt")
+                acceptedButtons: Qt.RightButton | ((App.inspection && App.inspection.picking) ? Qt.LeftButton : Qt.NoButton)
+                hoverEnabled: box.tokenMarksReady
+                onExited: if (typeof App.inspection !== "undefined" && App.inspection) App.inspection.endHover(box.negative ? "region:@negative" : "prompt")
                 onPositionChanged: function(m) {
-                    if (containsMouse && !box.negative && typeof App.inspection !== "undefined" && App.inspection)
-                        App.inspection.hoverPrompt(input.text, input.positionAt(m.x, m.y))
+                    if (containsMouse && typeof App.inspection !== "undefined" && App.inspection)
+                        if (box.negative) App.inspection.hoverRegion(input.text, input.positionAt(m.x, m.y), "@negative")
+                        else App.inspection.hoverPrompt(input.text, input.positionAt(m.x, m.y))
                 }
                 onPressed: function (m) {
                     if (m.button === Qt.LeftButton) {
-                        App.inspection.pickToken(input.text, input.positionAt(m.x, m.y), "")
+                        App.inspection.pickToken(input.text, input.positionAt(m.x, m.y), box.negative ? "@negative" : "")
                         return
                     }
                     // A right-click puts the keyboard in this box, exactly as a

@@ -90,6 +90,7 @@ class Engine:
         ctl.inspection.tokenized.connect(self.tokens_received)
         self.view_path = ''
         self.before = ''
+        ctl.compareReady.connect(self.compare_ready)
         self.player = self.sink = None
         self.frame = QImage()
         self.frame_tick = 0
@@ -259,6 +260,10 @@ class Engine:
         if self.view_path == 'live://generating':
             self.set_view(path)
 
+    def compare_ready(self):
+        if self.view_path and self.view_path != 'live://generating':
+            self.before = self.ctl.compareSource(self.view_path)
+
     def set_view(self, path):
         if path and path != 'live://generating':
             self.output_path(path)
@@ -268,7 +273,7 @@ class Engine:
             self.player.stop()
             self.player.setSource(QUrl())
         self.view_path = path
-        self.ctl.inspection.load(path)
+        self.ctl.inspection.load(path if self.ctl.inspection._viewing else '')
         self.before = ''
         self.frame = QImage()
         self.frame_tick += 1
@@ -316,12 +321,12 @@ class Engine:
         inspection = self.ctl.inspection
         highlights = {}
         if inspection.nearby:
-            prompts = [('', self.settings.get('positive', ''))]
+            prompts = [('', self.settings.get('positive', '')), ('@negative', self.settings.get('negative', ''))]
             prompts += [(r.get('id', ''), r.get('caption', '')) for r in self.settings.get('moss_layout', {}).get('items', [])]
             for identity, text in prompts:
                 highlights[identity] = dict(text=text, ranges=inspection.highlightedRanges(text, identity))
         return dict(path=self.view_path, status=inspection.status, available=inspection.available, nearby=inspection.nearby, highlights=highlights, exploring=inspection.exploring, imageHeld=inspection.imageHeld,
-                    tokens=inspection.tokens, overlay=inspection.overlay, selected=inspection.selected,
+                    tokens=inspection.tokens, allLabel=inspection.choices[0]['label'], overlay=inspection.overlay, selected=inspection.selected,
                     picking=inspection.picking, exporting=inspection.exporting,
                     gridLabel=inspection.gridLabel, gridStatus=inspection.gridStatus,
                     mask=inspection.mask_packet())
@@ -360,6 +365,7 @@ class Engine:
             return dict(heatmap=self.heatmap_state())
         if op == 'heatmap_viewing':
             c.inspection.setViewing(bool(request.get('viewing')))
+            c.inspection.load(self.view_path if request.get('viewing') else '')
             return dict(heatmap=self.heatmap_state())
         if op == 'heatmap_hover_end':
             c.inspection.endHover(request.get('owner', ''))

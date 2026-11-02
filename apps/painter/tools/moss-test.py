@@ -87,6 +87,10 @@ def main():
                 assert mapped_graph.node('sampler')['inputs']['text'] == 'red cube'
                 assert mapped_graph.node('save')['inputs']['heatmaps'] == [mapped_graph.id_of('sampler'), 2]
                 assert mapped['params']['moss_heatmaps'] is True
+                modern = dict(capabilities, PainterMossSampler={'input': {'optional': {'negative_text': ['STRING']}}})
+                negative = reg.build(entry, dict(positive='red cube', negative='blur'), object_info=modern)
+                assert G.Graph(negative['prompt']).node('sampler')['inputs']['negative_text'] == 'blur'
+                assert 'negative_text' not in mapped_graph.node('sampler')['inputs']
                 uncaptured = reg.build(entry, dict(positive='red cube', moss_capture=False), object_info=capabilities)
                 assert G.Graph(uncaptured['prompt']).node('sampler')['class_type'] != 'PainterMossSampler'
                 assert 'moss_heatmaps' not in uncaptured['params']

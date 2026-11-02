@@ -97,6 +97,59 @@ assert torch.allclose(torch.tensor(doc['consistency']),expected_agreement,atol=1
 assert moss_data.decode(moss_data.encode(doc,pixels))[1] == pixels
 print('PASS raw word grouping, independent smoothing, callback isolation, pairwise agreement and v3 round trip')
 
+# Batched and sequential CFG evaluations must produce identical independent
+# branches, even with a corrector evaluation discarded before each callback.
+class BranchSampler:
+    PAINTER_STEP_OBSERVER_VERSION = 1
+    mode = 'batched'
+    extra_token = False
+    def sample(self, model, **kw):
+        for step in range(30):
+            for scale in (100, 1):
+                groups = [[1, 0]] if self.mode == 'batched' else [[1], [0]] if self.mode == 'split' else [[0]]
+                for branches in groups:
+                    model.forward(lambda *a, **kw: None, torch.empty(1,1,h,w), None, None,
+                                  {'cond_or_uncond': branches})
+                    for layer in (4,8):
+                        q, k = queries[layer]*scale, keys[layer]
+                        if len(branches) == 1:
+                            row = 0 if branches[0] == 1 else 1
+                            q, k = q[row:row+1], k[row:row+1]
+                            if branches == [1] and self.extra_token:
+                                q = torch.cat((q, torch.ones_like(q[:, :1])), dim=1)
+                                k = torch.cat((k, torch.ones_like(k[:, :1])), dim=1)
+                        model.model_options['transformer_options']['optimized_attention_override'](
+                            lambda *a, **kw: q, q, k, q, heads,
+                            transformer_options={'cond_or_uncond':branches, 'block_index':layer})
+            model.model_options['painter_step_observer'](step)
+        return ({'samples':'unchanged'}, {'samples':'unchanged'})
+ns['nodes'].NODE_CLASS_MAPPINGS['PainterSamplerCustom'] = BranchSampler
+captures = []
+for mode in ('batched', 'split', 'positive'):
+    BranchSampler.mode = mode
+    result = ns['PainterMossSampler']().sample(SimpleNamespace(tokenizer=None), 'ramshackle tree',
+              negative_text='ramshackle tree', model=Model(), sigmas=list(range(31)))
+    captures.append(moss_data.decode(result[2][0]))
+assert captures[0] == captures[1], 'CFG batching changed saved maps'
+doc, pixels = captures[0]
+assert doc['version'] == 4 and len(doc['tokens']) == 2*n
+assert {t['branch'] for t in doc['tokens']} == {'positive', 'negative'}
+assert pixels[:n*h*w] != pixels[n*h*w:2*n*h*w]
+assert doc['negative_capture']['sampler_steps'] == [7,10,13,16]
+assert moss_data.decode(moss_data.encode(doc, pixels)) == (doc, pixels)
+assert captures[2][0]['version'] == 3 and 'not sampled' in captures[2][0]['negative_status']
+assert captures[2][1] == pixels[:n*h*w]
+BranchSampler.mode, BranchSampler.extra_token = 'split', True
+negative_tokens = tokens + [dict(id=3, index=3, text=' blur', visible=True, start=15, end=20)]
+ns['tokenize'] = lambda text, _: dict(count=4, tokens=negative_tokens) if text.endswith('blur') else dict(count=n, tokens=tokens)
+result = ns['PainterMossSampler']().sample(SimpleNamespace(tokenizer=None), 'ramshackle tree',
+          negative_text='ramshackle tree blur', model=Model(), sigmas=list(range(31)))
+unequal, planes = moss_data.decode(result[2][0])
+assert len(unequal['tokens']) == 7 and unequal['tokens'][-1]['text'] == ' blur'
+assert unequal['negative_prompt'] == 'ramshackle tree blur'
+assert len(planes) == 7*h*w
+print('PASS independent negative capture, split/batched CFG, skipped branch and v4 round trip')
+
 # The real save-node path persists a reason for every member of a skipped batch.
 import base64
 import tempfile

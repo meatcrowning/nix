@@ -2,6 +2,7 @@
 """GTK 3.6 / Python 2.7 widgets for Painter's Unity face."""
 from __future__ import unicode_literals
 import threading
+import os
 from collections import OrderedDict
 try:
     import Queue as queue
@@ -379,29 +380,46 @@ class ImageView(Gtk.Box):
         worker.start()
 
     def load_worker(self):
+        cache = OrderedDict()
+        def decode(path):
+            stat = os.stat(path)
+            key = (path, stat.st_mtime, stat.st_size)
+            pixbuf = cache.pop(key, None)
+            if pixbuf is None:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
+            cache[key] = pixbuf
+            while len(cache) > 3 or sum(p.get_rowstride() * p.get_height() for p in cache.values()) > 64 * 1024 * 1024:
+                cache.popitem(last=False)
+            return pixbuf
         while True:
             item = self.loads.get()
             while not self.loads.empty():
                 item = self.loads.get()
             serial, path, before = item
             try:
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
+                pixbuf = decode(path)
                 other = None
                 if before:
                     try:
-                        other = GdkPixbuf.Pixbuf.new_from_file(before)
-                    except GLib.GError:
+                        other = decode(before)
+                    except (GLib.GError, OSError):
                         pass
                 GLib.idle_add(self.loaded, serial, pixbuf, other, '')
-            except GLib.GError as exc:
+            except (GLib.GError, OSError) as exc:
                 GLib.idle_add(self.loaded, serial, None, None, str(exc))
 
     def load(self, path, before='', video=False):
         if (path, before, video) == self.path:
             return
-        self.heatmap = None
+        same_output = self.path and self.path[0] == path and self.path[2] == video
         self.path = (path, before, video)
         self.serial += 1
+        if same_output and self.original is not None:
+            # Late before-image metadata must not reset the user's zoom or
+            # blank the already decoded output while its partner is loaded.
+            self.loads.put((self.serial, path, before))
+            return
+        self.heatmap = None
         self.zoom = 0.0
         self.zoom_anchor = None
         self.video = video

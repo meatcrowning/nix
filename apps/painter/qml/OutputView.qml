@@ -19,6 +19,7 @@ Item {
 
     property string source: ""
     property bool isVideo: false
+    readonly property bool fullPending: !isVideo && source !== "" && (App.outputRevision, App.outputPending(source))
 
     // 0 = fit the pane; anything else is a literal scale, 1 being actual size.
     property real zoom: 0
@@ -45,7 +46,7 @@ Item {
     property bool compare: true
     property bool heatmap: false
     readonly property string beforePath:
-        (view.source === "" || view.isVideo) ? "" : App.compareSource(view.source)
+        (view.source === "" || view.isVideo) ? "" : (App.compareRevision, App.compareSource(view.source))
     readonly property bool comparing: view.compare && view.beforePath !== ""
 
     // WHAT THIS OUTPUT IS, in one phrase for the status bar: its pixels, and a
@@ -66,6 +67,7 @@ Item {
     }
     readonly property string infoText: {
         if (view.source === "") return ""
+        if (view.fullPending) return "Loading full resolution…"
         if (!view.isVideo)
             return view.natW > 0 ? (view.natW + "x" + view.natH) : ""
         var bits = []
@@ -117,10 +119,10 @@ Item {
                 width: view.imgW
                 height: view.imgH
                 visible: !view.isVideo && view.source !== ""
-                source: (!view.isVideo && view.source !== "") ? "file://" + view.source : ""
+                source: (!view.isVideo && view.source !== "") ? (App.outputRevision, App.outputSource(view.source)) : ""
                 // sourceSize unset on purpose: implicitWidth/Height must be the
                 // file's real pixels, which is what every number above is in.
-                cache: false
+                cache: true
                 asynchronous: true
                 smooth: true
                 // Nearest-neighbour past 2x, because past 2x he is looking at
@@ -241,7 +243,7 @@ Item {
             anchors.centerIn: parent
             text: view.isVideo
                 ? (view.infoText === "" ? "clip" : view.infoText)
-                : view.natW > 0
+                : view.fullPending ? "Loading full resolution…" : img.status === Image.Error ? "Image unavailable" : view.natW > 0
                   ? (view.natW + "x" + view.natH + "  "
                      + Math.round(view.scaleNow * 100) + "%")
                   : "loading"
@@ -251,8 +253,8 @@ Item {
 
     PixelText {
         anchors.centerIn: parent
-        visible: view.source === ""
-        text: "Nothing Selected"
+        visible: view.source === "" || (!view.isVideo && img.status === Image.Error)
+        text: view.source === "" ? "Nothing Selected" : "Image unavailable"
         color: Theme.dim
     }
 }

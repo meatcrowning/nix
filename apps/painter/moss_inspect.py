@@ -102,7 +102,8 @@ class MossInspect(QObject):
         if not self.available:
             return 'No heatmaps saved for this output' if self._path else 'Select an output to inspect heatmaps'
         doc = self._data[0]
-        capture = doc.get('capture', {})
+        negative = self._selected >= 0 and self._tokens[self._selected].get('branch') == 'negative'
+        capture = doc.get('negative_capture' if negative else 'capture', {})
         layers = capture.get('block_indices', [capture.get('block_index', 4)])
         text = 'Saved maps v%d · %d×%d · layers %s' % (doc.get('version',1),doc['width'],doc['height'],
                 ', '.join(str(i+1) for i in layers))
@@ -115,6 +116,10 @@ class MossInspect(QObject):
             text += ' · Select a token for capture agreement'
         else:
             text += ' · Capture agreement unavailable for this older output'
+        if self._selected >= 0 and self._tokens[self._selected].get('branch') == 'negative':
+            text += ' · Negative association, not amount removed'
+        if doc.get('negative_status'):
+            text += ' · ' + doc['negative_status']
         return text
 
     @Property('QVariantList', notify=changed)
@@ -123,7 +128,8 @@ class MossInspect(QObject):
 
     @Property('QVariantList', notify=changed)
     def choices(self):
-        return [dict(label='Nearby tokens' if self._exploring else 'All tokens')] + self._tokens
+        return [dict(label='Nearby tokens' if self._exploring else
+                           'All positive tokens' if self._data and self._data[0].get('version') == 4 else 'All tokens')] + self._tokens
 
     @Property(int, notify=changed)
     def selected(self):
@@ -273,7 +279,8 @@ class MossInspect(QObject):
             return []
         doc = self._data[0]
         region = None
-        if identity:
+        negative = identity == '@negative'
+        if identity and not negative:
             for i, item in enumerate(doc.get('_regions', [])):
                 if item.get('id') == identity and item.get('caption', '').strip() == text.strip():
                     region = i
@@ -285,7 +292,10 @@ class MossInspect(QObject):
         if positions is None:
             positions = []
             offset = 0
-            mapped = moss_data.prompt_positions(doc.get('prompt',''), text, region)
+            saved = doc.get('negative_prompt', '') if negative else doc.get('positive_prompt', doc.get('prompt', ''))
+            mapped = moss_data.prompt_positions(saved, text, region)
+            if negative:
+                mapped = tuple(p + doc.get('negative_offset', 0) if p is not None else None for p in mapped)
             for i, character in enumerate(text):
                 end = offset + len(character.encode('utf-16-le'))//2
                 position = mapped[i] if i < len(mapped) else None
@@ -297,7 +307,7 @@ class MossInspect(QObject):
             self._positions.popitem(last=False)
         result = []
         for start, end, position in positions:
-            if any(t.get('start', -1) <= position < t.get('end', -1) for t in self._nearby):
+            if any((t.get('branch') == 'negative') == negative and t.get('start', -1) <= position < t.get('end', -1) for t in self._nearby):
                 if result and result[-1]['end'] == start:
                     result[-1]['end'] = end
                 else:
@@ -392,7 +402,7 @@ class MossInspect(QObject):
         # sending them. Never apply current draft positions to another prompt.
         if not self._viewing or not self._data:
             return
-        saved = self._data[0].get('prompt', '')
+        saved = self._data[0].get('positive_prompt', self._data[0].get('prompt', ''))
         position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
         position = moss_data.prompt_position(saved, text, position)
         self._select_position(position, 'prompt')
@@ -402,11 +412,19 @@ class MossInspect(QObject):
         if not self._viewing or not self._data or not identity:
             return
         doc = self._data[0]
+        if identity == '@negative':
+            saved = doc.get('negative_prompt')
+            if saved is not None:
+                position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
+                position = moss_data.prompt_position(saved, text, position)
+                if position is not None:
+                    self._select_position(position + doc['negative_offset'], 'region:@negative')
+            return
         regions = doc.get('_regions', [])
         for index, region in enumerate(regions):
             if region.get('id') == identity and region.get('caption', '').strip() == text.strip():
                 position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
-                self._select_position(moss_data.prompt_position(doc.get('prompt', ''), text, position, index), 'region:' + identity)
+                self._select_position(moss_data.prompt_position(doc.get('positive_prompt', doc.get('prompt', '')), text, position, index), 'region:' + identity)
                 break
 
     def _select_position(self, position, owner):
@@ -515,6 +533,8 @@ class MossInspect(QObject):
                             raise ValueError('Heatmaps unavailable: ' + meta['painter_moss_status'])
                         if params.get('moss_heatmaps'):
                             raise ValueError('Heatmap capture unavailable: this generation saved no maps')
+                if serial != self._generation or self._closed:
+                    return
                 if value and not cached:
                     value[0]['_aggregate'] = moss_data.descriptive_aggregate(*value)
                     import moss_rank
@@ -544,7 +564,7 @@ class MossInspect(QObject):
         elif value:
             self._data = value
             visible = [t for t in value[0]['tokens'] if t['visible']]
-            self._tokens = [dict(t, label='%d · %s' % (i + 1, t['text'].replace('\n', '↵')))
+            self._tokens = [dict(t, label='%s%d · %s' % ('Negative · ' if t.get('branch') == 'negative' else '', i + 1, t['text'].replace('\n', '↵')))
                             for i, t in enumerate(visible)]
         self.changed.emit()
         if self._viewing and self.available:

@@ -669,6 +669,8 @@ class Registry:
                 and "PainterMossSampler" in object_info and "PainterMossSaveImage" in object_info):
             g.node("sampler")["class_type"] = "PainterMossSampler"
             g.set_inputs("sampler", {"clip": list(g.node("encode_pos")["inputs"]["clip"]), "text": pos})
+            if "negative_text" in object_info["PainterMossSampler"].get("input", {}).get("optional", {}):
+                g.set_input("sampler", "negative_text", neg)
             g.node("save")["class_type"] = "PainterMossSaveImage"
             sampler_id = g.id_of("sampler")
             g.set_input("save", "heatmaps", [sampler_id, 2])

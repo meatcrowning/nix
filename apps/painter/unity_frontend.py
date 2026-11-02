@@ -570,7 +570,7 @@ class Window(Gtk.Window, ParameterForm):
         for widget in self.actions.get('heatmap', []):
             widget.set_tooltip_text(heatmap.get('status', ''))
         self.heatmap_grid.set_sensitive(bool(heatmap.get('available')) and not heatmap.get('exporting'))
-        labels = ['Nearby tokens' if heatmap.get('exploring') else 'All tokens'] + [t['label'] for t in heatmap.get('tokens', [])]
+        labels = [heatmap.get('allLabel', 'Nearby tokens' if heatmap.get('exploring') else 'All tokens')] + [t['label'] for t in heatmap.get('tokens', [])]
         self.syncing_heatmap = True
         if labels != self.heatmap_labels:
             self.heatmap_tokens.remove_all()
@@ -744,7 +744,7 @@ class Window(Gtk.Window, ParameterForm):
                 enabled = enabled and bool(self.state.get('busy') or self.state.get('queue') or self.state.get('jobs'))
             elif key == 'heatmap':
                 heatmap = self.state.get('heatmap', {})
-                enabled = self.heatmap_open or (enabled and heatmap.get('available', False) and heatmap.get('path') == self.selection)
+                enabled = self.heatmap_open or (enabled and self.selection.lower().endswith('.png'))
             elif key == 'compare_params':
                 enabled = self.compare_open or (enabled and bool(self.selection and not self.selection.startswith('live://')))
             elif key in ('restore', 'open', 'preview', 'zoom_in', 'zoom_out', 'fit', 'actual', 'older', 'newer'):

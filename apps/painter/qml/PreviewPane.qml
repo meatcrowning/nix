@@ -79,6 +79,7 @@ Item {
     // anywhere else.
     property string source: ""
     property bool sourceIsVideo: false
+    readonly property bool fullPending: !sourceIsVideo && source !== "" && (App.outputRevision, App.outputPending(source))
     property bool compare: true
     property bool heatmap: false
     property bool winActive: true
@@ -86,7 +87,7 @@ Item {
     property bool still: false
     readonly property string beforePath: (pane.open && !pane.showLive
         && pane.source !== "" && !pane.sourceIsVideo)
-        ? App.compareSource(pane.source) : ""
+        ? (App.compareRevision, App.compareSource(pane.source)) : ""
     readonly property bool canCompare: pane.beforePath !== ""
     readonly property bool comparing: pane.compare && pane.canCompare
 
@@ -253,9 +254,9 @@ Item {
                     // start loading, so `status` would never reach Ready and the
                     // handover would only ever end on its timeout.
                     source: (pane.open && pane.source !== "" && !pane.sourceIsVideo)
-                            ? "file://" + pane.source : ""
+                            ? (App.outputRevision, App.outputSource(pane.source)) : ""
                     fillMode: Image.PreserveAspectFit
-                    cache: false
+                    cache: true
                     asynchronous: true
                     onStatusChanged: if (status === Image.Ready || status === Image.Error) {
                                          pane.handover = false
@@ -512,6 +513,8 @@ Item {
                          ? "sampling · frame " + App.previewFrame
                            + " of " + App.previewFrames
                          : (App.isVideo && !pane.still ? "sampling · frame 1" : "sampling"))
+                      : pane.fullPending ? "Loading full resolution…"
+                      : !pane.sourceIsVideo && finishedStill.status === Image.Error ? "Image unavailable"
                       : ((pane.sourceIsVideo ? "clip" : "still")
                          + (pane.zoom > 1.001
                             ? "  " + Math.round(pane.zoom * 100) + "%" : ""))
