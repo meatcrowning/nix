@@ -34,7 +34,11 @@
   systemd.user.services.konsole-theme = {
     Unit = {
       Description = "Regenerate Konsole's colour scheme from the system theme";
+      # default.target can run before the desktop imports its environment.
+      # Never generate a fallback palette outside the graphical session.
       After = [ "graphical-session.target" ];
+      Requisite = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
       # No start limit: the trigger is a burst (Theme.qml then kdeglobals, one
       # wal-set pass), and systemd's default five-in-ten-seconds ceiling is
       # tripped by it — leaving this unit and its path unit FAILED with the
@@ -52,11 +56,21 @@
       ];
       ExecStart = "${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/konsole-theme.py";
     };
-    Install.WantedBy = [ "default.target" ];
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 
   systemd.user.paths.konsole-theme = {
-    Unit.Description = "Repaint Konsole when the system theme moves";
+    Unit = {
+      Description = "Repaint Konsole when the system theme moves";
+      # Path units normally precede paths.target/basic.target, which would
+      # cycle with waiting for the graphical session. Keep shutdown ordering.
+      DefaultDependencies = false;
+      Conflicts = [ "shutdown.target" ];
+      Before = [ "shutdown.target" ];
+      After = [ "graphical-session.target" ];
+      Requisite = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
     Path = {
       # kdeglobals is rewritten wholesale (temp+rename) by KConfig, Theme.qml
       # in place by wal-set.sh — hence both triggers on both files.
@@ -69,6 +83,6 @@
         "%h/.config/quickshell/Theme.qml"
       ];
     };
-    Install.WantedBy = [ "default.target" ];
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 }

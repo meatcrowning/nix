@@ -88,6 +88,10 @@
   systemd.user.services.vivaldi-ui-css = {
     Unit = {
       Description = "Mint Vivaldi's custom.css from the live palette";
+      # Wait for the desktop environment before choosing the palette source.
+      After = [ "graphical-session.target" ];
+      Requisite = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
       # No start limit, because the trigger is a BURST. wal-set.sh rewrites
       # Theme.qml and then the KDE scheme in one pass, and each write starts
       # this unit — five starts inside ten seconds is systemd's default ceiling
@@ -104,11 +108,21 @@
       ExecStart = "${pkgs.python3}/bin/python3 /home/lam/nix/apps/pylib/tools/vivaldi-theme.py --ui";
       TimeoutStartSec = "1min";
     };
-    Install.WantedBy = [ "default.target" ];
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 
   systemd.user.paths.vivaldi-ui-css = {
-    Unit.Description = "Watch the palette sources Vivaldi's custom.css is built from";
+    Unit = {
+      Description = "Watch the palette sources Vivaldi's custom.css is built from";
+      # Path units normally precede paths.target/basic.target, which would
+      # cycle with waiting for the graphical session. Keep shutdown ordering.
+      DefaultDependencies = false;
+      Conflicts = [ "shutdown.target" ];
+      Before = [ "shutdown.target" ];
+      After = [ "graphical-session.target" ];
+      Requisite = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
     Path = {
       PathChanged = [
         "%h/.config/quickshell/Theme.qml"      # the Hyprland face
@@ -123,7 +137,7 @@
       ];
       Unit = "vivaldi-ui-css.service";
     };
-    Install.WantedBy = [ "paths.target" ];
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 
   # Start Page reads its image from the selected theme's Preferences entry;
