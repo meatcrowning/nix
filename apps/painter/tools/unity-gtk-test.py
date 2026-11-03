@@ -201,6 +201,10 @@ def test():
             mask_view.destroy()
             print('PASS: GTK heatmap composition keeps decoded source and restores it without reload')
             assert notifications == ['Generation completed'], notifications
+            independent = window.actions['wildcard_independent'][0]
+            assert independent.get_active() == window.state['wildcardIndependent']
+            window.expected_independent = not independent.get_active()
+            independent.activate()
             buttons = window.wildcard_buttons.get_children()
             assert [b.get_label() for b in buttons] == window.state['wildcards']
             card = window.wildcard_cards['pose']
@@ -366,6 +370,8 @@ def test():
             window.controls['seed'].set_text('1234')
             window.generate()
         elif step[0] == 1:
+            assert window.state['wildcardIndependent'] == window.expected_independent
+            assert window.actions['wildcard_independent'][0].get_active() == window.expected_independent
             assert not window.state['wildcardOptions']['pose'][0]['enabled']
             window.send('wildcard_line', name='pose', index=0, enabled=True)
             assert notifications == ['Generation completed'], notifications

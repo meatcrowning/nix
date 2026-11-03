@@ -75,6 +75,7 @@ Item {
         var n = i < 0 ? 0 : Math.max(0, Math.min(Gallery.count - 1, i + d))
         results.gallery.selectSingle(Gallery.pathAt(n))
     }
+    property bool independentWildcards: false
     property bool showSettings: false
     // The preview viewport above the history — off by default, remembered.
     property bool showPreview: false
@@ -414,7 +415,7 @@ Item {
         if (App.isEdit) {
             var editParams = {
                 edit: true,
-                positive: g.positive,
+                positive: g.positive, wildcard_independent: root.independentWildcards,
                 editNoScale: g.editNoScale, editMegapixels: g.editMegapixels,
                 seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed
             }
@@ -441,7 +442,7 @@ Item {
         // and the size is painter's own aspect + MP.
         if (App.isVideo && g.still) {
             App.generate({
-                positive: g.positive, still: true,
+                positive: g.positive, wildcard_independent: root.independentWildcards, still: true,
                 steps: g.steps, denoise: g.denoise,
                 sampler_name: g.sampler_name, scheduler: g.scheduler,
                 seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed,
@@ -452,7 +453,7 @@ Item {
         }
         if (App.isVideo) {
             App.generate({
-                positive: g.positive,
+                positive: g.positive, wildcard_independent: root.independentWildcards,
                 steps: g.steps, denoise: g.denoise,
                 sampler_name: g.sampler_name, scheduler: g.scheduler,
                 seed: g.seed, randomSeed: g.randomSeed, reuseSeed: g.reuseSeed,
@@ -465,6 +466,7 @@ Item {
             return
         }
         var imageParams = {
+            wildcard_independent: root.independentWildcards,
             positive: g.positive, negative: g.negative, moss_layout: App.layoutSupport ? (g.moss_layout || {}) : ({}),
             steps: g.steps, cfg: g.cfg, denoise: g.denoise,
             sampler_name: g.sampler_name, scheduler: g.scheduler,
@@ -962,6 +964,8 @@ Item {
         { id: "unload", tip: "Unload Models", menu: "tools",
           icon: "edit-clear-history", state: App.backendRunning ? 0 : 2 },
         // --------------------------------------------------------- settings
+        { id: "independentwildcards", tip: "Independent Wildcard Occurrences", menu: "settings",
+          checkable: true, state: root.independentWildcards ? 1 : 0 },
         { id: "set",  label: "st",   tb: true, state: root.showSettings ? 1 : 0,
           tip: "Settings", bottom: true, menu: "settings",
           menuText: "Configure painter…", icon: "configure",
@@ -1036,6 +1040,7 @@ Item {
             // parameters on would leave the gallery there and nothing to do.
             root.view = root.showParams ? 0 : 1
         }
+        else if (id === "independentwildcards") root.independentWildcards = !root.independentWildcards
         else if (id === "set") root.showSettings = !root.showSettings
         else if (id === "open") { if (root.selOne !== "") App.openExternally(root.selOne) }
         else if (id === "folder") App.openFolder()
@@ -1109,6 +1114,9 @@ Item {
         function onModeChanged() { root.pushButtons() }
     }
 
+    onIndependentWildcardsChanged: {
+        if (root.restored) Prefs.set("wildcard_independent", root.independentWildcards)
+    }
     onShowSettingsChanged: pushButtons()
     onInViewChanged: pushButtons()
     onSelOneChanged: pushButtons()
@@ -1335,6 +1343,7 @@ Item {
     }
 
     function injectParams(p) {
+        root.independentWildcards = p.wildcard_independent === true
         App.restoreWildcardOptions(p.wildcard_options === undefined ? null : p.wildcard_options)
         var g = clone(gen)
         for (var key of ["system_prompt", "krea_sampling", "krea_shift", "reference_megapixels"])
@@ -1477,6 +1486,7 @@ Item {
         var w = Prefs.get("win.width"), h = Prefs.get("win.height")
         if (w > 0 && h > 0) root.requestResize(w, h)
         var v = Prefs.get("view"); if (v === 0 || v === 1) root.view = v
+        root.independentWildcards = Prefs.get("wildcard_independent") === true
         root.showPreview = Prefs.get("showPreview") === true
         // Default ON: a stored `false` is the only thing that puts the column
         // away, so a fresh profile gets the controls rather than a blank window.

@@ -58,6 +58,55 @@ with tempfile.TemporaryDirectory() as tmp:
     editor.doc['enabled'] = False
     check('disabled layouts remain literal', W.expand_layout(editor.doc, 99, root) == editor.doc)
 
+    # This fixed seed and broad palette expose reused occurrence counters.
+    # Exercise the actual job path, including continuation into regions.
+    from submission import build_job, build_batch, Submission
+    class Registry:
+        def family_of(self, entry): return {}
+        def build(self, entry, params, object_info=None):
+            return {'params': copy.deepcopy(params)}
+    rows = [dict(text=str(i), enabled=True) for i in range(1000)]
+    params = dict(seed=42, positive='__number__ __number__', negative='__number__',
+                  moss_layout=dict(enabled=True, items=[
+                      dict(caption='__number__', text='__number__'),
+                      dict(caption='__number__', enabled=False),
+                      dict(caption='__number__')]),
+                  wildcard_options={'number': rows}, wildcard_independent=True)
+    independent = build_job(Registry(), None, params)['params']
+    picks = independent['positive'].split() + independent['negative'].split()
+    # Metadata retains raw region captions; inspect conditioning through a stub.
+    class CaptureRegistry(Registry):
+        def build(self, entry, params, object_info=None):
+            result = super().build(entry, params, object_info)
+            result['conditioning'] = copy.deepcopy(params)
+            return result
+    job = build_job(CaptureRegistry(), None, params)
+    regions = job['conditioning']['moss_layout']['items']
+    picks += [regions[0]['caption'], regions[2]['caption']]
+    check('each occurrence draws independently across boxes and regions', len(set(picks)) == 5)
+    check('independent jobs reproduce exactly', job == build_job(CaptureRegistry(), None, params))
+    check('literal text and disabled region captions stay untouched',
+          regions[0]['text'] == '__number__' and regions[1]['caption'] == '__number__')
+    check('independent metadata retains mode and original prompts',
+          independent['wildcard_independent'] is True and
+          independent['prompt_boxes']['positive'] == params['positive'] and
+          independent['moss_layout'] == params['moss_layout'])
+    linked = build_job(CaptureRegistry(), None, dict(params, wildcard_independent=False))
+    old = W.expand('__number__', 42, options=params['wildcard_options'])
+    check('disabled mode preserves the original seed mapping',
+          linked['params']['positive'] == old + ' ' + old and
+          linked['params']['negative'] == old and
+          linked['conditioning']['moss_layout']['items'][2]['caption'] == old)
+    frozen = Submission.freeze(params, None, CaptureRegistry(), None, 2, [], -1)
+    params['wildcard_independent'] = False
+    batch = build_batch(frozen)
+    check('queued mode stays frozen and each batch seed changes the draws',
+          all(j['params']['wildcard_independent'] for j in batch) and
+          batch[0]['params']['positive'] != batch[1]['params']['positive'])
+    only_one = {'colour': [dict(text='blue', enabled=True), dict(text='red', enabled=False)]}
+    check('independent draws respect disabled choices and allow chance repeats',
+          W.expand('__colour__ __colour__', 42, options=only_one, independent=True) == 'blue blue')
+
     state_path = root / 'settings.json'
     options = W.load_options(state_path, root)
     options['colour'][0]['enabled'] = False

@@ -130,13 +130,18 @@ class Window(Gtk.Window, ParameterForm):
                        ('newer', '_Next Output', 'Page_Down', lambda: self.walk(1)),
                        ('refresh', '_Refresh', 'F5', lambda: self.send('rescan'))]),
             ('_Generation', [('cancel', '_Cancel Queued Jobs', None, lambda: self.send('cancel')),
-                              ('hard_stop', '_Hard Stop', None, lambda: self.send('hard_stop'))])]:
+                              ('hard_stop', '_Hard Stop', None, lambda: self.send('hard_stop'))]),
+            ('_Settings', [('wildcard_independent', '_Independent Wildcard Occurrences', None,
+                            lambda: self.send('wildcard_independent',
+                                              enabled=not self.state.get('wildcardIndependent', False))
+                            if not self.loading else None)])]:
             top = Gtk.MenuItem.new_with_mnemonic(title)
             menu = Gtk.Menu()
             top.set_submenu(menu)
             menubar.append(top)
             for key, text, accelerator, callback in entries:
-                item = Gtk.MenuItem.new_with_mnemonic(text)
+                item_type = Gtk.CheckMenuItem if key == 'wildcard_independent' else Gtk.MenuItem
+                item = item_type.new_with_mnemonic(text)
                 item.connect('activate', lambda _w, fn=callback: fn())
                 if accelerator:
                     code, mods = Gtk.accelerator_parse(accelerator)
@@ -651,6 +656,11 @@ class Window(Gtk.Window, ParameterForm):
             for key in ('gallery', 'offset', 'total', 'limit', 'galleryQuery'):
                 if key in old: state[key] = old[key]
         self.state = state
+        was_loading = self.loading
+        self.loading = True
+        for item in self.actions.get('wildcard_independent', []):
+            item.set_active(state.get('wildcardIndependent', False))
+        self.loading = was_loading
         self.apply_parameter_state(state, old)
         for marks in self.token_marks:
             marks.update(state)

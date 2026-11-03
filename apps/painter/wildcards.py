@@ -30,25 +30,35 @@ def choices(name: str, root: Path = WILDCARDS) -> list[str]:
             if line.strip() and not line.lstrip().startswith("#")]
 
 
-def expand(text: str, seed: int, root: Path = WILDCARDS, options: dict | None = None) -> str:
+def expand(text: str, seed: int, root: Path = WILDCARDS, options: dict | None = None, *,
+           independent: bool = False, occurrences: dict | None = None) -> str:
     """Expand wildcard tokens, choosing once per name from the job seed.
 
+    Independent mode derives a separate draw from each name's occurrence index.
+    A shared counter continues across prompt boxes and region captions.
+
     Unknown names stay literal so a typo cannot silently disappear from a
-    submitted prompt. Repeated uses of one name, including across positive and
-    negative and region prompts with the same seed, resolve to the same line.
+    submitted prompt. By default, repeated uses of one name across positive,
+    negative and region prompts with the same seed resolve to the same line.
     """
     picked: dict[str, str] = {}
+    occurrences = {} if occurrences is None else occurrences
 
     def replace(match: re.Match[str]) -> str:
         name = match.group(1)
-        if name not in picked:
+        if independent or name not in picked:
             rows = options.get(name) if options is not None else None
             lines = [row['text'] for row in rows if row['enabled']] if rows is not None else choices(name, root)
             if rows and not lines:
                 raise ValueError('Wildcard __%s__ has no enabled lines.' % name)
             if not lines:
                 return match.group(0)
-            rng = random.Random(f"{int(seed)}:{name}")
+            key = f"{int(seed)}:{name}"
+            if independent:
+                index = occurrences.get(name, 0)
+                occurrences[name] = index + 1
+                key += f":{index}"
+            rng = random.Random(key)
             picked[name] = lines[rng.randrange(len(lines))]
         return picked[name]
 
@@ -56,20 +66,24 @@ def expand(text: str, seed: int, root: Path = WILDCARDS, options: dict | None = 
 
 
 def expand_prompts(positive: str, negative: str, seed: int,
-                   root: Path = WILDCARDS, options: dict | None = None) -> tuple[str, str]:
+                   root: Path = WILDCARDS, options: dict | None = None, *,
+                   independent: bool = False, occurrences: dict | None = None) -> tuple[str, str]:
     """Expand both boxes with a shared per-job wildcard selection."""
     joined = positive + "\0" + negative
-    expanded = expand(joined, seed, root, options)
+    expanded = expand(joined, seed, root, options, independent=independent, occurrences=occurrences)
     return tuple(expanded.split("\0", 1))
 
 
-def expand_layout(layout: dict, seed: int, root: Path = WILDCARDS, options: dict | None = None) -> dict:
+def expand_layout(layout: dict, seed: int, root: Path = WILDCARDS, options: dict | None = None, *,
+                  independent: bool = False, occurrences: dict | None = None) -> dict:
     """Expand region descriptions in a copy; preserve the editable document."""
+    occurrences = {} if occurrences is None else occurrences
     result = copy.deepcopy(layout)
     if result.get("enabled"):
         for item in result.get("items", []):
             if item.get("enabled", True) and isinstance(item.get("caption"), str):
-                item["caption"] = expand(item["caption"], seed, root, options)
+                item["caption"] = expand(item["caption"], seed, root, options,
+                                         independent=independent, occurrences=occurrences)
     return result
 
 

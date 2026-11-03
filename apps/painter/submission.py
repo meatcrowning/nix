@@ -54,15 +54,18 @@ def build_job(registry, entry, params, object_info=None):
     raw_boxes = {"positive": p.get("positive", ""), "negative": p.get("negative", "")}
     raw_layout = copy.deepcopy(p.get("moss_layout"))
     options = p.get("wildcard_options")
+    independent = p.get("wildcard_independent") is True
+    expansion = dict(options=options, independent=independent, occurrences={})
     positive, negative = wildcards.expand_prompts(
-        raw_boxes["positive"], raw_boxes["negative"], p["seed"], options=options)
+        raw_boxes["positive"], raw_boxes["negative"], p["seed"], **expansion)
     p["positive"] = positive
     if "negative" in p:
         p["negative"] = negative
     if raw_layout:
-        p["moss_layout"] = wildcards.expand_layout(raw_layout, p["seed"], options=options)
+        p["moss_layout"] = wildcards.expand_layout(raw_layout, p["seed"], **expansion)
     built = registry.build(entry, p, object_info=object_info)
     built["params"]["prompt_boxes"] = raw_boxes
+    built["params"]["wildcard_independent"] = independent
     if options is not None:
         built["params"]["wildcard_options"] = copy.deepcopy(options)
     if raw_layout:

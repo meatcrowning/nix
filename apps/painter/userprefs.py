@@ -101,9 +101,10 @@ def params_for(model_name, kind="image", doc=None):
     """
     doc = load() if doc is None else doc
     g = saved_for(model_name, doc)
+    out = ({"wildcard_independent": doc["wildcard_independent"] is True}
+           if "wildcard_independent" in doc else {})
     if not g:
-        return {}
-    out = {}
+        return out
 
     def put(key, src=None, cast=float):
         v = _num(g, src or key, cast)

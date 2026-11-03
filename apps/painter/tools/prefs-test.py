@@ -53,6 +53,12 @@ DOC = {"genByModel": json.dumps({"anima-base-v1.0.safetensors": GEN}),
 
 M = "anima-base-v1.0.safetensors"
 
+for kind in ('image', 'video', 'edit'):
+    check('global independent wildcards reach ' + kind,
+          UP.params_for(M, kind, doc=dict(DOC, wildcard_independent=True))['wildcard_independent'] is True)
+check('global wildcard preference applies to unseen models',
+      UP.params_for('new-model', doc={'wildcard_independent': True}) == {'wildcard_independent': True})
+
 print("\nan image job")
 p = UP.params_for(M, "image")
 check("his resolution comes across", p.get("width") == 1152 and p.get("height") == 1728, str(p))

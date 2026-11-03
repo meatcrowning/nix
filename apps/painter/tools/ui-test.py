@@ -5630,6 +5630,49 @@ def test_moss(win, ctl, tmp):
               {"positive": "a lake", "negative": "blur"})
 
 
+def test_independent_wildcards(win, ctl, keep):
+    from PySide6.QtCore import Q_ARG
+    prefs = keep[2]
+    action = lambda: next(a for a in prop(APP, 'actions')
+                          if isinstance(a, dict) and a.get('id') == 'independentwildcards')
+    check('independent wildcard setting defaults off', not prop(APP, 'independentWildcards'))
+    check('Settings contains a checkable wildcard action',
+          action().get('menu') == 'settings' and action().get('checkable') is True)
+    shell = keep[-1]
+    if shell is not None:
+        native_action = shell._actions['independentwildcards']
+        check('native global menu exposes an unchecked toggle', native_action.isCheckable() and not native_action.isChecked())
+        native_action.trigger()
+    else:
+        APP.metaObject().invokeMethod(APP, 'tbAction', Q_ARG('QVariant', 'independentwildcards'))
+    spin(50)
+    check('menu toggles and persists independent wildcards',
+          prop(APP, 'independentWildcards') and action()['state'] == 1 and
+          prefs.get('wildcard_independent') is True)
+    import main as P
+    check('global preference survives a fresh settings reader',
+          P.Prefs().get('wildcard_independent') is True)
+    if shell is not None:
+        check('native global menu reflects the checked state', native_action.isChecked())
+    # Capture the frontend submission before uploads or backend scheduling.
+    original_generate = ctl.generate
+    sent = []
+    ctl.generate = lambda params, count: sent.append(dict(params))
+    try:
+        APP.metaObject().invokeMethod(APP, 'submit')
+        spin(50)
+        check('frontend passes the global mode to generation',
+              bool(sent) and sent[-1].get('wildcard_independent') is True)
+    finally:
+        ctl.generate = original_generate
+    APP.metaObject().invokeMethod(APP, 'injectParams', Q_ARG('QVariant', {}))
+    check('old output parameters restore linked mode', not prop(APP, 'independentWildcards'))
+    APP.metaObject().invokeMethod(APP, 'injectParams',
+                                  Q_ARG('QVariant', {'wildcard_independent': True}))
+    check('output parameters restore independent mode', prop(APP, 'independentWildcards'))
+    APP.setProperty('independentWildcards', False)
+
+
 def test_region_wildcard_submission(ctl, tmp):
     import copy
     import moss_layout as M
@@ -6287,10 +6330,12 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("queue-button", "queue", "seed", "preview", "live", "llada", "modes", "compare",
+    if only in ("wildcards", "queue-button", "queue", "seed", "preview", "live", "llada", "modes", "compare",
                 "snapshots", "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections", "drag"):
         print("== %s ==" % only)
-        if only == "queue-button":
+        if only == "wildcards":
+            test_independent_wildcards(win, ctl, keep)
+        elif only == "queue-button":
             test_queue_button(ctl, keep[-1])
         elif only == "queue":
             test_job_queue(win, ctl, tmp)
@@ -6378,6 +6423,7 @@ def main():
     print("== startup ==");           test_startup(ctl)
     print("== wiring ==");            test_wiring(win, ctl)
     print("== prompt pills ==");       test_prompt_pills(win, ctl)
+    print("== wildcard mode ==");    test_independent_wildcards(win, ctl, keep)
     print("== seed reuse ==");        test_seed(win, ctl)
     print("== preset sampling ==");   test_preset_sampling(win, ctl, tmp)
     print("== section order ==");      test_section_order(win, ctl, tmp)

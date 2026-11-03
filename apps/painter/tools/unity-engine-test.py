@@ -131,6 +131,19 @@ engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
 assert engine.settings['seed'] == 42 and not engine.settings['randomSeed']
 assert engine.settings['positive'] == 'restored prompt'
 import wildcards as W
+assert not engine.independent_wildcards
+engine.dispatch(dict(op='wildcard_independent', enabled=True))
+assert engine.snapshot({})['wildcardIndependent'] is True
+assert __import__('userprefs').load()['wildcard_independent'] is True
+original_generate = ctl.generate
+captured = []
+ctl.generate = lambda p, count: captured.append(p)
+try:
+    engine.dispatch(dict(op='generate'))
+    assert captured[-1]['wildcard_independent'] is True
+finally:
+    ctl.generate = original_generate
+params['wildcard_independent'] = True
 original_options = ctl.wildcardOptions
 engine.dispatch(dict(op='wildcard_line', name='pose', index=0, enabled=False))
 assert not W.load_options(P.STATE / 'wildcards.json')['pose'][0]['enabled']
@@ -141,6 +154,7 @@ Path('/home/test/out/fixture.png').write_bytes(P.pngmeta.upsert_text(
 ctl.restoreWildcardOptions(original_options)
 engine.dispatch(dict(op='restore', path='/home/test/out/fixture.png'))
 assert ctl.wildcardOptions == saved_options
+assert engine.independent_wildcards is True
 ctl.restoreWildcardOptions(original_options)
 
 

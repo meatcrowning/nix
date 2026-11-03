@@ -354,8 +354,11 @@ storage underscore conventions distinct from displayed prompt spaces.
 
 Wildcards expand from app-local `wildcards/*.txt` after assigning the concrete
 per-job seed. Selection is deterministic for `<seed>:<name>` across both boxes and region prompts;
-missing/empty files leave tokens literal. Store expanded conditioning in output
-parameters and literal text in `prompt_boxes` for lossless injection. Expand
+the global Settings toggle “Independent Wildcard Occurrences” instead derives
+each draw from the seed, name and occurrence index across positive, negative and
+region captions. It defaults off and is frozen/restored as `wildcard_independent`
+in job metadata. Independent draws can repeat a value. Missing/empty files leave
+tokens literal. Store expanded conditioning in output parameters and literal text in `prompt_boxes` for lossless injection. Expand
 region captions in a copy before layout compilation; saved `moss_layout` retains
 the original tokens for restore/comparison. Exact wording stays literal.
 Wildcard buttons open hover cards with per-line checks. The controller owns

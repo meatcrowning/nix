@@ -68,6 +68,7 @@ class Engine:
     def __init__(self, ctl, prefs, desktop_env=None):
         self.ctl, self.prefs = ctl, prefs
         self.desktop_env = desktop_env
+        self.independent_wildcards = prefs.get('wildcard_independent') is True
         self.settings = copy.deepcopy(BASE)
         self.model = ''
         self.multiple = 64
@@ -155,6 +156,7 @@ class Engine:
                        editExtra=json.dumps(self.ctl.editExtraImages), lastSeed=self.ctl.lastSeed,
                        loras=json.dumps(self.ctl.lorasSnapshot()))
         doc.update({pref: self.heights[key] for key, pref in HEIGHT_KEYS.items()})
+        doc['wildcard_independent'] = self.independent_wildcards
         doc['unity.samplingExpanded'] = self.sampling_expanded
         doc['queue.height'] = self.queue_height
         doc['unity.historyWidth'] = self.history_width
@@ -412,7 +414,8 @@ class Engine:
         elif op == 'mode':
             c.setMode(request['name'])
         elif op == 'generate':
-            c.generate(submission(self.settings, c), int(self.settings['count']))
+            c.generate(dict(submission(self.settings, c), wildcard_independent=self.independent_wildcards),
+                       int(self.settings['count']))
         elif op == 'view':
             self.set_view(request.get('path', ''))
         elif op == 'playback':
@@ -455,6 +458,8 @@ class Engine:
                 row['patchesClip'] = bool(choices[row['name']].get('patches_clip'))
             c.loras.clear()
             c.restoreLoras(rows)
+        elif op == 'wildcard_independent':
+            self.independent_wildcards = request.get('enabled') is True
         elif op == 'wildcard_line':
             c.setWildcardLine(request['name'], int(request['index']), bool(request['enabled']))
         elif op == 'restore':
@@ -494,6 +499,7 @@ class Engine:
             c.setMode('')
             c.selectModel(index)
         c.restoreWildcardOptions(p.get('wildcard_options'))
+        self.independent_wildcards = p.get('wildcard_independent') is True
         g = self.settings
         g['moss_layout'] = p.get('moss_layout') or {}
         for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
@@ -556,7 +562,7 @@ class Engine:
                                               for row in c.models._rows], modes=c.modes(), mode=c.mode,
                     settings=self.settings, revision=self.revision, heights=self.heights, multiple=self.multiple,
                     previewWidth=self.preview_width, historyWidth=self.history_width, sidebarWidth=self.sidebar_width,
-                    samplingExpanded=self.sampling_expanded,
+                    samplingExpanded=self.sampling_expanded, wildcardIndependent=self.independent_wildcards,
                     layoutHeight=self.layout_height, regionListHeight=self.region_list_height,
                     regionPromptHeight=self.region_prompt_height, wordingHeight=self.wording_height,
                     media=self.media(request), replacement=self.replacement,
