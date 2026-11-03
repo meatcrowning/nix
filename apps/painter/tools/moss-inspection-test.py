@@ -142,6 +142,14 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     assert not scout.nearby and not scout.exploring
     scout.close()
     combo = ctl.inspection.bind_toolbar(keep[-1], root) if os.environ.get('PAINTER_UI_NATIVE') == '1' else None
+    if combo:
+        from PySide6.QtWidgets import QPushButton
+        grid_button = keep[-1].window.findChild(QPushButton, 'heatmapGrid')
+        u.spin(20)
+        assert not combo.isVisible() and not grid_button.isVisible()
+        keep[-1]._rebuild()
+        u.spin(20)
+        assert not combo.isVisible() and not grid_button.isVisible(), 'toolbar rebuild exposed inactive heatmap controls'
     probe = next(o for o in u.walk(win.contentItem()) if o.objectName() == 'positiveTokenProbe')
     service = Tokens()
     probe.setProperty('service', service)
@@ -271,9 +279,23 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     try:
         negative_probe._accept(0, joined)
         negative_probe.setViewing(True)
+        assert negative_probe.branch == 'positive'
+        negative_probe.hoverImage(.25, .25)
+        assert negative_probe.nearby and all(t['branch'] == 'positive' for t in negative_probe.nearby)
         negative_probe.hoverPrompt('red sphere', 1)
         positive_index = negative_probe.selected
         positive_mask = negative_probe.mask.copy()
+        negative_probe.hoverRegion('red sphere', 1, '@negative')
+        assert negative_probe.selected == positive_index, 'negative hover bypassed positive mode'
+        negative_probe.holdImage(.25, .25)
+        negative_probe.selectBranch('negative')
+        assert not negative_probe.imageHeld and not negative_probe.nearby
+        assert negative_probe.selected == -1
+        negative_probe.hoverImage(.25, .25)
+        assert negative_probe.nearby and all(t['branch'] == 'negative' for t in negative_probe.nearby)
+        negative_probe.leaveImage()
+        negative_probe.hoverPrompt('red sphere', 1)
+        assert negative_probe.selected == -1, 'positive hover bypassed negative mode'
         negative_probe.hoverRegion('red sphere', 1, '@negative')
         assert negative_probe.selected != positive_index
         assert negative_probe.tokens[negative_probe.selected]['branch'] == 'negative'
@@ -295,6 +317,9 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
         assert 'Negative' in grid.text('Description')
         assert all(i < 2 for t in json.loads(grid.text('PainterPromptLinks'))['words'] for i in t['source_indices'])
         assert moss_data.decode(moss_data.encode(*joined))[1] == joined[1]
+        negative_probe.setViewing(False)
+        negative_probe.setViewing(True)
+        assert negative_probe.branch == 'positive'
     finally:
         negative_probe.close()
     print('PASS negative hover/pick, identical-text branch isolation, stale drafts and v4 maps')
@@ -335,15 +360,22 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     ctl.inspection.endHover('region:unrelated')
     assert ctl.inspection.selected == 1
     ctl.inspection.endHover('prompt')
-    assert ctl.inspection.selected == 0  # Restore an explicit dropdown choice.
+    assert ctl.inspection.selected == 0  # Restore a pinned nearby-token choice.
     ctl.inspection.select(-1)
     assert gallery.isVisible()
     assert u.find(win.contentItem(), 'HeatmapPane').width() < u.find(win.contentItem(), 'ResultsPane').width()
     if combo:
-        assert combo.isVisible() and combo.count() == 3
+        assert combo.isVisible() and [combo.itemText(i) for i in range(combo.count())] == ['Positive', 'Negative']
+        combo.activated.emit(1)
+        assert ctl.inspection.branch == 'negative' and combo.currentIndex() == 1
+        assert ctl.inspection.mask.isNull() and 'No negative heatmaps' in ctl.inspection.status
+        assert not grid_button.isEnabled()
+        combo.activated.emit(0)
+        assert ctl.inspection.branch == 'positive' and not ctl.inspection.mask.isNull()
+        assert grid_button.isEnabled()
     ctl.inspection.hoverPrompt('red sphere', 5)
     assert ctl.inspection.selected == 1
-    if combo: assert combo.currentIndex() == 2
+    if combo: assert combo.currentIndex() == 0
     ctl.inspection.hoverPrompt('different draft', 0)
     assert ctl.inspection.selected == 1
     ctl.inspection.hoverPrompt('red sphere', 0)
@@ -467,7 +499,7 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     position = len(caption[:caption.index('sphere')].encode('utf-16-le')) // 2
     ctl.inspection.hoverPrompt(caption, position)
     assert ctl.inspection.selected == 1
-    if combo: assert combo.currentIndex() == 2
+    if combo: assert combo.currentIndex() == 0
     print('PASS layout caption hover, JSON escapes, Unicode and mismatched drafts')
     old_output = Path(tmp) / 'old.png'
     old_output.write_bytes(plain)
@@ -475,6 +507,10 @@ with tempfile.TemporaryDirectory(prefix='painter-inspection-test-') as tmp:
     u.spin(50)
     assert root.property('showHeatmap') and not ctl.inspection.available
     root.setProperty('showHeatmap', False)
+    if combo:
+        keep[-1]._rebuild()
+        u.spin(20)
+        assert not combo.isVisible() and not grid_button.isVisible()
     spec = importlib.util.spec_from_file_location('moss_checks', Path(__file__).with_name('moss-test.py'))
     checks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checks)

@@ -44,6 +44,7 @@ class MossInspect(QObject):
         self._exploring = False
         self._positions = OrderedDict()
         self._viewing = False
+        self._branch = 'positive'
         self._picks = None
         self._exporting = False
         self._grid_status = ''
@@ -101,8 +102,11 @@ class MossInspect(QObject):
             return self._error
         if not self.available:
             return 'No heatmaps saved for this output' if self._path else 'Select an output to inspect heatmaps'
+        if not self.branchAvailable:
+            return 'No %s heatmaps saved for this output' % self._branch
         doc = self._data[0]
-        negative = self._selected >= 0 and self._tokens[self._selected].get('branch') == 'negative'
+        negative = self._branch == 'negative' or (
+            self._selected >= 0 and self._tokens[self._selected].get('branch') == 'negative')
         capture = doc.get('negative_capture' if negative else 'capture', {})
         layers = capture.get('block_indices', [capture.get('block_index', 4)])
         text = 'Saved maps v%d · %d×%d · layers %s' % (doc.get('version',1),doc['width'],doc['height'],
@@ -116,11 +120,33 @@ class MossInspect(QObject):
             text += ' · Select a token for capture agreement'
         else:
             text += ' · Capture agreement unavailable for this older output'
-        if self._selected >= 0 and self._tokens[self._selected].get('branch') == 'negative':
+        if negative:
             text += ' · Negative association, not amount removed'
         if doc.get('negative_status'):
             text += ' · ' + doc['negative_status']
         return text
+
+    @Property(str, notify=changed)
+    def branch(self):
+        return self._branch
+
+    @Property(bool, notify=changed)
+    def branchAvailable(self):
+        return any(t.get('branch', 'positive') == self._branch for t in self._tokens)
+
+    @Slot(str)
+    def selectBranch(self, branch):
+        if branch not in ('positive', 'negative') or branch == self._branch:
+            return
+        self._branch = branch
+        self._image_held = False
+        self._image_cell = None
+        self._hover_owner = ''
+        self._set_nearby([])
+        self._chosen = -1
+        self._selected = -2
+        self._show(-1)
+        self.changed.emit()
 
     @Property('QVariantList', notify=changed)
     def tokens(self):
@@ -137,6 +163,8 @@ class MossInspect(QObject):
 
     @Slot(bool)
     def setViewing(self, viewing):
+        if viewing and not self._viewing:
+            self.selectBranch('positive')
         self._viewing = viewing
         if not viewing:
             self._picks = None
@@ -195,6 +223,8 @@ class MossInspect(QObject):
                  for i in range(max(0,cx-rx), min(w,cx+rx+1))]
         scores = []
         for token in doc.get('_content_tokens', []):
+            if token.get('branch', 'positive') != self._branch:
+                continue
             start = token['index'] * w * h
             score = sum(pixels[start+i] for i in cells) / (255*len(cells))
             if score > 0:
@@ -340,7 +370,7 @@ class MossInspect(QObject):
 
     @Slot()
     def toggleGrid(self):
-        if self._exporting or not self._viewing or not self.available:
+        if self._exporting or not self._viewing or not self.branchAvailable:
             return
         self._image_held = False
         self.leaveImage()
@@ -400,7 +430,7 @@ class MossInspect(QObject):
     def hoverPrompt(self, text, position):
         # QML offsets are UTF-16. GTK converts its character offsets before
         # sending them. Never apply current draft positions to another prompt.
-        if not self._viewing or not self._data:
+        if not self._viewing or not self._data or self._branch != 'positive':
             return
         saved = self._data[0].get('positive_prompt', self._data[0].get('prompt', ''))
         position = len(text.encode('utf-16-le')[:position * 2].decode('utf-16-le', errors='ignore'))
@@ -410,6 +440,8 @@ class MossInspect(QObject):
     @Slot(str, int, str)
     def hoverRegion(self, text, position, identity):
         if not self._viewing or not self._data or not identity:
+            return
+        if (identity == '@negative') != (self._branch == 'negative'):
             return
         doc = self._data[0]
         if identity == '@negative':
@@ -441,43 +473,37 @@ class MossInspect(QObject):
                 break
 
     def bind_toolbar(self, shell, root):
-        from PySide6.QtWidgets import QComboBox, QPushButton
+        from PySide6.QtWidgets import QComboBox, QPushButton, QWidgetAction
         combo = QComboBox(shell.window)
         combo.setObjectName('heatmapTokens')
-        combo.setAccessibleName('Prompt token heatmap')
+        combo.setAccessibleName('Heatmap prompt')
         combo.setMinimumContentsLength(12)
         combo.setMaximumWidth(260)
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.activated.connect(lambda index: self.select(index - 1))
-        combo.setToolTip('All tokens: mean normalized descriptive-token associations; layout structure excluded. Relative thermal contrast, not probability or absolute activity. Blue is low; red is high.')
+        combo.addItems(['Positive', 'Negative'])
+        combo.activated.connect(lambda index: self.selectBranch('negative' if index == 1 else 'positive'))
+        combo.setToolTip('Choose positive or negative prompt tokens for heatmap hovering.')
         grid = QPushButton('Grid comparison', shell.window)
         grid.setObjectName('heatmapGrid')
         grid.setCheckable(True)
         grid.clicked.connect(self.toggleGrid)
-        labels = []
-        signature = []
         def refresh():
             combo.blockSignals(True)
-            state = [self._generation, self.available, self._exploring]
-            if state != signature:
-                current = [token['label'] for token in self.choices]
-                if current != labels:
-                    combo.clear()
-                    combo.addItems(current)
-                    labels[:] = current
-                signature[:] = state
-            combo.setCurrentIndex(self.selected + 1)
+            combo.setCurrentIndex(1 if self.branch == 'negative' else 0)
             combo.blockSignals(False)
-            combo.setVisible(bool(root.property('showHeatmap')))
+            for action in actions:
+                action.setVisible(bool(root.property('showHeatmap')))
             combo.setEnabled(self.available)
-            grid.setVisible(bool(root.property('showHeatmap')))
-            grid.setEnabled(self.available and not self.exporting)
+            grid.setEnabled(self.branchAvailable and not self.exporting)
             grid.setChecked(self.picking)
             grid.setText(self.gridLabel)
             grid.setToolTip(self.gridStatus)
             combo.setToolTip(self.status + '\nRelative association; blue is low and red is high. Agreement measures consistency across captures, not correctness.')
         shell.toolbar_widget('main', combo)
         shell.toolbar_widget('main', grid)
+        # QWidget visibility alone is overwritten when native chrome rebuilds.
+        actions = [action for action in combo.parentWidget().actions()
+                   if isinstance(action, QWidgetAction) and action.defaultWidget() in (combo, grid)]
         self.changed.connect(refresh)
         root.showHeatmapChanged.connect(refresh)
         refresh()
@@ -537,6 +563,8 @@ class MossInspect(QObject):
                     return
                 if value and not cached:
                     value[0]['_aggregate'] = moss_data.descriptive_aggregate(*value)
+                    if any(t.get('branch') == 'negative' for t in value[0]['tokens']):
+                        value[0]['_negative_aggregate'] = moss_data.descriptive_aggregate(*value, branch='negative')
                     import moss_rank
                     value[0]['_content_tokens'] = moss_rank.content_tokens(value[0])
                     import pngmeta
@@ -589,16 +617,26 @@ class MossInspect(QObject):
         self._selected = index
         doc, pixels = self._data
         token = self._tokens[index]['index'] if index >= 0 else -1
-        mask = self._masks.pop(token, None)
+        key = token if token >= 0 else ('branch', self._branch)
+        mask = self._masks.pop(key, None)
         if mask is None:
-            mask = token_mask(doc, pixels, token)
-        self._masks[token] = mask
+            if token >= 0:
+                mask = token_mask(doc, pixels, token)
+            elif self.branchAvailable:
+                aggregate_key = '_negative_aggregate' if self._branch == 'negative' else '_aggregate'
+                aggregate = doc.get(aggregate_key)
+                if aggregate is None:
+                    aggregate = moss_data.descriptive_aggregate(doc, pixels, self._branch)
+                mask = token_mask(dict(doc, _aggregate=aggregate), pixels, -1)
+            else:
+                mask = QImage()
+        self._masks[key] = mask
         # At most 4 MiB for 128x128 maps; no full-resolution image copies.
         while len(self._masks) > 64:
             self._masks.popitem(last=False)
         self.mask = mask
         self._packet = None
-        self._overlay = '%d:%d' % (self._generation, token)
+        self._overlay = '%d:%s:%d' % (self._generation, self._branch, token)
         self.changed.emit()
 
     def mask_packet(self):

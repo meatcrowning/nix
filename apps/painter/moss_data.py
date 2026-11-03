@@ -28,10 +28,10 @@ def aggregate(document, pixels):
                  round(255 * ((value - low) / (high - low))) for value in totals)
 
 
-def descriptive_aggregate(document, pixels):
+def descriptive_aggregate(document, pixels, branch='positive'):
     """Combine prompt content, excluding compiled layout keys/coordinates."""
     spans = descriptive_spans(document)
-    tokens = [t for t in document['tokens'] if t['visible'] and t.get('branch') != 'negative' and
+    tokens = [t for t in document['tokens'] if t['visible'] and t.get('branch', 'positive') == branch and
               any(a < t.get('end', -1) and b > t.get('start', -1) for a, b in spans)]
     return aggregate(dict(document, tokens=tokens), pixels)
 

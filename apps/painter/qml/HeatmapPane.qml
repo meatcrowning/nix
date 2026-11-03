@@ -15,17 +15,16 @@ Item {
         Button { text: "Heatmap"; checkable: true; checked: true; onClicked: pane.toggled() }
         ComboBox {
             Layout.fillWidth: true
-            model: pane.service ? pane.service.choices : []
-            textRole: "label"
-            currentIndex: pane.service ? pane.service.selected + 1 : -1
-            onActivated: pane.service.select(currentIndex - 1)
+            model: ["Positive", "Negative"]
+            currentIndex: pane.service && pane.service.branch === "negative" ? 1 : 0
+            onActivated: pane.service.selectBranch(currentIndex === 1 ? "negative" : "positive")
             ToolTip.visible: hovered
             ToolTip.text: pane.service ? pane.service.status + "\nRelative association; blue is low and red is high. Agreement is consistency, not confidence." : ""
-            Accessible.name: "Prompt token heatmap"
+            Accessible.name: "Heatmap prompt"
         }
         Button {
             text: pane.service ? pane.service.gridLabel : "Grid comparison"
-            enabled: pane.service && pane.service.available && !pane.service.exporting
+            enabled: pane.service && pane.service.branchAvailable && !pane.service.exporting
             checkable: true
             checked: pane.service && pane.service.picking
             onClicked: pane.service.toggleGrid()

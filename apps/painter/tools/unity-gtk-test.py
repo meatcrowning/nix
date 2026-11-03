@@ -130,7 +130,7 @@ def test():
             heatmap_state = window.state.get('heatmap')
             requests = []
             window.send = lambda op, **kw: requests.append((op, kw))
-            window.state['heatmap'] = dict(available=True, path=window.selection, selected=-1,
+            window.state['heatmap'] = dict(available=True, branchAvailable=True, branch='positive', path=window.selection, selected=-1,
                 tokens=[dict(label='1 · red'), dict(label='2 · cube')], overlay='')
             window.toggle_heatmap()
             assert window.heatmap_picker.get_visible() and window.history_scroll.get_visible()
@@ -146,7 +146,11 @@ def test():
             if isinstance(grid_label, bytes): grid_label = grid_label.decode('utf-8')
             assert grid_label == u'Pick token 1/2 · Cancel'
             window.heatmap_tokens.set_active(1)
-            assert requests[-1][0] == 'heatmap_select' and requests[-1][1]['index'] == 0
+            assert requests[-1][0] == 'heatmap_branch' and requests[-1][1]['branch'] == 'negative'
+            window.receive('heatmap_branch', dict(ok=True, state=dict(heatmap=dict(
+                window.state['heatmap'], branch='negative', branchAvailable=False, overlay='negative-empty', mask=''))))
+            assert window.heatmap_tokens.get_active() == 1
+            assert not window.heatmap_grid.get_sensitive()
             window.toggle_heatmap()
             assert not window.heatmap_picker.get_visible() and not window.heatmap_grid.get_visible()
             window.send = send

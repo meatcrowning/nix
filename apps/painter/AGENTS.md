@@ -229,13 +229,16 @@ mean pairwise spatial correlation across captured layers/steps on at most 16×16
 pooled maps. This agreement is consistency, not correctness or confidence. Capture runs
 during ordinary MOSS generation when both nodes are advertised. PPM keeps
 its existing sampler because it changes tokenization/attention. Existing files
-without maps cannot display a heatmap. The toolbar token picker and matching
-positive/negative-prompt hovers share the selected token; negative choices are labeled.
-Entry defaults to All positive tokens (All tokens for older outputs):
-mean the saved positive descriptive prompt-token scores (excluding layout structure)
-before a single 5–95% contrast stretch and
-thermal colour mapping; stored per-token normalization cannot recover raw model
-activity. Hover temporarily shows one token, then restores the dropdown choice.
+without maps cannot display a heatmap. Heatmap entry defaults to Positive; the
+toolbar dropdown selects Positive or Negative for image and prompt hovering.
+The dropdown and grid button appear only while heatmaps are active. Nearby
+rankings and the default aggregate use only the selected branch; missing negative
+maps leave the image unmasked with an unavailable status. Branch changes clear
+held areas and pinned tokens. Average the selected branch’s saved descriptive
+prompt-token scores (excluding layout structure) before a single 5–95% contrast
+stretch and thermal colour mapping; stored per-token normalization cannot recover raw model
+activity. Hover temporarily shows one token, then restores the branch aggregate
+or a token pinned from the nearby list.
 Grid comparison arms two prompt/region clicks, validates each against saved tokens,
 and exports a labeled five-panel PNG to the platform Pictures directory in a worker.
 The original spans the left side with its aspect ratio preserved; the right 2×2

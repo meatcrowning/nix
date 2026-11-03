@@ -327,7 +327,8 @@ class Engine:
             prompts += [(r.get('id', ''), r.get('caption', '')) for r in self.settings.get('moss_layout', {}).get('items', [])]
             for identity, text in prompts:
                 highlights[identity] = dict(text=text, ranges=inspection.highlightedRanges(text, identity))
-        return dict(path=self.view_path, status=inspection.status, available=inspection.available, nearby=inspection.nearby, highlights=highlights, exploring=inspection.exploring, imageHeld=inspection.imageHeld,
+        return dict(path=self.view_path, status=inspection.status, available=inspection.available,
+                    branch=inspection.branch, branchAvailable=inspection.branchAvailable, nearby=inspection.nearby, highlights=highlights, exploring=inspection.exploring, imageHeld=inspection.imageHeld,
                     tokens=inspection.tokens, allLabel=inspection.choices[0]['label'], overlay=inspection.overlay, selected=inspection.selected,
                     picking=inspection.picking, exporting=inspection.exporting,
                     gridLabel=inspection.gridLabel, gridStatus=inspection.gridStatus,
@@ -377,6 +378,10 @@ class Engine:
                 c.inspection.hoverRegion(request['text'], int(request['position']), request['region'])
             else:
                 c.inspection.hoverPrompt(request['text'], int(request['position']))
+            return dict(heatmap=self.heatmap_state())
+        if op == 'heatmap_branch':
+            if request.get('path') == self.view_path:
+                c.inspection.selectBranch(request.get('branch'))
             return dict(heatmap=self.heatmap_state())
         if op == 'heatmap_select':
             if request.get('path') == self.view_path:

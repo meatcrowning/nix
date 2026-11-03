@@ -1339,7 +1339,8 @@ def _build_shell_class():
                 self._widget_actions[id(widget)] = act
             else:
                 tb.addAction(act)
-            widget.show()
+            # A contextual widget's action owns visibility across rebuilds.
+            widget.setVisible(act.isVisible())
             return act
 
         def _ensure_toolbar(self):

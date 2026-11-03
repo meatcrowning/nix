@@ -54,6 +54,14 @@ ctl._samplers = ['euler', 'heun']
 ctl._schedulers = ['normal', 'simple']
 ctl._set_status('Ready (isolated fixture)')
 engine = E.Engine(ctl, P.Prefs())
+assert engine.heatmap_state()['branch'] == 'positive'
+engine.dispatch(dict(op='heatmap_branch', path=engine.view_path, branch='negative'))
+assert engine.heatmap_state()['branch'] == 'negative'
+engine.dispatch(dict(op='heatmap_branch', path='stale-output.png', branch='positive'))
+assert engine.heatmap_state()['branch'] == 'negative'
+engine.dispatch(dict(op='heatmap_viewing', viewing=True))
+assert engine.heatmap_state()['branch'] == 'positive'
+engine.dispatch(dict(op='heatmap_viewing', viewing=False))
 assert len(engine.snapshot({})['models']) == 2
 json.dumps(engine.snapshot({}))  # no QObject/registry entries on the wire
 assert engine.snapshot({})['rate'] == ctl.rate

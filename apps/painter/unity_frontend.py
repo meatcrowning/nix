@@ -176,8 +176,8 @@ class Window(Gtk.Window, ParameterForm):
         self.heatmap_open = False
         self.heatmap_tokens = Gtk.ComboBoxText()
         self.heatmap_tokens.connect('changed', self.select_heatmap)
-        self.heatmap_tokens.get_accessible().set_name('Prompt token heatmap')
-        self.heatmap_tokens.set_tooltip_text('All tokens: mean saved association scores, with relative thermal contrast. Blue is low; red is high.')
+        self.heatmap_tokens.get_accessible().set_name('Heatmap prompt')
+        self.heatmap_tokens.set_tooltip_text('Choose positive or negative prompt tokens for heatmap hovering.')
         self.heatmap_picker = Gtk.ToolItem()
         self.heatmap_picker.set_no_show_all(True)
         self.heatmap_picker.add(self.heatmap_tokens)
@@ -574,15 +574,17 @@ class Window(Gtk.Window, ParameterForm):
         self.heatmap_tokens.set_tooltip_text(heatmap.get('status', ''))
         for widget in self.actions.get('heatmap', []):
             widget.set_tooltip_text(heatmap.get('status', ''))
-        self.heatmap_grid.set_sensitive(bool(heatmap.get('available')) and not heatmap.get('exporting'))
-        labels = [heatmap.get('allLabel', 'Nearby tokens' if heatmap.get('exploring') else 'All tokens')] + [t['label'] for t in heatmap.get('tokens', [])]
+        self.heatmap_grid.set_sensitive(bool(heatmap.get('branchAvailable')) and not heatmap.get('exporting'))
+        self.heatmap_picker.set_visible(self.heatmap_open)
+        self.heatmap_grid.set_visible(self.heatmap_open)
+        labels = ['Positive', 'Negative']
         self.syncing_heatmap = True
         if labels != self.heatmap_labels:
             self.heatmap_tokens.remove_all()
             for text in labels:
                 self.heatmap_tokens.append_text(text)
             self.heatmap_labels = labels
-        self.heatmap_tokens.set_active(heatmap.get('selected', -2) + 1)
+        self.heatmap_tokens.set_active(1 if heatmap.get('branch') == 'negative' else 0)
         self.heatmap_tokens.set_sensitive(bool(heatmap.get('available')) and heatmap.get('path') == self.selection)
         self.syncing_heatmap = False
         overlay = heatmap.get('overlay', '')
@@ -595,16 +597,18 @@ class Window(Gtk.Window, ParameterForm):
                 loader.write(base64.b64decode(packet))
                 loader.close()
                 self.viewer.set_heatmap(loader.get_pixbuf())
+            else:
+                self.viewer.set_heatmap(None)
 
     def select_heatmap(self, *_):
         index = self.heatmap_tokens.get_active()
         if self.heatmap_open and not self.syncing_heatmap and index >= 0:
-            self.send('heatmap_select', path=self.selection, index=index - 1)
+            self.send('heatmap_branch', path=self.selection, branch='negative' if index == 1 else 'positive')
 
     def receive(self, op, reply):
         if self.closing:
             return False
-        if op in ('heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick', 'heatmap_image', 'heatmap_image_end', 'heatmap_nearby', 'heatmap_hold', 'heatmap_release', 'heatmap_nearby_hover', 'heatmap_nearby_leave'):
+        if op in ('heatmap_branch', 'heatmap_select', 'heatmap_hover', 'heatmap_hover_end', 'heatmap_viewing', 'heatmap_grid', 'heatmap_pick', 'heatmap_image', 'heatmap_image_end', 'heatmap_nearby', 'heatmap_hold', 'heatmap_release', 'heatmap_nearby_hover', 'heatmap_nearby_leave'):
             if reply.get('ok') and reply.get('state', {}).get('heatmap'):
                 self.state['heatmap'] = reply['state']['heatmap']
                 for marks in self.token_marks:
