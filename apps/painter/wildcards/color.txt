@@ -1,0 +1,24 @@
+black
+white
+grey
+cream
+beige
+brown
+tan
+red
+burgundy
+coral
+orange
+peach
+yellow
+ochre
+green
+olive
+mint
+teal
+cyan
+blue
+navy blue
+purple
+lavender
+pink
