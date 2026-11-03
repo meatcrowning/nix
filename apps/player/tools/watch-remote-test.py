@@ -10,7 +10,7 @@ never propagates over cifs, so the watch was pure cost there anyway.
 
 The fix gates the library root on `library_is_remote_cached()`:
 
-  * remote library -> only the LOCAL slskd downloads dir is watched, and the
+  * remote library -> no local acquisition directories are watched, and the
     watcher NEVER holds the library root (so no periodic stat of it);
   * local library  -> the library root is watched exactly as before.
 
@@ -32,6 +32,7 @@ from pathlib import Path
 os.environ["QT_QPA_PLATFORM"] = "offscreen"   # hard, never setdefault
 os.environ.pop("WAYLAND_DISPLAY", None)
 os.environ.pop("DISPLAY", None)
+os.environ.pop("PLAYER_REMOTE_WATCH_HOST", None)
 
 SCRATCH = tempfile.mkdtemp(prefix="player-watch-test-")
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
@@ -97,6 +98,11 @@ def watched(remote):
         return walk(root, *args, **kwargs)
     with patch.object(P.os, "walk", observe):
         scanner = P.AutoScanner(FakeLibrary())
+        if remote:
+            check("remote: no startup import", scanner._import_timer.isActive(), False)
+            with patch.object(P.QProcess, "start", side_effect=AssertionError("remote writer")):
+                scanner._run_import()
+                scanner._maybe_rg_scan()
         scanner._import_timer.stop()  # never run the actual importer
         try:
             deadline = time.monotonic() + 2
@@ -115,7 +121,7 @@ def watched(remote):
 
 remote = watched(True)
 check("remote: library root NOT watched", str(LIB) in remote, False)
-check("remote: downloads dir watched", str(DOWNLOADS) in remote, True)
+check("remote: downloads dir not watched", str(DOWNLOADS) in remote, False)
 
 local = watched(False)
 check("local: library root watched", str(LIB) in local, True)
@@ -172,6 +178,47 @@ check("remote: stream reconnected", len(calls) >= 2, True)
 check("remote: fixed host", calls[0][-2], "top-test")
 check("remote: fixed watch command", "exec inotifywait" in calls[0][-1], True)
 check("remote: watches declared root", calls[0][-1].endswith(str(P.LIBRARY_ROOT)), True)
+# Startup readiness also catches edits between the launch-time DB pull and
+# opening the event stream, without depending on a local download importer.
+with patch.object(P.RemoteLibraryWatch, "_start"):
+    startup_lib = FakeLibrary()
+    startup = P.RemoteLibraryWatch(startup_lib, "top-test")
+    class Ready:
+        def readAllStandardOutput(self): return b"PLAYER_LIBRARY_READY\n"
+    startup._proc = Ready()
+    startup._read_stdout()
+    startup._proc = None
+end = time.monotonic() + .07
+while time.monotonic() < end:
+    app.processEvents()
+    time.sleep(.005)
+check("remote: initial readiness catches up", startup_lib.rescans, 1)
+startup.stop()
+startup.deleteLater()
+app.processEvents()
+# Keep sending events faster than the quiet interval: a scan must occur
+# while the producer is still active, then one trailing scan must follow.
+with patch.object(P.RemoteLibraryWatch, "_start"):
+    lib = FakeLibrary()
+    bridge = P.RemoteLibraryWatch(lib, "top-test")
+bridge.MAX_WAIT_MS = 90
+end = time.monotonic() + .22
+while time.monotonic() < end:
+    bridge._queue_changes()
+    app.processEvents()
+    time.sleep(.005)
+check("remote: sustained writes cannot starve scans", lib.rescans >= 2, True)
+before = lib.rescans
+end = time.monotonic() + .07
+while time.monotonic() < end:
+    app.processEvents()
+    time.sleep(.005)
+check("remote: final burst is flushed", lib.rescans, before + 1)
+bridge._queue_changes()
+bridge.stop()
+check("remote: shutdown cancels deadline", bridge._deadline_timer.isActive(), False)
+bridge.deleteLater()
+app.processEvents()
 os.environ["PATH"] = old_path
 
 print()

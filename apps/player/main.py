@@ -5060,6 +5060,7 @@ class RemoteLibraryWatch(QObject):
     """
 
     QUIET_MS = 8000
+    MAX_WAIT_MS = 30000
     RECONNECT_MS = 5000
 
     def __init__(self, library, host, parent=None):
@@ -5068,11 +5069,14 @@ class RemoteLibraryWatch(QObject):
         self._host = host
         self._proc = None
         self._stdout = b""
-        self._catch_up = False
+        self._catch_up = True
         self._stopping = False
         self._scan_timer = QTimer(self)
         self._scan_timer.setSingleShot(True)
-        self._scan_timer.timeout.connect(self._library.rescan)
+        self._scan_timer.timeout.connect(self._flush_changes)
+        self._deadline_timer = QTimer(self)
+        self._deadline_timer.setSingleShot(True)
+        self._deadline_timer.timeout.connect(self._flush_changes)
         self._restart_timer = QTimer(self)
         self._restart_timer.setSingleShot(True)
         self._restart_timer.timeout.connect(self._start)
@@ -5124,10 +5128,22 @@ class RemoteLibraryWatch(QObject):
                 # Only remote readiness closes the blind interval; QProcess's
                 # started signal means merely that the local ssh binary ran.
                 if self._catch_up:
-                    self._scan_timer.start(self.QUIET_MS)
+                    self._queue_changes()
                     self._catch_up = False
             elif line == b"PLAYER_LIBRARY_CHANGED":
-                self._scan_timer.start(self.QUIET_MS)
+                self._queue_changes()
+
+    def _queue_changes(self):
+        self._scan_timer.start(self.QUIET_MS)
+        # A long cover/tag job may never leave eight quiet seconds. Bound the
+        # debounce; Library.rescan coalesces requests while a scan is running.
+        if not self._deadline_timer.isActive():
+            self._deadline_timer.start(self.MAX_WAIT_MS)
+
+    def _flush_changes(self):
+        self._scan_timer.stop()
+        self._deadline_timer.stop()
+        self._library.rescan()
 
     def _read_stderr(self):
         if self._proc is None:
@@ -5158,6 +5174,7 @@ class RemoteLibraryWatch(QObject):
         self._stopping = True
         self._restart_timer.stop()
         self._scan_timer.stop()
+        self._deadline_timer.stop()
         if self._proc is not None:
             proc = self._proc
             self._proc = None
@@ -5238,13 +5255,13 @@ class AutoScanner(QObject):
         self._rg_timer.timeout.connect(self._maybe_rg_scan)
         self._library.scanRunning.connect(self._on_scan_running)
         # Catch up anything already sitting in downloads/ from a previous session.
-        if SLSKD_DOWNLOADS.is_dir():
+        if not library_is_remote_cached() and SLSKD_DOWNLOADS.is_dir():
             self._import_timer.start(500)
 
     def _watch_dirs(self):
         if self._watch_worker is not None:
             return
-        dirs = [str(SLSKD_DOWNLOADS)]
+        dirs = [] if library_is_remote_cached() else [str(SLSKD_DOWNLOADS)]
         # Never stat or watch the library root when it is a network mount: this
         # runs on the GUI thread at startup and every REWATCH_S, and a stat on
         # book's cifs mount (//top/aud over Tailscale) blocks the whole event
@@ -5292,6 +5309,8 @@ class AutoScanner(QObject):
             self._import_timer.start(self.IMPORT_DEBOUNCE_MS)
 
     def _run_import(self):
+        if library_is_remote_cached():
+            return  # top owns acquisition; do not walk/write its share from air
         if self._proc is not None:
             self._import_pending = True
             return
@@ -5331,6 +5350,8 @@ class AutoScanner(QObject):
             self._rg_timer.start(250)
 
     def _maybe_rg_scan(self):
+        if library_is_remote_cached():
+            return  # file tag writes belong on the library host
         if self._proc is not None or self._rg_proc is not None:
             return  # an import is mid-move, or a gain scan is already running
         if not self._untagged_pending():
@@ -5773,9 +5794,8 @@ def main():
     # On air the launcher has just pulled top's authoritative SQLite database.
     # Walking every file over CIFS merely to rediscover that unchanged metadata
     # takes minutes and competes with first-frame gallery construction.  The
-    # remote library is not watched (inotify does not cross CIFS); its next
-    # launch pulls a fresh DB, and Configure player still offers a deliberate
-    # Rescan when that is needed.  Keep the local-SSD startup catch-up.
+    # remote watcher schedules catch-up after its SSH connection is ready,
+    # then follows top's filesystem events. Keep the local-SSD startup catch-up.
     if not library_is_remote_cached():
         QTimer.singleShot(400, library.rescan)
 

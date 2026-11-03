@@ -78,8 +78,10 @@ in `$XDG_STATE_HOME/player/`. Respect each tool's path overrides in harnesses.
   into follow-up work. Watch discovery covers local descendants off-thread and
   excludes remote libraries. On air, `RemoteLibraryWatch` consumes a fixed
   marker stream from `inotifywait` running locally on top over SSH, debounces
-  copy bursts, and uses the same incremental scanner. It must reconnect with a
-  catch-up scan and must never interpolate event paths into commands. Busy
+  copy bursts with a bounded wait, and uses the same incremental scanner.
+  The watcher scans on initial connection and reconnect, and must never
+  interpolate event paths into commands. Remote clients do not run local
+  download imports or ReplayGain writers; top owns those file mutations. Busy
   rescans retain follow-up requests too. Child
   start failures release busy state and report errors. The importer uses the
   shared Scanner, not a separate deletion/transaction implementation. Manual
