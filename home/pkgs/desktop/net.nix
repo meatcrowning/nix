@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ config, pkgs, lib, host, ... }:
 
 let
   # Vivaldi's proprietary H.264/AAC codecs (`vivaldi-ffmpeg-codecs`) and the
@@ -6,10 +6,21 @@ let
   # pkg's src is a hardcoded x86_64 snapcraft snap, and Google ships no desktop
   # aarch64 Widevine — so both fail to build on `air` (Asahi/aarch64) even
   # though their meta.platforms wrongly claims aarch64. Ship them only on
-  # x86_64. `air` gets no nix vivaldi at all — see the note below.
+  # x86_64.
   isx86 = pkgs.stdenv.hostPlatform.isx86_64;
 in
 {
+  # Existing Plasma pins and host-local browser choices keep the Flatpak ID.
+  # Redirect that ID without exposing a second browser in the application menu.
+  xdg.desktopEntries."com.vivaldi.Vivaldi" = lib.mkIf (host == "air") {
+    name = "Vivaldi";
+    exec = "${config.home.profileDirectory}/bin/vivaldi %U";
+    icon = "vivaldi";
+    noDisplay = true;
+    terminal = false;
+    type = "Application";
+  };
+
   home.packages = with pkgs; [
 	lynx
   ] ++ lib.optionals isx86 [
@@ -21,13 +32,7 @@ in
   ] ++ lib.optionals (host != "air") [
         qutebrowser
         firefox
-        # Vivaldi is nix's on `top` only. On `book` the browser he actually uses
-        # is the FLATPAK (com.vivaldi.Vivaldi), whose profile lives in
-        # ~/.var/app; the nix build reads ~/.config/vivaldi instead, so its
-        # `vivaldi-stable.desktop` in the launcher opened a second, EMPTY
-        # profile — which is how a launch from the runner lost him every
-        # session cookie he had [2026-08-30]. One install per host, so there is
-        # only one profile to land on.
+  ] ++ [
         ((vivaldi.override {
           proprietaryCodecs = isx86;
           enableWidevine = isx86;
@@ -49,8 +54,15 @@ in
           # kwallet key. Verified by test-decryption
           # (`apps/pylib/tools/chromium-key-recover.py`): the real key is the
           # kwallet one, so name that backend and the session stops mattering.
-          commandLineArgs = "--password-store=kwallet6";
+          commandLineArgs = "--password-store=kwallet6"
+            + lib.optionalString (host == "air") " --use-gl=angle --use-angle=vulkan";
         }).overrideAttrs (old: {
+          # Fedora has no /run/opengl-driver. Use Nix's tested Honeykrisp ICD
+          # explicitly so ANGLE does not fall back to software rendering.
+          postFixup = (old.postFixup or "") + lib.optionalString (host == "air") ''
+            wrapProgram "$out/bin/vivaldi" \
+              --set VK_DRIVER_FILES "${pkgs.mesa}/share/vulkan/icd.d/asahi_icd.aarch64.json"
+          '';
           postInstall = (old.postInstall or "") + ''
             ui="$out/opt/vivaldi/resources/vivaldi"
             cp ${../../../apps/pylib/vivaldi-sidebar.js} "$ui/desktop-sidebar.js"

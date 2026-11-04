@@ -412,6 +412,8 @@ in
       };
       # Maximized window controls and title move into the global menu bar.
       kwinrc.Windows.BorderlessMaximizedWindows = true;
+      # Book's old look-and-feel defaults reference an uninstalled Aero switcher.
+      kwinrc.TabBox.LayoutName = lib.mkIf (host == "air") "compact";
       kwinrc.Desktops.Number = 1;
       kwinrc.Desktops.Rows = 1;
       # The translucent left launcher needs compositor blur on both hosts.

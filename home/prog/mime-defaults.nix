@@ -67,8 +67,7 @@ let
 
   # Desktop-specific distribution fallbacks preserve Plasma's native defaults
   # without masking the generic mimeapps.list written by settings GUIs.
-  vivaldiDesktop =
-    if host == "air" then "com.vivaldi.Vivaldi.desktop" else "vivaldi-stable.desktop";
+  vivaldiDesktop = "vivaldi-stable.desktop";
 
   kdeAssoc =
     (map (t: "${t}=org.kde.dolphin.desktop") filerTypes)
