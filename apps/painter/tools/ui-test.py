@@ -2747,6 +2747,74 @@ def test_filter(win, ctl, tmp):
     spin(120)
 
 
+def test_history_arrows(win, ctl, tmp):
+    """Deliver real keys to the isolated window, including focus boundaries."""
+    from PySide6.QtCore import Qt
+    view = find(win.contentItem(), "GalleryView")
+    grid = next(it for it in walk(view) if it.objectName() == "historyGrid")
+    original_columns = view.property("columns")
+    paths = [fake_png(os.path.join(tmp, "out", "arrow_%d.png" % i),
+                      {"positive": "arrow fixture"}) for i in range(7)]
+    for path in paths:
+        ctl.gallery.add(path)
+    ctl.gallery.setFilter('filename:arrow_')
+    view.setProperty("columns", 2)
+    spin(200)
+    order = [ctl.gallery.pathAt(i) for i in range(ctl.gallery.rowCount())]
+    check("history uses two columns for navigation fixture", grid.property("cols") == 2)
+    view.metaObject().invokeMethod(view, "clearSelection")
+    grid.forceActiveFocus(Qt.TabFocusReason)
+    key(win, Qt.Key_Right)
+    check("arrow enters an empty selection at the first output", prop(view, "selection") == order[:1])
+    for arrow, expected in ((Qt.Key_Right, 1), (Qt.Key_Down, 3), (Qt.Key_Up, 1),
+                            (Qt.Key_Up, 1), (Qt.Key_Left, 0), (Qt.Key_Left, 0)):
+        key(win, arrow)
+        check("history arrow %s selects index %d" % (arrow, expected),
+              prop(view, "selection") == [order[expected]], prop(view, "selection"))
+    key(win, Qt.Key_Right, Qt.ShiftModifier)
+    key(win, Qt.Key_Right, Qt.ShiftModifier)
+    check("shift arrows extend from the original anchor", prop(view, "selection") == order[:3])
+    key(win, Qt.Key_Left, Qt.ShiftModifier)
+    check("shift arrows shrink back toward the anchor", prop(view, "selection") == order[:2])
+    invoke_str(view, "selectSingle", order[5])
+    key(win, Qt.Key_Down)
+    check("down reaches the last partial row", prop(view, "selection") == [order[6]])
+    key(win, Qt.Key_Down)
+    key(win, Qt.Key_Right)
+    check("arrows clamp at the end", prop(view, "selection") == [order[6]])
+    check("keyboard selection scrolls into view", grid.property("contentY") > 0)
+    box = find(win.contentItem(), "PromptBox")
+    edit = find(box, "QQuickTextEdit")
+    edit.forceActiveFocus()
+    key(win, Qt.Key_Left)
+    check("arrows in a prompt do not move history", prop(view, "selection") == [order[6]])
+    # Click a real tile: this must give the grid focus without a test-only call.
+    grid.metaObject().invokeMethod(grid, "positionViewAtBeginning")
+    spin(120)
+    image = next(it for it in walk(grid) if it.objectName() == "historyImage"
+                 and it.isVisible() and it.mapToItem(grid, 0, 0).y() >= 0
+                 and it.mapToItem(grid, 0, 0).y() < grid.height() - it.height())
+    click(win, image)
+    selected = prop(view, "selection")[0]
+    index = ctl.gallery.indexOf(selected)
+    check("clicking a history tile gives it keyboard focus", grid.property("activeFocus"))
+    key(win, Qt.Key_Right)
+    check("arrow navigation works immediately after a tile click",
+          prop(view, "selection") == [order[min(index + 1, len(order) - 1)]])
+    ctl.gallery.setFilter('filename:does-not-exist')
+    key(win, Qt.Key_Down)
+    check("arrows tolerate an empty filtered history", prop(view, "selection") == [])
+    ctl.gallery.setFilter('filename:arrow_')
+    key(win, Qt.Key_Right)
+    check("arrows restart after the old cursor is filtered out", prop(view, "selection") == order[:1])
+    view.setProperty("columns", original_columns)
+    ctl.gallery.setFilter('')
+    for path in paths:
+        os.remove(path)
+    ctl.gallery.load_existing()
+    spin(100)
+
+
 def test_browse_view(win, ctl, tmp):
     """Browse <-> View: enter, walk, zoom, leave.
 
@@ -6353,6 +6421,7 @@ def main():
         elif only == "gallery":
             test_thumb_cache(win, ctl, tmp)
             test_filter(win, ctl, tmp)
+            test_history_arrows(win, ctl, tmp)
             test_live_row(win, ctl, tmp)
         elif only == "notifications":
             test_done_toast(win, ctl, tmp)
@@ -6410,6 +6479,7 @@ def main():
     print("== escape ==");            test_escape(win, ctl)
     print("== panel order + pins =="); test_panel_order_and_pins(win, ctl, tmp, keep)
     print("== filter ==");           test_filter(win, ctl, tmp)
+    print("== history arrows ==");   test_history_arrows(win, ctl, tmp)
     print("== browse/view ==");      test_browse_view(win, ctl, tmp)
     print("== compare + columns =="); test_compare_and_columns(win, ctl, tmp)
     print("== inject ==");            test_inject(win, ctl, tmp)

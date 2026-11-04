@@ -178,6 +178,12 @@ it false. Collapsed sections retain pinned interactive rows. Park others in
 stash without overwriting their visibility bindings or using a null parent.
 Repeater-containing rows use `selfHides` and remain first in their section.
 
+History takes keyboard focus on tile/background clicks and through Tab. Arrow
+keys move its path-based selection by item or grid row; Shift extends from the
+anchor, and navigation scrolls the destination into view. Keep these handlers
+local to the focused history so prompt editors retain their arrow keys. GTK uses
+native IconView navigation. The offscreen gallery harness covers the Qt route.
+
 Selection is the single current-output cursor (`selOne`). Return/double-click
 enters View; Escape leaves it; Back/Forward switch Browse/View without changing
 selection. PgUp/PgDown walk outputs only in View. Open in Viewer is separate.

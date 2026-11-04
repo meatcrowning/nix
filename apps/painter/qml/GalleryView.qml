@@ -37,6 +37,7 @@ Item {
     //     rule as filer's rows (docs/DESIGN.md §13).
     property var selection: []
     property string anchorPath: ""
+    property string cursorPath: ""
 
     // FOLLOWING THE JOB. The preview viewport shows what is SELECTED, and the
     // running job is a row like any other (`Gallery.begin_live`), so "show me
@@ -62,6 +63,7 @@ Item {
         // A DELIBERATE pick decides whether the pane keeps following the job.
         view.followLive = Gallery.isLive(p)
         view.anchorPath = p
+        view.cursorPath = p
         view.setSelection([p])
     }
 
@@ -71,6 +73,7 @@ Item {
     function followTo(p) {
         if (p === "") return
         view.anchorPath = p
+        view.cursorPath = p
         view.setSelection([p])
     }
 
@@ -81,6 +84,7 @@ Item {
         if (i >= 0) s.splice(i, 1)
         else s.push(p)
         view.anchorPath = p
+        view.cursorPath = p
         view.setSelection(s)
     }
 
@@ -89,6 +93,7 @@ Item {
         var to = Gallery.indexOf(p)
         var from = view.anchorPath === "" ? to : Gallery.indexOf(view.anchorPath)
         if (to < 0) return
+        view.cursorPath = p
         if (from < 0) from = to
         var lo = Math.min(from, to), hi = Math.max(from, to)
         var s = []
@@ -103,7 +108,31 @@ Item {
         // selected.
         view.followLive = true
         view.anchorPath = ""
+        view.cursorPath = ""
         view.setSelection([])
+    }
+
+    function moveSelection(key, extend) {
+        if (Gallery.count === 0) return
+        var current = Gallery.indexOf(view.cursorPath)
+        if (current < 0 && view.selection.length)
+            current = Gallery.indexOf(view.selection[view.selection.length - 1])
+        var next = 0
+        if (current >= 0) {
+            next = current
+            if (key === Qt.Key_Left) next = Math.max(0, current - 1)
+            else if (key === Qt.Key_Right) next = Math.min(Gallery.count - 1, current + 1)
+            else if (key === Qt.Key_Up && current >= grid.cols) next = current - grid.cols
+            else if (key === Qt.Key_Down
+                     && Math.floor(current / grid.cols) < Math.floor((Gallery.count - 1) / grid.cols))
+                next = Math.min(Gallery.count - 1, current + grid.cols)
+        }
+        var path = Gallery.pathAt(next)
+        if (extend && current >= 0) {
+            if (Gallery.indexOf(view.anchorPath) < 0) view.anchorPath = Gallery.pathAt(current)
+            view.extendTo(path)
+        } else view.selectSingle(path)
+        grid.positionViewAtIndex(next, GridView.Contain)
     }
 
     // What a drag from `p` should carry: the whole selection when p is part of
@@ -139,6 +168,8 @@ Item {
     Connections {
         target: Gallery
         function onCountChanged() {
+            if (Gallery.indexOf(view.cursorPath) < 0) view.cursorPath = ""
+            if (Gallery.indexOf(view.anchorPath) < 0) view.anchorPath = ""
             if (view.selection.length === 0) return
             var s = []
             for (var i = 0; i < view.selection.length; i++)
@@ -214,11 +245,26 @@ Item {
     // sits UNDER the grid, so a click only reaches it where there is no tile.
     MouseArea {
         anchors.fill: grid
-        onClicked: view.clearSelection()
+        onClicked: {
+            grid.forceActiveFocus(Qt.MouseFocusReason)
+            view.clearSelection()
+        }
     }
 
     KineticGridView {
         id: grid
+        objectName: "historyGrid"
+        activeFocusOnTab: true
+        // Selection is path-based; GridView's independent currentIndex must not
+        // consume keys or move a different cursor after filtering/insertion.
+        keyNavigationEnabled: false
+        Keys.onPressed: function(event) {
+            if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) return
+            if (event.key !== Qt.Key_Left && event.key !== Qt.Key_Right
+                    && event.key !== Qt.Key_Up && event.key !== Qt.Key_Down) return
+            view.moveSelection(event.key, (event.modifiers & Qt.ShiftModifier) !== 0)
+            event.accepted = true
+        }
         anchors.top: head.bottom
         anchors.topMargin: 8
         anchors.left: parent.left
@@ -588,6 +634,7 @@ Item {
                     drag.onActiveChanged: if (tileMa.drag.active) tileMa.dragged = true
 
                     onPressed: function (m) {
+                        grid.forceActiveFocus(Qt.MouseFocusReason)
                         if (tile.live) {
                             // Selecting it is the whole interaction: that is
                             // how you get the preview viewport back onto the
