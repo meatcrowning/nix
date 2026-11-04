@@ -25,6 +25,7 @@ it does not.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -48,7 +49,7 @@ def params_for(path) -> dict | None:
             own = tags.get("painter")
             if own:
                 try:
-                    return import_prompt(json.loads(own))
+                    return _saved_params(own, tags.get("prompt"))
                 except ValueError:
                     return None
             return params_from_graph(tags.get("prompt"))
@@ -56,7 +57,7 @@ def params_for(path) -> dict | None:
         own = text.get("painter")
         if own:
             try:
-                return import_prompt(json.loads(own))
+                return _saved_params(own, text.get("prompt"))
             except ValueError:
                 return None
         out = params_from_graph(text.get("prompt"))
@@ -66,6 +67,23 @@ def params_for(path) -> dict | None:
         return out
     except (OSError, ValueError):
         return None
+
+
+def _saved_params(own, graph):
+    params = import_prompt(json.loads(own))
+    # Older Painter tags can coexist with a complete Comfy graph. An explicit
+    # empty stack is authoritative; only recover a genuinely unrecorded field.
+    if isinstance(params, dict) and 'loras' not in params:
+        recovered = params_from_graph(graph) or {}
+        for key in ('loras', 'moss_destripe_lora', 'moss_destripe_strength'):
+            if key in recovered and key not in params:
+                params[key] = recovered[key]
+    return params
+
+
+@lru_cache(maxsize=1)
+def _moss_correction():
+    return json.loads((Path(__file__).parent / 'families/moss_image.json').read_text())['destripe']
 
 
 def _nodes_of(graph: dict, *class_names):
@@ -151,6 +169,39 @@ def _lit(inputs, key, cast=None, default=None):
         return default
 
 
+def _model_loras(graph, sampler, model_name):
+    """Recover chain order from model wires, never JSON node order."""
+    link = sampler.get('model') or sampler.get('guider')
+    rows, correction, seen = [], {}, set()
+    while isinstance(link, list) and len(link) >= 2 and str(link[0]) not in seen:
+        key = str(link[0])
+        seen.add(key)
+        node = graph.get(key)
+        if not isinstance(node, dict):
+            break
+        inputs = node.get('inputs') or {}
+        if node.get('class_type') in ('LoraLoader', 'LoraLoaderModelOnly'):
+            name = _lit(inputs, 'lora_name')
+            strength = _lit(inputs, 'strength_model', float)
+            if isinstance(name, str) and strength is not None:
+                role = (node.get('_meta') or {}).get('painter_role')
+                source = inputs.get('model')
+                parent = graph.get(str(source[0]), {}) if isinstance(source, list) and source else {}
+                fix = _moss_correction()
+                automatic = (model_name in fix['models'] and name == fix['file']
+                             and parent.get('class_type') in ('UNETLoader', 'UnetLoaderGGUF'))
+                if role == 'moss_destripe' or automatic:
+                    correction = dict(moss_destripe_lora=name, moss_destripe_strength=strength)
+                else:
+                    row = dict(name=name, strength=strength,
+                               patches_clip=node['class_type'] == 'LoraLoader')
+                    if row['patches_clip']:
+                        row['strength_clip'] = _lit(inputs, 'strength_clip', float, strength)
+                    rows.append(row)
+        link = inputs.get('model')
+    return dict(loras=list(reversed(rows)), **correction)
+
+
 def params_from_graph(raw) -> dict | None:
     """Painter-shaped parameters read out of a ComfyUI prompt graph.
 
@@ -185,7 +236,8 @@ def params_from_graph(raw) -> dict | None:
         break
     # The prompt the SAMPLER was given, not whichever encoder comes first: a
     # graph's node order says nothing about which box is which.
-    sampler = _first(graph, "*SamplerCustom", "KSampler", "KSamplerAdvanced",
+    sampler = _first(graph, "*SamplerCustom", "PainterMossSampler", "SamplerCustomAdvanced",
+                     "KSampler", "KSamplerAdvanced",
                      "CFGGuider")
     if "positive" not in out and sampler:
         pos = _cond_text(graph, sampler.get("positive"))
@@ -270,6 +322,9 @@ def params_from_graph(raw) -> dict | None:
         if isinstance(name, str):
             out["model"] = name
         break
+
+    if sampler:
+        out.update(_model_loras(graph, sampler, out.get("model")))
 
     # Seconds are what the duration control holds; the graph counts frames.
     if out.get("frames") and out.get("fps"):

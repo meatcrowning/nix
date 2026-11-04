@@ -2747,6 +2747,83 @@ def test_filter(win, ctl, tmp):
     spin(120)
 
 
+def test_lora_roundtrip(win, ctl, tmp, keep):
+    """Saved PNG -> injection, rescan, and a delayed second-window startup."""
+    from unittest.mock import patch
+    import main as P
+    import outmeta
+    import output_save
+    import userprefs
+    models = Path(os.environ['PAINTER_MODELS'])
+    for name in ('roundtrip-a', 'roundtrip-b'):
+        write_safetensors(str(models / 'loras' / (name + '.safetensors')), {
+            'diffusion_model.double_blocks.0.img_attn.qkv.lora_down.weight': [4, 16],
+            'diffusion_model.double_blocks.0.img_attn.qkv.lora_up.weight': [16, 4]})
+    ctl.rescan()
+    ctl.selectModelByName('alpha-model.safetensors')
+    rows = [dict(name='roundtrip-a.safetensors', strength=0, patches_clip=True, strength_clip=.3),
+            dict(name='roundtrip-b.safetensors', strength=-.6, patches_clip=False)]
+    source = Path(tmp) / 'roundtrip-source.png'
+    source.write_bytes(fake_png_bytes())
+    output = Path(tmp) / 'out' / 'roundtrip.png'
+    output_save.publish(source, output, {'params': {'positive': 'roundtrip', 'loras': rows}})
+    params = outmeta.params_for(output)
+    check('saved PNG retains the exact LoRA metadata', params['loras'] == rows)
+    APP.metaObject().invokeMethod(APP, 'injectParams', Q_ARG('QVariant', params))
+    check('Qt injection restores order, zero/negative strengths and CLIP settings',
+          ctl.loras.active() == [dict(row, enabled=True) for row in rows], ctl.loras.active())
+    APP.metaObject().invokeMethod(APP, 'injectPrompt', Q_ARG('QVariant', {'positive': 'words only'}))
+    check('prompt-only injection leaves LoRAs intact', ctl.loras.rowCount() == 2)
+    APP.metaObject().invokeMethod(APP, 'injectAll', Q_ARG('QVariant', {'positive': 'no adapters'}))
+    check('injecting a no-LoRA output clears the old stack', ctl.loras.rowCount() == 0)
+    ctl.restoreLoras(rows + [rows[0], {'name': rows[1]['name'], 'strength': 'bad'},
+                             {'name': 'missing.safetensors'}])
+    check('restore skips duplicates and invalid/missing rows', ctl.loras.rowCount() == 2
+          and ctl.loras.active() == [dict(row, enabled=True) for row in rows])
+    ctl.loras.setEnabled(1, False)
+    saved = ctl.lorasSnapshot()
+    ctl.rescan()
+    check('model rescans retain the stack including disabled rows', ctl.lorasSnapshot() == saved)
+    APP.metaObject().invokeMethod(APP, 'saveState')
+    check('session preferences retain the complete stack', json.loads(keep[2].get('loras')) == saved)
+    defaults = userprefs.loras_for(ctl.reg, ctl.models.entry_at(ctl._selected), keep[2]._doc)
+    check('headless defaults preserve zero strength and omit disabled adapters',
+          len(defaults) == 1 and defaults[0]['strength'] == 0 and defaults[0]['strength_clip'] == .3)
+    # Allow the debounce timer to fire before the registry is available.
+    APP.setProperty('restored', False)
+    with patch.object(P.Painter, 'rescan', lambda self: None):
+        eng, win2, root2, ctl2, keep2 = build_window()
+        spin(1000)
+        check('slow startup cannot overwrite saved model or LoRAs',
+              keep2[2].get('model') == 'alpha-model.safetensors'
+              and json.loads(keep2[2].get('loras')) == saved)
+    ctl2.rescan()
+    spin(100)
+    check('relaunch restores the full LoRA stack after discovery', ctl2.lorasSnapshot() == saved,
+          ctl2.lorasSnapshot())
+    ctl2.rescan()
+    check('a second scan after startup also retains restored LoRAs', ctl2.lorasSnapshot() == saved)
+    root2.setProperty('restored', False)
+    win2.close()
+    write_safetensors(str(models / 'unet' / 'roundtrip-moss.safetensors'), {
+        'video_embedder.bias': [3072], 'text_embedder.proj.weight': [3072, 4096],
+        'shared_block_modulation.weight': [18432, 3072],
+        'layers.0.q_norm.weight': [128], 'final_linear_video.weight': [128, 3072],
+        'layers.0.proj.q.weight': [3072, 3072]})
+    write_safetensors(str(models / 'loras' / 'roundtrip-moss-lora.safetensors'), {
+        'diffusion_model.layers.0.proj.q.lora_down.weight': [4, 3072],
+        'diffusion_model.layers.0.proj.q.lora_up.weight': [3072, 4]})
+    ctl.rescan()
+    ctl.selectModelByName('roundtrip-moss.safetensors')
+    moss = [dict(name='roundtrip-moss-lora.safetensors', strength=.8, patches_clip=False)]
+    APP.metaObject().invokeMethod(APP, 'injectAll', Q_ARG('QVariant', {'loras': moss}))
+    check('MOSS injection restores its compatible LoRA stack', ctl.supportsLoras
+          and ctl.loras.active() == [dict(moss[0], enabled=True)])
+    ctl.rescan()
+    check('MOSS rescans retain injected LoRAs', ctl.loras.active() == [dict(moss[0], enabled=True)])
+    return eng, win2, ctl2, keep2
+
+
 def test_history_arrows(win, ctl, tmp):
     """Deliver real keys to the isolated window, including focus boundaries."""
     from PySide6.QtCore import Qt
@@ -6398,10 +6475,12 @@ def main():
 
     app, engine, win, ctl, keep = build(tmp)
     only = os.environ.get("PAINTER_UI_ONLY")
-    if only in ("wildcards", "queue-button", "queue", "seed", "preview", "live", "llada", "modes", "compare",
+    if only in ("loras", "wildcards", "queue-button", "queue", "seed", "preview", "live", "llada", "modes", "compare",
                 "snapshots", "pairing", "source", "tags", "tab", "krea", "moss", "notifications", "gallery", "sidebar", "history", "agent", "sections", "drag"):
         print("== %s ==" % only)
-        if only == "wildcards":
+        if only == "loras":
+            lora_keep = test_lora_roundtrip(win, ctl, tmp, keep)
+        elif only == "wildcards":
             test_independent_wildcards(win, ctl, keep)
         elif only == "queue-button":
             test_queue_button(ctl, keep[-1])

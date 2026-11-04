@@ -461,7 +461,6 @@ class Engine:
                 if row['name'] not in choices or not math.isfinite(float(row['strength'])):
                     raise ValueError('Invalid or incompatible LoRA')
                 row['patchesClip'] = bool(choices[row['name']].get('patches_clip'))
-            c.loras.clear()
             c.restoreLoras(rows)
         elif op == 'wildcard_independent':
             self.independent_wildcards = request.get('enabled') is True
@@ -538,7 +537,6 @@ class Engine:
         if p.get('last_image_local'):
             restored = c.restoreLastImage(p['last_image_local'])
             g['useLastFrame'] = bool(p.get('use_last_frame')) and restored
-        c.loras.clear()
         c.restoreLoras(p.get('loras') or [])
         refs = p.get('reference_images_local') or []
         if refs:

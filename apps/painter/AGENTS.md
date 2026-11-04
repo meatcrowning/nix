@@ -358,6 +358,15 @@ change. Structurally identical VAEs may need a hash/name fallback; LoRA matching
 uses namespace aliases and base-model compatibility. Unknown files remain
 visible and user assignments persist separately.
 
+LoRA snapshots preserve order, enabled state, model strength and optional CLIP
+strength. `userprefs.normalize_loras` accepts metadata and UI field names against
+the selected model's compatible choices. Qt parameter/all injection replaces the
+stack; prompt-only injection leaves it alone. Same-model rescans preserve the
+stack. Startup snapshots survive saves before model discovery completes.
+`outmeta` recovers legacy LoRAs by following model wires, keeping the automatic
+MOSS correction separate. Verify with `tools/lora-metadata-test.py` and the
+`PAINTER_UI_ONLY=loras` offscreen harness.
+
 Families are declarative under `families/`; shared graph kinds live in `graphs/`.
 Adding a family normally extends data, while a new pipeline kind can require
 code. Validate node contracts against `/object_info` and report unavailable

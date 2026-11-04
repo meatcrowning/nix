@@ -781,6 +781,7 @@ class Painter(QObject):
         self._progress = 0.0
         self._current = ""
         self._selected = -1
+        self._lora_model = ""
         self._enc_name = ""
         self._vae_name = ""
         self._fam_label = ""
@@ -1597,31 +1598,26 @@ class Painter(QObject):
         rows += [{"name": e.name, "ok": False, "reason": v["reason"],
                   "score": v["score"], "patches_clip": e.patches_clip}
                  for e, v in bad]
+        saved = self.lorasSnapshot() if self._lora_model == entry.name else []
+        self._lora_model = entry.name
         self.choices.set_rows(rows)
-        self.loras.clear()
+        self.restoreLoras(saved)
         self.modelChanged.emit()
 
     @Slot("QVariant")
     def restoreLoras(self, rows):
-        """The remembered LoRA chain for the model `selectModel` just landed
-        on. Called once, right after startup's restored selection settles —
-        `selectModel` always clears the stack, so this is what puts it back.
-        Names no longer on disk (`choices`, just populated for this model) are
-        dropped rather than referencing a file that has since moved."""
-        known = {r["name"] for r in self.choices._rows}
-        # QML hands an untyped Slot its array as a QJSValue, which is not
-        # iterable in Python: this loop raised TypeError on every startup and
-        # the remembered chain was silently never restored.
+        """Replace the stack from preferences or metadata, preserving order."""
+        import userprefs
         if hasattr(rows, "toVariant"):
             rows = rows.toVariant()
-        for r in (rows or []):
-            name = r.get("name") if isinstance(r, dict) else None
-            if not name or name not in known:
-                continue
-            self.loras.add(name, bool(r.get("patchesClip", False)))
-            i = self.loras.rowCount() - 1
-            self.loras.setStrength(i, float(r.get("strength", 1.0)))
-            self.loras.setEnabled(i, bool(r.get("enabled", True)))
+        clean = userprefs.normalize_loras(rows, self.choices._rows)
+        if clean == self.loras._rows:
+            return
+        self.loras.beginResetModel()
+        self.loras._rows = clean
+        self.loras.endResetModel()
+        self.loras.countChanged.emit()
+        self.loras.stackChanged.emit()
 
     @Slot(result="QVariant")
     def lorasSnapshot(self):
@@ -1629,7 +1625,8 @@ class Painter(QObject):
         unlike `_start_jobs`' `loras.active()`, which is enabled-only."""
         rows = self.loras.snapshot()
         return [{"name": r["name"], "strength": r["strength"],
-                  "enabled": r["enabled"], "patchesClip": r["patches_clip"]}
+                  "enabled": r["enabled"], "patchesClip": r["patches_clip"],
+                  **({"strength_clip": r["strength_clip"]} if "strength_clip" in r else {})}
                  for r in rows]
 
     # -- modes -------------------------------------------------------------

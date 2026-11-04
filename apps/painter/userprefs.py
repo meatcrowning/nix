@@ -25,6 +25,7 @@ The window is the owner of this file; nothing here writes to it.
 from __future__ import annotations
 
 import json
+import math
 import os
 
 STATE = os.path.join(
@@ -155,6 +156,35 @@ def params_for(model_name, kind="image", doc=None):
     return out
 
 
+def normalize_loras(rows, choices):
+    """Validate either metadata or UI snapshots against the selected model."""
+    if not isinstance(rows, list):
+        return []
+    known = {r['name']: r for r in choices if r.get('ok')}
+    out, seen = [], set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = row.get('name')
+        if not isinstance(name, str) or name not in known or name in seen:
+            continue
+        try:
+            strength = float(row.get('strength', 1.0))
+            clip_strength = float(row.get('strength_clip', strength))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(strength) or not math.isfinite(clip_strength):
+            continue
+        item = dict(name=name, strength=strength, enabled=bool(row.get('enabled', True)),
+                    patches_clip=bool(row.get('patches_clip', row.get('patchesClip',
+                                      known[name].get('patches_clip', False)))))
+        if 'strength_clip' in row:
+            item['strength_clip'] = clip_strength
+        out.append(item)
+        seen.add(name)
+    return out
+
+
 def loras_for(reg, entry, doc=None):
     """His LoRA stack, filtered to what applies to this model.
 
@@ -166,16 +196,6 @@ def loras_for(reg, entry, doc=None):
         rows = json.loads(doc.get("loras") or "[]")
     except (ValueError, TypeError):
         return []
-    if not isinstance(rows, list):
-        return []
-    out = []
-    for r in rows:
-        if not isinstance(r, dict) or not r.get("enabled", True):
-            continue
-        found = reg.find(str(r.get("name") or ""))
-        if found is None or not reg.lora_compat(found, entry)["ok"]:
-            continue
-        out.append({"name": found.name,
-                    "strength": float(r.get("strength", 1.0) or 1.0),
-                    "patches_clip": found.patches_clip})
-    return out
+    choices = [dict(name=lora.name, ok=reg.lora_compat(lora, entry)['ok'],
+                    patches_clip=lora.patches_clip) for lora in reg.loras()]
+    return [row for row in normalize_loras(rows, choices) if row['enabled']]

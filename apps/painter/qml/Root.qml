@@ -496,14 +496,9 @@ Item {
         target: App
         function onModelChanged() {
             root.applyDefaults()
-            // The LoRA chain the model landed with (startup restore only —
-            // `selectModel` always clears the stack, so this is what puts it
-            // back, once, for the remembered selection). A later switch in
-            // the same session clears it same as before.
-            if (!root.lorasRestored && App.selectedName === (Prefs.get("model") || "")) {
+            if (!root.lorasRestored && App.selectedName !== "") {
                 root.lorasRestored = true
-                try { App.restoreLoras(JSON.parse(Prefs.get("loras") || "[]")) }
-                catch (e) { /* a corrupt list just leaves the stack empty */ }
+                App.restoreLoras(root.startupLoras)
             }
         }
         function onLayoutEdited(model, document) {
@@ -1343,6 +1338,7 @@ Item {
     }
 
     function injectParams(p) {
+        App.restoreLoras(p.loras || [])
         root.independentWildcards = p.wildcard_independent === true
         App.restoreWildcardOptions(p.wildcard_options === undefined ? null : p.wildcard_options)
         var g = clone(gen)
@@ -1412,10 +1408,10 @@ Item {
     // collapsed state (Panel.qml, `persistKey`). Written on change, debounced,
     // because `gen` changes on every keystroke.
     property bool restored: false
-    // Set once the startup selection's own LoRA chain has been put back
-    // (Connections.onModelChanged, above) — guards against a later in-session
-    // model switch re-applying a stale, already-consumed restore.
+    // Keep the startup snapshot separate from debounced saves while model
+    // discovery is pending; consume it once the first model has choices.
     property bool lorasRestored: false
+    property var startupLoras: []
 
     function saveState() {
         if (!restored) return          // never persist the pre-restore defaults
@@ -1429,13 +1425,15 @@ Item {
         // come back across a relaunch (see genByModel / applyDefaults above).
         if (root.defaultsFor) root.genByModel[root.defaultsFor] = snapshotGen()
         Prefs.set("genByModel", JSON.stringify(root.genByModel))
-        Prefs.set("model", App.selectedName)
-        Prefs.set("mode", App.mode)
+        if (App.selectedName !== "") {
+            Prefs.set("model", App.selectedName)
+            Prefs.set("mode", App.mode)
+        }
         Prefs.set("inputImage", App.inputImage)
         Prefs.set("editExtra", JSON.stringify(App.editExtraImages))
         Prefs.set("lastImage", App.lastImage)
         Prefs.set("lastSeed", App.lastSeed)
-        Prefs.set("loras", JSON.stringify(App.lorasSnapshot()))
+        if (root.lorasRestored) Prefs.set("loras", JSON.stringify(App.lorasSnapshot()))
     }
 
     Timer {
@@ -1483,6 +1481,8 @@ Item {
     signal requestResize(int w, int h)
 
     function restoreState() {
+        try { root.startupLoras = JSON.parse(Prefs.get("loras") || "[]") }
+        catch (e) { root.startupLoras = [] }
         var w = Prefs.get("win.width"), h = Prefs.get("win.height")
         if (w > 0 && h > 0) root.requestResize(w, h)
         var v = Prefs.get("view"); if (v === 0 || v === 1) root.view = v
