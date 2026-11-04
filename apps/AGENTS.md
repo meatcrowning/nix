@@ -22,6 +22,7 @@ establish the user's live session.
 | viewer/ | image/video viewer | home/prog/viewer.nix |
 | player/ | music player | home/prog/player.nix |
 | gforce/ | classic audio visualizer | home/prog/gforce.nix |
+| trainer/ | MOSS-Image LoRA trainer (top CUDA) | home/prog/trainer.nix |
 | painter/ | ComfyUI image front end | home/prog/painter.nix |
 | surfer/ | QtWebEngine browser | home/prog/surfer.nix |
 | askpass/ | sudo -A password dialog | home/prog/askpass.nix |

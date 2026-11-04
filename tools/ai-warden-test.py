@@ -476,6 +476,27 @@ w.done("comfy", "cold")
 check("released capacity is available again", w.reserve("ollama", model="large", token="retry")["ok"])
 
 
+print("exclusive training reservations")
+world = World(comfy_queue=1)
+w = world.install()
+check("training never interrupts a render", not w.reserve("trainer", hint=12 * GiB, token="train")["ok"])
+check("busy render is not unloaded", not world.freed)
+w = World().install()
+w.reserve("ollama", token="reply")
+check("training never interrupts a reply", not w.reserve("trainer", token="train")["ok"])
+w = World().install()
+check("idle GPU admits training", w.reserve("trainer", hint=12 * GiB, token="train")["ok"])
+check("training blocks painter even with spare RAM", not w.reserve("comfy", token="render")["ok"])
+check("training blocks chatter", not w.reserve("ollama", token="reply")["ok"])
+check("second trainer is refused", not w.reserve("trainer", token="second")["ok"])
+check("training heartbeat renews", w.renew("trainer", lease=120, token="train")["ok"])
+w.done("trainer", "train")
+check("training release lets painter run", w.reserve("comfy", token="render")["ok"])
+w = World().install()
+w.done("trainer", "cancelled")
+check("late training reserve stays cancelled", not w.reserve("trainer", token="cancelled")["ok"])
+
+
 print()
 if FAILS:
     print("FAILED: %d" % len(FAILS))

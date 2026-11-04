@@ -167,7 +167,7 @@ LOG = Path.home() / ".cache" / "ai-warden.log"
 PRESSURE_LOG = STATE_DIR / "pressure.log"
 
 BACKENDS = ("ollama", "comfy")
-NICE = {"ollama": "chatter", "comfy": "painter"}
+NICE = {"ollama": "chatter", "comfy": "painter", "trainer": "trainer"}
 
 
 def log(msg):
@@ -511,6 +511,8 @@ class Warden:
         """RAM bytes the backend is holding, by the most pessimistic reading we
         have. `max` on purpose: the API under-reports during a load and the
         cgroup over-reports page cache, and over-reporting is the safe error."""
+        if backend == "trainer":
+            return 0  # external worker; reservation is exclusive, no daemon cgroup
         if backend == "ollama":
             api = sum(int(m.get("size") or 0) for m in ollama_ps())
             return max(api, ollama_cgroup())
@@ -602,6 +604,8 @@ class Warden:
                 "busy": bsy, "busy_why": why, "lease_s": lease,
                 "clients": clients, "stop_in_s": idle,
             }
+        with self.lock:
+            snap["training_lease_s"] = max(0, int(self._lease_until("trainer") - time.time()))
         return snap
 
     # -- daemon lifetime -------------------------------------------------
@@ -828,7 +832,37 @@ class Warden:
                     return {"ok": True, "reason": "", "token": token, "freed": []}
             return self._reserve(backend, model, hint, lease, token)
 
+    def _reserve_training(self, hint, lease, token):
+        if not token:
+            return {"ok": False, "reason": "training requires an owned reservation"}
+        if self.leased("trainer"):
+            return {"ok": False, "reason": "another trainer is running"}
+        # Admission lock serializes this check/unload/admit with every app.
+        # Never unload a backend that is loading, rendering or replying.
+        for other in BACKENDS:
+            busy, why = self.busy(other)
+            if busy:
+                return {"ok": False, "reason": why or (NICE[other] + " is busy")}
+        freed = []
+        for other in BACKENDS:
+            released = self.free(other, wait=10)
+            if released:
+                freed.append(other)
+                notify("unloaded %s (%s)" % (NICE[other], gb(released)),
+                       "trainer needed the gpu")
+        available = mem_available()
+        if available - hint < HARD_FLOOR:
+            return self._refuse("not enough memory for training: %s free" % gb(available),
+                                hint, available, freed)
+        return self._admit("trainer", lease, freed, hint, available, token,
+                           "exclusive training reservation")
+
     def _reserve(self, backend, model="", hint=0, lease=None, token=""):
+        if not OFF.exists():
+            if backend == "trainer":
+                return self._reserve_training(hint, lease, token)
+            if backend in BACKENDS and self.leased("trainer"):
+                return {"ok": False, "reason": "trainer is running; save and stop it to release the GPU"}
         if backend not in BACKENDS:
             return {"ok": True, "reason": "unknown backend %r — not gated" % backend,
                     "freed": [], "bypassed": True}
@@ -990,7 +1024,7 @@ class Warden:
         deadline out. That is what lets the lease be SHORT and renewed often
         rather than long and taken once: the heartbeat interval, not the job's
         ceiling, is what a caller that dies mid-render costs the other side."""
-        if backend not in BACKENDS:
+        if backend not in (*BACKENDS, "trainer"):
             return {"ok": False, "reason": "unknown backend %r" % backend}
         with self.lock:
             if token:

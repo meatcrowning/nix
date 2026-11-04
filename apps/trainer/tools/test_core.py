@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Isolated manifest and cooperative-control tests; no GPU or user data."""
+import io
+import json
+from pathlib import Path
+import sys
+import tempfile
+import threading
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core import Settings, prepare_run, training_args
+from control import Controls
+
+
+class Tests(unittest.TestCase):
+    def test_captionless_mixed_and_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / 'images with # spaces'
+            data.mkdir()
+            (data / 'a.jpg').write_bytes(b'image')
+            (data / 'a.txt').write_text('A caption\nwith lines.')
+            (data / 'b.png').write_bytes(b'image')
+            model = root / 'model'
+            model.touch()
+            s = Settings(dataset=str(data), output=str(root / 'runs'), dit=str(model),
+                         text_encoder=str(model), vae=str(model), sample_prompt='a "quoted" prompt\n--s 99')
+            run = prepare_run(s)
+            self.assertEqual((run / 'dataset/000000.txt').read_text(), 'A caption\nwith lines.')
+            self.assertEqual((run / 'dataset/000001.txt').read_text(), '')
+            self.assertFalse((data / 'b.txt').exists())
+            self.assertTrue((run / 'dataset/000000.jpg').is_symlink())
+            args, offset, manifest = training_args(run)
+            self.assertIn('--network_train_unet_only', args)
+            self.assertEqual(offset, 0)
+            self.assertEqual(manifest['captioned'], 1)
+            self.assertEqual(json.loads((run / 'prompts.json').read_text())[0]['prompt'], s.sample_prompt)
+            import tomllib
+            parsed = tomllib.loads((run / 'dataset.toml').read_text())
+            self.assertEqual(parsed['datasets'][0]['subsets'][0]['image_dir'], str(run / 'dataset'))
+            state = run / 'saved-state'
+            state.mkdir()
+            (state / 'trainer-state.json').write_text(json.dumps({'step': 200, 'run': str(run)}))
+            args, offset, _ = training_args(run, state)
+            self.assertEqual(offset, 200)
+            self.assertEqual(args[args.index('--max_train_steps') + 1], '1800')
+            s.output = str(data / 'output')
+            with self.assertRaises(ValueError):
+                prepare_run(s)
+
+    def test_pause_save_resume_stop(self):
+        control = Controls()
+        paused = threading.Event()
+        saved = threading.Event()
+        events = []
+        def event(state):
+            events.append(state)
+            if state == 'paused':
+                paused.set()
+        control.submit('pause')
+        result = []
+        thread = threading.Thread(target=lambda: result.append(control.boundary(saved.set, event)))
+        thread.start()
+        self.assertTrue(paused.wait(2))
+        self.assertTrue(thread.is_alive())
+        control.submit('save')
+        self.assertTrue(saved.wait(2))
+        self.assertTrue(thread.is_alive())
+        control.submit('resume')
+        thread.join(2)
+        self.assertEqual(result, [True])
+        control.submit('stop')
+        saved.clear()
+        self.assertFalse(control.boundary(saved.set, event))
+        self.assertTrue(saved.is_set())
+
+    def test_gui_loss_requests_save(self):
+        control = Controls()
+        control.read(io.StringIO('not json\n'))
+        saved = []
+        self.assertFalse(control.boundary(lambda: saved.append(1), lambda _: None))
+        self.assertEqual(saved, [1])
+
+
+if __name__ == '__main__':
+    unittest.main()
