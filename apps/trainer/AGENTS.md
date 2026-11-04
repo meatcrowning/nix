@@ -26,6 +26,9 @@ through the dataset (batch size and repeats are both one).
 Verify without live GPU work or windows:
 - `python3 apps/trainer/tools/test_core.py`
 - `python3 apps/trainer/tools/test_worker.py`
+- `CUDA_VISIBLE_DEVICES= ENGINE/.venv/bin/python tools/test_backend.py` from
+  this directory, with the package library environment: real upstream dataset
+  loading on synthetic images, no model loading or GPU work.
 - `python3 tools/ai-warden-test.py`
 - `worker.py RUN --check` in the engine venv validates real backend imports and
   argument/dataset-schema parsing without loading models or reserving GPU memory.
