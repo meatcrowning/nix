@@ -100,7 +100,10 @@ def prepare_run(settings):
         caption = original.with_suffix('.txt')
         text = caption.read_text(encoding='utf-8-sig') if caption.is_file() else settings.fallback_caption
         captioned += caption.is_file()
-        target.with_suffix('.txt').write_text(text, encoding='utf-8')
+        # sd-scripts rejects zero-byte caption files. An absent file with
+        # class_tokens='' is its supported unconditional-training path.
+        if text.strip():
+            target.with_suffix('.txt').write_text(text, encoding='utf-8')
     manifest = {'settings': asdict(settings), 'images': len(images), 'captioned': captioned,
                 'revision': REVISION, 'sources': [str(p) for p in images]}
     atomic_json(run / 'run.json', manifest)
