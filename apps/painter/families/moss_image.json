@@ -18,7 +18,7 @@
     "prefer": ["moss-image-vae.safetensors"]
   },
   "supports_patches": false,
-  "supports_loras": false,
+  "supports_loras": true,
   "toggles": {"negpip": false, "model_sampling": false},
   "defaults": {
     "steps": 50,

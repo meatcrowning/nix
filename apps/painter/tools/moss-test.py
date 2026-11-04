@@ -25,6 +25,7 @@ def models(root):
             "video_embedder.bias": [3072], "text_embedder.proj.weight": [3072, 4096],
             "shared_block_modulation.weight": [18432, 3072],
             "layers.0.q_norm.weight": [128], "final_linear_video.weight": [128, 3072],
+            "layers.0.proj.q.weight": [3072, 3072],
             "layers.0.proj.q.comfy_quant": [1]})
     fixture(root / "text_encoders/qwen35.safetensors", {
         "model.language_model.layers.0.linear_attn.A_log": [32],
@@ -37,6 +38,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix="painter-moss-test-") as tmp:
         root = Path(tmp)
         models(root)
+        for name, target in (("style", "layers.0.proj.q"), ("detail", "layers.0.proj.q"),
+                             ("other", "unrelated.module")):
+            fixture(root / "loras" / (name + ".safetensors"), {
+                "diffusion_model." + target + ".lora_down.weight": [4, 3072],
+                "diffusion_model." + target + ".lora_up.weight": [3072, 4]})
+        stack = [{"name": "style.safetensors", "strength": .7},
+                 {"name": "detail.safetensors", "strength": -.25}]
         reg = R.Registry(str(root), R.Overrides(str(root / "overrides.json")), use_cache=False)
         assert len(reg.base_models()) == 2
         assert all(m["family"] != "moss_image" for m in R.MODES)
@@ -44,7 +52,7 @@ def main():
             assert entry.family == "moss_image" and entry.quant == "comfy_quant"
             assert not reg.pair(entry)["problems"]
             fam = reg.family_of(entry)
-            assert not fam["supports_patches"] and not fam["supports_loras"]
+            assert not fam["supports_patches"] and fam["supports_loras"]
             assert not fam.get("edit") and not fam.get("reference_images")
             for overrides in ({}, {"steps": 23, "cfg": 4.5, "sampler_name": "heun",
                                    "scheduler": "beta", "denoise": .8, "add_noise": False}):
@@ -141,7 +149,25 @@ def main():
                                                     moss_layout=layout, toggles={"negpip": True}))
             compiled = json.loads(G.Graph(weighted_layout['prompt']).node('encode_pos')['inputs']['text'])
             assert compiled['summary']['caption'] == "A (red:1.5) cap, (blur:-1)"
-            for p in ({"edit": True}, {"loras": [{"name": "wrong.safetensors"}]}):
+            assert reg.lora_compat(reg.find("style.safetensors"), entry)["ok"]
+            assert not reg.lora_compat(reg.find("other.safetensors"), entry)["ok"]
+            restored = userprefs.loras_for(reg, entry, {"loras": json.dumps(stack)})
+            assert [row["name"] for row in restored] == [row["name"] for row in stack]
+            for negpip in (False, True):
+                built = reg.build(entry, {"loras": stack, "toggles": {"negpip": negpip}})
+                graph = G.Graph(built["prompt"])
+                assert built["params"]["loras"] == stack
+                for i, row in enumerate(stack):
+                    node = graph.node("lora%d" % i)
+                    assert node["class_type"] == "LoraLoaderModelOnly"
+                    assert node["inputs"]["lora_name"] == row["name"]
+                    assert node["inputs"]["strength_model"] == row["strength"]
+                    parent = "loader" if i == 0 else "lora%d" % (i - 1)
+                    assert node["inputs"]["model"] == [graph.id_of(parent), 0]
+                assert graph.node("moss_guidance")["inputs"]["model"] == [graph.id_of("lora1"), 0]
+                tail = "negpip" if negpip else "moss_guidance"
+                assert graph.node("sampler")["inputs"]["model"] == [graph.id_of(tail), 0]
+            for p in ({"edit": True},):
                 try:
                     reg.build(entry, p)
                 except G.GraphError:
@@ -178,6 +204,12 @@ def main():
                 assert built["params"]["moss_destripe_strength"] == strength
                 assert built["params"]["moss_destripe_lora"] == fix["inputs"]["lora_name"]
                 assert graph.node("vae")["inputs"]["vae_name"] == "moss-image-vae.safetensors"
+        # Stock SFT correction precedes the user stack without cycles or bypasses.
+        graph = G.Graph(reg.build(entry, {"loras": stack})["prompt"])
+        assert graph.node("moss_destripe")["inputs"]["model"] == [graph.id_of("loader"), 0]
+        assert graph.node("lora0")["inputs"]["model"] == [graph.id_of("moss_destripe"), 0]
+        assert graph.node("lora1")["inputs"]["model"] == [graph.id_of("lora0"), 0]
+        assert graph.node("moss_guidance")["inputs"]["model"] == [graph.id_of("lora1"), 0]
         for invalid in (-1, 3, float('nan'), 'bad'):
             try:
                 reg.build(entry, {"moss_destripe_strength": invalid})

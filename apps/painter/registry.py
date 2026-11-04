@@ -499,8 +499,6 @@ class Registry:
             # PPM supports MOSS weighting; its native sampling stays unchanged.
             toggles["model_sampling"] = False
             p.pop("model_sampling", None)
-            if p.get("loras"):
-                raise G.GraphError("MOSS LoRAs are not exposed yet")
         if toggles.get("model_sampling", False):
             ms = {**(fam.get("model_sampling") or {}), **(p.get("model_sampling") or {})}
             g.set_inputs("model_sampling", ms)
