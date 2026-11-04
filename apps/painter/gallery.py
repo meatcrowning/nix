@@ -12,6 +12,7 @@ from PySide6.QtGui import QImageReader
 
 import outmeta
 import catalogue
+import history_search
 
 # Book downloads its own copy of each result, but also sees top's backend output
 # over the read-only sshfs peer root. Local stays first in `load_existing`: its
@@ -144,8 +145,8 @@ def _catalogue_rows(local):
         dest = CACHE / "thumbs" / f"{Path(entry["path"]).stem}-{entry["stamp"]}.jpg"
         row["thumb"] = (QUrl.fromLocalFile(str(dest)).toString()
                         if not row["is_video"] and dest.exists() else "")
-        row["hay"] = " ".join([row["name"]] + [str(entry.get("params", {}).get(k, ""))
-                          for k in ("positive", "negative", "model", "family")]).lower()
+        row["search"] = history_search.document(row["name"], entry.get("params"),
+                                                 row["is_video"], entry["mtime"])
         row["mtime"] = entry["mtime"]
         found.setdefault(row["key"], row)
     return sorted(found.values(), key=lambda r: r.get("mtime", 0), reverse=True)
@@ -189,6 +190,27 @@ class _HistoryScan(QRunnable):
             self.sig.done.emit(self.serial, rows, True)
 
 
+class _SearchIndex(QRunnable):
+    class Signals(QObject):
+        done = Signal(object)
+
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = rows
+        self.sig = self.Signals()
+
+    def run(self):
+        results = []
+        for row in self.rows:
+            try:
+                params = outmeta.params_for(row['path'])
+            except Exception:  # malformed metadata must not strand the indexing queue
+                params = None
+            doc = history_search.document(row['name'], params, row['is_video'], row.get('mtime'))
+            results.append((row, doc))
+        self.sig.done.emit(results)
+
+
 class Gallery(QAbstractListModel):
     PathRole = Qt.UserRole + 1
     UrlRole = Qt.UserRole + 2
@@ -222,6 +244,10 @@ class Gallery(QAbstractListModel):
         # `_all` from the directory, and a job in flight is not in a directory).
         self._live = None
         self._filter = ""
+        self._query = []
+        self._search_pool = QThreadPool(self)
+        self._search_pool.setMaxThreadCount(1)
+        self._search_job = None
         # Poster frames are extracted one at a time, off the GUI thread. A
         # gallery of 60 videos would otherwise fork 60 ffmpegs at once on a
         # machine that is already busy sampling.
@@ -272,32 +298,36 @@ class Gallery(QAbstractListModel):
     # ------------------------------------------------------------- filtering
     @Slot(str)
     def setFilter(self, text):
-        """Show only the outputs whose FILENAME or PROMPT contains `text`.
-
-        Case-insensitive, every word must match, and the prompt is read out of
-        the file the first time it is needed and then kept — sixty PNG chunks is
-        a few milliseconds once, and nothing at all on the next keystroke."""
-        text = str(text or "").strip().lower()
+        """Filter cached metadata; queue missing metadata off the UI thread."""
+        text = str(text or "").strip()
         if text == self._filter:
             return
         self._filter = text
+        self._query = history_search.parse(text)
         self._refilter()
 
     filterText = Property(str, lambda self: self._filter, notify=countChanged)
 
-    def _haystack(self, r):
-        if "hay" not in r:
-            bits = [r["name"]]
-            try:
-                p = outmeta.params_for(r["path"]) or {}
-                for k in ("positive", "negative", "model", "family"):
-                    v = p.get(k)
-                    if v:
-                        bits.append(str(v))
-            except Exception:  # noqa: BLE001  — an unreadable file still matches its name
-                pass
-            r["hay"] = " ".join(bits).lower()
-        return r["hay"]
+    def _index_missing(self):
+        if (not self._query or self._search_job is not None
+                or all(field in ('filename', 'type', 'date', 'before', 'after')
+                       for field, _, _ in self._query)):
+            return
+        rows = [r for r in self._all if not r.get('live') and 'search' not in r][:32]
+        if rows:
+            job = self._search_job = _SearchIndex(rows)
+            job.sig.done.connect(self._search_ready)
+            self._search_pool.start(job)
+
+    @Slot(object)
+    def _search_ready(self, results):
+        self._search_job = None
+        current = {id(row) for row in self._all}
+        for row, doc in results:
+            # A rescan/replacement may have retired this row while reading it.
+            if id(row) in current:
+                row['search'] = doc
+        self._refilter()
 
     def _matches(self, r):
         # THE RUNNING JOB IS NEVER FILTERED OUT. It has no filename and no
@@ -307,14 +337,22 @@ class Gallery(QAbstractListModel):
             return True
         if not self._filter:
             return True
-        hay = self._haystack(r)
-        return all(w in hay for w in self._filter.split())
+        doc = r.get('search')
+        if doc is None:
+            doc = r.get('search_base')
+            if doc is None:
+                doc = r['search_base'] = history_search.document(
+                    r['name'], video=r['is_video'], mtime=r.get('mtime'))
+        return history_search.matches(doc, self._query)
 
     def _refilter(self):
-        self.beginResetModel()
-        self._rows = [r for r in self._all if self._matches(r)]
-        self.endResetModel()
+        rows = [r for r in self._all if self._matches(r)]
+        if len(rows) != len(self._rows) or any(a is not b for a, b in zip(rows, self._rows)):
+            self.beginResetModel()
+            self._rows = rows
+            self.endResetModel()
         self.countChanged.emit()
+        self._index_missing()
 
     @staticmethod
     def _dedup_key(path):
@@ -400,6 +438,7 @@ class Gallery(QAbstractListModel):
         # moved on to its next one: that file is finished and this one is not.
         at = 1 if self._live is not None else 0
         self._all.insert(at, row)
+        self._index_missing()
         if self._matches(row):
             self.beginInsertRows(QModelIndex(), at, at)
             self._rows.insert(at, row)

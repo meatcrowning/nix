@@ -136,9 +136,18 @@ an isolated fixture image. Never run its inner Python scripts on the host.
 
 `gallery.py` owns discovery, deduplication, filtering, and bounded workers;
 `main.py` re-exports public names. `_all` and `_rows` share row dictionaries,
-and QML indexes refer to filtered rows. Filter all words against cached filename
-and prompt metadata. Peer outputs merge with local outputs without duplicate
-rows; prefer the local copy. An unavailable peer cannot block local discovery.
+and QML indexes refer to filtered rows. `history_search.py` owns query syntax
+and metadata projection: quoted phrases, `-` exclusions,
+filename/positive/prompt/negative/model/family/lora/seed/type fields, and date/before/after using local file modification dates. Plain terms omit
+negative prompts; saved prompt boxes separate NegPiP's folded negatives.
+`gallery.py` reads missing search metadata in bounded worker batches, applies
+results only to surviving row identities, and always evaluates the current query.
+Catalogue rows use the same projection without opening mounted files. Preserve
+live rows and reuse cached indexes across queries; `tools/history-search-test.py`
+covers parser semantics and indexing races.
+
+Peer outputs merge with local outputs without duplicate rows; prefer the local
+copy. An unavailable peer cannot block local discovery.
 Startup scans run on a worker and publish local history before waiting for
 peers; merge outputs that complete during the scan and retain the live
 generation row.

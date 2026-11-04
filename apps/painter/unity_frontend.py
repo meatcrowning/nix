@@ -220,6 +220,8 @@ class Window(Gtk.Window, ParameterForm):
         split.pack2(right, True, False)
         self.search = Gtk.Entry()
         self.search.set_placeholder_text('Search outputs')
+        from history_search import HELP as search_help
+        self.search.set_tooltip_text(search_help)
         self.search.connect('changed', self.search_changed)
         right.pack_start(self.search, False, False, 0)
         self.pages = Gtk.Notebook()
