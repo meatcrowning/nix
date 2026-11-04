@@ -33,6 +33,8 @@
         "https://cache.nixos.org"
         "https://cuda-maintainers.cachix.org"
         "https://ai.cachix.org"
+        # llm-agents publishes current builds here instead of ai.cachix.org.
+        "https://cache.numtide.com"
         # Hyprland now comes from the pinned hyprwm flake (see flake.nix), not
         # nixpkgs, so cache.nixos.org has no build for it. This is upstream's
         # own cache and it only hits when the hyprwm inputs are left
@@ -42,10 +44,12 @@
       ];
       trusted-substituters = [
         "https://ai.cachix.org"
+        "https://cache.numtide.com"
         "https://cuda-maintainers.cachix.org"
         "https://hyprland.cachix.org"
       ];
       trusted-public-keys = [
+        "niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g="
         "ai.cachix.org-1:N9dzRK+alWwoKXQlnn0H6aUx0lU/mspIoz8hMvGvbbc="
         "cuda-maintainers.cachix.org-1:0dq3bujKpuEPMCX6U4WylrUDZ9JyUG0VpVZa7CNfq5E="
         "hyprland.cachix.org-1:a7pgxzMz7+chwVL3/pzj6jIBMioiJM7ypFP8PwtkuGc="
