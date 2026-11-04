@@ -87,6 +87,9 @@ in `$XDG_STATE_HOME/player/`. Respect each tool's path overrides in harnesses.
   shared Scanner, not a separate deletion/transaction implementation. Manual
   remote scans remain supported.
 - `tools/dbsync.py` reconciles by track path, never row id, and never deletes.
+  Pull also copies album artwork references by title/album artist, including
+  replacements and clears; top owns these and push must never overwrite them.
+  `air-launch.sh` transfers the corresponding cached JPEGs.
   Seed a first database rather than renumbering a scan: saved queues contain
   ids. Snapshot SQLite with `backup()`, never copy an active WAL database.
   Migration tuples are `(table, column, declaration, rescan)`; app-written

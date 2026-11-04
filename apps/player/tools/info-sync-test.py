@@ -37,6 +37,10 @@ def make_db(path, identity=True, info=True):
             for c in TRACK_COLS]
     # The integer-ish columns need not be typed precisely for this merge probe.
     con.execute("CREATE TABLE tracks (%s)" % ",".join(cols))
+    con.execute("ALTER TABLE tracks ADD COLUMN album_id INTEGER")
+    con.execute("CREATE TABLE albums (id INTEGER PRIMARY KEY, album TEXT NOT NULL, "
+                "album_artist TEXT NOT NULL, year INTEGER, orig_year INTEGER, "
+                "art_src TEXT, thumb TEXT, full_art TEXT, UNIQUE(album, album_artist))")
     con.execute("CREATE TABLE lyrics (track_id INTEGER, source TEXT, synced TEXT, body TEXT, fetched_at REAL, attempts INTEGER)")
     if info:
         con.executescript(dbsync.INFO_SCHEMA)

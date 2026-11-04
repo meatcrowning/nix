@@ -131,6 +131,45 @@ print("\nstats:", st)
 st2 = dbsync.merge(str(A), str(B), quiet=True)
 check("second merge is a no-op", all(v == 0 for v in st2.values()), True)
 
+# Artwork follows top -> book only. Use distinct row ids and identical titles
+# under different credits so an accidental row-id/title-only join is exposed.
+ca = sqlite3.connect(A)
+ca.execute("INSERT INTO albums (id, album, album_artist, art_src, thumb, full_art) "
+           "VALUES (-101, 'Artwork probe', 'Artist A', 'embedded:donor', 'new-t.jpg', 'new-f.jpg')")
+cb.execute("INSERT INTO albums (id, album, album_artist) VALUES (-202, 'Artwork probe', 'Artist A')")
+cb.execute("INSERT INTO albums (id, album, album_artist, thumb) "
+           "VALUES (-101, 'Artwork probe', 'Artist B', 'other-t.jpg')")
+ca.commit()
+cb.commit()
+art = lambda: tuple(cb.execute(
+    "SELECT art_src, thumb, full_art FROM albums WHERE id=-202").fetchone())
+dbsync.merge(str(A), str(B), quiet=True)
+check("ordinary merge/push leaves artwork alone", art(), (None, None, None))
+st = dbsync.merge(str(A), str(B), dry_run=True, quiet=True, source_album_art=True)
+check("art dry run reports repair", st['album_art'] > 0, True)
+check("art dry run leaves rows unchanged", art(), (None, None, None))
+dbsync.merge(str(A), str(B), quiet=True, source_album_art=True)
+check("pull repairs existing blank without new tracks", art(),
+      ('embedded:donor', 'new-t.jpg', 'new-f.jpg'))
+check("same title and different artist stays separate", cb.execute(
+    "SELECT thumb FROM albums WHERE id=-101").fetchone()[0], 'other-t.jpg')
+st = dbsync.merge(str(A), str(B), quiet=True, source_album_art=True)
+check("art pull is idempotent", st['album_art'], 0)
+ca.execute("UPDATE albums SET thumb='replacement-t.jpg' WHERE id=-101")
+ca.commit()
+dbsync.merge(str(A), str(B), quiet=True, source_album_art=True)
+check("pull propagates replacement", art()[1], 'replacement-t.jpg')
+ca.execute("UPDATE albums SET art_src=NULL, thumb=NULL, full_art=NULL WHERE id=-101")
+ca.execute("INSERT INTO tracks (path, mtime, size, album, album_artist, added_at) "
+           "VALUES ('/art-new.flac', 1, 1, 'New artwork', 'Artist A', ?)", (now,))
+ca.execute("INSERT INTO albums (album, album_artist, art_src, thumb, full_art) "
+           "VALUES ('New artwork', 'Artist A', 'embedded:new', 'fresh-t.jpg', 'fresh-f.jpg')")
+ca.commit()
+dbsync.merge(str(A), str(B), quiet=True, source_album_art=True)
+check("pull propagates explicit clear", art(), (None, None, None))
+check("newly imported album gets artwork", cb.execute(
+    "SELECT thumb FROM albums WHERE album='New artwork' AND album_artist='Artist A'").fetchone()[0], 'fresh-t.jpg')
+
 print("\nFAILURES:" if fails else "\nALL PASS")
 print("\n".join(fails))
 sys.exit(1 if fails else 0)

@@ -337,7 +337,28 @@ def _rebuild_albums(con):
     """)
 
 
-def merge(src_path, dst_path, dry_run=False, quiet=False):
+def _merge_album_art(con, src):
+    """Copy top's artwork on pull, keyed by album credit/title, never row id.
+
+    Artwork has no edit timestamp: top owns file edits and its clears/replacements
+    are authoritative. Push must not send book's older cache references back.
+    The launcher's art rsync owns the corresponding JPEG files.
+    """
+    columns = {"album", "album_artist", "art_src", "thumb", "full_art"}
+    if not all(columns <= _table_columns(c, "albums") for c in (con, src)):
+        return 0  # older snapshots without artwork columns
+    changed = 0
+    for row in src.execute("SELECT album, album_artist, art_src, thumb, full_art FROM albums"):
+        art = (row["art_src"], row["thumb"], row["full_art"])
+        changed += con.execute(
+            "UPDATE albums SET art_src=?, thumb=?, full_art=? "
+            "WHERE album=? AND album_artist=? "
+            "AND (art_src IS NOT ? OR thumb IS NOT ? OR full_art IS NOT ?)",
+            (*art, row["album"], row["album_artist"], *art)).rowcount
+    return changed
+
+
+def merge(src_path, dst_path, dry_run=False, quiet=False, *, source_album_art=False):
     """Merge src INTO dst. Returns a stats dict. Never deletes."""
     con = sqlite3.connect(dst_path, timeout=60)
     con.execute("PRAGMA busy_timeout=60000")
@@ -353,7 +374,8 @@ def merge(src_path, dst_path, dry_run=False, quiet=False):
     st = {"tracks_new": 0, "plays": 0, "rating": 0, "favorite": 0,
           "lyrics_new": 0, "lyrics_upd": 0, "identity": 0,
           "info_user_new": 0, "info_user_upd": 0,
-          "info_cache_new": 0, "info_cache_upd": 0, "info_links": 0}
+          "info_cache_new": 0, "info_cache_upd": 0, "info_links": 0,
+          "album_art": 0}
 
     dst_tracks = {r["path"]: r for r in con.execute("SELECT * FROM tracks")}
     dst_track_cols = _table_columns(con, "tracks")
@@ -470,8 +492,11 @@ def merge(src_path, dst_path, dry_run=False, quiet=False):
 
     _merge_info_tables(con, src, dry_run, st)
 
-    if st["tracks_new"] and not dry_run:
+    if st["tracks_new"]:
         _rebuild_albums(con)
+
+    if source_album_art:
+        st["album_art"] = _merge_album_art(con, src)
 
     if dry_run:
         con.rollback()
@@ -595,7 +620,8 @@ def _local_stamp(db):
     the merge.  Include the WAL's size and nanosecond mtime; its appearance,
     disappearance, growth, or in-place rewrite must all force a snapshot.
     """
-    parts = ["v2"]
+    # v3 forces a first pull with album artwork reconciliation enabled.
+    parts = ["v3"]
     for suffix in ("", "-wal"):
         try:
             st = Path(str(db) + suffix).stat()
@@ -666,7 +692,7 @@ def cmd_pull(args):
         snapshot(str(local), str(args.db))
         print(f"seeded {args.db} from {args.host}", flush=True)
     else:
-        merge(str(local), str(args.db), dry_run=args.dry_run)
+        merge(str(local), str(args.db), dry_run=args.dry_run, source_album_art=True)
     # Only now — a stamp written before the merge would make a failed pull look
     # done, and a --dry-run never merged anything at all.
     if want and not args.dry_run:
