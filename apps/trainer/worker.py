@@ -79,7 +79,7 @@ def main():
     controls = Controls()
     threading.Thread(target=controls.read, args=(sys.stdin,), daemon=True).start()
     s = manifest['settings']
-    sampling = load_sampling(Settings(**s), run)
+    sampling = load_sampling(Settings.from_run(s), run)
     # Restore the last accepted sampling configuration on checkpoint resume.
     atomic_json(run / 'prompts.json', sample_prompts(sampling)
                 if sampling.sample_enabled and sampling.sample_every else [])

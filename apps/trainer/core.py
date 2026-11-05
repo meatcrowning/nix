@@ -33,6 +33,7 @@ class Settings:
     training_unit: str = 'steps'
     resolution: int = 512
     rank: int = 16
+    alpha: float = 1.0
     learning_rate: float = 0.0001
     blocks_to_swap: int = 20
     sample_enabled: bool = True
@@ -65,6 +66,12 @@ class Settings:
         except (OSError, ValueError, TypeError):
             return cls()
 
+    @classmethod
+    def from_run(cls, values):
+        # Older manifests used alpha=rank. Preserve that scale on resume;
+        # ordinary settings/presets without alpha use the new default of one.
+        return cls(**{**values, 'alpha': values.get('alpha', float(values.get('rank', 16)))})
+
     def validate(self):
         if not Path(self.dataset).is_dir() or not self.dataset:
             raise ValueError('Choose a dataset folder.')
@@ -76,6 +83,8 @@ class Settings:
         for key in ('steps', 'epochs', 'rank', 'resolution', 'sample_count', 'sample_steps'):
             if not 1 <= getattr(self, key) <= 1000000:
                 raise ValueError('Invalid ' + key)
+        if not math.isfinite(self.alpha) or not 0.01 <= self.alpha <= 256:
+            raise ValueError('LoRA alpha must be between 0.01 and 256.')
         if self.resolution % 16 or any(n < 256 or n > 2048 or n % 16 for n in (self.sample_width, self.sample_height)):
             raise ValueError('Image dimensions must be multiples of 16 (samples: 256–2048).')
         if not math.isfinite(self.learning_rate) or not 0 < self.learning_rate <= 0.01:
@@ -147,7 +156,7 @@ def total_training_steps(manifest):
 def training_args(run, resume=None):
     run = Path(run)
     manifest = json.loads((run / 'run.json').read_text())
-    s = Settings(**manifest['settings'])
+    s = Settings.from_run(manifest['settings'])
     offset = 0
     if resume:
         state = json.loads((Path(resume) / 'trainer-state.json').read_text())
@@ -161,7 +170,7 @@ def training_args(run, resume=None):
             '--vae', s.vae, '--dataset_config', str(run / 'dataset.toml'),
             '--output_dir', str(run), '--output_name', s.name,
             '--network_module', 'networks.lora_generic', '--network_dim', str(s.rank),
-            '--network_alpha', str(s.rank), '--network_train_unet_only',
+            '--network_alpha', str(s.alpha), '--network_train_unet_only',
             '--learning_rate', str(s.learning_rate), '--optimizer_type', 'AdamW8bit',
             '--lr_scheduler', 'constant', '--max_train_steps', str(total - offset),
             '--mixed_precision', 'bf16', '--save_precision', 'bf16', '--save_model_as', 'safetensors',

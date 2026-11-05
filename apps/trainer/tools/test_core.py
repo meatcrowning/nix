@@ -36,6 +36,7 @@ class Tests(unittest.TestCase):
             args, offset, manifest = training_args(run)
             self.assertIn('--network_train_unet_only', args)
             self.assertEqual(offset, 0)
+            self.assertEqual(float(args[args.index('--network_alpha') + 1]), 1.0)
             self.assertEqual(manifest['captioned'], 2)
             self.assertFalse((run / 'dataset/000002.txt').exists())
             self.assertEqual(json.loads((run / 'prompts.json').read_text())[0]['prompt'], s.sample_prompt)
@@ -51,6 +52,15 @@ class Tests(unittest.TestCase):
             # Old manifests remain step-based; epoch runs resume against their
             # original total rather than training a fresh set of epochs.
             self.assertEqual(total_training_steps(manifest), 2000)
+            manifest['settings']['alpha'] = 4.5
+            (run / 'run.json').write_text(json.dumps(manifest))
+            custom_args, _, _ = training_args(run)
+            self.assertEqual(float(custom_args[custom_args.index('--network_alpha') + 1]), 4.5)
+            manifest['settings'].pop('alpha')
+            (run / 'run.json').write_text(json.dumps(manifest))
+            legacy_args, _, _ = training_args(run, state)
+            self.assertEqual(float(legacy_args[legacy_args.index('--network_alpha') + 1]), s.rank)
+            self.assertEqual(Settings.from_run(manifest['settings']).alpha, s.rank)
             manifest['settings'].pop('training_unit')
             manifest['settings'].pop('epochs')
             self.assertEqual(total_training_steps(manifest), 2000)

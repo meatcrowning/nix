@@ -149,6 +149,7 @@ class Window(QMainWindow):
         length_mode(length_unit.currentText())
         self.spin(train, 'resolution', 'Training resolution', 256, 2048, 16)
         self.spin(train, 'rank', 'LoRA rank', 1, 256)
+        self.spin(train, 'alpha', 'LoRA alpha', 0.01, 256, 0.1, decimals=2)
         self.spin(train, 'learning_rate', 'Learning rate', 0.000001, 0.01, 0.00001, decimals=6)
         self.spin(train, 'blocks_to_swap', 'Blocks offloaded to CPU', 0, 36)
         note = QLabel('MOSS-Image-Base · batch size 1 · INT8\nCaptions are optional. Original dataset files stay untouched.')
@@ -496,7 +497,7 @@ class Window(QMainWindow):
             self.sampling_status.setText(str(exc))
 
     def run_settings(self):
-        settings = Settings(**json.loads((self.run / 'run.json').read_text())['settings'])
+        settings = Settings.from_run(json.loads((self.run / 'run.json').read_text())['settings'])
         return load_sampling(settings, self.run)
 
     def resume_run(self):
@@ -540,7 +541,7 @@ class Window(QMainWindow):
         def selected(path):
             try:
                 manifest = json.loads(Path(path).read_text())
-                settings = Settings(**manifest['settings'])
+                settings = Settings.from_run(manifest['settings'])
                 self.load_settings(settings)
                 self.run = Path(path).parent
                 self.load_settings(self.run_settings())

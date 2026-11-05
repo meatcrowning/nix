@@ -20,6 +20,10 @@ with tempfile.TemporaryDirectory() as tmp:
     app = QApplication([])
     assert app.platformName() == 'offscreen'
     window = main.Window()
+    assert window.collect().alpha == 1.0
+    window.widgets['alpha'].setValue(4.5)
+    window.widgets['rank'].setValue(32)
+    assert window.collect().alpha == 4.5
     calls = []
     window.launch = lambda *args: calls.append(args)
     window.setup()
@@ -62,6 +66,7 @@ with tempfile.TemporaryDirectory() as tmp:
     window.widgets['sample_count'].setValue(1)
     window.preset_file(preset, False)
     assert window.collect().sample_count == 3 and window.collect().sample_baseline
+    assert window.collect().alpha == 4.5
     window.persist_settings()
     assert json.loads(main.CONFIG.read_text())['epochs'] == 7
     # No QProcess: prove live controls only send the sampling mailbox message.
@@ -103,6 +108,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert window2.collect().sample_seed_mode == 'random'
     assert [e['seed'] for e in window2.collect().sample_entries] == [11, 22, 33]
     assert window2.collect().sample_entries[1]['prompt'] == 'Second sample\n\nwith a blank line'
+    assert window2.collect().alpha == 4.5
     assert window2.collect().sample_count == 3
     assert window2.collect().sample_unit == 'epochs'
     assert window2.collect().training_unit == 'epochs'

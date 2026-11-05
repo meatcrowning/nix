@@ -24,6 +24,8 @@ Periodic intervals use completed optimizer steps, with epochs counting one pass
 through the dataset (batch size and repeats are both one). Training length
 selects either steps or epochs; core.py resolves the step budget from the
 frozen dataset count, including for resume. Old manifests default to steps.
+Alpha defaults to 1 for new settings and is independent of rank. Run manifests
+without alpha retain the historical alpha=rank behavior when opened/resumed.
 
 Sampling changes travel through worker stdin and are accepted at completed
 steps. Disabling skips future batches, never cancels an active sampler. Accepted
