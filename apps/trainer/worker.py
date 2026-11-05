@@ -179,7 +179,8 @@ def main():
                         sample_prompts(updated)
                     atomic_json(run / 'sampling.json', {key: getattr(updated, key) for key in LIVE_KEYS})
                     changed = any(getattr(updated, key) != getattr(sampling, key)
-                                  for key in ('sample_prompt', 'negative_prompt', 'sample_count', 'sample_baseline'))
+                                  for key in ('sample_prompt', 'negative_prompt', 'sample_count', 'sample_baseline',
+                                              'sample_seed_mode', 'sample_seeds', 'seed'))
                     sampling.__dict__.update(vars(updated))
                     if changed:
                         self.baseline_pending = sampling.sample_baseline

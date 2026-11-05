@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 import json
 import math
+import secrets
 from pathlib import Path
 import uuid
 
@@ -45,6 +46,9 @@ class Settings:
     sample_height: int = 768
     sample_steps: int = 30
     sample_cfg: float = 3.0
+    sample_seed_mode: str = 'increment'
+    sample_seeds: str = ''
+    sample_random_seed: int = 42
     seed: int = 42
     save_every: int = 250
     save_unit: str = 'steps'
@@ -88,6 +92,9 @@ class Settings:
 
 
 def prepare_run(settings):
+    # Freeze random sample seeds in the manifest, independent of training RNG.
+    settings = Settings(**asdict(settings))
+    settings.sample_random_seed = secrets.randbits(63)
     settings.validate()
     source = Path(settings.dataset).resolve()
     # Snapshot the list before creating output; an output inside the dataset

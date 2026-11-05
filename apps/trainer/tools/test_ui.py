@@ -42,6 +42,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert '3 / 20' in window.progress.toolTip()
     window.handle_event({'event': 'error', 'message': 'synthetic failure'})
     assert window.status.text() == 'synthetic failure'
+    window.widgets['sample_seed_mode'].setCurrentIndex(1)
+    window.widgets['sample_seeds'].setText('11, 22, 33')
     window.widgets['sample_baseline'].setChecked(True)
     preset = Path(tmp) / 'custom-preset.json'
     window.preset_file(preset, True)
@@ -75,6 +77,8 @@ with tempfile.TemporaryDirectory() as tmp:
     window.proc = None
     window.close()
     window2 = main.Window()
+    assert window2.collect().sample_seed_mode == 'random'
+    assert window2.collect().sample_seeds == '11, 22, 33'
     assert window2.collect().sample_count == 3
     assert window2.collect().sample_unit == 'epochs'
     assert window2.collect().training_unit == 'epochs'

@@ -3,9 +3,10 @@ import gc
 import os
 from pathlib import Path
 import re
+import random
 
 LIVE_KEYS = ('sample_prompt', 'negative_prompt', 'sample_count', 'sample_enabled',
-             'sample_baseline', 'sample_every', 'sample_unit')
+             'sample_baseline', 'sample_every', 'sample_unit', 'sample_seed_mode', 'sample_seeds', 'seed')
 
 
 class RestorationError(RuntimeError):
@@ -28,11 +29,26 @@ def sample_prompts(settings):
         raise ValueError('Use at most 64 samples in one sampling interval.')
     if len(settings.sample_prompt) + len(settings.negative_prompt) > 65536:
         raise ValueError('Sample prompts are too long (maximum 65536 characters).')
+    count = len(prompts) * settings.sample_count
+    if settings.sample_seed_mode == 'random':
+        rng = random.Random(settings.sample_random_seed)
+        seeds = rng.sample(range(2147483648), count)
+    elif settings.sample_seed_mode == 'explicit':
+        try:
+            seeds = [int(value) for value in re.split(r'[\s,]+', settings.sample_seeds.strip()) if value]
+        except ValueError:
+            raise ValueError('Sample seeds must be whole numbers separated by commas or spaces.') from None
+        if len(seeds) != count or any(seed < 0 or seed > 2147483647 for seed in seeds):
+            raise ValueError(f'Enter exactly {count} sample seeds between 0 and 2147483647 (prompt order).')
+    elif settings.sample_seed_mode == 'increment':
+        seeds = [(settings.seed + i) % 2147483648 for i in range(count)]
+    else:
+        raise ValueError('Choose a valid sample seed mode.')
     return [{'prompt': prompt, 'negative_prompt': settings.negative_prompt,
              'width': settings.sample_width, 'height': settings.sample_height,
              'sample_steps': settings.sample_steps, 'scale': settings.sample_cfg,
-             'seed': settings.seed + i}
-            for prompt in prompts for i in range(settings.sample_count)]
+             'seed': seeds[index * settings.sample_count + i]}
+            for index, prompt in enumerate(prompts) for i in range(settings.sample_count)]
 
 
 def refresh_cache(cache, prompts, encode):

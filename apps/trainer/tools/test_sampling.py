@@ -13,7 +13,7 @@ from sampling import sample_prompts, refresh_cache, encode_new_prompts
 
 prompts = sample_prompts(Settings(sample_prompt='one\nline\n\ntwo', sample_count=3))
 assert len(prompts) == 6 and prompts[0]['prompt'] == 'one\nline'
-assert [p['seed'] for p in prompts] == [42, 43, 44, 42, 43, 44]
+assert [p['seed'] for p in prompts] == [42, 43, 44, 45, 46, 47]
 cache = {'one\nline': [1], '': [0], 'old': [3]}
 calls = []
 updated = refresh_cache(cache, prompts, lambda texts: calls.append(texts) or {'two': [2]})
@@ -77,3 +77,19 @@ for fail in (False, True):
     assert resident.moves == ['cpu', 'cuda:0'] and streamed.moves == []
     assert encoder.moves == ['cuda:0']
 print('Prompt expansion, cache reuse, encoder failure cleanup and streamed block isolation OK')
+
+s = Settings(sample_prompt='one\n\ntwo', sample_count=2, sample_seed_mode='random', sample_random_seed=9123)
+first = [p['seed'] for p in sample_prompts(s)]
+assert len(set(first)) == 4 and first == [p['seed'] for p in sample_prompts(s)]
+s.sample_random_seed = 9124
+assert first != [p['seed'] for p in sample_prompts(s)]
+s.sample_seed_mode = 'explicit'
+s.sample_seeds = '10, 20 30\n40'
+assert [p['seed'] for p in sample_prompts(s)] == [10, 20, 30, 40]
+s.sample_seeds = '10'
+try:
+    sample_prompts(s)
+    raise AssertionError('missing seeds accepted')
+except ValueError:
+    pass
+print('Per-sample explicit seeds and repeatable random seeds OK')

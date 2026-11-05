@@ -33,6 +33,9 @@ blocks; failures skip sampling, while failure to restore training weights is
 fatal. Baselines use multiplier zero with restoration in finally, at startup
 and before sampling changed prompts. Existing workers cannot gain these controls
 without restarting: never interrupt a user's run to apply source updates.
+Random sample seeds derive from a per-run seed frozen in run.json; explicit
+seeds follow prompt order, then sample order within each prompt. Baselines use
+the same seeds. Changing live sample seeds never changes the training RNG.
 GUI values autosave; File menu presets contain Settings only, not checkpoints.
 
 Verify without live GPU work or windows:

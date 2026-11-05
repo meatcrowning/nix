@@ -183,9 +183,19 @@ class Window(QMainWindow):
         ar.currentTextChanged.connect(ratio)
         self.spin(samples, 'sample_steps', 'Sampling steps', 1, 100)
         self.spin(samples, 'sample_cfg', 'Guidance', 1, 10, 0.1, decimals=1)
-        self.spin(samples, 'seed', 'First sample seed', 0, 2147483647)
+        seed_mode = QComboBox()
+        for label, value in [('Increment from first seed', 'increment'),
+                             ('Random, fixed across sampling times', 'random'),
+                             ('Specific seed per sample', 'explicit')]:
+            seed_mode.addItem(label, value)
+        seed_mode.setCurrentIndex(seed_mode.findData(self.settings.sample_seed_mode))
+        self.widgets['sample_seed_mode'] = seed_mode
+        samples.addRow('Sample seeds', seed_mode)
+        self.spin(samples, 'seed', 'First seed (also seeds training at start)', 0, 2147483647)
+        self.line(samples, 'sample_seeds', 'Seeds in prompt order')
+        self.widgets['sample_seeds'].setPlaceholderText('One per sample, separated by commas or spaces')
         self.interval(samples, 'save', 'Autosave every')
-        note = QLabel('Zero disables an interval. Samples reuse the same seeds for comparison.\nEvery save includes the LoRA and resumable optimizer state.')
+        note = QLabel('Zero disables an interval. Seeds stay fixed across sampling times; random seeds are chosen anew for each run.\nEvery save includes the LoRA and resumable optimizer state.')
         note.setWordWrap(True)
         samples.addRow(note)
         models = QFormLayout()
@@ -353,12 +363,13 @@ class Window(QMainWindow):
             elif isinstance(widget, QPlainTextEdit):
                 value = widget.toPlainText()
             elif isinstance(widget, QComboBox):
-                value = widget.currentText()
+                value = widget.currentData() if key == 'sample_seed_mode' else widget.currentText()
             elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
                 value = widget.value()
             else:
                 value = widget.text()
             values[key] = value
+        values['sample_random_seed'] = self.settings.sample_random_seed
         return Settings(**values)
 
     def message(self, text):
@@ -500,7 +511,10 @@ class Window(QMainWindow):
             elif isinstance(widget, QPlainTextEdit):
                 widget.setPlainText(value)
             elif isinstance(widget, QComboBox):
-                widget.setCurrentText(value)
+                if key == 'sample_seed_mode':
+                    widget.setCurrentIndex(widget.findData(value))
+                else:
+                    widget.setCurrentText(value)
             elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
                 widget.setValue(value)
             else:
