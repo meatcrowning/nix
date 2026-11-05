@@ -70,6 +70,7 @@ class Window(QMainWindow):
         self.mode = ''
         self.state = 'ready'
         self.live_sampling = False
+        self.can_sample_now = False
         self.sampling_request_id = 0
         self.pending_close = False
         self.widgets = {}
@@ -168,10 +169,13 @@ class Window(QMainWindow):
         self.text(samples, 'negative_prompt', 'Negative prompt')
         self.apply_samples = QPushButton('Apply sampling changes')
         self.apply_samples.clicked.connect(self.apply_sampling)
+        self.sample_now = QPushButton('Sample now')
+        self.sample_now.setToolTip('Generate samples with the current prompts at the next completed training step, regardless of the sampling switch or interval. Resume first if paused.')
+        self.sample_now.clicked.connect(lambda: self.apply_sampling(force=True))
         self.sampling_status = QLabel('Each sample has its own prompt. New rows copy the preceding prompt for editing. Apply edits during training for the next sampling interval.')
         self.sampling_status.setTextFormat(Qt.PlainText)
         self.sampling_status.setWordWrap(True)
-        samples.addRow(self.apply_samples)
+        samples.addRow(self.apply_samples, self.sample_now)
         samples.addRow(self.sampling_status)
         ar = QComboBox()
         self.sample_ar = ar
@@ -407,12 +411,14 @@ class Window(QMainWindow):
         self.sample_editor.setEnabled(not active or live)
         self.sample_ar.setEnabled(not active)
         self.apply_samples.setEnabled(live)
+        self.sample_now.setEnabled(live and self.can_sample_now and self.state != 'stopping')
         if not engine and not active:
             self.status.setText('Set up the training engine before starting.')
 
     def launch(self, program, arguments, mode):
         self.mode = mode
         self.live_sampling = False
+        self.can_sample_now = False
         self.state = 'preparing'
         self.buffer = ''
         self.started = time.monotonic()
@@ -479,20 +485,22 @@ class Window(QMainWindow):
             self.message(str(exc))
             self.update_buttons()
 
-    def apply_sampling(self):
+    def apply_sampling(self, *, force=False):
         if not (self.active() and self.mode == 'training' and self.live_sampling):
             return
         try:
             settings = self.collect()
-            if settings.sample_enabled and settings.sample_every:
+            if force or (settings.sample_enabled and settings.sample_every):
                 sample_prompts(settings)
             payload = {key: getattr(settings, key) for key in LIVE_KEYS}
             self.sampling_request_id += 1
             payload['request_id'] = self.sampling_request_id
+            payload['force'] = force
             message = {'command': 'sampling', 'sampling': payload}
             self.proc.write((json.dumps(message) + '\n').encode())
             atomic_json(CONFIG, asdict(settings))
-            self.sampling_status.setText('Sampling changes queued for the next completed training step.')
+            self.sampling_status.setText('Sample queued for the next completed training step.' if force else
+                                         'Sampling changes queued for the next completed training step.')
         except Exception as exc:
             self.sampling_status.setText(str(exc))
 
@@ -596,12 +604,14 @@ class Window(QMainWindow):
         kind = event['event']
         if kind == 'capabilities':
             self.live_sampling = bool(event.get('live_sampling'))
+            self.can_sample_now = bool(event.get('sample_now'))
         elif kind == 'sampling_update':
             if event.get('request_id') != self.sampling_request_id:
                 return
             if event['applied']:
-                self.sampling_status.setText('Applied: sampling enabled; prompts encode at the next interval.'
-                                            if event['enabled'] else 'Applied: sampling off.')
+                text = ('Applied: sampling enabled; prompts encode at the next interval.'
+                        if event['enabled'] else 'Applied: sampling off.')
+                self.sampling_status.setText('Applied: sampling now.' if event.get('forced') else text)
             else:
                 self.sampling_status.setText('Sampling changes rejected: ' + event['message'])
         elif kind == 'status':

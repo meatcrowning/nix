@@ -75,7 +75,7 @@ def main():
         generator.generate(config_util.load_user_config(args.dataset_config), args)
         print('MOSS training imports, arguments and dataset schema OK')
         return
-    emit('capabilities', live_sampling=True)
+    emit('capabilities', live_sampling=True, sample_now=True)
     controls = Controls()
     threading.Thread(target=controls.read, args=(sys.stdin,), daemon=True).start()
     s = manifest['settings']
@@ -168,6 +168,7 @@ def main():
             if not controls.boundary(save, lambda state: emit('status', state=state)):
                 emit('status', state='stopped')
                 raise Stopped()
+            force_sample = False
             request = controls.take_sampling()
             if request is not None:
                 try:
@@ -175,20 +176,21 @@ def main():
                     for key in LIVE_KEYS:
                         setattr(updated, key, request[key])
                     # Disabling works even while the prompt editor is empty.
-                    if updated.sample_enabled and updated.sample_every:
+                    if request.get('force') or (updated.sample_enabled and updated.sample_every):
                         sample_prompts(updated)
                     atomic_json(run / 'sampling.json', {key: getattr(updated, key) for key in LIVE_KEYS})
                     changed = any(getattr(updated, key) != getattr(sampling, key)
                                   for key in ('sample_entries', 'sample_prompt', 'negative_prompt', 'sample_count', 'sample_baseline',
                                               'sample_seed_mode', 'sample_seeds', 'seed'))
                     sampling.__dict__.update(vars(updated))
+                    force_sample = bool(request.get('force'))
                     if changed:
                         self.baseline_pending = sampling.sample_baseline
                     emit('sampling_update', applied=True, enabled=sampling.sample_enabled and sampling.sample_every > 0,
-                         request_id=request.get('request_id'))
+                         request_id=request.get('request_id'), forced=force_sample)
                 except Exception as exc:
                     emit('sampling_update', applied=False, message=str(exc), request_id=request.get('request_id'))
-            if sampling.sample_enabled and due(sampling.sample_every, sampling.sample_unit):
+            if force_sample or (sampling.sample_enabled and due(sampling.sample_every, sampling.sample_unit)):
                 try:
                     prompts = sample_prompts(sampling)
                     emit('status', state='preparing sample prompts')

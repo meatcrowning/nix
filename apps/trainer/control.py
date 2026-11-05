@@ -21,6 +21,9 @@ class Controls:
                 self.stopping = True
                 self.paused = False
             elif command == 'sampling':
+                # Keep a one-shot request when later edits replace the mailbox.
+                if self.sampling and self.sampling.get('force'):
+                    payload = dict(payload, force=True)
                 self.sampling = payload
             elif command == 'save':
                 self.save = True

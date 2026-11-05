@@ -28,7 +28,10 @@ Alpha defaults to 1 for new settings and is independent of rank. Run manifests
 without alpha retain the historical alpha=rank behavior when opened/resumed.
 
 Sampling changes travel through worker stdin and are accepted at completed
-steps. Disabling skips future batches, never cancels an active sampler. Accepted
+steps. Sample now applies the current prompts and requests one batch at the next
+completed step, bypassing the enable switch and interval without changing them.
+While paused it waits for resume; repeated pending requests coalesce.
+Disabling skips future automatic batches, never cancels an active sampler. Accepted
 sampling settings persist in run-local sampling.json; prompts.json is derived.
 New prompt text temporarily loads the encoder, preserving RNG and H2D streamed
 blocks; failures skip sampling, while failure to restore training weights is

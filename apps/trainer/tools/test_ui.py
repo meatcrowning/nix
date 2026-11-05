@@ -20,6 +20,7 @@ with tempfile.TemporaryDirectory() as tmp:
     app = QApplication([])
     assert app.platformName() == 'offscreen'
     window = main.Window()
+    assert not window.sample_now.isEnabled()
     assert window.collect().alpha == 1.0
     window.widgets['alpha'].setValue(4.5)
     window.widgets['rank'].setValue(32)
@@ -76,6 +77,8 @@ with tempfile.TemporaryDirectory() as tmp:
     window.active = lambda: True
     window.mode = 'training'
     window.handle_event({'event': 'capabilities', 'live_sampling': True})
+    assert not window.sample_now.isEnabled()  # Older workers cannot force samples.
+    window.handle_event({'event': 'capabilities', 'live_sampling': True, 'sample_now': True})
     assert window.sample_editor.isEnabled()
     assert window.widgets['sample_every'].isEnabled()
     window.widgets['sample_seed_mode'].setCurrentIndex(2)
@@ -93,6 +96,14 @@ with tempfile.TemporaryDirectory() as tmp:
     window.widgets['sample_every'].setValue(0)
     window.update_buttons()
     assert window.apply_samples.isEnabled()
+    assert window.sample_now.isEnabled()
+    window.sample_now.click()
+    assert sent[-1]['sampling']['force'] is True
+    assert sent[-1]['sampling']['sample_enabled'] is False
+    assert sent[-1]['sampling']['sample_every'] == 0
+    window.handle_event({'event': 'sampling_update', 'request_id': window.sampling_request_id,
+                         'applied': True, 'enabled': False, 'forced': True})
+    assert window.sampling_status.text() == 'Applied: sampling now.'
     window.widgets['sample_every'].setValue(17)
     window.widgets['sample_enabled'].setChecked(True)
     assert sent[-1]['sampling']['sample_enabled'] is True

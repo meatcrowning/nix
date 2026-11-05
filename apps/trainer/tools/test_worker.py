@@ -124,3 +124,25 @@ with tempfile.TemporaryDirectory() as tmp:
     assert observations[0] == (0, 'test-baseline', 0.0, 3)
     assert all(row[2] == 1 for row in observations[1:])
     print('Live disable/re-enable, prompt/count changes, baseline isolation and persistence OK')
+
+    # A manual request bypasses disabled/zero and not-yet-due schedules once.
+    for enabled_flag, interval, expected in ((False, 0, [1]), (True, 3, [1, 3])):
+        settings = Settings(sample_enabled=enabled_flag, sample_every=interval)
+        payload = {k: getattr(settings, k) for k in LIVE_KEYS}
+        (run / 'sampling.json').write_text(json.dumps(payload))
+        controls = worker.Controls()
+        controls.submit('sampling', dict(payload, force=True))
+        controls.submit('sampling', dict(payload, request_id=99))
+        observations.clear()
+        with patch.dict(sys.modules, modules), patch.object(worker, 'ENGINE', root), \
+             patch.object(worker.Lease, 'acquire'), patch.object(worker.Lease, 'close'), \
+             patch.object(worker.Controls, 'read'), patch.object(sys, 'stdout', io.StringIO()), \
+             patch.object(sys, 'argv', ['worker.py', str(run)]), \
+             patch.object(worker, 'Controls', return_value=controls), \
+             patch.object(Backend, 'sample_images', capture):
+            worker.main()
+        assert [row[0] for row in observations] == expected, observations
+        persisted = json.loads((run / 'sampling.json').read_text())
+        assert persisted['sample_enabled'] == enabled_flag
+        assert persisted['sample_every'] == interval and 'force' not in persisted
+    print('Manual samples bypass disabled/zero/not-due schedules once and preserve automatic settings OK')
