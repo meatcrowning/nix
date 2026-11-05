@@ -9,8 +9,9 @@ class Controls:
         self.paused = False
         self.stopping = False
         self.save = False
+        self.sampling = None
 
-    def submit(self, command):
+    def submit(self, command, payload=None):
         with self.condition:
             if command == 'pause':
                 self.paused = True
@@ -19,6 +20,8 @@ class Controls:
             elif command == 'stop':
                 self.stopping = True
                 self.paused = False
+            elif command == 'sampling':
+                self.sampling = payload
             elif command == 'save':
                 self.save = True
             self.condition.notify_all()
@@ -26,12 +29,18 @@ class Controls:
     def read(self, stream):
         for line in stream:
             try:
-                self.submit(json.loads(line)['command'])
+                doc = json.loads(line)
+                self.submit(doc['command'], doc.get('sampling'))
             except (ValueError, KeyError, TypeError):
                 pass
         # Closing/crashing the UI requests a recoverable stop, never orphans
         # an unobserved training process on the GPU.
         self.submit('stop')
+
+    def take_sampling(self):
+        with self.condition:
+            pending, self.sampling = self.sampling, None
+            return pending
 
     def boundary(self, save, emit):
         announced = False

@@ -25,6 +25,9 @@ class Accelerator:
 
 class Backend:
     samples = []
+    def post_process_network(self, *a):
+        pass
+
     def on_step_start(self, *args, **kwargs):
         pass
 
@@ -36,16 +39,20 @@ class Backend:
 
     def train(self, args):
         accelerator = Accelerator()
+        self.sample_prompts_te_outputs = {Settings().sample_prompt: [], '': []}
+        network = types.SimpleNamespace(multiplier=1.0)
+        network.set_multiplier = lambda value: setattr(network, 'multiplier', value)
+        self.post_process_network(args, accelerator, network)
         self.sample_images(accelerator, args, 0, 0)
-        self.on_step_start(args, accelerator, object())
+        self.on_step_start(args, accelerator, network)
         for step in range(1, args.max_train_steps + 1):
-            self.sample_images(accelerator, args, None, step)
+            self.sample_images(accelerator, args, None, step, object())
 
 
 def parser():
     class Parser:
         def parse_args(self, args):
-            return types.SimpleNamespace(output_dir=args[args.index('--output_dir') + 1],
+            return types.SimpleNamespace(output_name='test', output_dir=args[args.index('--output_dir') + 1],
                 max_train_steps=int(args[args.index('--max_train_steps') + 1]))
     return Parser()
 
@@ -83,3 +90,36 @@ with tempfile.TemporaryDirectory() as tmp:
         (1, 1, 1), (2, 1, 2), (3, 2, 1), (4, 2, 2)]
     assert all(e['total'] == 4 and e['total_epochs'] == 2 for e in progress)
     print('Adapter scheduling, complete checkpoint publication and progress OK')
+
+    # Disable at step 1, then enable with new prompts and baseline at step 3.
+    from sampling import LIVE_KEYS
+    disabled = Settings(sample_enabled=False)
+    enabled = Settings(sample_enabled=True, sample_baseline=True, sample_every=1,
+                       sample_prompt='new portrait\n\na landscape', sample_count=3)
+    requests = [{**{k: getattr(x, k) for k in LIVE_KEYS}, 'request_id': i}
+                for i, x in enumerate((disabled, enabled))]
+    observations = []
+    def capture(self, accelerator, args, epoch, step, *a):
+        observations.append((step, args.output_name, self.network.multiplier,
+                             len(json.loads((run / 'prompts.json').read_text()))))
+    with patch.dict(sys.modules, modules), patch.object(worker, 'ENGINE', root), \
+         patch.object(worker.Lease, 'acquire'), patch.object(worker.Lease, 'close'), \
+         patch.object(worker.Controls, 'read'), patch.object(sys, 'stdout', io.StringIO()), \
+         patch.object(sys, 'argv', ['worker.py', str(run)]), \
+         patch.object(worker.Controls, 'take_sampling', side_effect=[requests[0], None, requests[1], None]), \
+         patch.object(worker, 'encode_new_prompts', side_effect=lambda args, acc, unet, texts: {t: [] for t in texts}), \
+         patch.object(Backend, 'sample_images', capture):
+        worker.main()
+    assert observations == [(3, 'test-baseline', 0.0, 6), (3, 'test', 1.0, 6), (4, 'test', 1.0, 6)], observations
+    # Resume/start uses persisted sampling and takes baseline before any steps.
+    observations.clear()
+    with patch.dict(sys.modules, modules), patch.object(worker, 'ENGINE', root), \
+         patch.object(worker.Lease, 'acquire'), patch.object(worker.Lease, 'close'), \
+         patch.object(worker.Controls, 'read'), patch.object(sys, 'stdout', io.StringIO()), \
+         patch.object(sys, 'argv', ['worker.py', str(run)]), \
+         patch.object(worker, 'encode_new_prompts', side_effect=lambda args, acc, unet, texts: {t: [] for t in texts}), \
+         patch.object(Backend, 'sample_images', capture):
+        worker.main()
+    assert observations[0] == (0, 'test-baseline', 0.0, 6)
+    assert all(row[2] == 1 for row in observations[1:])
+    print('Live disable/re-enable, prompt/count changes, baseline isolation and persistence OK')

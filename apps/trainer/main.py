@@ -9,12 +9,13 @@ import time
 
 from PySide6.QtCore import QMimeData, QProcess, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
-from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox, QFileDialog,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
     QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from core import ENGINE, Settings, atomic_json, prepare_run
+from sampling import LIVE_KEYS, sample_prompts, load_sampling
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / 'pylib'))
@@ -67,6 +68,8 @@ class Window(QMainWindow):
         self.proc = None
         self.mode = ''
         self.state = 'ready'
+        self.live_sampling = False
+        self.sampling_request_id = 0
         self.pending_close = False
         self.widgets = {}
         self.seen_samples = set()
@@ -76,6 +79,15 @@ class Window(QMainWindow):
         self.progress_start = None
         self.eta = ''
         self.build()
+        self.persist_timer = QTimer(self)
+        self.persist_timer.setSingleShot(True)
+        self.persist_timer.setInterval(400)
+        self.persist_timer.timeout.connect(self.persist_settings)
+        for widget in self.widgets.values():
+            signal = (widget.toggled if isinstance(widget, QCheckBox) else
+                      widget.currentTextChanged if isinstance(widget, QComboBox) else
+                      widget.valueChanged if isinstance(widget, (QSpinBox, QDoubleSpinBox)) else widget.textChanged)
+            signal.connect(lambda *_: self.persist_timer.start())
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.scan_samples)
@@ -91,7 +103,9 @@ class Window(QMainWindow):
 
     def build(self):
         menu = self.menuBar().addMenu('&File')
-        for text, handler in [('Open run…', self.open_run), ('Open output folder', self.open_output), ('Quit', self.close)]:
+        for text, handler in [('Open run…', self.open_run), ('Open output folder', self.open_output),
+                              ('Save preset…', lambda: self.preset_dialog(True)),
+                              ('Load preset…', lambda: self.preset_dialog(False)), ('Quit', self.close)]:
             action = QAction(text, self)
             action.triggered.connect(handler)
             menu.addAction(action)
@@ -140,11 +154,23 @@ class Window(QMainWindow):
         train.addRow(note)
         samples = QFormLayout()
         self.add_tab('Sampling & saving', samples)
+        self.check(samples, 'sample_enabled', 'Enable sampling')
+        self.widgets['sample_enabled'].toggled.connect(lambda *_: self.apply_sampling())
+        self.check(samples, 'sample_baseline', 'Take baseline samples without LoRA first')
         self.interval(samples, 'sample', 'Sample every')
-        self.spin(samples, 'sample_count', 'Samples per interval', 1, 16)
-        self.text(samples, 'sample_prompt', 'Sample prompt')
+        self.spin(samples, 'sample_count', 'Samples per prompt', 1, 16)
+        self.text(samples, 'sample_prompt', 'Sample prompts')
+        self.widgets['sample_prompt'].setPlaceholderText('Separate prompts with a blank line')
         self.text(samples, 'negative_prompt', 'Negative prompt')
+        self.apply_samples = QPushButton('Apply sampling changes')
+        self.apply_samples.clicked.connect(self.apply_sampling)
+        self.sampling_status = QLabel('Separate prompts with a blank line. Apply edits during training; new text is encoded at the next sampling interval.')
+        self.sampling_status.setTextFormat(Qt.PlainText)
+        self.sampling_status.setWordWrap(True)
+        samples.addRow(self.apply_samples)
+        samples.addRow(self.sampling_status)
         ar = QComboBox()
+        self.sample_ar = ar
         ar.addItems(['Custom', '1:1', '4:3', '3:4', '16:9', '9:16'])
         samples.addRow('Aspect ratio', ar)
         self.spin(samples, 'sample_width', 'Width', 256, 2048, 16)
@@ -221,6 +247,55 @@ class Window(QMainWindow):
         self.widgets[key] = widget
         form.addRow(label, widget)
 
+    def check(self, form, key, label):
+        widget = QCheckBox(label)
+        widget.setChecked(getattr(self.settings, key))
+        self.widgets[key] = widget
+        form.addRow(widget)
+
+    def persist_settings(self):
+        try:
+            atomic_json(CONFIG, asdict(self.collect()))
+        except OSError as exc:
+            self.message('Could not save settings: ' + str(exc))
+
+    def preset_dialog(self, saving):
+        if not saving and self.active():
+            self.message('Load presets when training is stopped; live sampling controls remain available.')
+            return
+        folder = CONFIG.parent / 'presets'
+        folder.mkdir(parents=True, exist_ok=True)
+        dialog = QFileDialog(self, 'Save preset' if saving else 'Load preset', str(folder))
+        dialog.setOption(QFileDialog.DontUseNativeDialog)
+        dialog.setNameFilter('Trainer presets (*.json)')
+        dialog.setDefaultSuffix('json')
+        dialog.setAcceptMode(QFileDialog.AcceptSave if saving else QFileDialog.AcceptOpen)
+        dialog.setFileMode(QFileDialog.AnyFile if saving else QFileDialog.ExistingFile)
+        dialog.fileSelected.connect(lambda path: self.preset_file(path, saving))
+        dialog.open()
+        self.dialog = dialog
+
+    def preset_file(self, path, saving):
+        try:
+            if saving:
+                atomic_json(path, asdict(self.collect()))
+            else:
+                if self.active():
+                    raise ValueError('Stop training before loading a preset.')
+                values = json.loads(Path(path).read_text())
+                if not isinstance(values, dict) or not values or not set(values) <= set(Settings.__dataclass_fields__):
+                    raise ValueError('This is not a trainer preset.')
+                settings = Settings(**values)
+                defaults = Settings()
+                if any(type(getattr(settings, key)) is not type(getattr(defaults, key))
+                       for key in values):
+                    raise ValueError('Preset contains an invalid value type.')
+                self.load_settings(settings)
+                self.persist_settings()
+            self.message(('Saved preset: ' if saving else 'Loaded preset: ') + Path(path).stem)
+        except (OSError, ValueError, TypeError) as exc:
+            self.message(str(exc))
+
     def spin(self, form, key, label, minimum, maximum, step=1, decimals=None):
         widget = QDoubleSpinBox() if decimals is not None else QSpinBox()
         if decimals is not None:
@@ -273,7 +348,9 @@ class Window(QMainWindow):
     def collect(self):
         values = {}
         for key, widget in self.widgets.items():
-            if isinstance(widget, QPlainTextEdit):
+            if isinstance(widget, QCheckBox):
+                value = widget.isChecked()
+            elif isinstance(widget, QPlainTextEdit):
                 value = widget.toPlainText()
             elif isinstance(widget, QComboBox):
                 value = widget.currentText()
@@ -303,12 +380,21 @@ class Window(QMainWindow):
         self.stop.setEnabled(active and self.mode == 'training' and self.state != 'stopping')
         self.install.setEnabled(not active)
         self.install.setText('Check / repair engine' if engine else 'Set up training engine')
-        self.tabs.setEnabled(not active)
+        live = active and self.mode == 'training' and self.live_sampling
+        self.tabs.setEnabled(not active or live)
+        self.tabs.setTabEnabled(0, not active)
+        self.tabs.setTabEnabled(2, not active)
+        for key, widget in self.widgets.items():
+            if key.startswith('sample_') or key in ('negative_prompt', 'seed', 'save_every', 'save_unit'):
+                widget.setEnabled(not active or (live and key in LIVE_KEYS))
+        self.sample_ar.setEnabled(not active)
+        self.apply_samples.setEnabled(live)
         if not engine and not active:
             self.status.setText('Set up the training engine before starting.')
 
     def launch(self, program, arguments, mode):
         self.mode = mode
+        self.live_sampling = False
         self.state = 'preparing'
         self.buffer = ''
         self.started = time.monotonic()
@@ -375,11 +461,33 @@ class Window(QMainWindow):
             self.message(str(exc))
             self.update_buttons()
 
+    def apply_sampling(self):
+        if not (self.active() and self.mode == 'training' and self.live_sampling):
+            return
+        try:
+            settings = self.collect()
+            if settings.sample_enabled and settings.sample_every:
+                sample_prompts(settings)
+            payload = {key: getattr(settings, key) for key in LIVE_KEYS}
+            self.sampling_request_id += 1
+            payload['request_id'] = self.sampling_request_id
+            message = {'command': 'sampling', 'sampling': payload}
+            self.proc.write((json.dumps(message) + '\n').encode())
+            atomic_json(CONFIG, asdict(settings))
+            self.sampling_status.setText('Sampling changes queued for the next completed training step.')
+        except Exception as exc:
+            self.sampling_status.setText(str(exc))
+
+    def run_settings(self):
+        settings = Settings(**json.loads((self.run / 'run.json').read_text())['settings'])
+        return load_sampling(settings, self.run)
+
     def resume_run(self):
         if self.active() or not self.run:
             return
         try:
             latest = json.loads((self.run / 'latest.json').read_text())
+            self.load_settings(self.run_settings())
             self.launch(ENGINE / '.venv/bin/python', ['-u', HERE / 'worker.py', self.run, '--resume', latest['state']], 'training')
         except Exception as exc:
             self.message(str(exc))
@@ -387,7 +495,9 @@ class Window(QMainWindow):
     def load_settings(self, settings):
         for key, widget in self.widgets.items():
             value = getattr(settings, key)
-            if isinstance(widget, QPlainTextEdit):
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(value)
+            elif isinstance(widget, QPlainTextEdit):
                 widget.setPlainText(value)
             elif isinstance(widget, QComboBox):
                 widget.setCurrentText(value)
@@ -396,6 +506,7 @@ class Window(QMainWindow):
             else:
                 widget.setText(value)
         self.settings = settings
+        self.sample_ar.setCurrentText('Custom')
 
     def open_run(self):
         if self.active():
@@ -411,6 +522,7 @@ class Window(QMainWindow):
                 settings = Settings(**manifest['settings'])
                 self.load_settings(settings)
                 self.run = Path(path).parent
+                self.load_settings(self.run_settings())
                 self.gallery.clear()
                 self.seen_samples.clear()
                 self.message('Opened ' + str(self.run))
@@ -460,7 +572,17 @@ class Window(QMainWindow):
 
     def handle_event(self, event):
         kind = event['event']
-        if kind == 'status':
+        if kind == 'capabilities':
+            self.live_sampling = bool(event.get('live_sampling'))
+        elif kind == 'sampling_update':
+            if event.get('request_id') != self.sampling_request_id:
+                return
+            if event['applied']:
+                self.sampling_status.setText('Applied: sampling enabled; prompts encode at the next interval.'
+                                            if event['enabled'] else 'Applied: sampling off.')
+            else:
+                self.sampling_status.setText('Sampling changes rejected: ' + event['message'])
+        elif kind == 'status':
             self.state = event['state']
             self.message(self.state.capitalize())
         elif kind == 'progress':

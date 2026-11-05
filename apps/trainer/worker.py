@@ -10,7 +10,8 @@ import urllib.request
 import uuid
 
 from control import Controls
-from core import ENGINE, REVISION, atomic_json, training_args, total_training_steps
+from core import ENGINE, REVISION, Settings, atomic_json, training_args, total_training_steps
+from sampling import LIVE_KEYS, sample_prompts, refresh_cache, encode_new_prompts, load_sampling, RestorationError
 
 
 def emit(event, **values):
@@ -74,9 +75,14 @@ def main():
         generator.generate(config_util.load_user_config(args.dataset_config), args)
         print('MOSS training imports, arguments and dataset schema OK')
         return
+    emit('capabilities', live_sampling=True)
     controls = Controls()
     threading.Thread(target=controls.read, args=(sys.stdin,), daemon=True).start()
     s = manifest['settings']
+    sampling = load_sampling(Settings(**s), run)
+    # Restore the last accepted sampling configuration on checkpoint resume.
+    atomic_json(run / 'prompts.json', sample_prompts(sampling)
+                if sampling.sample_enabled and sampling.sample_every else [])
     total = total_training_steps(manifest)
     steps_per_epoch = manifest['images']
     total_epochs = (total + steps_per_epoch - 1) // steps_per_epoch
@@ -89,12 +95,40 @@ def main():
         network = None
         saved_step = -1
 
+        baseline_pending = sampling.sample_baseline
+
+        def post_process_network(self, args, accelerator, network, *a):
+            self.network = accelerator.unwrap_model(network)
+            return super().post_process_network(args, accelerator, network, *a)
+
+        def baseline(self, accelerator, args, step, *a):
+            if not self.baseline_pending or not sampling.sample_enabled or not sampling.sample_every:
+                return
+            emit('status', state='sampling baseline without LoRA')
+            name = args.output_name
+            first = getattr(args, 'sample_at_first', False)
+            multiplier = self.network.multiplier
+            try:
+                self.network.set_multiplier(0.0)
+                args.output_name = name + '-baseline'
+                args.sample_at_first = True
+                args.sample_every_n_steps = 1
+                args.sample_every_n_epochs = None
+                super().sample_images(accelerator, args, None, step, *a)
+                self.baseline_pending = False
+                emit('samples')
+            finally:
+                self.network.set_multiplier(multiplier)
+                args.output_name = name
+                args.sample_at_first = first
+
         def on_step_start(self, args, accelerator, network, *a, **kw):
             self.network = accelerator.unwrap_model(network)
             return super().on_step_start(args, accelerator, network, *a, **kw)
 
         def sample_images(self, accelerator, args, epoch, global_step, *a):
-            if epoch == 0:  # initial callback has no trained network yet
+            if epoch == 0:
+                self.baseline(accelerator, args, offset, *a)
                 emit('status', state='training')
                 return
             if epoch is not None:  # step callback owns scheduling and controls
@@ -134,7 +168,41 @@ def main():
             if not controls.boundary(save, lambda state: emit('status', state=state)):
                 emit('status', state='stopped')
                 raise Stopped()
-            if due(s['sample_every'], s['sample_unit']):
+            request = controls.take_sampling()
+            if request is not None:
+                try:
+                    updated = Settings(**vars(sampling))
+                    for key in LIVE_KEYS:
+                        setattr(updated, key, request[key])
+                    # Disabling works even while the prompt editor is empty.
+                    if updated.sample_enabled and updated.sample_every:
+                        sample_prompts(updated)
+                    atomic_json(run / 'sampling.json', {key: getattr(updated, key) for key in LIVE_KEYS})
+                    changed = any(getattr(updated, key) != getattr(sampling, key)
+                                  for key in ('sample_prompt', 'negative_prompt', 'sample_count', 'sample_baseline'))
+                    sampling.__dict__.update(vars(updated))
+                    if changed:
+                        self.baseline_pending = sampling.sample_baseline
+                    emit('sampling_update', applied=True, enabled=sampling.sample_enabled and sampling.sample_every > 0,
+                         request_id=request.get('request_id'))
+                except Exception as exc:
+                    emit('sampling_update', applied=False, message=str(exc), request_id=request.get('request_id'))
+            if sampling.sample_enabled and due(sampling.sample_every, sampling.sample_unit):
+                try:
+                    prompts = sample_prompts(sampling)
+                    emit('status', state='preparing sample prompts')
+                    cache = refresh_cache(self.sample_prompts_te_outputs, prompts,
+                        lambda texts: encode_new_prompts(args, accelerator, a[-1], texts))
+                    atomic_json(run / 'prompts.json', prompts)
+                    self.sample_prompts_te_outputs = cache
+                except RestorationError:
+                    raise
+                except Exception as exc:
+                    # Keep optimization running; retry on the next interval.
+                    emit('warning', message='Sampling skipped: ' + str(exc))
+                    emit('status', state='training')
+                    return
+                self.baseline(accelerator, args, step, *a)
                 emit('status', state='sampling')
                 args.sample_every_n_steps = 1
                 args.sample_every_n_epochs = None

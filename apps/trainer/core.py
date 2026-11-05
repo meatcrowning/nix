@@ -6,6 +6,8 @@ import math
 from pathlib import Path
 import uuid
 
+from sampling import sample_prompts
+
 REVISION = 'cb70b96858477e716a2096292ab8aab433277f38'
 ENGINE = Path.home() / '.local/share/moss-trainer/engine'
 IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}
@@ -32,6 +34,8 @@ class Settings:
     rank: int = 16
     learning_rate: float = 0.0001
     blocks_to_swap: int = 20
+    sample_enabled: bool = True
+    sample_baseline: bool = False
     sample_every: int = 250
     sample_unit: str = 'steps'
     sample_count: int = 2
@@ -79,8 +83,8 @@ class Settings:
             raise ValueError('Training length unit must be steps or epochs.')
         if self.sample_unit not in ('steps', 'epochs') or self.save_unit not in ('steps', 'epochs'):
             raise ValueError('Interval units must be steps or epochs.')
-        if self.sample_every and not self.sample_prompt.strip():
-            raise ValueError('Enter a sample prompt or disable periodic samples.')
+        if (self.sample_enabled and self.sample_every) or self.sample_prompt.strip():
+            sample_prompts(self)
 
 
 def prepare_run(settings):
@@ -118,10 +122,7 @@ def prepare_run(settings):
         '[[datasets]]\n' + f'resolution = {settings.resolution}\nbatch_size = 1\n'
         'enable_bucket = true\nbucket_no_upscale = true\nbucket_reso_steps = 16\n'
         '[[datasets.subsets]]\n' + f'image_dir = {json.dumps(str(data))}\nnum_repeats = 1\nclass_tokens = ""\n')
-    prompts = [{'prompt': settings.sample_prompt, 'negative_prompt': settings.negative_prompt,
-                'width': settings.sample_width, 'height': settings.sample_height,
-                'sample_steps': settings.sample_steps, 'scale': settings.sample_cfg,
-                'seed': settings.seed + i} for i in range(settings.sample_count)]
+    prompts = sample_prompts(settings) if settings.sample_prompt.strip() else []
     atomic_json(run / 'prompts.json', prompts)
     return run
 

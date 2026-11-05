@@ -25,7 +25,18 @@ through the dataset (batch size and repeats are both one). Training length
 selects either steps or epochs; core.py resolves the step budget from the
 frozen dataset count, including for resume. Old manifests default to steps.
 
+Sampling changes travel through worker stdin and are accepted at completed
+steps. Disabling skips future batches, never cancels an active sampler. Accepted
+sampling settings persist in run-local sampling.json; prompts.json is derived.
+New prompt text temporarily loads the encoder, preserving RNG and H2D streamed
+blocks; failures skip sampling, while failure to restore training weights is
+fatal. Baselines use multiplier zero with restoration in finally, at startup
+and before sampling changed prompts. Existing workers cannot gain these controls
+without restarting: never interrupt a user's run to apply source updates.
+GUI values autosave; File menu presets contain Settings only, not checkpoints.
+
 Verify without live GPU work or windows:
+- `python3 apps/trainer/tools/test_sampling.py`
 - `python3 apps/trainer/tools/test_core.py`
 - `python3 apps/trainer/tools/test_worker.py`
 - `CUDA_VISIBLE_DEVICES= ENGINE/.venv/bin/python tools/test_backend.py` from
