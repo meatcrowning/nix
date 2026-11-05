@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBo
     QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from core import ENGINE, Settings, atomic_json, prepare_run
-from sampling import LIVE_KEYS, sample_prompts, load_sampling
+from sampling import LIVE_KEYS, sample_prompts, load_sampling, sample_entries
+from sample_editor import SampleEditor
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / 'pylib'))
@@ -88,6 +89,7 @@ class Window(QMainWindow):
                       widget.currentTextChanged if isinstance(widget, QComboBox) else
                       widget.valueChanged if isinstance(widget, (QSpinBox, QDoubleSpinBox)) else widget.textChanged)
             signal.connect(lambda *_: self.persist_timer.start())
+        self.sample_editor.changed.connect(self.persist_timer.start)
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.scan_samples)
@@ -158,13 +160,14 @@ class Window(QMainWindow):
         self.widgets['sample_enabled'].toggled.connect(lambda *_: self.apply_sampling())
         self.check(samples, 'sample_baseline', 'Take baseline samples without LoRA first')
         self.interval(samples, 'sample', 'Sample every')
-        self.spin(samples, 'sample_count', 'Samples per prompt', 1, 16)
-        self.text(samples, 'sample_prompt', 'Sample prompts')
-        self.widgets['sample_prompt'].setPlaceholderText('Separate prompts with a blank line')
+        self.spin(samples, 'sample_count', 'Samples per interval', 1, 64)
+        self.sample_editor = SampleEditor(sample_entries(self.settings))
+        self.widgets['sample_count'].valueChanged.connect(self.sample_editor.set_count)
+        samples.addRow(self.sample_editor)
         self.text(samples, 'negative_prompt', 'Negative prompt')
         self.apply_samples = QPushButton('Apply sampling changes')
         self.apply_samples.clicked.connect(self.apply_sampling)
-        self.sampling_status = QLabel('Separate prompts with a blank line. Apply edits during training; new text is encoded at the next sampling interval.')
+        self.sampling_status = QLabel('Each sample has its own prompt. New rows copy the preceding prompt for editing. Apply edits during training for the next sampling interval.')
         self.sampling_status.setTextFormat(Qt.PlainText)
         self.sampling_status.setWordWrap(True)
         samples.addRow(self.apply_samples)
@@ -192,8 +195,9 @@ class Window(QMainWindow):
         self.widgets['sample_seed_mode'] = seed_mode
         samples.addRow('Sample seeds', seed_mode)
         self.spin(samples, 'seed', 'First seed (also seeds training at start)', 0, 2147483647)
-        self.line(samples, 'sample_seeds', 'Seeds in prompt order')
-        self.widgets['sample_seeds'].setPlaceholderText('One per sample, separated by commas or spaces')
+        seed_mode.currentIndexChanged.connect(
+            lambda *_: self.sample_editor.set_explicit(seed_mode.currentData() == 'explicit'))
+        self.sample_editor.set_explicit(seed_mode.currentData() == 'explicit')
         self.interval(samples, 'save', 'Autosave every')
         note = QLabel('Zero disables an interval. Seeds stay fixed across sampling times; random seeds are chosen anew for each run.\nEvery save includes the LoRA and resumable optimizer state.')
         note.setWordWrap(True)
@@ -369,6 +373,7 @@ class Window(QMainWindow):
             else:
                 value = widget.text()
             values[key] = value
+        values['sample_entries'] = self.sample_editor.entries()
         values['sample_random_seed'] = self.settings.sample_random_seed
         return Settings(**values)
 
@@ -398,6 +403,7 @@ class Window(QMainWindow):
         for key, widget in self.widgets.items():
             if key.startswith('sample_') or key in ('negative_prompt', 'seed', 'save_every', 'save_unit'):
                 widget.setEnabled(not active or (live and key in LIVE_KEYS))
+        self.sample_editor.setEnabled(not active or live)
         self.sample_ar.setEnabled(not active)
         self.apply_samples.setEnabled(live)
         if not engine and not active:
@@ -519,6 +525,7 @@ class Window(QMainWindow):
                 widget.setValue(value)
             else:
                 widget.setText(value)
+        self.sample_editor.set_entries(sample_entries(settings))
         self.settings = settings
         self.sample_ar.setCurrentText('Custom')
 

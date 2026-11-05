@@ -27,6 +27,17 @@ with tempfile.TemporaryDirectory() as tmp:
     window.widgets['sample_every'].setValue(17)
     window.widgets['sample_unit'].setCurrentText('epochs')
     window.widgets['sample_count'].setValue(3)
+    assert window.sample_editor.count == 3 and len(window.sample_editor.rows) == 3
+    window.sample_editor.rows[1][1].setPlainText('Second sample\n\nwith a blank line')
+    window.widgets['sample_count'].setValue(4)
+    assert len(window.sample_editor.entries()) == 4
+    window.sample_editor.rows[3][1].setPlainText('Fourth draft')
+    window.widgets['sample_count'].setValue(3)
+    assert window.sample_editor.rows[3][0].isHidden()
+    assert len(main.sample_prompts(window.collect())) == 3
+    window.widgets['sample_count'].setValue(4)
+    assert window.sample_editor.entries()[3]['prompt'] == 'Fourth draft'
+    window.widgets['sample_count'].setValue(3)
     window.widgets['training_unit'].setCurrentText('epochs')
     window.widgets['epochs'].setValue(7)
     assert not window.widgets['steps'].isEnabled()
@@ -43,7 +54,8 @@ with tempfile.TemporaryDirectory() as tmp:
     window.handle_event({'event': 'error', 'message': 'synthetic failure'})
     assert window.status.text() == 'synthetic failure'
     window.widgets['sample_seed_mode'].setCurrentIndex(1)
-    window.widgets['sample_seeds'].setText('11, 22, 33')
+    for row, seed in zip(window.sample_editor.rows, (11, 22, 33)):
+        row[2].setValue(seed)
     window.widgets['sample_baseline'].setChecked(True)
     preset = Path(tmp) / 'custom-preset.json'
     window.preset_file(preset, True)
@@ -59,8 +71,17 @@ with tempfile.TemporaryDirectory() as tmp:
     window.active = lambda: True
     window.mode = 'training'
     window.handle_event({'event': 'capabilities', 'live_sampling': True})
-    assert window.widgets['sample_prompt'].isEnabled()
+    assert window.sample_editor.isEnabled()
     assert window.widgets['sample_every'].isEnabled()
+    window.widgets['sample_seed_mode'].setCurrentIndex(2)
+    assert not window.sample_editor.rows[0][2].isHidden()
+    window.widgets['sample_count'].setValue(4)
+    window.apply_sampling()
+    assert len(sent[-1]['sampling']['sample_entries']) == 4
+    assert sent[-1]['sampling']['sample_count'] == 4
+    window.widgets['sample_count'].setValue(3)
+    window.widgets['sample_seed_mode'].setCurrentIndex(1)
+    assert window.sample_editor.rows[0][2].isHidden()
     assert not window.widgets['sample_width'].isEnabled()
     window.widgets['sample_enabled'].setChecked(False)
     assert sent[-1]['sampling']['sample_enabled'] is False
@@ -70,6 +91,8 @@ with tempfile.TemporaryDirectory() as tmp:
     window.widgets['sample_every'].setValue(17)
     window.widgets['sample_enabled'].setChecked(True)
     assert sent[-1]['sampling']['sample_enabled'] is True
+    assert len(sent[-1]['sampling']['sample_entries']) == 3
+    assert sent[-1]['sampling']['sample_entries'][1]['prompt'] == 'Second sample\n\nwith a blank line'
     window.handle_event({'event': 'sampling_update', 'request_id': window.sampling_request_id,
                          'applied': True, 'enabled': True})
     assert window.sampling_status.text().startswith('Applied:')
@@ -78,7 +101,8 @@ with tempfile.TemporaryDirectory() as tmp:
     window.close()
     window2 = main.Window()
     assert window2.collect().sample_seed_mode == 'random'
-    assert window2.collect().sample_seeds == '11, 22, 33'
+    assert [e['seed'] for e in window2.collect().sample_entries] == [11, 22, 33]
+    assert window2.collect().sample_entries[1]['prompt'] == 'Second sample\n\nwith a blank line'
     assert window2.collect().sample_count == 3
     assert window2.collect().sample_unit == 'epochs'
     assert window2.collect().training_unit == 'epochs'

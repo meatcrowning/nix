@@ -95,7 +95,8 @@ with tempfile.TemporaryDirectory() as tmp:
     from sampling import LIVE_KEYS
     disabled = Settings(sample_enabled=False)
     enabled = Settings(sample_enabled=True, sample_baseline=True, sample_every=1,
-                       sample_prompt='new portrait\n\na landscape', sample_count=3)
+                       sample_count=3, sample_entries=[{'prompt': 'new portrait', 'seed': 11},
+                           {'prompt': 'a landscape', 'seed': 12}, {'prompt': 'new portrait', 'seed': 13}])
     requests = [{**{k: getattr(x, k) for k in LIVE_KEYS}, 'request_id': i}
                 for i, x in enumerate((disabled, enabled))]
     observations = []
@@ -110,7 +111,7 @@ with tempfile.TemporaryDirectory() as tmp:
          patch.object(worker, 'encode_new_prompts', side_effect=lambda args, acc, unet, texts: {t: [] for t in texts}), \
          patch.object(Backend, 'sample_images', capture):
         worker.main()
-    assert observations == [(3, 'test-baseline', 0.0, 6), (3, 'test', 1.0, 6), (4, 'test', 1.0, 6)], observations
+    assert observations == [(3, 'test-baseline', 0.0, 3), (3, 'test', 1.0, 3), (4, 'test', 1.0, 3)], observations
     # Resume/start uses persisted sampling and takes baseline before any steps.
     observations.clear()
     with patch.dict(sys.modules, modules), patch.object(worker, 'ENGINE', root), \
@@ -120,6 +121,6 @@ with tempfile.TemporaryDirectory() as tmp:
          patch.object(worker, 'encode_new_prompts', side_effect=lambda args, acc, unet, texts: {t: [] for t in texts}), \
          patch.object(Backend, 'sample_images', capture):
         worker.main()
-    assert observations[0] == (0, 'test-baseline', 0.0, 6)
+    assert observations[0] == (0, 'test-baseline', 0.0, 3)
     assert all(row[2] == 1 for row in observations[1:])
     print('Live disable/re-enable, prompt/count changes, baseline isolation and persistence OK')

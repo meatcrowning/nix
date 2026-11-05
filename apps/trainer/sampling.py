@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import random
 
-LIVE_KEYS = ('sample_prompt', 'negative_prompt', 'sample_count', 'sample_enabled',
+LIVE_KEYS = ('sample_entries', 'sample_prompt', 'negative_prompt', 'sample_count', 'sample_enabled',
              'sample_baseline', 'sample_every', 'sample_unit', 'sample_seed_mode', 'sample_seeds', 'seed')
 
 
@@ -13,42 +13,55 @@ class RestorationError(RuntimeError):
     """Training cannot continue if resident weights were not restored."""
 
 
+def sample_entries(settings):
+    """Read rows, or adapt older settings to the total-count interpretation."""
+    if settings.sample_entries:
+        if not isinstance(settings.sample_entries, list):
+            raise ValueError('Sample entries must be a list.')
+        return settings.sample_entries
+    prompts = [p.strip() for p in re.split(r'\n\s*\n', settings.sample_prompt.strip()) if p.strip()] or ['']
+    try:
+        seeds = [int(value) for value in re.split(r'[\s,]+', settings.sample_seeds.strip()) if value]
+    except ValueError:
+        raise ValueError('Sample seeds must be whole numbers.') from None
+    return [{'prompt': prompts[i % len(prompts)],
+             'seed': seeds[i] if i < len(seeds) else (settings.seed + i) % 2147483648}
+            for i in range(settings.sample_count)]
+
+
 def sample_prompts(settings):
-    """Blank lines separate prompts; line breaks within a prompt are preserved."""
-    prompts = [p.strip() for p in re.split(r'\n\s*\n', settings.sample_prompt.strip()) if p.strip()]
-    prompts = list(dict.fromkeys(prompts))
+    """One output image per row; sample_count is the entire interval's batch."""
     if settings.sample_unit not in ('steps', 'epochs') or not isinstance(settings.sample_every, int) or not 0 <= settings.sample_every <= 1000000:
         raise ValueError('Choose a valid sampling interval.')
     if not isinstance(settings.sample_enabled, bool) or not isinstance(settings.sample_baseline, bool):
         raise ValueError('Invalid sampling switch.')
-    if not prompts:
-        raise ValueError('Enter at least one sample prompt.')
-    if not isinstance(settings.sample_count, int) or not 1 <= settings.sample_count <= 16:
-        raise ValueError('Choose between 1 and 16 samples per prompt.')
-    if len(prompts) * settings.sample_count > 64:
-        raise ValueError('Use at most 64 samples in one sampling interval.')
-    if len(settings.sample_prompt) + len(settings.negative_prompt) > 65536:
+    if not isinstance(settings.sample_count, int) or not 1 <= settings.sample_count <= 64:
+        raise ValueError('Choose between 1 and 64 samples per interval.')
+    entries = sample_entries(settings)
+    if len(entries) != settings.sample_count:
+        raise ValueError('Provide one prompt entry for each sample.')
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict) or not isinstance(entry.get('prompt'), str) or not entry['prompt'].strip():
+            raise ValueError(f'Enter a prompt for sample {i + 1}.')
+    if sum(len(e['prompt']) for e in entries) + len(settings.negative_prompt) > 65536:
         raise ValueError('Sample prompts are too long (maximum 65536 characters).')
-    count = len(prompts) * settings.sample_count
+    count = settings.sample_count
     if settings.sample_seed_mode == 'random':
         rng = random.Random(settings.sample_random_seed)
         seeds = rng.sample(range(2147483648), count)
     elif settings.sample_seed_mode == 'explicit':
-        try:
-            seeds = [int(value) for value in re.split(r'[\s,]+', settings.sample_seeds.strip()) if value]
-        except ValueError:
-            raise ValueError('Sample seeds must be whole numbers separated by commas or spaces.') from None
-        if len(seeds) != count or any(seed < 0 or seed > 2147483647 for seed in seeds):
-            raise ValueError(f'Enter exactly {count} sample seeds between 0 and 2147483647 (prompt order).')
+        seeds = [e.get('seed') for e in entries]
+        if any(type(seed) is not int or not 0 <= seed <= 2147483647 for seed in seeds):
+            raise ValueError('Each sample needs a seed between 0 and 2147483647.')
     elif settings.sample_seed_mode == 'increment':
         seeds = [(settings.seed + i) % 2147483648 for i in range(count)]
     else:
         raise ValueError('Choose a valid sample seed mode.')
-    return [{'prompt': prompt, 'negative_prompt': settings.negative_prompt,
+    return [{'prompt': entry['prompt'], 'negative_prompt': settings.negative_prompt,
              'width': settings.sample_width, 'height': settings.sample_height,
              'sample_steps': settings.sample_steps, 'scale': settings.sample_cfg,
-             'seed': seeds[index * settings.sample_count + i]}
-            for index, prompt in enumerate(prompts) for i in range(settings.sample_count)]
+             'seed': seeds[i]}
+            for i, entry in enumerate(entries)]
 
 
 def refresh_cache(cache, prompts, encode):

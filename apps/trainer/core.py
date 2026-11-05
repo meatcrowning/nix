@@ -1,5 +1,5 @@
 """Run manifests and sd-scripts configuration; no GUI or ML imports."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import json
 import math
@@ -40,6 +40,7 @@ class Settings:
     sample_every: int = 250
     sample_unit: str = 'steps'
     sample_count: int = 2
+    sample_entries: list = field(default_factory=list)
     sample_prompt: str = 'A portrait in soft natural light.'
     negative_prompt: str = ''
     sample_width: int = 768
@@ -87,7 +88,7 @@ class Settings:
             raise ValueError('Training length unit must be steps or epochs.')
         if self.sample_unit not in ('steps', 'epochs') or self.save_unit not in ('steps', 'epochs'):
             raise ValueError('Interval units must be steps or epochs.')
-        if (self.sample_enabled and self.sample_every) or self.sample_prompt.strip():
+        if (self.sample_enabled and self.sample_every) or self.sample_entries or self.sample_prompt.strip():
             sample_prompts(self)
 
 
@@ -129,7 +130,7 @@ def prepare_run(settings):
         '[[datasets]]\n' + f'resolution = {settings.resolution}\nbatch_size = 1\n'
         'enable_bucket = true\nbucket_no_upscale = true\nbucket_reso_steps = 16\n'
         '[[datasets.subsets]]\n' + f'image_dir = {json.dumps(str(data))}\nnum_repeats = 1\nclass_tokens = ""\n')
-    prompts = sample_prompts(settings) if settings.sample_prompt.strip() else []
+    prompts = sample_prompts(settings) if settings.sample_entries or settings.sample_prompt.strip() else []
     atomic_json(run / 'prompts.json', prompts)
     return run
 
