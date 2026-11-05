@@ -9,7 +9,7 @@ import threading
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from core import Settings, prepare_run, training_args
+from core import Settings, prepare_run, training_args, total_training_steps
 from control import Controls
 
 
@@ -48,6 +48,21 @@ class Tests(unittest.TestCase):
             args, offset, _ = training_args(run, state)
             self.assertEqual(offset, 200)
             self.assertEqual(args[args.index('--max_train_steps') + 1], '1800')
+            # Old manifests remain step-based; epoch runs resume against their
+            # original total rather than training a fresh set of epochs.
+            self.assertEqual(total_training_steps(manifest), 2000)
+            manifest['settings'].pop('training_unit')
+            manifest['settings'].pop('epochs')
+            self.assertEqual(total_training_steps(manifest), 2000)
+            manifest['settings'].update(training_unit='epochs', epochs=7)
+            (run / 'run.json').write_text(json.dumps(manifest))
+            (state / 'trainer-state.json').write_text(json.dumps({'step': 4, 'run': str(run)}))
+            args, offset, _ = training_args(run, state)
+            self.assertEqual(offset, 4)
+            self.assertEqual(args[args.index('--max_train_steps') + 1], '17')
+            (state / 'trainer-state.json').write_text(json.dumps({'step': 21, 'run': str(run)}))
+            with self.assertRaises(ValueError):
+                training_args(run, state)
             s.output = str(data / 'output')
             with self.assertRaises(ValueError):
                 prepare_run(s)

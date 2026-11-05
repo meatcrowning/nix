@@ -119,7 +119,18 @@ class Window(QMainWindow):
         self.path_row(train, 'output', 'Output folder', directory=True)
         self.line(train, 'name', 'Run name')
         self.line(train, 'fallback_caption', 'Caption for images without .txt')
+        length_unit = QComboBox()
+        length_unit.addItems(['steps', 'epochs'])
+        length_unit.setCurrentText(self.settings.training_unit)
+        self.widgets['training_unit'] = length_unit
+        train.addRow('Training length in', length_unit)
         self.spin(train, 'steps', 'Training steps', 1, 1000000)
+        self.spin(train, 'epochs', 'Training epochs', 1, 1000000)
+        def length_mode(unit):
+            self.widgets['steps'].setEnabled(unit == 'steps')
+            self.widgets['epochs'].setEnabled(unit == 'epochs')
+        length_unit.currentTextChanged.connect(length_mode)
+        length_mode(length_unit.currentText())
         self.spin(train, 'resolution', 'Training resolution', 256, 2048, 16)
         self.spin(train, 'rank', 'LoRA rank', 1, 256)
         self.spin(train, 'learning_rate', 'Learning rate', 0.000001, 0.01, 0.00001, decimals=6)
@@ -462,7 +473,12 @@ class Window(QMainWindow):
                 self.eta = f' · ~{remaining // 60} min remaining'
             self.progress.setRange(0, event['total'])
             self.progress.setValue(event['step'])
-            self.progress.setFormat(f"{event['step']} / {event['total']} steps · epoch {event['epoch']:.1f}")
+            if 'current_epoch' in event:
+                epoch_text = f"epoch {event['current_epoch']} / {event['total_epochs']}"
+                self.progress.setToolTip(f"Step {event['epoch_step']} / {event['steps_per_epoch']} in this epoch")
+            else:  # tolerate an already-running worker from before this update
+                epoch_text = f"epoch {event['epoch']:.1f}"
+            self.progress.setFormat(f"%p% · step {event['step']} / {event['total']} · {epoch_text}")
         elif kind == 'saved':
             self.message('Saved ' + Path(event['path']).name)
         elif kind in ('error', 'warning'):

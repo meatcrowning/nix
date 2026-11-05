@@ -55,10 +55,11 @@ with tempfile.TemporaryDirectory() as tmp:
     data = root / 'input'
     data.mkdir()
     (data / 'image.png').touch()
+    (data / 'second.png').touch()
     model = root / 'model'
     model.touch()
     run = prepare_run(Settings(dataset=str(data), output=str(root / 'out'), dit=str(model),
-        text_encoder=str(model), vae=str(model), steps=4, sample_every=2, save_every=2))
+        text_encoder=str(model), vae=str(model), steps=99, epochs=2, training_unit='epochs', sample_every=2, save_every=2))
     (root / 'revision').write_text(REVISION)
     modules = {'torch': types.SimpleNamespace(bfloat16='bf16'),
                'moss_image_train_network': types.SimpleNamespace(MossImageNetworkTrainer=Backend, setup_parser=parser),
@@ -76,4 +77,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert (Path(latest['state']) / 'optimizer.bin').is_file()
     assert json.loads((Path(latest['state']) / 'trainer-state.json').read_text())['step'] == 4
     assert 'completed' in output.getvalue()
+    progress = [json.loads(line.removeprefix('TRAINER:')) for line in output.getvalue().splitlines()
+                if line.startswith('TRAINER:') and '"event": "progress"' in line]
+    assert [(e['step'], e['current_epoch'], e['epoch_step']) for e in progress] == [
+        (1, 1, 1), (2, 1, 2), (3, 2, 1), (4, 2, 2)]
+    assert all(e['total'] == 4 and e['total_epochs'] == 2 for e in progress)
     print('Adapter scheduling, complete checkpoint publication and progress OK')

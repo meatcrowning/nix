@@ -21,7 +21,9 @@ only after both state and weights are complete; failed saves retain the prior
 checkpoint. Resuming restores optimizer/weights/RNG with constant learning rate
 and restarts dataset traversal; it is not an exact sample-order replay.
 Periodic intervals use completed optimizer steps, with epochs counting one pass
-through the dataset (batch size and repeats are both one).
+through the dataset (batch size and repeats are both one). Training length
+selects either steps or epochs; core.py resolves the step budget from the
+frozen dataset count, including for resume. Old manifests default to steps.
 
 Verify without live GPU work or windows:
 - `python3 apps/trainer/tools/test_core.py`

@@ -10,7 +10,7 @@ import urllib.request
 import uuid
 
 from control import Controls
-from core import ENGINE, REVISION, atomic_json, training_args
+from core import ENGINE, REVISION, atomic_json, training_args, total_training_steps
 
 
 def emit(event, **values):
@@ -77,6 +77,9 @@ def main():
     controls = Controls()
     threading.Thread(target=controls.read, args=(sys.stdin,), daemon=True).start()
     s = manifest['settings']
+    total = total_training_steps(manifest)
+    steps_per_epoch = manifest['images']
+    total_epochs = (total + steps_per_epoch - 1) // steps_per_epoch
     lease = Lease()
 
     class Stopped(Exception):
@@ -98,7 +101,9 @@ def main():
                 return
             step = global_step + offset
             epoch_number = step / manifest['images']
-            emit('progress', step=step, total=s['steps'], epoch=epoch_number)
+            emit('progress', step=step, total=total, epoch=epoch_number,
+                 current_epoch=(step - 1) // steps_per_epoch + 1, total_epochs=total_epochs,
+                 epoch_step=(step - 1) % steps_per_epoch + 1, steps_per_epoch=steps_per_epoch)
 
             def save():
                 if self.saved_step == step:
@@ -124,7 +129,7 @@ def main():
                 interval = interval * manifest['images'] if unit == 'epochs' else interval
                 return interval > 0 and step % interval == 0
 
-            if due(s['save_every'], s['save_unit']) or step >= s['steps']:
+            if due(s['save_every'], s['save_unit']) or step >= total:
                 save()
             if not controls.boundary(save, lambda state: emit('status', state=state)):
                 emit('status', state='stopped')
@@ -152,7 +157,7 @@ def main():
         except Stopped:
             return
         latest = json.loads((run / 'latest.json').read_text())
-        if latest['step'] != s['steps']:
+        if latest['step'] != total:
             raise RuntimeError('The backend ended before the requested training limit; see the log.')
         emit('status', state='completed')
     finally:

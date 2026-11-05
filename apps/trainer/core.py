@@ -26,6 +26,8 @@ class Settings:
     name: str = 'moss-lora'
     fallback_caption: str = ''
     steps: int = 2000
+    epochs: int = 50
+    training_unit: str = 'steps'
     resolution: int = 512
     rank: int = 16
     learning_rate: float = 0.0001
@@ -62,7 +64,7 @@ class Settings:
         for key in ('dit', 'text_encoder', 'vae'):
             if not Path(getattr(self, key)).is_file():
                 raise ValueError('Select the missing model file: ' + key)
-        for key in ('steps', 'rank', 'resolution', 'sample_count', 'sample_steps'):
+        for key in ('steps', 'epochs', 'rank', 'resolution', 'sample_count', 'sample_steps'):
             if not 1 <= getattr(self, key) <= 1000000:
                 raise ValueError('Invalid ' + key)
         if self.resolution % 16 or any(n < 256 or n > 2048 or n % 16 for n in (self.sample_width, self.sample_height)):
@@ -73,6 +75,8 @@ class Settings:
             raise ValueError('CPU offload must be between 0 and 36 blocks.')
         if self.sample_every < 0 or self.save_every < 0:
             raise ValueError('Intervals must be zero (off) or positive.')
+        if self.training_unit not in ('steps', 'epochs'):
+            raise ValueError('Training length unit must be steps or epochs.')
         if self.sample_unit not in ('steps', 'epochs') or self.save_unit not in ('steps', 'epochs'):
             raise ValueError('Interval units must be steps or epochs.')
         if self.sample_every and not self.sample_prompt.strip():
@@ -106,6 +110,7 @@ def prepare_run(settings):
             target.with_suffix('.txt').write_text(text, encoding='utf-8')
     manifest = {'settings': asdict(settings), 'images': len(images), 'captioned': captioned,
                 'revision': REVISION, 'sources': [str(p) for p in images]}
+    total_training_steps(manifest)
     atomic_json(run / 'run.json', manifest)
     # JSON quoted strings are valid TOML basic strings, including unusual paths.
     (run / 'dataset.toml').write_text(
@@ -121,6 +126,15 @@ def prepare_run(settings):
     return run
 
 
+def total_training_steps(manifest):
+    settings = Settings(**manifest['settings'])
+    # Batch size, accumulation and repeats are all one, including each bucket.
+    total = settings.epochs * manifest['images'] if settings.training_unit == 'epochs' else settings.steps
+    if not 1 <= total <= 2147483647:
+        raise ValueError('Training length must be between 1 and 2147483647 steps.')
+    return total
+
+
 def training_args(run, resume=None):
     run = Path(run)
     manifest = json.loads((run / 'run.json').read_text())
@@ -131,7 +145,8 @@ def training_args(run, resume=None):
         offset = int(state['step'])
         if Path(state['run']).resolve() != run.resolve():
             raise ValueError('The checkpoint belongs to a different run.')
-    if offset >= s.steps:
+    total = total_training_steps(manifest)
+    if offset >= total:
         raise ValueError('This run has already reached its training limit.')
     args = ['--pretrained_model_name_or_path', s.dit, '--text_encoder', s.text_encoder,
             '--vae', s.vae, '--dataset_config', str(run / 'dataset.toml'),
@@ -139,7 +154,7 @@ def training_args(run, resume=None):
             '--network_module', 'networks.lora_generic', '--network_dim', str(s.rank),
             '--network_alpha', str(s.rank), '--network_train_unet_only',
             '--learning_rate', str(s.learning_rate), '--optimizer_type', 'AdamW8bit',
-            '--lr_scheduler', 'constant', '--max_train_steps', str(s.steps - offset),
+            '--lr_scheduler', 'constant', '--max_train_steps', str(total - offset),
             '--mixed_precision', 'bf16', '--save_precision', 'bf16', '--save_model_as', 'safetensors',
             '--gradient_checkpointing', '--cache_latents', '--cache_latents_to_disk',
             '--cache_text_encoder_outputs', '--cache_text_encoder_outputs_to_disk',
