@@ -110,9 +110,10 @@ def main():
         if ev[0] != 0x3E:
             continue
         sub, body = ev[2], ev[3:]
-        if sub in (0x01, 0x0A) and len(body) >= 10:   # (Enhanced) Connection Complete
+        if sub in (0x01, 0x0A) and len(body) >= 11:   # (Enhanced) Connection Complete
             status, handle = body[0], struct.unpack("<H", body[1:3])[0]
-            addr = addr_str(body[4:10])
+            # status(1) handle(2) role(1) peer_addr_type(1) peer_addr(6)
+            addr = addr_str(body[5:11])
             if status == 0 and addr in want:
                 handles[handle] = addr
                 apply(handle, "connected")
