@@ -7,6 +7,11 @@ from pathlib import Path
 import sys
 import time
 
+if __name__ == '__main__' and any(arg in sys.argv for arg in ('--rpc', '--controller')):
+    from service import rpc, serve
+    serve() if '--controller' in sys.argv else rpc()
+    sys.exit(0)
+
 from PySide6.QtCore import QMimeData, QProcess, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
@@ -724,8 +729,10 @@ class Window(QMainWindow):
 
 def main():
     if '--setup-engine' in sys.argv:
-        from setup_engine import main as setup
-        setup()
+        import uuid
+        from remote import Client
+        result = Client(os.environ.get('TRAINER_SSH_HOST')).call('setup', id=uuid.uuid4().hex)
+        print('Engine setup submitted on top: ' + result['generation'])
         return
     app = QApplication(sys.argv)
     app.setApplicationName('moss-trainer')
@@ -733,7 +740,8 @@ def main():
     if is_plasma():
         apply_icon_theme()
         apply_widget_style(app)
-    window = Window()
+    from remote import Client, Window as ConnectedWindow
+    window = ConnectedWindow(Client(os.environ.get('TRAINER_SSH_HOST')))
     window.show()
     sys.exit(app.exec())
 

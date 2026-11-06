@@ -1,10 +1,13 @@
 { pkgs, lib, hostProfile, ... }:
 
-# Local CUDA training is top-only. Book has no CUDA device; its existing
-# apps remain unchanged. The ML environment is isolated from Painter/ComfyUI.
+# CUDA and the controller stay on top; book runs only the native SSH client.
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
-  trainer = pkgs.stdenv.mkDerivation {
+  trainer = if !hostProfile.isTop then pkgs.writeShellScriptBin "moss-trainer" ''
+    export TRAINER_SSH_HOST=top
+    export PATH=${lib.makeBinPath [ pkgs.rsync ]}:$PATH
+    exec /usr/bin/python3 /home/lam/nix/apps/trainer/main.py "$@"
+  '' else pkgs.stdenv.mkDerivation {
     pname = "moss-trainer";
     version = "live";
     dontUnpack = true;
@@ -19,12 +22,22 @@ let
         --set TRAINER_DYNAMIC_LINKER ${pkgs.stdenv.cc.bintools.dynamicLinker} \
         --set TRITON_LIBCUDA_PATH /run/opengl-driver/lib \
         --set PYTHONNOUSERSITE 1 \
-        --prefix PATH : ${lib.makeBinPath [ pkgs.git pkgs.uv pkgs.patchelf ]} \
+        --prefix PATH : ${lib.makeBinPath [ pkgs.git pkgs.uv pkgs.patchelf pkgs.rsync pkgs.systemd ]} \
         --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib:${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib pkgs.glib pkgs.libGL ]} \
         "''${qtWrapperArgs[@]}"
     '';
   };
-in lib.mkIf hostProfile.isTop {
+in {
+  systemd.user.services.moss-trainer-controller = lib.mkIf hostProfile.isTop {
+    Unit.Description = "Persistent MOSS training controller";
+    Service = {
+      ExecStart = "${trainer}/bin/moss-trainer --controller";
+      UMask = "0077";
+      KillMode = "process";
+      # On an unexpected controller exit, stdin EOF lets the worker save and
+      # stop. Do not SIGKILL it midway through publishing a checkpoint.
+    };
+  };
   home.packages = [ trainer ];
   home.file.".local/share/applications/moss-trainer.desktop".text = ''
     [Desktop Entry]
