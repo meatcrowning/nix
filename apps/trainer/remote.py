@@ -50,6 +50,21 @@ class Client:
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or 'Transfer failed; retry to continue')
 
+    def download(self, run, folder):
+        info = self.call('inspect', run=run)
+        if not info['latest']:
+            raise ValueError('No checkpoint has been saved yet')
+        path = info['latest']['lora']
+        destination = Path(folder) / Path(path).name
+        if destination.exists():
+            raise ValueError('Destination already exists; choose another folder')
+        partial = destination.with_name('.' + destination.name + '.partial')
+        self.transfer((self.host + ':' if self.host else '') + path, str(partial))
+        # Publish only a complete transfer, without replacing an existing file.
+        os.link(partial, destination)
+        partial.unlink()
+        return str(destination)
+
     def start(self, settings, local_dataset, request_id):
         self.cache.mkdir(parents=True, exist_ok=True)
         with (self.cache / 'upload.lock').open('a') as lock:
@@ -394,17 +409,8 @@ class Window(main.Window):
         dialog.setOption(QFileDialog.DontUseNativeDialog)
         dialog.setFileMode(QFileDialog.Directory)
         def selected(folder):
-            def transfer():
-                info = self.client.call('inspect', run=run)
-                if not info['latest']:
-                    raise ValueError('No checkpoint has been saved yet')
-                path = info['latest']['lora']
-                destination = str(Path(folder) / Path(path).name)
-                if Path(destination).exists():
-                    raise ValueError('Destination already exists; choose another folder')
-                self.client.transfer((self.client.host + ':' if self.client.host else '') + path, destination)
-                return destination
-            self.submit(transfer, lambda path: self.message('Downloaded ' + path))
+            self.submit(lambda: self.client.download(run, folder),
+                        lambda path: self.message('Downloaded ' + path))
         dialog.fileSelected.connect(selected)
         dialog.open()
         self.dialog = dialog

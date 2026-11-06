@@ -44,3 +44,26 @@ with tempfile.TemporaryDirectory() as tmp:
         assert calls[-2][1]['token'] != token
     assert settings['dataset'] == str(dataset)
 print('Failed upload isolation, retry, mixed-case images and sealed dataset reuse OK')
+
+with tempfile.TemporaryDirectory() as tmp:
+    client = Client('top')
+    client.call = lambda *a, **kw: {'latest': {'lora': '/synthetic/model.safetensors'}}
+    def interrupted(source, target):
+        Path(target).write_bytes(b'partial')
+        raise RuntimeError('interrupted')
+    client.transfer = interrupted
+    try:
+        client.download('/synthetic/run', tmp)
+        raise AssertionError('interrupted download accepted')
+    except RuntimeError:
+        pass
+    assert not (Path(tmp) / 'model.safetensors').exists()
+    client.transfer = lambda source, target: Path(target).write_bytes(b'complete')
+    destination = client.download('/synthetic/run', tmp)
+    assert Path(destination).read_bytes() == b'complete'
+    try:
+        client.download('/synthetic/run', tmp)
+        raise AssertionError('existing download overwritten')
+    except ValueError:
+        pass
+print('Interrupted downloads stay partial and existing LoRAs are never overwritten')
