@@ -110,7 +110,7 @@ class Window(QMainWindow):
         self.update_buttons()
 
     def build(self):
-        menu = self.menuBar().addMenu('&File')
+        self.file_menu = menu = self.menuBar().addMenu('&File')
         for text, handler in [('Open run…', self.open_run), ('Open output folder', self.open_output),
                               ('Save preset…', lambda: self.preset_dialog(True)),
                               ('Load preset…', lambda: self.preset_dialog(False)), ('Quit', self.close)]:

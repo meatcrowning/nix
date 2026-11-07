@@ -151,7 +151,7 @@ class Window(main.Window):
         self.dataset_source = QComboBox()
         self.dataset_source.addItems(['Dataset on top', 'Upload dataset from book'] if client.host else ['Dataset on top'])
         self.tabs.widget(0).widget().layout().insertRow(0, 'Dataset location', self.dataset_source)
-        menu = self.menuBar().actions()[0].menu()
+        menu = self.file_menu
         for label, callback in [('Reconnect to training on top', self.reconnect),
                                 ('Download latest LoRA…', self.download)]:
             action = QAction(label, self)
