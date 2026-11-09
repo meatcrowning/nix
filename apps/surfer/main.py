@@ -69,7 +69,7 @@ sys.path.insert(0, str(HERE.parent / "pylib"))
 from vtbclient import VtbClient  # noqa: E402
 from deskstyle import DeskStyle  # noqa: E402  (pylib; the desktop-wide font setting)
 import chantheme  # noqa: E402  (pylib; the OneeChan override sheet, shared with the userscript)
-from kdetheme import kde_chrome, theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
+from kdetheme import is_plasma, kde_chrome, theme_source  # noqa: E402  (pylib; the KDE global theme in a Plasma session)
 from styleparticipant import StyleParticipant  # noqa: E402  (live theme acknowledgement)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 from kinetic import (WHEEL_GAIN, QML_WHEEL_GAIN,  # noqa: E402
@@ -1986,7 +1986,7 @@ class OneeTheme(QObject):
         self._scripts = None
 
     def _css(self):
-        return chantheme.css(self._pal.hex, kde_chrome())
+        return chantheme.css(self._pal.hex, kde_chrome(), is_plasma())
 
     @Slot(str, result=str)
     def css(self, url):

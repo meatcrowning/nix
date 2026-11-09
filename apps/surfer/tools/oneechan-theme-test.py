@@ -422,8 +422,11 @@ def main():
               ox.rindex(".dd-menu ul{background:linear-gradient")
               > ox.index(".dd-menu ul{background:%s!important" % dark_pal["bgAlt"]))
         os.environ["DESK_KDEGLOBALS"] = scheme("breeze")
+        breeze = onee_css(dark_pal)
         check("plasma + breeze: a flat KStyle gets no relief layer",
-              "linear-gradient(to bottom" not in onee_css(dark_pal))
+              "linear-gradient(to bottom" not in breeze)
+        check("plasma + breeze: posts still have no borders",
+              ".postInfo{border:none!important;box-shadow:none!important}" in breeze)
     finally:
         os.environ["DESK_SESSION"] = "hypr"
         os.environ.pop("DESK_KDEGLOBALS", None)

@@ -78,12 +78,13 @@ def _legible_link(link_hex, bg_hex, cap_hex, target=4.0):
     return link
 
 
-def css(pal, chrome=None):
+def css(pal, chrome=None, plasma=False):
     """The whole OneeChan override sheet for one palette.
 
     `pal` is a name->'#rrggbb' callable over docs/DESIGN.md 3.1's twelve
-    tokens; `chrome` is `kdetheme.kde_chrome()`'s dict or None. Pure and
-    Qt-free, so the userscript generator can call it with no Qt at all.
+    tokens; `chrome` is `kdetheme.kde_chrome()`'s dict or None; `plasma` says
+    the sheet is for a Plasma session, whose flat styles have no `chrome`. Pure
+    and Qt-free, so the userscript generator can call it with no Qt at all.
     """
     p = pal
     bg = p("bg")
@@ -227,8 +228,27 @@ def css(pal, chrome=None):
         # every palette above, not here.)
         parts.append(
             ".postInfo{background:%s%s}" % (bg, i))
+    if plasma or chrome:
+        parts.extend(_borderless_posts(i))
     parts.extend(_chrome_css(chrome, i))
     return "".join(parts)
+
+
+def _borderless_posts(i):
+    """Posts carry no outline in a Plasma session, whichever KStyle is active.
+
+    Separate from the relief layer because `kde_chrome()` is None under a flat
+    style (Fusion, Breeze), which would otherwise restore OneeChan's box around
+    every post."""
+    return [
+        ".reply,.inline,:root.op-background .postContainer.opContainer,"
+        ".postInfo{border:none%s;box-shadow:none%s}" % (i, i),
+        # ...except the "you were quoted"/selection marker, which the rule
+        # above would take with it: it is the only border a post keeps.
+        ":root.hl-border .post.reply,"
+        ":root.op-background.hl-border .postContainer.opContainer{"
+        "border-left-style:solid%s;border-left-width:4px%s}" % (i, i),
+    ]
 
 
 def _chrome_css(ch, i):
@@ -287,16 +307,10 @@ def _chrome_css(ch, i):
         # Posts are NOT slabs. A thread is a column of them, so slabbing each
         # one tiles the panel gradient down the page and the window gradient
         # this layer's whole point is never seen. Posts (and their header
-        # strips and inline quotes) drop background, border and shadow
-        # instead, and the fixed body gradient reads through them.
+        # strips and inline quotes) drop their background instead, and the
+        # fixed body gradient reads through them.
         ".reply,.inline,:root.op-background .postContainer.opContainer,"
-        ".postInfo{background:none%s;background-color:transparent%s;"
-        "border:none%s;box-shadow:none%s}" % (i, i, i, i),
-        # ...except the "you were quoted"/selection marker, which the rule
-        # above would take with it: it is the only border a post keeps.
-        ":root.hl-border .post.reply,"
-        ":root.op-background.hl-border .postContainer.opContainer{"
-        "border-left-style:solid%s;border-left-width:4px%s}" % (i, i),
+        ".postInfo{background:none%s;background-color:transparent%s}" % (i, i),
         # The board header reads as the style's toolbar.
         ":root:not(.header-gradient) #header-bar,"
         ":root.header-gradient #header-bar{background:%s%s;"

@@ -106,7 +106,7 @@ baked = json.loads(css_line.group(1)) if css_line else ""
 # the same palette + chrome. If this fails, one browser has drifted.
 kpal = {k: kdetheme._hex(v) for k, v in kdetheme.kde_palette(surface="Window").items()}
 check("the 4chan fallback includes the sheet surfer serves plus Twitter/X",
-      baked == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome())
+      baked == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome(), kdetheme.is_plasma())
       + "\n" + twittertheme.css(kpal.__getitem__))
 check("plasma + oxygen: the baked sheet carries the KStyle relief",
       "background-attachment:fixed" in baked and "box-shadow:inset" in baked)
@@ -144,6 +144,14 @@ oxygen_chan = chantheme.css(PAL.__getitem__, {
     "headerTop": "#304050", "headerBottom": "#203040", "buttonTop": "#405060",
     "buttonBottom": "#304050", "bevel": "#506070", "shade": "#081018", "radius": 3,
 })
+POST_BORDERS = ".postInfo{border:none!important;box-shadow:none!important}"
+fusion_chan = chantheme.css(PAL.__getitem__, None, plasma=True)
+check("a flat Plasma style (Fusion) removes post borders with no relief layer",
+      POST_BORDERS in fusion_chan and "linear-gradient(to bottom" not in fusion_chan)
+check("a flat Plasma style keeps the quoted-post marker",
+      "border-left-width:4px!important" in fusion_chan)
+check("Oxygen removes post borders too", POST_BORDERS in oxygen_chan)
+check("the Hyprland face keeps its post borders", POST_BORDERS not in flat)
 check("the 4chan Oxygen surface covers the root canvas and constrained body",
       "html,html body{background-color:#102030!important" in oxygen_chan)
 check("the Twitter/X sheet targets semantic X hooks, not generated classes",
@@ -225,7 +233,7 @@ try:
         etag = r.headers.get("ETag")
         ctype = r.headers.get("Content-Type")
     check("the dedicated 4chan courier stays byte-identical to surfer's sheet",
-          served == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome()))
+          served == chantheme.css(kpal.__getitem__, kdetheme.kde_chrome(), kdetheme.is_plasma()))
     check("it is text/css", (ctype or "").startswith("text/css"))
     check("it carries an ETag", bool(etag))
 

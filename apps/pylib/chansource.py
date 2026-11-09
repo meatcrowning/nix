@@ -66,9 +66,9 @@ def palette(source=None):
 def build_css(source=None):
     """(OneeChan CSS, provenance) for the requested session face."""
     pal, provenance = palette(source)
-    chrome = kdetheme.kde_chrome() if (kdetheme.is_plasma() if source is None
-                                       else source == "plasma") else None
-    return chantheme.css(pal.__getitem__, chrome), provenance
+    plasma = kdetheme.is_plasma() if source is None else source == "plasma"
+    chrome = kdetheme.kde_chrome() if plasma else None
+    return chantheme.css(pal.__getitem__, chrome, plasma), provenance
 
 
 def stamp(css: str) -> str:
