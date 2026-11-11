@@ -8,6 +8,7 @@ import hashlib
 import http.client
 import json
 import os
+import sys
 from pathlib import Path, PurePosixPath
 import tempfile
 import threading
@@ -16,6 +17,9 @@ import urllib.request
 
 VERSION = 1
 MAX_REPLY = 32 * 1024 * 1024
+# A stale client gets the full output listing (~8 KiB of params per output), which
+# passed 32 MiB at ~4.3k outputs and silently froze book's peer history.
+OUTPUTS_MAX_REPLY = 512 * 1024 * 1024
 _lock = threading.RLock()
 _outputs = {}
 
@@ -72,8 +76,8 @@ def _get(route, query=None, limit=MAX_REPLY):
     return raw
 
 
-def _fetch(name, previous):
-    doc = json.loads(_get(name, {'since': previous.get('revision', '')}))
+def _fetch(name, previous, limit=MAX_REPLY):
+    doc = json.loads(_get(name, {'since': previous.get('revision', '')}, limit))
     if not isinstance(doc, dict) or doc.get('version') != VERSION:
         raise ValueError('Unsupported Painter catalogue version')
     if doc.get('unchanged'):
@@ -100,7 +104,7 @@ def models(root):
 def outputs(peer_root):
     previous = _cached('outputs')
     try:
-        doc = _fetch('outputs', previous)
+        doc = _fetch('outputs', previous, OUTPUTS_MAX_REPLY)
         if doc.get('delta'):
             merged = {r['relative']: r for r in previous.get('outputs', [])}
             for name in doc.get('removed', []):
@@ -110,7 +114,8 @@ def outputs(peer_root):
         for row in doc['outputs']:
             safe_relative(row['relative'])
         atomic_json(cache_root() / 'outputs.json', doc)
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f'painter: output catalogue refresh failed, using cache: {exc}', file=sys.stderr)
         doc = previous
     rows = []
     for row in doc.get('outputs', []):
