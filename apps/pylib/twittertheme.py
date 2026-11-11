@@ -55,7 +55,8 @@ time, [data-testid="socialContext"], [data-testid="app-text-transition-container
 [data-testid="tweet"] [data-testid="like"]:hover {{ color:var(--desk-crit)!important; }}
 [data-testid="tweet"] [data-testid="analytics"]:hover {{ color:var(--desk-accent)!important; }}
 [data-testid="SearchBox_Search_Input"], [data-testid="SearchBox_Search_Input"] input,
-[data-testid="tweetTextarea_0"], [contenteditable="true"], input, textarea {{
+[data-testid="tweetTextarea_0"], [contenteditable="true"], textarea,
+input:not([type="file"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]) {{
   background-color:var(--desk-bg)!important; color:var(--desk-text)!important;
   border-color:var(--desk-border)!important; caret-color:var(--desk-accent)!important; }}
 [data-testid="SearchBox_Search_Input"]:focus-within, [data-testid="tweetTextarea_0"]:focus-within,
@@ -96,6 +97,15 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
 [data-testid="primaryColumn"] :not(img):not(svg):not(video):not(canvas):not(path),
 [data-testid="sidebarColumn"] :not(img):not(svg):not(video):not(canvas):not(path) {{
   background-color:transparent!important; border-color:transparent!important; }}
+/* Composer tools and post actions draw their own circle/pill faces (and on
+   some builds a blurred backdrop) over the canvas.  Clear every paint layer
+   on them and their insides; the Post button keeps its accent face. */
+[data-testid="toolBar"] :is(button, [role="button"]):not([data-testid="tweetButtonInline"]),
+[data-testid="toolBar"] :is(button, [role="button"]):not([data-testid="tweetButtonInline"]) :not(svg):not(path):not(img),
+[data-testid="tweet"] [role="group"],
+[data-testid="tweet"] [role="group"] :not(svg):not(path):not(img) {{
+  background:transparent!important; box-shadow:none!important;
+  backdrop-filter:none!important; -webkit-backdrop-filter:none!important; }}
 /* The composer is a control group, not a feed card.  Its two quiet rules give
    the tabs, editor, and “show posts” affordance a readable structure without
    reintroducing separators between actual posts. */
@@ -132,13 +142,6 @@ aside[role="complementary"] {{ background-color:transparent!important; backgroun
   background-repeat:no-repeat!important; background-attachment:fixed!important; }}
 [aria-label^="Timeline:"] :not(img):not(svg):not(video):not(canvas):not(path) {{
   background-color:transparent!important; border-color:transparent!important; }}
-/* Leaving media fullscreen can leave X at its wide-navigation breakpoint.
-   Keep the desktop's normal icon rail; clipping the link rather than hiding
-   it preserves its label for accessibility and its icon/count for the UI. */
-header[role="banner"]:has(nav a[aria-label="Home"]) {{
-  width:104px!important; min-width:104px!important; max-width:104px!important; }}
-header[role="banner"]:has(nav a[aria-label="Home"]) nav a {{
-  width:52px!important; max-width:52px!important; overflow:hidden!important; }}
 ::-webkit-scrollbar-track {{ background:var(--desk-bg)!important; }}
 ::-webkit-scrollbar-thumb {{ background:var(--desk-border)!important; border-color:var(--desk-bg)!important; }}
 ::-webkit-scrollbar-thumb:hover {{ background:var(--desk-accent)!important; }}
