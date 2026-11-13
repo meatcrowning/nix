@@ -10,6 +10,40 @@ let
   isx86 = pkgs.stdenv.hostPlatform.isx86_64;
 in
 {
+  home.file.".local/bin/vivaldi" = lib.mkIf (host == "air") {
+    executable = true;
+    text = ''
+      #!${pkgs.runtimeShell}
+      exec ${config.home.profileDirectory}/bin/vivaldi "$@"
+    '';
+  };
+
+  # Fedora's Plasma session does not inherit the Nix profile's application
+  # search path. Publish the canonical browser ID where native launchers look.
+  home.file.".local/share/applications/vivaldi-stable.desktop" = lib.mkIf (host == "air") {
+    text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=Vivaldi
+      GenericName=Web Browser
+      Exec=${config.home.profileDirectory}/bin/vivaldi %U
+      Icon=vivaldi
+      Terminal=false
+      Categories=Network;WebBrowser;
+      MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+      StartupWMClass=vivaldi-stable
+      Actions=new-window;new-private-window;
+
+      [Desktop Action new-window]
+      Name=New Window
+      Exec=${config.home.profileDirectory}/bin/vivaldi --new-window
+
+      [Desktop Action new-private-window]
+      Name=New Private Window
+      Exec=${config.home.profileDirectory}/bin/vivaldi --incognito
+    '';
+  };
+
   # Existing Plasma pins and host-local browser choices keep the Flatpak ID.
   # Redirect that ID without exposing a second browser in the application menu.
   xdg.desktopEntries."com.vivaldi.Vivaldi" = lib.mkIf (host == "air") {

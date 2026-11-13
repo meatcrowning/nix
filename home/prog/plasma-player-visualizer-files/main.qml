@@ -1,61 +1,58 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
+import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasma5support as P5Support
+import org.kde.kirigami as Kirigami
 
-// Compact fallback for the Plasma media controller.  Its producer is shared
+// Output spectrum beside the Plasma media controller. Its producer is shared
 // with the Oxygen decoration, so this applet never starts a second Cava.
 PlasmoidItem {
     id: root
-    Plasmoid.status: playerOwnsVisualizer ? PlasmaCore.Types.HiddenStatus : PlasmaCore.Types.ActiveStatus
+    Plasmoid.status: hasAudio ? PlasmaCore.Types.ActiveStatus : PlasmaCore.Types.HiddenStatus
     preferredRepresentation: compactRepresentation
     property var levels: []
-    property bool playerOwnsVisualizer: false
+    property double lastAudio: 0
+    property bool hasAudio: false
+    Layout.minimumWidth: hasAudio ? 72 : 0
+    Layout.preferredWidth: hasAudio ? 72 : 0
+    Layout.maximumWidth: hasAudio ? 72 : 0
 
     P5Support.DataSource {
         id: state
         engine: "executable"
         onNewData: (source, data) => {
+            disconnectSource(source);
             try {
                 const parsed = JSON.parse(data.stdout || "{}");
-                root.levels = parsed.levels || [];
+                root.levels = Date.now() / 1000 - Number(parsed.updated || 0) < 2
+                    ? parsed.levels || [] : [];
+                if (root.levels.some(level => level > 0)) root.lastAudio = Date.now();
+                root.hasAudio = Date.now() - root.lastAudio < 500;
             } catch (_) {
                 root.levels = [];
+                root.hasAudio = false;
             }
         }
     }
 
     // Plasma does not expose a portable file watcher to applets. Polling this
-    // tmpfs snapshot at the producer's 60 Hz cadence is cheap and coalesces
-    // naturally if the panel is busy.
+    // tmpfs snapshot at 30 Hz; disconnect each completed command so the next
+    // tick executes it again instead of retaining the first result forever.
     Timer {
         interval: 34; repeat: true; running: true
-        onTriggered: state.connectSource("sh -c 'cat \"$XDG_RUNTIME_DIR/player-visualizer.json\" 2>/dev/null || true'")
-    }
-
-    Timer {
-        interval: 500; repeat: true; running: true; triggeredOnStart: true
-        onTriggered: viewState.connectSource("sh -c 'cat \"$XDG_RUNTIME_DIR/player-view.json\" 2>/dev/null || true'")
-    }
-
-    P5Support.DataSource {
-        id: viewState
-        engine: "executable"
-        onNewData: (source, data) => {
-            try {
-                const parsed = JSON.parse(data.stdout || "{}");
-                root.playerOwnsVisualizer = (parsed.view === "now" || parsed.view === "visualizer")
-                    && Date.now() / 1000 - Number(parsed.updated || 0) < 3;
-            } catch (_) {
-                root.playerOwnsVisualizer = false;
-            }
-        }
+        onTriggered: state.connectSource("sh -c 'cat \"$XDG_RUNTIME_DIR/player-visualizer-panel.json\" 2>/dev/null || true'")
     }
 
     compactRepresentation: Item {
-        implicitWidth: root.playerOwnsVisualizer ? 0 : 72
+        implicitWidth: root.hasAudio ? 72 : 0
+        Layout.minimumWidth: implicitWidth
+        Layout.preferredWidth: implicitWidth
+        Layout.maximumWidth: implicitWidth
         implicitHeight: Math.max(22, Plasmoid.configuration.panelHeight || 22)
-        visible: !root.playerOwnsVisualizer
+        visible: root.hasAudio
         Repeater {
             model: root.levels.length
             Rectangle {
@@ -64,7 +61,7 @@ PlasmoidItem {
                 width: Math.max(1, Math.round(parent.width * (index + 1) / root.levels.length) - x)
                 anchors.bottom: parent.bottom
                 height: Math.max(1, parent.height * Math.pow((root.levels[index] || 0) / 100, 0.55))
-                color: PlasmaCore.Theme.textColor
+                color: Kirigami.Theme.textColor
             }
         }
     }

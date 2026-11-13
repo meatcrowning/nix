@@ -6,10 +6,9 @@ let
     (builtins.readFile ./plasma-player-visualizer-files/cava.conf);
   state = pkgs.writeShellApplication {
     name = "plasma-player-visualizer-state";
-    runtimeInputs = [ pkgs.cava pkgs.pipewire pkgs.python3 ];
+    runtimeInputs = [ pkgs.cava pkgs.python3 ];
     text = ''
       export CAVA=${pkgs.cava}/bin/cava
-      export PW_DUMP=${pkgs.pipewire}/bin/pw-dump
       export PLAYER_VISUALIZER_CAVA_CONFIG=${cavaConfig}
       exec ${pkgs.python3}/bin/python3 ${./plasma-player-visualizer-files/cava-state.py}
     '';
