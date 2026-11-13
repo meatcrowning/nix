@@ -32,6 +32,7 @@ establish the user's live session.
 | slsk/ | Soulseek client | home/prog/slsk.nix |
 | updater/ | flake-input updater | home/prog/updater.nix |
 | oracle/ | local-ollama chat | home/prog/oracle.nix |
+| coder/ | Claude Code / Codex front end | home/prog/coder.nix |
 | tuner/ | RTL-SDR receiver (GTK, top's Unity session) | home/prog/tuner.nix |
 | pylib/ | shared Python helpers | imported, not packaged |
 | collage/ | private browser collage userscript | symlink to `docs/apps/collage/`; local updater, no host package |

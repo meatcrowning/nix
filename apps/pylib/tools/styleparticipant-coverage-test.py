@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 EXPECTED = {
     "askpass": "askpass",
     "board": "goetia",
+    "coder": "coder",
     "editor": "editor",
     "filer": "filer",
     "painter": "painter",
