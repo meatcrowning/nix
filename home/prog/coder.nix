@@ -28,10 +28,7 @@ let
 
   coder =
     if hostProfile.isBook then
-      pkgs.writeShellScriptBin "coder" (lib.optionalString hostProfile.isFedora ''
-        unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH \
-              QML_IMPORT_PATH NIXPKGS_QT6_QML_IMPORT_PATH LD_LIBRARY_PATH
-'' + ''
+      pkgs.writeShellScriptBin "coder" (''
         exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/coder/main.py "$@"
       '')
     else

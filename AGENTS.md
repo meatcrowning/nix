@@ -74,9 +74,8 @@ loginctl session metadata and the target session's compositor process/socket
 to resolve it; a nested compositor or stale environment is not proof. Keep an
 unresolved desktop unknown rather than defaulting to Hyprland. Recheck after a
 session change, reconnect, or when evidence contradicts the earlier result.
-top is NixOS; book (flake host air) dual-boots Fedora Asahi and NixOS during
-the migration. Do not infer the host from the kernel, nor book's OS from the
-host. Match IPC, UI conventions, and reloads to the verified desktop;
+top is NixOS (x86_64); book (flake host air) is NixOS on Apple Silicon
+(Asahi). Do not infer the host from the kernel. Match IPC, UI conventions, and reloads to the verified desktop;
 do not start an inactive desktop's components to apply or verify a change.
 Name hosts explicitly in synced notes and hardware/rebuild dispatches. Record
 session observations as host-specific, dated measurements, not permanent facts.
@@ -88,7 +87,7 @@ git status --short
 ./tools/preflight.sh
 tools/git-commit.sh -m "subject" -m "Co-Authored-By: Name <email>" -- path/one path/two
 sudo rebuild-top                  # top: NixOS including home-manager
-rebuild-air                        # book: home-manager on Fedora, nixos-rebuild on NixOS
+rebuild-air                        # book: NixOS including home-manager
 git push origin main
 ~~~
 
@@ -159,15 +158,13 @@ also verifies the public noreply Git identity (home/git-privacy.nix).
   deployment key is provisioned in /etc/ssh/authorized_keys.d/root at install.
   Do not run rebuild-top on pad. Disk labels in its hardware module are an
   installation contract, not a description of the existing Arch partitions.
-- flake.nix defines nixosConfigurations.top and .air plus
-  homeConfigurations.air (Fedora book). hosts/top/ and sys/ are top's NixOS;
-  hosts/air/ is book's standalone NixOS (Asahi). lam.nix imports shared home/.
+- flake.nix defines nixosConfigurations.top and .air. hosts/top/ and sys/ are
+  top's NixOS; hosts/air/ is book's standalone NixOS (nixos-apple-silicon,
+  kernel cross-built on top). lam.nix imports shared home/.
   Recursive umport imports only .nix files. Keep system changes in sys/, user
   changes in home/, and use focused modules.
-- Home modules receive host = "top" | "air" (the machine) and hostProfile;
-  hostProfile.isFedora marks Fedora-only paths (/usr/bin/python3, Fedora
-  toolchain builds). Gate x86-only packages with
-  lib.optionals pkgs.stdenv.hostPlatform.isx86_64.
+- Home modules receive host = "top" | "air" and hostProfile. Gate x86-only
+  packages with lib.optionals pkgs.stdenv.hostPlatform.isx86_64.
 - apps/ is vendored source outside Nix imports; wrappers in
   home/prog/<name>.nix run /home/lam/nix/apps/<name>/main.py.
   Keep apps/pylib/ with the tree. apps/board/ is goetia; its host-local
@@ -179,13 +176,13 @@ also verifies the public noreply Git identity (home/git-privacy.nix).
 - Labwc is top-only (sys/dsk/labwc.nix, home/prog/labwc.nix).
   Its config is seeded once and owned by its tools; never reconcile it.
   The greeter default does not identify the active desktop.
-- Book's custom Hyprvtb, Konsole, and Nix Qt6 Oxygen use lib/air-offload.nix
-  and top's restricted builder (sys/book-builder.nix).
-  See tools/book-builder-setup.sh; cap local ARM jobs in rebuild-air.
-  Fedora Oxygen remains a native build.
+- Book's custom Hyprvtb, Konsole, Oxygen and Asahi kernel are cross-built by
+  top's restricted builder (lib/air-offload.nix, sys/book-builder.nix; book's
+  side is hosts/air/configuration.nix). /etc/nix/book-builder-key is machine
+  state on book. Cap local ARM jobs in rebuild-air.
 - home/srvs/hypr-env.nix owns compositor environment repair.
   sys/remote-power.nix and known-good-boots are top-only; poweroff requires
-  --confirm. Book-only Fedora setup commands are in the relevant file headers.
+  --confirm.
 - home/srvs/ai-warden.nix arbitrates ollama/ComfyUI on top: never interrupt
   work, fail open when unavailable. Check with ai-warden status.
   Board watcher runbooks, logs, kill switches, and harnesses are in docs/agents/.

@@ -1,4 +1,4 @@
-{ pkgs, lib, host, hostProfile, ... }:
+{ pkgs, lib, host, ... }:
 
 # filer as the desktop's FILE PICKER — the `org.freedesktop.impl.portal.FileChooser`
 # D-Bus backend (source: ~/nix/apps/filer/portal.py + pick.py).
@@ -36,7 +36,7 @@ let
   # spawns. On air (book) that is Fedora's python3, which already has gi, for
   # the same Mesa reason home/prog/filer.nix documents.
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pygobject3 ]);
-  python = if hostProfile.isFedora then "/usr/bin/python3" else "${pyEnv}/bin/python3";
+  python = "${pyEnv}/bin/python3";
 
   # Which backend answers SaveFile/SaveFiles (and OpenFile, if the picker can't
   # start). Portal backend selection is per-INTERFACE, not per-method, so
@@ -45,7 +45,7 @@ let
   # on top (sys/dsk/hyprland.nix routes FileChooser there) and `gtk` on book,
   # where the configured `hyprland` backend is not installed and xdp falls
   # through to gtk.
-  delegate = if hostProfile.isFedora then "gtk" else "kde";
+  delegate = "kde";
 
   filer-portal = pkgs.writeShellScriptBin "filer-portal" ''
     # D-Bus activation gives this a minimal PATH that need not include the nix
@@ -79,23 +79,14 @@ let
 
   # The routing with the file picker left alone — what `off` restores. It is a
   # FILE, not an absence, because the Secret line above has to hold either way.
-  baseConf = if hostProfile.isFedora then ''
-    [preferred]
-    default=hyprland;gtk
-    ${secretLine}
-  '' else ''
+  baseConf = ''
     [preferred]
     default=hyprland;gtk
     org.freedesktop.impl.portal.Settings=kde
     ${secretLine}
   '';
 
-  preferred = if hostProfile.isFedora then ''
-    [preferred]
-    default=hyprland;gtk
-    org.freedesktop.impl.portal.FileChooser=filer;gtk
-    ${secretLine}
-  '' else ''
+  preferred = ''
     [preferred]
     default=hyprland;gtk
     org.freedesktop.impl.portal.FileChooser=filer;kde

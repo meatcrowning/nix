@@ -36,8 +36,7 @@
   };
   services.resolved.enable = true;
 
-  # Same tailnet node as Fedora's (the state directory is copied at install),
-  # so top's builder and SMB share resolve as `top` without a new login.
+  # top's builder and SMB share resolve as `top` over the tailnet.
   services.tailscale.enable = true;
 
   time.timeZone = privateConfig.location.timeZone;
@@ -104,14 +103,16 @@
       options = "--delete-older-than 14d";
     };
   };
-  # The key is copied from Fedora's /etc/nix at install; the host key is pinned.
+  # /etc/nix/book-builder-key is machine state, not in the store; the host key
+  # is pinned.
   programs.ssh.knownHosts.top = {
     hostNames = [ "top" ];
     publicKey = privateConfig.builderHostKey;
   };
 
-  # 7.3G shared with the GPU: a local build may fail, never take the session
-  # (docs/agents/book-fedora-state.md, nix-daemon memory cap).
+  # 7.3G shared with the GPU: a local build may fail, never take the session.
+  # Measured on 2026-08-02: an unbounded compositor build tripped a global
+  # oom-kill; at --cores 4 under this cap it peaked at 3.78G.
   systemd.services.nix-daemon.serviceConfig = {
     MemoryHigh = "3.5G";
     MemoryMax = "5G";

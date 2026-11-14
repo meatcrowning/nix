@@ -1,4 +1,4 @@
-{ pkgs, lib, host, hostProfile, ... }:
+{ pkgs, lib, host, ... }:
 
 # The `SUDO_ASKPASS` password dialog — full Vista-UAC treatment: the chime plays
 # as the dialog appears, and the `askpass-dim` window rule in hyprland.lua
@@ -17,18 +17,7 @@
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
-  # air: nixpkgs' Qt can't create a GPU context on Apple Silicon, so exec the
-  # SYSTEM python3 with Fedora's python3-pyside6 — same split as filer/viewer.
   askpass-dialog =
-    if hostProfile.isFedora then
-      pkgs.writeShellScriptBin "vista-askpass" ''
-        # sudo runs from Nix-wrapped terminals (Konsole) whose Qt paths name
-        # Nix plugins Fedora's Qt cannot load; it aborts on the platform plugin.
-        unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH \
-              QML_IMPORT_PATH NIXPKGS_QT6_QML_IMPORT_PATH LD_LIBRARY_PATH
-        exec /usr/bin/python3 /home/lam/nix/apps/askpass/main.py "$@"
-      ''
-    else
       pkgs.stdenv.mkDerivation {
         pname = "vista-askpass";
         version = "live";

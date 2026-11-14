@@ -1,4 +1,4 @@
-{ pkgs, lib, host, hostProfile, ... }:
+{ pkgs, lib, host, ... }:
 
 # Live frontend and renderer patches travel with nix-pull. The original engine
 # stays an upstream dependency, fetched by the rebuild rather than docs sync.
@@ -15,19 +15,11 @@ let
     export GF_HOST=${host}
     export GF_ENGINE_ARCHIVE=${engineArchive}
     export GF_PATCH=${pkgs.gnupatch}/bin/patch
-    ${if hostProfile.isFedora then ''
-      # Fedora's Python/Qt and graphics ABI stay together on book.
-      export PATH=/usr/bin:$PATH
-      unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH LD_LIBRARY_PATH
-      export CC=/usr/bin/gcc CXX=/usr/bin/g++
-      exec "$@"
-    '' else ''
-      export PATH=${lib.makeBinPath [ pkgs.pulseaudio pkgs.pipewire pkgs.coreutils pkgs.stdenv.cc ]}:$PATH
-      export CC=${pkgs.stdenv.cc}/bin/cc CXX=${pkgs.stdenv.cc}/bin/c++
-      export CPATH=${nativeLibs}/include LIBRARY_PATH=${nativeLibs}/lib
-      export LD_LIBRARY_PATH=/run/opengl-driver/lib:${nativeLibs}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-      exec player-qtenv "$@"
-    ''}
+    export PATH=${lib.makeBinPath [ pkgs.pulseaudio pkgs.pipewire pkgs.coreutils pkgs.stdenv.cc ]}:$PATH
+    export CC=${pkgs.stdenv.cc}/bin/cc CXX=${pkgs.stdenv.cc}/bin/c++
+    export CPATH=${nativeLibs}/include LIBRARY_PATH=${nativeLibs}/lib
+    export LD_LIBRARY_PATH=/run/opengl-driver/lib:${nativeLibs}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+    exec player-qtenv "$@"
   '';
   gforce = pkgs.writeShellScriptBin "gforce" ''
     exec ${qtenv}/bin/gforce-qtenv python3 /home/lam/nix/apps/gforce/launch.py "$@"

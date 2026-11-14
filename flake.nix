@@ -94,14 +94,11 @@
         inherit (airOffload) konsole oxygen;
       };
     };
-    pkgsAir = pkgsAirBase.extend airOffloadOverlay;
 
-    # Fedora book runs the standalone home configuration; NixOS book runs the
-    # same lam.nix through the system. hostProfile.isFedora tells them apart.
-    airHomeArgs = os: {
+    airArgs = {
       inherit inputs user privateConfig airOffload;
       host = "air";
-      hostProfile = import ./lib/host-profile.nix { host = "air"; inherit os; };
+      hostProfile = import ./lib/host-profile.nix { host = "air"; };
     };
 
   in
@@ -118,7 +115,7 @@
         modules = [ ./hosts/pad/configuration.nix ];
       };
       air = nixpkgs.lib.nixosSystem {
-        specialArgs = airHomeArgs "nixos";
+        specialArgs = airArgs;
         modules = [
           {
             nixpkgs.hostPlatform = "aarch64-linux";
@@ -128,7 +125,7 @@
           home-manager.nixosModules.home-manager
           {
             home-manager = {
-              extraSpecialArgs = airHomeArgs "nixos";
+              extraSpecialArgs = airArgs;
               useGlobalPkgs = true;
               useUserPackages = true;
               backupFileExtension = "backup";
@@ -168,18 +165,6 @@
               users.${user} = import ./lam.nix;
             };
           }
-        ];
-      };
-    };
-
-    # top uses the NixOS module above; only book has a standalone home config.
-    homeConfigurations = {
-      air = home-manager.lib.homeManagerConfiguration {
-        pkgs = pkgsAir;
-        extraSpecialArgs = airHomeArgs "fedora";
-        modules = [
-          plasma-manager.homeModules.plasma-manager
-          ./lam.nix
         ];
       };
     };

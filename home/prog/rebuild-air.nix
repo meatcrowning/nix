@@ -1,4 +1,4 @@
-{ pkgs, lib, host, hostProfile, ... }:
+{ pkgs, lib, host, ... }:
 
 # book's rebuild wrapper — the standalone-home-manager twin of `rebuild-top`
 # (sys/nixos-rebuild.nix). No root and no NOPASSWD rule involved here; the
@@ -16,7 +16,7 @@ lib.mkIf (host == "air") {
     (pkgs.writeShellScriptBin "rebuild-air" ''
       # book has 7.3 GiB of RAM, shared with its GPU.  Keep one derivation in
       # flight and give its build system four threads: this is the measured
-      # no-thrash setting recorded in docs/agents/book-fedora-state.md.  Two
+      # no-thrash setting (hosts/air/configuration.nix caps the daemon).  Two
       # simultaneous derivations make their non-compiler memory overlap and
       # are much less predictable under nix-daemon's 5 GiB hard ceiling.
       BUILD_CORES=4
@@ -107,9 +107,8 @@ lib.mkIf (host == "air") {
       echo "rebuild-air: ARM work uses one job/four cores; custom cross-builds use top; telemetry: $RUN" >&2
       # The client retains fd 9 (and therefore the lock) for the whole switch.
       set -o pipefail
-      ${if hostProfile.isFedora then "home-manager switch" else ''
-        if [ -n "''${SUDO_ASKPASS:-}" ]; then SUDO="sudo -A"; else SUDO=sudo; fi
-        $SUDO nixos-rebuild switch''} --max-jobs "$BUILD_JOBS" --cores "$BUILD_CORES" \
+      if [ -n "''${SUDO_ASKPASS:-}" ]; then SUDO="sudo -A"; else SUDO=sudo; fi
+      $SUDO nixos-rebuild switch --max-jobs "$BUILD_JOBS" --cores "$BUILD_CORES" \
         --print-build-logs --flake "$FLAKE#air" "$@" \
         --override-input private-config "path:$PRIVATE" --no-write-lock-file 2>&1 | ${pkgs.coreutils}/bin/tee "$RUN/build.log"
       result=''${PIPESTATUS[0]}

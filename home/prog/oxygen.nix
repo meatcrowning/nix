@@ -1,4 +1,4 @@
-{ host, hostProfile, pkgs, lib, ... }:
+{ host, pkgs, lib, ... }:
 
 # `oxygenrc` is live input to both hosts' Plasma apps and their QML DeskStyle
 # bridge. Values declared here are reset at each switch; undeclared values stay
@@ -47,75 +47,4 @@
     # the same Oxygen decoration.
     Windeco.TitleAlignment = "AlignLeft";
   };
-
-  # book's KWin and KDecoration are Fedora binaries. Build the patched Oxygen
-  # decoration and widget style with Fedora's matching toolchain, never Nix's Qt/KF ABI:
-  #   oxygen-vivaldi-build
-  # Loading a replacement decoration into the running compositor remains the
-  # user's visual step; the helper installs it for the next Plasma login.
-  home.packages = lib.optionals hostProfile.isFedora [
-    (pkgs.writeShellScriptBin "oxygen-vivaldi-build" ''
-      set -euo pipefail
-      SOURCE=${pkgs.kdePackages.oxygen.src}
-      PATCH=${./oxygen-themed-vivaldi.patch}
-      CONTENT_PATCH=${./oxygen-native-content.patch}
-      MENU_PATCH=${./oxygen-compact-menus.patch}
-      FIELD_PATCH=${./oxygen-desktop-field.patch}
-      DEST="$HOME/.local/lib64/qt6/plugins/org.kde.kdecoration3/org.kde.oxygen.so"
-      FEDORA_VERSION=$(/usr/bin/rpm -q --qf '%{VERSION}' plasma-oxygen)
-      SOURCE_VERSION=${pkgs.kdePackages.oxygen.version}
-
-      # KDecoration3 and KStyle are stable across a Plasma point release, and
-      # Fedora moves ahead of nixpkgs' source between them. Refuse a different
-      # FEATURE release, which is where those interfaces do move.
-      FEDORA_SERIES=''${FEDORA_VERSION%.*}
-      SOURCE_SERIES=''${SOURCE_VERSION%.*}
-      [ "$FEDORA_SERIES" = "$SOURCE_SERIES" ] || {
-        echo "oxygen-vivaldi-build: Fedora Oxygen $FEDORA_VERSION != source $SOURCE_VERSION" >&2
-        exit 1
-      }
-      [ "$FEDORA_VERSION" = "$SOURCE_VERSION" ] || \
-        echo "oxygen-vivaldi-build: building $SOURCE_VERSION source against Fedora $FEDORA_VERSION"
-      for tool in /usr/bin/cmake /usr/bin/gcc /usr/bin/g++ /usr/bin/git; do
-        [ -x "$tool" ] || {
-          echo "oxygen-vivaldi-build: $tool is missing" >&2
-          exit 1
-        }
-      done
-
-      WORK=$(/usr/bin/mktemp -d "$HOME/.cache/oxygen-vivaldi-build.XXXXXX")
-      trap '/usr/bin/rm -rf -- "$WORK"' EXIT
-      /usr/bin/tar -xf "$SOURCE" -C "$WORK"
-      /usr/bin/mv "$WORK/oxygen-$SOURCE_VERSION" "$WORK/source"
-      /usr/bin/chmod -R u+w "$WORK/source"
-      /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$PATCH"
-      # Fedora ships no patch(1) here; git apply is the tool that exists, and
-      # the content patch is a zero-context diff, which it refuses by default.
-      /usr/bin/git apply --unidiff-zero --unsafe-paths --directory="$WORK/source" "$CONTENT_PATCH"
-      /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$FIELD_PATCH"
-      /usr/bin/git apply --unsafe-paths --directory="$WORK/source" "$MENU_PATCH"
-
-      env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
-          -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \
-        /usr/bin/cmake -S "$WORK/source" -B "$WORK/build" -G Ninja \
-          -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
-          -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-          -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-          -DCMAKE_INSTALL_RPATH="$HOME/.local/lib64/oxygen-custom" \
-          -DBUILD_QT6=ON -DBUILD_QT5=OFF
-      env -u CMAKE_PREFIX_PATH -u LIBRARY_PATH -u CPATH -u C_INCLUDE_PATH \
-          -u CPLUS_INCLUDE_PATH -u PKG_CONFIG_PATH -u NIX_CFLAGS_COMPILE \
-        /usr/bin/cmake --build "$WORK/build" --target oxygendecoration oxygen6 -j2
-      # The background renderer lives in liboxygenstyle, not the style plugin.
-      # Ship the matching library: a temporary build RPATH otherwise falls back
-      # to Fedora's unpatched renderer as soon as WORK is removed.
-      /usr/bin/install -Dm755 "$WORK/build/bin/liboxygenstyle6.so.$SOURCE_VERSION" \
-        "$HOME/.local/lib64/oxygen-custom/liboxygenstyle6.so.6"
-      /usr/bin/install -Dm755 "$WORK/build/bin/org.kde.oxygen.so" "$DEST"
-      /usr/bin/install -Dm755 "$WORK/build/bin/oxygen6.so" \
-        "$HOME/.local/lib64/qt6/plugins/styles/oxygen6.so"
-      echo "oxygen-vivaldi-build: installed $DEST and native content style"
-      echo "  takes effect at the next Plasma login"
-    '')
-  ];
 }

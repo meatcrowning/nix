@@ -1,4 +1,4 @@
-{ pkgs, host, hostProfile, ... }:
+{ pkgs, host, ... }:
 
 # `scrollbar-theme` — put this desktop's scrollbar into Vivaldi.
 #
@@ -33,13 +33,9 @@
       source /home/lam/nix/tools/lib/session-guard.sh
       sg_require_offscreen
       export QT_QPA_PLATFORMTHEME=kde
-      ${if hostProfile.isFedora then ''
-        exec /usr/bin/python3 /home/lam/nix/apps/pylib/tools/vivaldi-splitter-render.py
-      '' else ''
-        export QT_PLUGIN_PATH=${pkgs.kdePackages.oxygen}/lib/qt-6/plugins:${pkgs.kdePackages.plasma-integration}/lib/qt-6/plugins
-        export XDG_DATA_DIRS=${pkgs.kdePackages.oxygen}/share:${pkgs.kdePackages.plasma-integration}/share:''${XDG_DATA_DIRS:-}
-        exec ${(pkgs.python3.withPackages (ps: [ ps.pyside6 ]))}/bin/python3 /home/lam/nix/apps/pylib/tools/vivaldi-splitter-render.py
-      ''}
+      export QT_PLUGIN_PATH=${pkgs.kdePackages.oxygen}/lib/qt-6/plugins:${pkgs.kdePackages.plasma-integration}/lib/qt-6/plugins
+      export XDG_DATA_DIRS=${pkgs.kdePackages.oxygen}/share:${pkgs.kdePackages.plasma-integration}/share:''${XDG_DATA_DIRS:-}
+      exec ${(pkgs.python3.withPackages (ps: [ ps.pyside6 ]))}/bin/python3 /home/lam/nix/apps/pylib/tools/vivaldi-splitter-render.py
     '')
     (pkgs.writeShellScriptBin "scrollbar-theme" ''
       exec ${pkgs.python3}/bin/python3 \
