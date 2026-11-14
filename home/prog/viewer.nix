@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, host, ... }:
 
 # viewer — the standalone Qt/QML image viewer split out of filer (source at
 # ~/nix/apps/viewer). Packaging mirrors filer.nix exactly:
@@ -39,8 +39,7 @@ let
         # Qt falls back to software on its own for anything NVDEC cannot decode,
         # so this narrows the choice rather than forcing it. --set-default, so
         # `QT_FFMPEG_DECODING_HW_DEVICE_TYPES= viewer x.webm` still bisects it by
-        # hand. book is not NVIDIA and keeps Qt's default (the `air` branch above
-        # has no wrapper to set it in).
+        # hand. Book keeps Qt's default so it can use the Asahi VA-API driver.
         buildInputs = [ pyEnv pkgs.kdePackages.plasma-integration pkgs.kdePackages.qqc2-desktop-style pkgs.kdePackages.oxygen pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg pkgs.qt6.qtmultimedia ];
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
@@ -49,7 +48,7 @@ let
           mkdir -p $out/bin
           makeWrapper ${pyEnv}/bin/python3 $out/bin/viewer \
             --add-flags /home/lam/nix/apps/viewer/main.py \
-            --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
+            ${lib.optionalString (host == "top") "--set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda"} \
             "''${qtWrapperArgs[@]}"
           runHook postInstall
         '';
