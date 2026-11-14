@@ -75,6 +75,33 @@ if [ ! -e "$SESSION_RESTORED" ]; then
     fi
 fi
 
+# Dolphin's "Set as Wallpaper" points Plasma at the file where it lies. The
+# durable choice (.current-wallpaper, read at the next login) and DeskStyle
+# only accept direct files of the library, so an outside pick was themed once
+# and then reverted at the next login. Copy it in and theme from the copy;
+# wal-set then repoints Plasma at it, and that write dedupes below.
+library="$(realpath "$HOME/Pictures/Wallpapers" 2>/dev/null || true)"
+ext="${WALL##*.}"
+case "${ext,,}" in png|jpg|jpeg|webp|bmp) supported=1 ;; *) supported=0 ;; esac
+if [ -n "$library" ] && [ -d "$library" ] && [ "$supported" = 1 ] \
+   && [ "$(dirname "$WALL")" != "$library" ]; then
+    name="${WALL##*/}"
+    stem="${name%.*}"
+    dest="$library/$name"
+    n=2
+    while [ -e "$dest" ] && ! cmp -s "$WALL" "$dest"; do
+        dest="$library/$stem-$n.$ext"
+        n=$((n + 1))
+    done
+    if [ -e "$dest" ] || cp --reflink=auto "$WALL" "$dest"; then
+        # Already themed from the copy: a failed repoint must not loop.
+        [ "$(cat "$CACHE/current" 2>/dev/null)" = "$dest" ] && exit 0
+        mkdir -p "$CACHE"
+        echo "plasma-wallpaper-watch: imported $WALL as $dest" >> "$LOG"
+        exec "$HOME/.config/scripts/wal-set.sh" "$dest" >> "$LOG" 2>&1
+    fi
+fi
+
 # Already themed from this image? Then this appletsrc write was some other
 # applet's state and there is nothing to do.
 if [ -f "$CACHE/current" ] && [ "$(cat "$CACHE/current")" = "$WALL" ]; then
