@@ -40,7 +40,7 @@ let
     else "rebuild-air";
   scope =
     if isAir then
-      "NixOS: `hosts/air/` and `home/` apply; `sys/` is top's."
+      "NixOS: `hosts/air/` and `home/` apply; `sys/` belongs to top."
     else
       "Full NixOS: both `sys/` and `home/` apply.";
 in
