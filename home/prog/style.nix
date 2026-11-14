@@ -1,4 +1,4 @@
-{ pkgs, hostProfile, ... }:
+{ pkgs, ... }:
 
 # style — live wallpaper and desktop-theme control centre.  Its source stays
 # under apps/style and is intentionally run in place: changes to the UI or its
@@ -6,16 +6,6 @@
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
   style =
-    if hostProfile.isBook then
-      pkgs.symlinkJoin {
-        name = "style-live";
-        paths = [
-          (pkgs.writeShellScriptBin "style" ''
-            exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/style/main.py "$@"
-          '')
-        ];
-      }
-    else
       pkgs.stdenv.mkDerivation {
         pname = "style";
         version = "live";

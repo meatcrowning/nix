@@ -1,14 +1,10 @@
-{ pkgs, lib, hostProfile, ... }:
+{ pkgs, lib, ... }:
 
 # reader — the desktop's document reader: markdown, and PDFs (source at
 # ~/nix/apps/reader).
-# Packaging mirrors viewer.nix exactly, including the air split:
+# Packaging mirrors viewer.nix exactly:
 #
-#   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon (no
-#     Honeykrisp GBM/EGL driver — same root cause as filer/viewer/hyprvtb, see
-#     docs/agents/air-port-nextsteps.md), so exec the SYSTEM python3 with
-#     Fedora's python3-pyside6.
-#   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
+#   * a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env. reader draws text and rasterized PDF pages — no media plugins are
 #     needed, which is why this buildInputs list is shorter than viewer's.
 #
@@ -25,14 +21,6 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   reader =
-    if hostProfile.isBook then
-      pkgs.writeShellScriptBin "reader" ''
-        # `mimetype` for the same reason as the `top` wrapper below; book needs
-        # it more, its graphical session PATH holding no nix profile at all.
-        export PATH="${pkgs.perlPackages.FileMimeInfo}/bin:$PATH"
-        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/reader/main.py "$@"
-      ''
-    else
       pkgs.stdenv.mkDerivation {
         pname = "reader";
         version = "live";

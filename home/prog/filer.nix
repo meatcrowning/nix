@@ -1,4 +1,4 @@
-{ pkgs, lib, hostProfile, ... }:
+{ pkgs, lib, ... }:
 
 # filer — the standalone Qt/QML file browser split out of the Quickshell panel
 # (source at ~/nix/apps/filer, in this repo so it travels to every machine on pull).
@@ -18,25 +18,7 @@
 let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
-  # On air, nixpkgs' Qt/Mesa can't get a GPU context: same root cause already
-  # diagnosed for hyprvtb/Hyprland in docs/agents/air-port-nextsteps.md — nixpkgs' Mesa has no
-  # working Apple Silicon (Honeykrisp) GBM/EGL driver, so QRhiGles2 fails to
-  # create a context and the app aborts. Fedora's own Mesa (system) does have
-  # it — it's what quickshell/Hyprland already run against here — so on air,
-  # skip nixpkgs' Qt/PySide6 entirely and exec the system python3 with the
-  # dnf-installed python3-pyside6 instead. `top` is untouched.
   filer =
-    if hostProfile.isBook then
-      pkgs.writeShellScriptBin "filer" ''
-        # Same `mimetype` prefix as the `top` wrapper below, and book is the
-        # host that actually needs it: `home.packages` puts it in
-        # ~/.nix-profile/bin, which the graphical session's PATH does not
-        # contain here (measured on book 2026-07-29: Hyprland's own PATH is
-        # /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin).
-        export PATH="${pkgs.perlPackages.FileMimeInfo}/bin:$PATH"
-        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/filer/main.py "$@"
-      ''
-    else
       pkgs.stdenv.mkDerivation {
         pname = "filer";
         version = "live";
@@ -45,8 +27,7 @@ let
         nativeBuildInputs = [ pkgs.qt6.wrapQtAppsHook pkgs.makeWrapper ];
         # qtimageformats/qtsvg add the extra image plugins (webp, tiff, svg, …)
         # the built-in viewer decodes beyond qtbase's png/jpg/gif — wrapQtAppsHook
-        # puts them on QT_PLUGIN_PATH. (On `air` filer runs Fedora's system Qt,
-        # which already ships these, so this only matters for `top`.)
+        # puts them on QT_PLUGIN_PATH.
         buildInputs = [ pyEnv pkgs.kdePackages.plasma-integration pkgs.kdePackages.qqc2-desktop-style pkgs.kdePackages.oxygen pkgs.qt6.qtdeclarative pkgs.qt6.qtimageformats pkgs.qt6.qtsvg ];
 
         # glib gives filer `gio`, which is what BOTH "trash" actions shell out
@@ -56,15 +37,11 @@ let
         # cleared, the list refreshed, the files stayed. It went unnoticed
         # because FileOps.run reported success unconditionally; it is visible
         # now (a "cannot run gio" toast), and this makes it work instead.
-        # book gets /usr/bin/gio from Fedora's glib2 and needs nothing.
 
         # sshfs is what the address bar's `:host` syntax mounts with
         # (apps/filer/remote.py). It is here rather than in home.packages for
         # the same reason gio is: the app inherits no profile bin dir when the
-        # runner or a .desktop entry launches it. book needs nothing added —
-        # it runs Fedora's python3 with /usr/sbin on PATH, and nixpkgs' sshfs
-        # would be the wrong one there anyway (its libfuse looks for the setuid
-        # fusermount3 in /run/wrappers/bin, which only exists on NixOS).
+        # runner or a .desktop entry launches it.
 
         # File-MimeInfo gives `mimetype`, and this is the ONLY way it reaches
         # the one caller that matters. Opening a non-image shells out to
@@ -81,8 +58,7 @@ let
         # (archive.py) offers beyond tar (tar/gzip/xz are in the base system on
         # both hosts). Same reason as gio/sshfs: an app launched from a .desktop
         # entry inherits no profile bin dir. archive.py gates each format on its
-        # tool actually resolving, so book — which resolves its own /usr/bin —
-        # simply offers whichever of these Fedora has, never a row that fails.
+        # tool actually resolving, so a missing tool never offers a failing row.
 
         dontWrapQtApps = true; # we wrap the python launcher ourselves
         installPhase = ''

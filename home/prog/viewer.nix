@@ -1,12 +1,9 @@
-{ pkgs, lib, hostProfile, ... }:
+{ pkgs, lib, ... }:
 
 # viewer — the standalone Qt/QML image viewer split out of filer (source at
-# ~/nix/apps/viewer). Packaging mirrors filer.nix exactly, including the air split:
+# ~/nix/apps/viewer). Packaging mirrors filer.nix exactly:
 #
-#   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon (no
-#     Honeykrisp GBM/EGL driver — same root cause as filer/hyprvtb, see
-#     docs/agents/air-port-nextsteps.md), so exec the SYSTEM python3 with Fedora's python3-pyside6.
-#   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
+#   * a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env (qtimageformats/qtsvg add the webp/tiff/svg image plugins beyond
 #     qtbase's png/jpg/gif).
 #
@@ -17,11 +14,6 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   viewer =
-    if hostProfile.isBook then
-      pkgs.writeShellScriptBin "viewer" ''
-        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/viewer/main.py "$@"
-      ''
-    else
       pkgs.stdenv.mkDerivation {
         pname = "viewer";
         version = "live";

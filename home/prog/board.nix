@@ -1,4 +1,4 @@
-{ pkgs, lib, hostProfile, ... }:
+{ pkgs, lib, ... }:
 
 # goetia — what needs him, what is moving, what landed (source at ~/nix/apps/board).
 #
@@ -7,13 +7,9 @@
 # writes is still `docs/board.<hostname>.md` — one board per host since
 # 2026-07-30 — and every path, module and identifier is still
 # `board*` — this file, `apps/board/`, `boardctl.py`, `board-watch`. His call.
-# Packaging mirrors reader.nix exactly, including the air split:
+# Packaging mirrors reader.nix exactly:
 #
-#   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon (no
-#     Honeykrisp GBM/EGL driver — same root cause as filer/viewer/reader, see
-#     docs/agents/air-port-nextsteps.md), so exec the SYSTEM python3 with
-#     Fedora's python3-pyside6.
-#   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
+#   * a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env. goetia draws only text — no image or media plugins are needed.
 #
 # Both run the LIVE source at ~/nix/apps/board/main.py, so QML/Python edits need
@@ -27,11 +23,6 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   goetia =
-    if hostProfile.isBook then
-      pkgs.writeShellScriptBin "goetia" ''
-        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/board/main.py "$@"
-      ''
-    else
       pkgs.stdenv.mkDerivation {
         pname = "goetia";
         version = "live";

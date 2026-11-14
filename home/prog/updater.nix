@@ -1,17 +1,13 @@
-{ pkgs, lib, hostProfile, ... }:
+{ pkgs, lib, ... }:
 
 # updater — the desktop's GUI for this flake's package updates (source at
 # ~/nix/apps/updater). It checks for updates by shelling out to the read-only
 # preview `tools/nix-upgradable.sh`, updates non-pinned inputs (or one input)
 # with `nix flake update`, and rebuilds through this host's own wrapper.
 #
-# Packaging mirrors reader.nix — the plain live-source wrapper with the air
-# split, no extra runtime deps (it draws text and runs subprocesses):
+# Packaging mirrors reader.nix — the plain live-source wrapper, no extra runtime deps (it draws text and runs subprocesses):
 #
-#   * air (book): exec the SYSTEM python3 with Fedora's python3-pyside6, same
-#     reason as reader/viewer (nixpkgs Qt/Mesa can't make a GPU context on
-#     Apple Silicon).
-#   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
+#   * a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env.
 #
 # Both run the LIVE source at ~/nix/apps/updater/main.py, so Python/QML edits
@@ -25,11 +21,6 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   updater =
-    if hostProfile.isBook then
-      pkgs.writeShellScriptBin "updater" ''
-        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/updater/main.py "$@"
-      ''
-    else
       pkgs.stdenv.mkDerivation {
         pname = "updater";
         version = "live";

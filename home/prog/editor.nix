@@ -1,14 +1,9 @@
-{ pkgs, lib, hostProfile, ... }:
+{ pkgs, lib, ... }:
 
 # editor — the desktop's text editor, with Kate's core editing (source at
-# ~/nix/apps/editor). Packaging mirrors reader.nix exactly, including the air
-# split:
+# ~/nix/apps/editor). Packaging mirrors reader.nix exactly:
 #
-#   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon (no
-#     Honeykrisp GBM/EGL driver — same root cause as filer/viewer/reader, see
-#     docs/agents/air-port-nextsteps.md), so exec the SYSTEM python3 with
-#     Fedora's python3-pyside6.
-#   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
+#   * a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env.
 #
 # **Nothing here is architecture-specific.** editor draws only text and imports
@@ -19,13 +14,7 @@
 # The ONE runtime dependency beyond that is the spell checker's dictionary, and
 # it is deliberately not a Python module: `pylib/spellcheck.py` talks to the
 # `hunspell` BINARY in pipe mode, so `SPELL_HUNSPELL`/`SPELL_DICPATH` below are
-# the whole wiring on top. **book gets nothing here** — its branch execs
-# Fedora's python3 with no wrapper, so the checker resolves `hunspell` from
-# `$PATH` and the dictionary from `/usr/share/hunspell`, i.e. it works if
-# `hunspell` + `hunspell-en-US` are dnf-installed and marks NOTHING if they are
-# not (docs/DESIGN.md §10 — an input with no dictionary behaves exactly as it did
-# before). Nothing is x86-only about either package; keeping book on the system
-# copy is what avoids a second nixpkgs Qt/Mesa closure on the laptop.
+# the whole wiring on both hosts.
 #
 # Both run the LIVE source at ~/nix/apps/editor/main.py, so QML/Python edits need
 # no rebuild — only changing the runtime deps or this file does.
@@ -33,11 +22,6 @@ let
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ]);
 
   editor =
-    if hostProfile.isBook then
-      pkgs.writeShellScriptBin "editor" ''
-        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/editor/main.py "$@"
-      ''
-    else
       pkgs.stdenv.mkDerivation {
         pname = "editor";
         version = "live";

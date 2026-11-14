@@ -1,13 +1,10 @@
-{ pkgs, lib, hostProfile, ... }:
+{ pkgs, lib, ... }:
 
 # coder — a native front end for the claude and codex CLIs (source at
 # ~/nix/apps/coder; plan in the private docs/agents/coder-plan.md). It runs the
 # CLIs already on PATH and reads their own session stores, so it adds no
 # dependency on either one here.
 #
-#   * air: Fedora's python3 + python3-pyside6, like every app there. A shell
-#     started from the Nix-wrapped Konsole carries Nix Qt plugin and QML paths,
-#     and Fedora's Qt aborts on them, so the launcher drops them first.
 #   * top: nixpkgs' python3 + PySide6 with the KDE style, platform theme and
 #     qqc2-desktop-style on the plugin path for the Plasma face (the same set
 #     as chatter, apps/AGENTS.md "Plasma chrome and shell").
@@ -27,11 +24,6 @@ let
   '';
 
   coder =
-    if hostProfile.isBook then
-      pkgs.writeShellScriptBin "coder" (''
-        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/coder/main.py "$@"
-      '')
-    else
       pkgs.stdenv.mkDerivation {
         pname = "coder";
         version = "live";
