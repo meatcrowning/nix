@@ -189,9 +189,8 @@ in
   # it has to: Plasma rewrites this file for any applet's state, not just the
   # wallpaper.
   #
-  # plasma-apply-colorscheme lives in plasma-workspace, and on book that is
-  # Fedora's, not a nix package — so the PATH here is the ambient one plus
-  # /usr/bin rather than a makeBinPath list.
+  # plasma-apply-colorscheme comes from the system's plasma-workspace, so the
+  # PATH here is the ambient one rather than a makeBinPath list.
   systemd.user.services.plasma-wallpaper-watch = {
     Unit = {
       Description = "Re-theme the desktop from the wallpaper Plasma just set";

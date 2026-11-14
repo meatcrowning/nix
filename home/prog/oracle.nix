@@ -3,10 +3,8 @@
 # oracle — a minimal chat window for the local ollama daemon (source at
 # ~/nix/apps/oracle). A model selector filled from /api/tags and a prompt box
 # that streams one turn from /api/chat; nothing else. Packaging mirrors
-# board.nix exactly, including the air split:
+# board.nix, except that book's launcher first forwards top's ollama:
 #
-#   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon, so
-#     exec the SYSTEM python3 with Fedora's python3-pyside6.
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env. Beyond QtNetwork (which ships with pyside6) it needs qtmultimedia:
 #     `show_video` plays a video inline in a reply, and the QML MediaPlayer +

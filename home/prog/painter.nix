@@ -1,8 +1,8 @@
 { pkgs, lib, hostProfile, ... }:
 
 # Painter is the live-source ComfyUI front end under apps/painter. Its wrapper
-# supplies WebSockets, multimedia, ffmpeg, libnotify, and hunspell on top; book
-# uses Fedora's equivalents. Top pins Qt video decoding away from its broken
+# supplies WebSockets, multimedia, ffmpeg, libnotify, and hunspell on top; book's
+# tunnel launcher runs hostProfile.bookPython. Top pins Qt video decoding away from its broken
 # NVIDIA VAAPI export, as documented in viewer.nix.
 #
 # ComfyUI and the model store remain external mutable state. The on-demand user

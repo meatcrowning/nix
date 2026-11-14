@@ -26,9 +26,7 @@
 # desktop's runaway is a user process, and letting oomd reach system services
 # trades a freeze for a killed daemon.
 #
-# NixOS-only, so `book` does not get this — it is Fedora with home-manager
-# layered on, and its oomd policy is Fedora's (which does arm the user slice by
-# default, so book was never exposed the same way).
+# book sets the same in hosts/air/configuration.nix.
 { ... }:
 
 {

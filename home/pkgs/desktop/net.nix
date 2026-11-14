@@ -18,8 +18,7 @@ in
     '';
   };
 
-  # Fedora's Plasma session does not inherit the Nix profile's application
-  # search path. Publish the canonical browser ID where native launchers look.
+  # Publish the canonical browser ID where launchers and Plasma pins look.
   home.file.".local/share/applications/vivaldi-stable.desktop" = lib.mkIf (host == "air") {
     text = ''
       [Desktop Entry]

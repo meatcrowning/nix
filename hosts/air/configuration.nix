@@ -68,6 +68,14 @@
   security.rtkit.enable = true;
   hardware.bluetooth.enable = true;
   zramSwap.enable = true;
+  # PSI-based kills in the user slices before 7.3G runs out (sys/oomd.nix).
+  systemd.oomd.enableUserSlices = true;
+
+  # KDE Connect, on Wi-Fi only (top scopes it to its wired LAN the same way).
+  networking.firewall.interfaces.wld0 = {
+    allowedTCPPortRanges = [{ from = 1714; to = 1764; }];
+    allowedUDPPortRanges = [{ from = 1714; to = 1764; }];
+  };
 
   fonts = {
     enableDefaultPackages = true;
@@ -80,6 +88,7 @@
   nix = {
     settings = {
       experimental-features = [ "nix-command" "flakes" "pipe-operators" ];
+      auto-optimise-store = true;
       trusted-users = [ "root" user ];
       builders-use-substitutes = true;
       # top's store, reached with the same restricted key as its builder.

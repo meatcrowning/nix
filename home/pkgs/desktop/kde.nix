@@ -1,9 +1,8 @@
 { pkgs, lib, host, ... }:
 
 let
-  # NixOS gives Top's Plasma applications these paths system-wide. Air's Fedora
-  # session does not, so an unwrapped Konsole silently falls back to Qt's flat
-  # style even though the Oxygen package is present in the profile.
+  # An unwrapped Konsole silently falls back to Qt's flat style when the
+  # session's plugin path lacks Oxygen, so the wrapper names it.
   konsoleOxygen = pkgs.symlinkJoin {
     name = "konsole-oxygen";
     paths = [ pkgs.kdePackages.konsole ];
@@ -37,15 +36,14 @@ in {
     kate
     # The Dynamic scheme renders the KStyle-painted window field beneath the
     # terminal text. Keep Konsole managed on both hosts so that scheme and its
-    # deliberate chrome defaults do not depend on Fedora's system package.
+    # deliberate chrome defaults are the same everywhere.
     konsoleOxygen
     qttools
     elisa
     # These are the actual applications named by Plasma's default-handler
     # table in home/prog/mime-defaults.nix. On top Plasma brings many of them
-    # in transitively; declaring them here keeps air's independently managed
-    # profile complete too, rather than relying on whatever Fedora happened to
-    # have installed at the time of the visual migration.
+    # in transitively; declaring them keeps book's standalone system complete
+    # too.
     dolphin
     gwenview
     haruna

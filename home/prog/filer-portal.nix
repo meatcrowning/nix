@@ -33,8 +33,7 @@ let
   # portal.py needs PyGObject (Gio/GLib) — the D-Bus + main-loop layer — and
   # nothing else. It deliberately does NOT import Qt: the backend is a tiny
   # long-lived service, and the QML lives in the `filer --pick` subprocess it
-  # spawns. On air (book) that is Fedora's python3, which already has gi, for
-  # the same Mesa reason home/prog/filer.nix documents.
+  # spawns.
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pygobject3 ]);
   python = "${pyEnv}/bin/python3";
 

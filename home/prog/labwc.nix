@@ -5,9 +5,8 @@
 # NixOS side (sys/dsk/labwc.nix); this module supplies the two GUI config tools
 # and seeds ~/.config/labwc.
 #
-# HOST EXCEPTION: top only. book is Fedora Asahi with no binary cache for
-# aarch64, so the compositor and the Qt tweaks app would both be long source
-# builds for a session book has no greeter entry for. Drop the guard (and add
+# HOST EXCEPTION: top only. On book the compositor and the Qt tweaks app would
+# both be long source builds for a session it has no greeter entry for. Drop the guard (and add
 # the session another way) if labwc is ever wanted there.
 let
   onTop = pkgs.stdenv.hostPlatform.isx86_64;

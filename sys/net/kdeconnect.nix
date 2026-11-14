@@ -24,8 +24,7 @@
 # identity broadcasts a device is discovered by; closing the UDP side alone
 # breaks discovery, and therefore pairing, and therefore notifications.
 #
-# NixOS-only, so `top` only: `air` is home-manager over Fedora and its firewall
-# is Fedora state this repo cannot write.
+# top only; book opens the same range on Wi-Fi in hosts/air/configuration.nix.
 
 let
   # Same wired interface share.nix scopes its holes to; kept in step with it.

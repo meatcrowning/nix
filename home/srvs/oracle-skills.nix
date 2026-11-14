@@ -27,7 +27,7 @@
 # one for itself. A new store landing beside them cannot widen the push.
 #
 # Both machines get this: `home/` is shared verbatim between `top` and `air`
-# via lam.nix + umport, and Fedora Asahi runs systemd the same as NixOS.
+# via lam.nix + umport.
 
 {
   xdg.configFile = {

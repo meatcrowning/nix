@@ -19,9 +19,8 @@
 let
   # ps.pillow: "create systheme" (main.py's createSysthemeFromAlbum) shells
   # out to apps/pylib/systheme.py via sys.executable, i.e. THIS interpreter —
-  # without Pillow here the entry point dies with "Pillow is required" on top
-  # (book already has it for free: air-launch.sh runs /usr/bin/python3, which
-  # dnf's python3-pillow already covers).
+  # without Pillow here the entry point dies with "Pillow is required". Book's
+  # air-launch.sh runs this same interpreter (PLAYER_PYTHON).
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 ps.mpv ps.mutagen ps.mpris-server ps.pillow ]);
 
   # The side-effect-free way to borrow player's Qt environment. Never source the

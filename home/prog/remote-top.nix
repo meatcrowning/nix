@@ -31,7 +31,7 @@
 # avoid.
 #
 # Not on top, which would only be pointing at itself. If book ever needs to be
-# reachable the same way it needs an sshd first; Fedora's is not enabled here.
+# reachable the same way it needs an sshd first; book runs none.
 lib.mkIf (host == "air") {
   # The Remote Folders entry. Same four keys knetattach writes; verified to
   # appear with `kioclient ls remote:/`.

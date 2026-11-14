@@ -2,8 +2,7 @@
 
 # The reminder shells out to boardctl.py, which imports the whole board module
 # set (boardparse -> glyphs -> PySide6), so it must run under the board's python,
-# NOT bare pkgs.python3. Same host split as home/prog/board.nix: nixpkgs
-# python3+PySide6 on top, Fedora's system python3 (with python3-pyside6) on book.
+# NOT bare pkgs.python3 (hostProfile.boardPython).
 let reminderPython = hostProfile.boardPython pkgs;
 in
 

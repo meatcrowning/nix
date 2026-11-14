@@ -428,9 +428,9 @@ in
   };
 
   # plasma-manager's generated panel and wallpaper scripts call bare `qdbus`.
-  # Plasma launches this desktop entry as a transient systemd user service on
-  # Fedora, whose PATH does not include the Nix profile; both scripts then fail
-  # and Plasma keeps its stock panel. Replace only the generated launcher with
+  # Plasma launches this desktop entry as a transient systemd user service whose
+  # PATH may not include the Nix profile; both scripts then fail and Plasma
+  # keeps its stock panel. Replace only the generated launcher with
   # a wrapper that pins the matching Qt tool for both hosts.
   xdg.configFile."autostart/plasma-manager-autostart.desktop".text = lib.mkForce ''
     [Desktop Entry]

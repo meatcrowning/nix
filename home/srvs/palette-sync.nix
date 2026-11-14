@@ -9,8 +9,7 @@
 # reasoning and the file-per-host rule; this module is only its plumbing.
 #
 # Transport is docs/, which already syncs both ways every 5 minutes — no new
-# remote, no new credentials. Both machines get this: `home/` is shared verbatim
-# and Fedora Asahi runs systemd the same as NixOS.
+# remote, no new credentials. Both machines get this: `home/` is shared verbatim.
 
 {
   xdg.configFile."scripts/palette-sync.py" = {

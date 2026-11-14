@@ -3,10 +3,9 @@
 # slsk — the desktop's Soulseek client for the local slskd daemon (source at
 # ~/nix/apps/slsk). It replaces the slskd web UI for search + downloads.
 #
-# Packaging mirrors reader.nix exactly, including the air split:
+# Packaging mirrors reader.nix, except that book's launcher first forwards
+# top's slskd:
 #
-#   * air: nixpkgs' Qt/Mesa can't create a GPU context on Apple Silicon, so exec
-#     the SYSTEM python3 with Fedora's python3-pyside6.
 #   * top: a plain wrapper over nixpkgs' python3 + PySide6, wrapped with the Qt
 #     env. The app is stdlib-only for its network layer (urllib against the
 #     loopback slskd API), so PySide6 is the only runtime dependency.

@@ -4,10 +4,9 @@ let
   qmlDir = ./quickshell-files;
 
   # The panel binary. On `top` it is the pinned Quickshell (same source wm.nix
-  # installs — see the `nixpkgs-quickshell` input in flake.nix); on `book` the
-  # compositor stack is Fedora's, so `qs` is resolved from PATH there and the
-  # nix build is never forced. An absolute path on `top` means the service does
-  # not depend on the systemd user manager's PATH being right when it starts.
+  # installs — see the `nixpkgs-quickshell` input in flake.nix) on both hosts.
+  # An absolute path means the service does not depend on the systemd user
+  # manager's PATH being right when it starts.
   qsBin =
     "${(import inputs.nixpkgs-quickshell {
       inherit (pkgs.stdenv.hostPlatform) system;
@@ -15,10 +14,8 @@ let
 
   # THE PANEL MUST SEE THE NIX PROFILE'S PROGRAMS. `DesktopEntries` scans
   # `XDG_DATA_DIRS`, and the panel inherits it from the SYSTEMD USER MANAGER,
-  # which is not a login shell — on `book` (Fedora + home-manager only) the
-  # manager's copy is Fedora's `/var/lib/flatpak…:/usr/local/share/:/usr/share/`
-  # and nothing else, while the shell's has the two nix profile dirs appended by
-  # nix's own profile script. Measured 2026-08-30: every nix-installed program
+  # which is not a login shell. On book under Fedora (measured 2026-08-30)
+  # the manager's copy lacked the nix profile dirs the shell had: every nix-installed program
   # (nicotine+ among them) was absent from the runner for exactly that reason,
   # and their icons were unresolvable for the same one. `top` sets this
   # system-wide so it is already correct there; prepending a dir that is already
@@ -269,8 +266,7 @@ in
   # panel, and a rebuild must not do that for nothing.
   #
   # gawk explicitly on PATH: the carry is an awk pass, and home-manager's
-  # activation PATH carries no awk on book (Fedora's /usr/bin is not on it
-  # either). It failed there on every switch, silently — the reconcile then
+  # activation PATH carries no awk. It failed there on every switch, silently — the reconcile then
   # wrote the nix source's DEFAULT palette over the live wal-derived one, so a
   # `home-manager switch` recoloured the panel away from the wallpaper until
   # the next wal-set.sh run put it back. The script now refuses to write when

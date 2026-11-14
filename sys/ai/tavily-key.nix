@@ -15,9 +15,8 @@
 # ~/.config/oracle/tavily.key at that path, so the app is unchanged and needs
 # no env var.
 #
-# NixOS-only, so `book` does not get it (see docs/private-config/secrets.nix): it is
-# home-manager over Fedora and is not yet a recipient. chatter there keeps
-# reading its own hand-written ~/.config/oracle/tavily.key.
+# top only: book is not yet an agenix recipient (docs/private-config/secrets.nix),
+# so chatter there keeps reading its own hand-written ~/.config/oracle/tavily.key.
 #
 # Rotate the key:  cd ~/nix/docs/private-config && agenix -e tavily-key.age
 {

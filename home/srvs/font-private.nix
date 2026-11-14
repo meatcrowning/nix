@@ -14,8 +14,7 @@
 # the font out. Authentication is the gh credential helper (`!gh auth
 # git-credential`), exactly like claude-state-sync and nix-docs-sync.
 #
-# Both machines get this: `home/` is shared verbatim between `top` and `air`,
-# and Fedora Asahi runs systemd the same as NixOS.
+# Both machines get this: `home/` is shared verbatim between `top` and `air`.
 
 let
   # git for the clone/fetch, gh for the credential helper, coreutils for the

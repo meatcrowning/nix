@@ -11,10 +11,9 @@
 # Out-of-store on purpose (mkOutOfStoreSymlink): /nix/store is world-readable,
 # so the plaintext key must never be copied into it — only pointed at.
 #
-# top only. `book` is Fedora + home-manager, has no NixOS activation to
-# decrypt anything, and is not yet an agenix recipient (secrets/secrets.nix),
-# so chatter there keeps reading its own hand-written file — which this must
-# not claim out from under it.
+# top only. `book` is not yet an agenix recipient (secrets/secrets.nix), so
+# chatter there keeps reading its own hand-written file — which this must not
+# claim out from under it.
 lib.optionalAttrs (host != "air") {
   home.file.".config/oracle/tavily.key".source =
     config.lib.file.mkOutOfStoreSymlink "/run/agenix/tavily-key";
