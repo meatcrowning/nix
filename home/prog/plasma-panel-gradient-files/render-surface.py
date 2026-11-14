@@ -26,6 +26,10 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 def plasma_screen_size() -> tuple[int, int] | None:
     """Read the live logical primary-output size before Qt goes offscreen."""
+    # With no session to ask (home-manager activation at boot), kscreen-doctor
+    # aborts on Qt platform init and leaves a core dump behind.
+    if not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+        return None
     probe_env = os.environ.copy()
     # The renderer itself must stay offscreen, but kscreen-doctor must connect
     # to the real session or it reports Qt's synthetic 800x800 output.
