@@ -1,12 +1,10 @@
 { pkgs, lib, hostProfile, ... }:
 
-# surfer is the live-source QtWebEngine browser. top uses nixpkgs Python/PySide6;
-# book/air executes Fedora's system Python/PySide6 because nixpkgs Qt/Mesa cannot
-# create an Asahi GPU context. Both wrappers log to ~/.cache/surfer.log, and the
-# singleton probe precedes redirection so a link click cannot truncate the
-# running browser's log. Python source edits are live; dependency changes need
-# a home rebuild. Missing system `adblock` on book degrades to the
-# feature-detected domain-only path.
+# surfer is the live-source QtWebEngine browser. Both hosts run the same wrapped
+# launcher; book's adds the profile sync with top around it. The wrapper logs to
+# ~/.cache/surfer.log, and the singleton probe precedes redirection so a link
+# click cannot truncate the running browser's log. Python source edits are
+# live; dependency changes need a rebuild.
 #
 let
   # top uses the pinned meatcrowning fork (adblock-rust 0.12.5) because PyPI's
@@ -46,8 +44,7 @@ let
 
   pyEnv = pkgs.python3.withPackages (ps: [ ps.pyside6 adblock ]);
 
-  # top needs Hunspell converted to Chromium's .bdic format. book uses Fedora's
-  # QtWebEngine dictionaries and must not build nixpkgs QtWebEngine on Asahi.
+  # Chromium wants Hunspell converted to its .bdic format.
   spellDicts = pkgs.runCommand "surfer-spellcheck-dicts" { } ''
     mkdir -p "$out"
     ${pkgs.qt6.qtwebengine}/libexec/qwebengine_convert_dict \
@@ -104,34 +101,28 @@ let
     exec "$@"
   '';
 
-  surfer =
-    if hostProfile.isBook then
-      # air pulls top's profile before launch and pushes after exit. The sync is
-      # timeout-bounded and fail-open, so an unavailable top never blocks launch.
-      pkgs.writeShellScriptBin "surfer" ''
-        ${sourceGuard}
-        # Probe the singleton before profile sync and log truncation; a link click
-        # must hand off without disturbing the live instance.
-        if ${hostProfile.bookPython pkgs} /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi
+  # book pulls top's profile before launch (main.py) and pushes after exit
+  # (below). The sync is timeout-bounded and fail-open, so an unavailable top
+  # never blocks launch.
+  surferBook = pkgs.writeShellScriptBin "surfer" ''
+    ${sourceGuard}
+    # Probe the singleton before anything else; a link click must hand off
+    # without disturbing the live instance.
+    if ${pyEnv}/bin/python3 /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi
 
-        LOG="$HOME/.cache/surfer-sync.log"
-        vtbsync() {
-          echo "--- $(date -Is) $1" >> "$LOG"
-          timeout 90 ${hostProfile.bookPython pkgs} /home/lam/nix/apps/surfer/tools/sync.py "$1" \
-            >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
-        }
-        # Pull happens in main.py after launch; pushing here runs after close and
-        # cannot delay the window.
-        # Fedora's fontconfig is covered by the same explicit Botis/web pin.
-        export FONTCONFIG_FILE="''${FONTCONFIG_FILE:-${fcConf}}"
-        # Preserve Qt/Chromium diagnostics and the GPU fallback log.
-        ${hostProfile.bookPython pkgs} /home/lam/nix/apps/surfer/main.py "$@" \
-          > "$HOME/.cache/surfer.log" 2>&1
-        rc=$?
-        [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync push
-        exit $rc
-      ''
-    else
+    LOG="$HOME/.cache/surfer-sync.log"
+    vtbsync() {
+      echo "--- $(date -Is) $1" >> "$LOG"
+      timeout 90 ${pyEnv}/bin/python3 /home/lam/nix/apps/surfer/tools/sync.py "$1" \
+        >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
+    }
+    ${surferWrapped}/bin/surfer "$@"
+    rc=$?
+    [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync push
+    exit $rc
+  '';
+
+  surferWrapped =
       pkgs.stdenv.mkDerivation {
         pname = "surfer";
         version = "live";
@@ -163,12 +154,14 @@ let
           runHook postInstall
         '';
       };
+  surfer = if hostProfile.isBook then surferBook else surferWrapped;
 in
 {
-  home.packages = [ surfer ]
-    # air has no nix Qt environment, so its helper is a passthrough.
-    ++ lib.optional hostProfile.isBook
-      (pkgs.writeShellScriptBin "surfer-qtenv" ''exec ${qtenvBody} "$@"'');
+  home.packages =
+    if hostProfile.isBook then [
+      surferBook
+      (pkgs.writeShellScriptBin "surfer-qtenv" ''exec ${surferWrapped}/bin/surfer-qtenv "$@"'')
+    ] else [ surferWrapped ];
 
   # MIME/default-browser associations are centralized in mime-defaults.nix;
   # `%U` supplies the start URL and SURFER_DESKTOP_LAUNCH=1 marks human no-URL
