@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, host, ... }:
 
 let
   pkgId = "org.kde.lam.playervisualizer";
@@ -31,7 +31,7 @@ let
     cp ${pkgs.writeText "metadata.json" metadata} $out/metadata.json
     cp ${./plasma-player-visualizer-files/main.qml} $out/contents/ui/main.qml
   '';
-in {
+in lib.mkIf (host != "air") {
   # KWin resolves the patched decoration from the top system profile.  It must
   # not also enter the user profile: player already brings in stock Oxygen,
   # and buildEnv correctly rejects two providers for the same plugin path.

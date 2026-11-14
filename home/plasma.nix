@@ -131,10 +131,13 @@ in
             };
           }
           "org.kde.plasma.mediacontroller"
+        ] ++ lib.optionals (host != "air") [
           # The visualizer is the media controller's compact fallback. Keep it
           # adjacent to that controller rather than reserving its 72px slot at
-          # the physical right edge after the system tray.
+          # the physical right edge after the system tray. Off on book: its
+          # cava feed costs ~25% CPU there (2026-11-13).
           "org.kde.lam.playervisualizer"
+        ] ++ [
           # This controller has a 1px representation, but Plasma still adds
           # applet margins around it. Keep that invisible margin before the
           # tray, leaving the tray as the panel's physical endpoint.
