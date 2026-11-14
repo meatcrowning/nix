@@ -22,17 +22,10 @@
   boot.loader = {
     systemd-boot = {
       enable = true;
-      # The 500M ESP also holds the Asahi firmware and Fedora's loaders.
+      # The 500M ESP also holds the Asahi firmware and m1n1's stage 2, which
+      # the apple-silicon module installs here with device trees matching
+      # this kernel.
       configurationLimit = 3;
-      # While Fedora exists, its update-m1n1 owns m1n1/boot.bin (stage 2 with
-      # the device trees). Remove this once Fedora is gone so NixOS installs
-      # its own stage 2 matching its kernel.
-      extraFiles = lib.mkForce { };
-      extraEntries."fedora.conf" = ''
-        title Fedora Linux Asahi Remix
-        efi /EFI/fedora/shimaa64.efi
-        sort-key z_fedora
-      '';
     };
     efi.canTouchEfiVariables = false;
   };
