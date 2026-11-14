@@ -6,6 +6,7 @@
 {
   imports = [
     ./hardware-configuration.nix
+    ./kwin-momentum.nix
     inputs.apple-silicon.nixosModules.apple-silicon-support
   ];
 

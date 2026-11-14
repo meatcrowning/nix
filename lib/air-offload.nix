@@ -98,9 +98,11 @@ let
     paths = [ hostTools native.kdePackages.kcmutils.dev native.kdePackages.kpackage.dev ];
   };
   crossOxygen = (crossQt "oxygen").overrideAttrs (old: {
-    # Book's applications and KWin decoration load THIS Oxygen, so the
-    # maximised-window field has to be in it.
-    patches = (old.patches or []) ++ [ ../home/prog/oxygen-desktop-field.patch ../home/prog/oxygen-compact-menus.patch ];
+    # Book's applications and KWin decoration load THIS Oxygen. Same patch set
+    # and order as Fedora's native build had: themed Vivaldi frames, native
+    # content (from the overlay), the maximised-window field, compact menus.
+    patches = [ ../home/prog/oxygen-themed-vivaldi.patch ] ++ (old.patches or [])
+      ++ [ ../home/prog/oxygen-desktop-field.patch ../home/prog/oxygen-compact-menus.patch ];
     outputs = builtins.filter (o: o != "qt5" && o != "debug") old.outputs;
     cmakeFlags = old.cmakeFlags ++ [ "-DBUILD_QT5=OFF" "-DBUILD_QT6=ON" "-DKF6_HOST_TOOLING=${oxygenHostTools}/lib/cmake" ];
     postInstall = "";
