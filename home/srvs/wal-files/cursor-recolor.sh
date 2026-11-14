@@ -79,6 +79,17 @@ MASTER="$CACHE/cursor-master"
 STAMP="$CACHE/cursor-accent"
 mkdir -p "$CACHE"
 
+# wal-set.sh publishes the newest (accent, bg) before launching this job; the
+# flock above does not keep arrival order, so an older pick must drop itself.
+superseded() {
+    want="$(sed -n 's/^cursor=//p' "$CACHE/theme-target" 2>/dev/null | tr 'A-F' 'a-f')"
+    [ -n "$want" ] && [ "$want" != "$ACCENT$BG" ]
+}
+if superseded; then
+    echo "cursor-recolor: $ACCENT$BG superseded by $want, skipping"
+    exit 0
+fi
+
 # nothing to tint if the base theme isn't installed
 if [ ! -d "$SRC/cursors" ]; then
     echo "cursor-recolor: $SRC not found, skipping" >&2
@@ -202,5 +213,9 @@ rm -rf "$DST"
 mv "$WORK/theme" "$DST"
 
 printf '%s' "$ACCENT$BG" > "$STAMP"
+if superseded; then
+    echo "cursor-recolor: $ACCENT$BG superseded by $want, not applying"
+    exit 0
+fi
 pin_env; apply; sync_generated
 echo "cursor-recolor: $NAME core #$BG / outline #$ACCENT, applied at ${SIZE}px"

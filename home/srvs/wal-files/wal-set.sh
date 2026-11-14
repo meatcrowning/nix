@@ -270,16 +270,25 @@ fi
 # kdeglobals is the user's desktop theme, so re-mint the selected colour-scheme
 # file instead of overwriting widget style, icons, or fonts.
 KG="$CONFIG/kdeglobals"
+# The icon and cursor jobs below run detached and serialise on their own locks,
+# which do not keep arrival order: a quick A -> B -> A pick let B's job finish
+# last and leave B's colours on screen.  Publish this apply's targets first;
+# each job re-reads them under its lock and drops itself once superseded.
+printf 'icons=%s\ncursor=%s%s\n' "$KDE_ACCENT" "$ACCENT" "$BG" > "$CACHE/theme-target"
 # Oxygen's raster icon set is expensive to mint.  It follows the committed
 # palette asynchronously, and its completion sends KWin the narrow cache
 # reconfigure so the titlebar icon joins the refreshed Dolphin and panel art.
 if command -v systemd-run >/dev/null 2>&1; then
-    systemd-run --user --quiet --no-block --collect \
+    # Foreground: a trailing `&` on `systemd-run || setsid` backgrounds the
+    # whole list, and a oneshot caller's cgroup kill then races systemd-run's
+    # own request (a lost cursor job left the previous accent on screen).
+    if ! systemd-run --user --quiet --no-block --collect \
         --unit="wal-oxygen-icons-${KDE_ACCENT}-$$" \
         "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
-        >>"$CACHE/wallpaper-picker.log" 2>&1 \
-        || setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
+        >>"$CACHE/wallpaper-picker.log" 2>&1; then
+        setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
             >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
+    fi
 else
     setsid "$SCRIPTS/oxygen-live-icons.py" --accent "$KDE_ACCENT" \
         >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
@@ -500,12 +509,13 @@ fi
 # serialises overlapping runs; the transient user unit keeps it alive after a
 # systemd oneshot, with setsid as the manual fallback.
 if command -v systemd-run >/dev/null 2>&1; then
-    systemd-run --user --quiet --no-block --collect \
-        --unit="wal-cursor-${ACCENT}${BG}" \
+    if ! systemd-run --user --quiet --no-block --collect \
+        --unit="wal-cursor-${ACCENT}${BG}-$$" \
         "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
-        >>"$CACHE/wallpaper-picker.log" 2>&1 \
-        || setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
+        >>"$CACHE/wallpaper-picker.log" 2>&1; then
+        setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
             >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &
+    fi
 else
     setsid "$SCRIPTS/cursor-recolor.sh" "$ACCENT" "$BG" "${XCURSOR_SIZE:-22}" \
         >>"$CACHE/wallpaper-picker.log" 2>&1 </dev/null &

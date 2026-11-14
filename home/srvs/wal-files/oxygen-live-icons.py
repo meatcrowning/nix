@@ -155,6 +155,20 @@ def activate(name):
                        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def superseded(accent):
+    """Newer accent published by wal-set.sh's theme-target, or None."""
+    target = Path.home() / ".cache/wal/theme-target"
+    try:
+        lines = target.read_text().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        if line.startswith("icons="):
+            wanted = line.removeprefix("icons=").strip().lower()
+            return wanted if wanted and wanted != accent else None
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--accent", required=True, metavar="RRGGBB")
@@ -172,6 +186,9 @@ def main():
     state, lock = root / ".oxygen-live-state", root / ".oxygen-live.lock"
     with lock.open("w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
+        if not args.no_activate and (newer := superseded(accent)):
+            print(f"oxygen-live-icons: {accent} superseded by {newer}, skipping")
+            return
         previous = state.read_text().strip().split() if state.exists() else []
         # KDE retains pixmaps by theme name.  The name therefore identifies
         # immutable pixels: both the transform version and the accent belong
@@ -188,6 +205,10 @@ def main():
             recolour_vivaldi(destination, accent)
             recolour_codex(destination, accent)
             state.write_text(RENDER_VERSION + " " + accent + "\n")
+        # Minting takes about a minute; a newer pick may have landed meanwhile.
+        if not args.no_activate and (newer := superseded(accent)):
+            print(f"oxygen-live-icons: {accent} superseded by {newer}, not activating")
+            return
         if not args.no_activate:
             activate(name)
     print(name)
