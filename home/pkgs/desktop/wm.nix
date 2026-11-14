@@ -22,25 +22,6 @@ in
     # it a selection owned by a closed client is gone; with it, the persist
     # daemon holds the data so Ctrl+V still works. Both hosts.
     wl-clip-persist
-    # screen recording (Screenshot.qml's record mode execs it by bare name) —
-    # lightweight wlroots screencopy grabber, no audio, matches the display
-    # refresh rate. COMMON, not in the `host != "air"` block below: unlike
-    # kitty/brightnessctl/wl-clipboard/hypridle, Fedora Asahi ships no
-    # wf-recorder, so skipping it there left `command -v wf-recorder` empty on
-    # both paths and the recorder silently never started. NixPath.qml's startup
-    # probe is what surfaced it.
-    wf-recorder
-  # already native on air (this Fedora install, including the Hyprland this
-  # very session is running under) — skip duplicating there. Tried swapping
-  # air to nixpkgs' own hyprland as the actual compositor instead (so
-  # hyprvtb could match hashes without the override below) — it crashed on
-  # startup: nixpkgs' Mesa lacks working Apple Silicon (Honeykrisp GBM)
-  # driver support that Fedora Asahi's patched Mesa has (aquamarine got past
-  # DRM/KMS enumeration fine, then failed creating a GBM allocator). Not
-  # fixable without nixGL-style host-Mesa injection, which isn't set up and
-  # is its own can of worms — reverted, back to the GIT_*-forced-unknown
-  # hyprvtb build below.
-  ] ++ lib.optionals (host != "air") [
     hyprlauncher
     hyprlang
     hypridle
@@ -52,9 +33,8 @@ in
     quickshellPinned
     # screenshots (Screenshot.qml overlay drives grim) + clipboard history
     wl-clipboard
-    # screen recording (Screenshot.qml overlay drives wf-recorder in record
-    # mode) — lightweight wlroots screencopy grabber, no audio, matches the
-    # display refresh rate
+    # screen recording (Screenshot.qml's record mode execs it by bare name):
+    # wlroots screencopy grabber, no audio, at the display's refresh rate
     wf-recorder
     ];
 }

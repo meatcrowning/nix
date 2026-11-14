@@ -6,13 +6,14 @@
   home.packages = with pkgs; [
     # network diagnostics
     mtr           # my traceroute
-    nmap          # also provides `ncat` (was dnf nmap-ncat)
+    nmap          # also provides `ncat`
     tcpdump
     traceroute
     whois
-    dnsutils      # dig / nslookup (was dnf bind-utils)
+    dnsutils      # dig / nslookup
 
     # general
+    jq            # wal-prepare and the board tools parse JSON with it
     bc
     dos2unix
     lsof

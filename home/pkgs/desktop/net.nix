@@ -60,10 +60,7 @@ in
   ] ++ lib.optionals isx86 [
         vivaldi-ffmpeg-codecs
         google-chrome
-  # firefox/qutebrowser are GUI browsers with GPU-accelerated rendering
-  # (QtWebEngine / gfx): nixpkgs' Mesa lacks Asahi (Honeykrisp) support, so
-  # keep them on Fedora's native, hardware-accelerated build on `air`.
-  ] ++ lib.optionals (host != "air") [
+  ] ++ [
         qutebrowser
         firefox
   ] ++ [
@@ -91,8 +88,8 @@ in
           commandLineArgs = "--password-store=kwallet6"
             + lib.optionalString (host == "air") " --use-gl=angle --use-angle=vulkan";
         }).overrideAttrs (old: {
-          # Fedora has no /run/opengl-driver. Use Nix's tested Honeykrisp ICD
-          # explicitly so ANGLE does not fall back to software rendering.
+          # Name Nix's Honeykrisp ICD explicitly so ANGLE never falls back to
+          # software rendering on book.
           postFixup = (old.postFixup or "") + lib.optionalString (host == "air") ''
             wrapProgram "$out/bin/vivaldi" \
               --set VK_DRIVER_FILES "${pkgs.mesa}/share/vulkan/icd.d/asahi_icd.aarch64.json"

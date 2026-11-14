@@ -12,9 +12,8 @@
     (python3.withPackages (ps: [ ps.mutagen ]))
     cage
   ] ++ lib.optionals (host == "top") [
-    # Book already has Fedora's native C/C++/Rust tools. Keep the full Nix
-    # development toolchains on top; use a task-specific shell when needed
-    # on book instead of retaining another SDK in every home generation.
+    # Full toolchains stay on top; book uses a task-specific `nix shell`
+    # rather than keeping another SDK in every generation.
     cmake
     gnumake
     (dotnetCorePackages.combinePackages [ dotnet-sdk dotnetCorePackages.runtime_10_0-bin ])

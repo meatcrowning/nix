@@ -61,8 +61,7 @@ in {
     kcolorpicker
    # plasma-framework
     ]) ++ lib.optionals (host == "top") [
-    # Book uses Fedora's kdenlive package and shared Qt/multimedia libraries,
-    # avoiding the separate ffmpeg-full build and its development closure.
+    # Top only: kdenlive pulls the separate ffmpeg-full closure.
     kdePackages.kdenlive
     # breeze-square-overlay patches this locally, so there's no cache hit —
     # it always compiles from source (KDE Frameworks/Qt, genuinely slow).
