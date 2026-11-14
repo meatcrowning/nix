@@ -51,6 +51,9 @@ let
       pkgs.writeShellScriptBin "painter" ''
         export PAINTER_TAG_LLAMA=${tagLlama}/bin/llama-completion
         export PAINTER_TAG_MODEL=${tagModel}
+        export COMFY_SSH=${pkgs.openssh}/bin/ssh
+        export COMFY_SSHFS=${pkgs.sshfs}/bin/sshfs
+        export PAINTER_BACKEND_SSH_BIN=${pkgs.openssh}/bin/ssh
         exec /home/lam/nix/apps/painter/tools/comfy-tunnel.sh -- \
              ${hostProfile.bookPython pkgs} /home/lam/nix/apps/painter/main.py "$@"
       ''

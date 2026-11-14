@@ -15,11 +15,11 @@ trap '' PIPE
 
 PORT="${COMFY_PORT:-8188}"
 WPORT="${PAINTER_WARDEN_PORT:-8200}"
-SSH="${COMFY_SSH:-/usr/bin/ssh}"   # Fedora's ssh: nix-built binaries on book
-                                   # cannot resolve .local names (nss-mdns).
-# Same reason for sshfs and fusermount3 — Fedora's, under /usr/sbin.
-SSHFS="${COMFY_SSHFS:-/usr/sbin/sshfs}"
-FUSERMOUNT="${COMFY_FUSERMOUNT:-/usr/sbin/fusermount3}"
+# The painter wrapper pins ssh and sshfs to store paths; fusermount3 must be
+# NixOS's setuid wrapper, so it comes from PATH.
+SSH="${COMFY_SSH:-ssh}"
+SSHFS="${COMFY_SSHFS:-sshfs}"
+FUSERMOUNT="${COMFY_FUSERMOUNT:-/run/wrappers/bin/fusermount3}"
 MODELS_REMOTE="${COMFY_MODELS:-/home/lam/models}"
 MODELS_LOCAL="${PAINTER_MODELS_MOUNT:-${XDG_CACHE_HOME:-$HOME/.cache}/painter/models-top}"
 OUT_REMOTE="${COMFY_OUT:-/home/lam/Pictures/painter/out}"
