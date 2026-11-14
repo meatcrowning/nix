@@ -29,7 +29,7 @@ let
   goetia =
     if hostProfile.isBook then
       pkgs.writeShellScriptBin "goetia" ''
-        exec /usr/bin/python3 /home/lam/nix/apps/board/main.py "$@"
+        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/board/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

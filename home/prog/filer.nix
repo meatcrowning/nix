@@ -34,7 +34,7 @@ let
         # contain here (measured on book 2026-07-29: Hyprland's own PATH is
         # /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin).
         export PATH="${pkgs.perlPackages.FileMimeInfo}/bin:$PATH"
-        exec /usr/bin/python3 /home/lam/nix/apps/filer/main.py "$@"
+        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/filer/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, host, hostProfile, ... }:
 
 # The `SUDO_ASKPASS` password dialog — full Vista-UAC treatment: the chime plays
 # as the dialog appears, and the `askpass-dim` window rule in hyprland.lua
@@ -20,7 +20,7 @@ let
   # air: nixpkgs' Qt can't create a GPU context on Apple Silicon, so exec the
   # SYSTEM python3 with Fedora's python3-pyside6 — same split as filer/viewer.
   askpass-dialog =
-    if host == "air" then
+    if hostProfile.isFedora then
       pkgs.writeShellScriptBin "vista-askpass" ''
         exec /usr/bin/python3 /home/lam/nix/apps/askpass/main.py "$@"
       ''

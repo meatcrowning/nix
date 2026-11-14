@@ -1,4 +1,4 @@
-{ host, pkgs, lib, ... }:
+{ host, hostProfile, pkgs, lib, ... }:
 
 # Lid-close behaviour on `book` (the MacBook Air) — user-settable.
 #
@@ -35,7 +35,7 @@ lib.mkIf (host == "air") {
     Service = {
       # /usr/bin — book is Fedora, and systemd is the OS's, not nixpkgs'; the
       # inhibitor has to be taken against the running system logind.
-      ExecStart = ''/usr/bin/systemd-inhibit --what=handle-lid-switch --who=hyprland --why="lid close is a user setting (quickshell settings.json lidClose)" --mode=block ${pkgs.coreutils}/bin/sleep infinity'';
+      ExecStart = ''${if hostProfile.isFedora then "/usr/bin" else "/run/current-system/sw/bin"}/systemd-inhibit --what=handle-lid-switch --who=hyprland --why="lid close is a user setting (quickshell settings.json lidClose)" --mode=block ${pkgs.coreutils}/bin/sleep infinity'';
       Restart = "always";
       RestartSec = 5;
     };

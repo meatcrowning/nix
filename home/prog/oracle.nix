@@ -55,7 +55,7 @@ let
     if hostProfile.isBook then
       pkgs.writeShellScriptBin "oracle" ''
         exec /home/lam/nix/apps/oracle/tools/ollama-tunnel.sh -- \
-             /usr/bin/python3 /home/lam/nix/apps/oracle/main.py "$@"
+             ${hostProfile.bookPython pkgs} /home/lam/nix/apps/oracle/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

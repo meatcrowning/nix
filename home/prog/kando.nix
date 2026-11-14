@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, host, hostProfile, ... }:
 
 # Kando pie menu, book only for now (top later).
 #
@@ -18,7 +18,7 @@ let
     stripRoot = false;
   };
 in
-lib.mkIf (host == "air") {
+lib.mkIf hostProfile.isFedora {
   home.file.".local/lib64/qt6/plugins/kwin/effects/plugins/kandointegration.so".source =
     "${kwinIntegration}/kandointegration.so";
 

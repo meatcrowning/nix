@@ -1,4 +1,4 @@
-{ config, pkgs, lib, host, inputs, privateConfig, ... }:
+{ config, pkgs, lib, host, hostProfile, inputs, privateConfig, ... }:
 
 let
   qmlDir = ./quickshell-files;
@@ -9,7 +9,7 @@ let
   # nix build is never forced. An absolute path on `top` means the service does
   # not depend on the systemd user manager's PATH being right when it starts.
   qsBin =
-    if host == "air"
+    if hostProfile.isFedora
     then "qs"
     else "${(import inputs.nixpkgs-quickshell {
       inherit (pkgs.stdenv.hostPlatform) system;

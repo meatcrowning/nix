@@ -1,4 +1,4 @@
-{ pkgs, host, ... }:
+{ pkgs, host, hostProfile, ... }:
 
 # `scrollbar-theme` — put this desktop's scrollbar into Vivaldi.
 #
@@ -33,7 +33,7 @@
       source /home/lam/nix/tools/lib/session-guard.sh
       sg_require_offscreen
       export QT_QPA_PLATFORMTHEME=kde
-      ${if host == "air" then ''
+      ${if hostProfile.isFedora then ''
         exec /usr/bin/python3 /home/lam/nix/apps/pylib/tools/vivaldi-splitter-render.py
       '' else ''
         export QT_PLUGIN_PATH=${pkgs.kdePackages.oxygen}/lib/qt-6/plugins:${pkgs.kdePackages.plasma-integration}/lib/qt-6/plugins

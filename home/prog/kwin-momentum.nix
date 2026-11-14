@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, host, hostProfile, ... }:
 
 # kwin-momentum — packaging + session wiring for the KWin touchpad-momentum
 # plugin whose source lives at home/prog/kwin-momentum/src/. See the runbook
@@ -18,7 +18,7 @@
 #   2. ship `kwin-momentum-build`, the Fedora-toolchain build+install helper.
 # The .so is never a nix output, and loading it into a live KWin stays the
 # user's step (runbook §5).
-lib.mkIf (host == "air") {
+lib.mkIf hostProfile.isFedora {
   # 1. Session env. Plasma sources every executable *.sh in
   #    ~/.config/plasma-workspace/env/ before kwin_wayland starts, so this is
   #    the reliable way to reach the GUI session's env on a Fedora Plasma login

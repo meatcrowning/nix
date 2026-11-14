@@ -19,7 +19,7 @@ let
   viewer =
     if hostProfile.isBook then
       pkgs.writeShellScriptBin "viewer" ''
-        exec /usr/bin/python3 /home/lam/nix/apps/viewer/main.py "$@"
+        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/viewer/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

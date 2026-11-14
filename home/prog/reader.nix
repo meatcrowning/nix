@@ -30,7 +30,7 @@ let
         # `mimetype` for the same reason as the `top` wrapper below; book needs
         # it more, its graphical session PATH holding no nix profile at all.
         export PATH="${pkgs.perlPackages.FileMimeInfo}/bin:$PATH"
-        exec /usr/bin/python3 /home/lam/nix/apps/reader/main.py "$@"
+        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/reader/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

@@ -27,7 +27,7 @@ let
   updater =
     if hostProfile.isBook then
       pkgs.writeShellScriptBin "updater" ''
-        exec /usr/bin/python3 /home/lam/nix/apps/updater/main.py "$@"
+        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/updater/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

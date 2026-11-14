@@ -1,4 +1,4 @@
-{ host, ... }:
+{ host, hostProfile, ... }:
 
 # Tell every Claude Code session which host and desktop session it is running on.
 #
@@ -32,11 +32,19 @@ let
   isAir = host == "air";
 
   osName = if isAir then "book" else "top";
-  arch = if isAir then "aarch64 Fedora Asahi Remix, home-manager only" else "x86_64 NixOS";
-  rebuild = if isAir then "home-manager switch --flake ~/nix#air" else "sudo rebuild-top";
+  arch =
+    if !isAir then "x86_64 NixOS"
+    else if hostProfile.isFedora then "aarch64 Fedora Asahi Remix, home-manager only"
+    else "aarch64 NixOS (Asahi)";
+  rebuild =
+    if !isAir then "sudo rebuild-top"
+    else if hostProfile.isFedora then "home-manager switch --flake ~/nix#air"
+    else "rebuild-air";
   scope =
-    if isAir then
-      "`sys/` does not apply here; there is no `hosts/air/`."
+    if isAir && hostProfile.isFedora then
+      "`sys/` does not apply here; `hosts/air/` is NixOS book, not this OS."
+    else if isAir then
+      "NixOS: `hosts/air/` and `home/` apply; `sys/` is top's."
     else
       "Full NixOS: both `sys/` and `home/` apply.";
 in

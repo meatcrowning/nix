@@ -1,4 +1,4 @@
-{ pkgs, lib, config, host, ... }:
+{ pkgs, lib, config, host, hostProfile, ... }:
 
 # The embedded stock appmenu imports native DBus menus. This applet supplies
 # desktop menus, a Window fallback, and Vivaldi's own menus over a loopback
@@ -73,7 +73,7 @@ in
   # this interface against Fedora's libraries and install in its user path.
   # Prerequisites: libplasma-devel, qt6-qtwebsockets-devel, KF6 development
   # packages and the native CMake/GCC toolchain. Run after source updates.
-  home.packages = [ nativeInterface ] ++ lib.optionals (host == "air") [
+  home.packages = [ nativeInterface ] ++ lib.optionals hostProfile.isFedora [
     (pkgs.writeShellScriptBin "plasma-menubar-build" ''
       set -euo pipefail
       WORK=$(/usr/bin/mktemp -d "$HOME/.cache/plasma-menubar-build.XXXXXX")

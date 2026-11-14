@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, host, hostProfile, ... }:
 
 # Live frontend and renderer patches travel with nix-pull. The original engine
 # stays an upstream dependency, fetched by the rebuild rather than docs sync.
@@ -15,7 +15,7 @@ let
     export GF_HOST=${host}
     export GF_ENGINE_ARCHIVE=${engineArchive}
     export GF_PATCH=${pkgs.gnupatch}/bin/patch
-    ${if host == "air" then ''
+    ${if hostProfile.isFedora then ''
       # Fedora's Python/Qt and graphics ABI stay together on book.
       export PATH=/usr/bin:$PATH
       unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH QML2_IMPORT_PATH LD_LIBRARY_PATH

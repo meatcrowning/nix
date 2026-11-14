@@ -11,7 +11,7 @@ let
         name = "style-live";
         paths = [
           (pkgs.writeShellScriptBin "style" ''
-            exec /usr/bin/python3 /home/lam/nix/apps/style/main.py "$@"
+            exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/style/main.py "$@"
           '')
         ];
       }

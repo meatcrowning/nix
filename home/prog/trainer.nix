@@ -6,7 +6,7 @@ let
   trainer = if !hostProfile.isTop then pkgs.writeShellScriptBin "moss-trainer" ''
     export TRAINER_SSH_HOST=top
     export PATH=${lib.makeBinPath [ pkgs.rsync ]}:$PATH
-    exec /usr/bin/python3 /home/lam/nix/apps/trainer/main.py "$@"
+    exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/trainer/main.py "$@"
   '' else pkgs.stdenv.mkDerivation {
     pname = "moss-trainer";
     version = "live";

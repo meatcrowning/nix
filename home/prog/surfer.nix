@@ -112,12 +112,12 @@ let
         ${sourceGuard}
         # Probe the singleton before profile sync and log truncation; a link click
         # must hand off without disturbing the live instance.
-        if /usr/bin/python3 /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi
+        if ${hostProfile.bookPython pkgs} /home/lam/nix/apps/surfer/singleton.py "$@"; then exit 0; fi
 
         LOG="$HOME/.cache/surfer-sync.log"
         vtbsync() {
           echo "--- $(date -Is) $1" >> "$LOG"
-          timeout 90 /usr/bin/python3 /home/lam/nix/apps/surfer/tools/sync.py "$1" \
+          timeout 90 ${hostProfile.bookPython pkgs} /home/lam/nix/apps/surfer/tools/sync.py "$1" \
             >> "$LOG" 2>&1 || echo "  (skipped: rc=$?)" >> "$LOG"
         }
         # Pull happens in main.py after launch; pushing here runs after close and
@@ -125,7 +125,7 @@ let
         # Fedora's fontconfig is covered by the same explicit Botis/web pin.
         export FONTCONFIG_FILE="''${FONTCONFIG_FILE:-${fcConf}}"
         # Preserve Qt/Chromium diagnostics and the GPU fallback log.
-        /usr/bin/python3 /home/lam/nix/apps/surfer/main.py "$@" \
+        ${hostProfile.bookPython pkgs} /home/lam/nix/apps/surfer/main.py "$@" \
           > "$HOME/.cache/surfer.log" 2>&1
         rc=$?
         [ -n "''${SURFER_NO_SYNC:-}" ] || vtbsync push

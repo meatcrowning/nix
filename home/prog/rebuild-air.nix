@@ -1,4 +1,4 @@
-{ pkgs, lib, host, ... }:
+{ pkgs, lib, host, hostProfile, ... }:
 
 # book's rebuild wrapper — the standalone-home-manager twin of `rebuild-top`
 # (sys/nixos-rebuild.nix). No root and no NOPASSWD rule involved here; the
@@ -107,7 +107,9 @@ lib.mkIf (host == "air") {
       echo "rebuild-air: ARM work uses one job/four cores; custom cross-builds use top; telemetry: $RUN" >&2
       # The client retains fd 9 (and therefore the lock) for the whole switch.
       set -o pipefail
-      home-manager switch --max-jobs "$BUILD_JOBS" --cores "$BUILD_CORES" \
+      ${if hostProfile.isFedora then "home-manager switch" else ''
+        if [ -n "''${SUDO_ASKPASS:-}" ]; then SUDO="sudo -A"; else SUDO=sudo; fi
+        $SUDO nixos-rebuild switch''} --max-jobs "$BUILD_JOBS" --cores "$BUILD_CORES" \
         --print-build-logs --flake "$FLAKE#air" "$@" \
         --override-input private-config "path:$PRIVATE" --no-write-lock-file 2>&1 | ${pkgs.coreutils}/bin/tee "$RUN/build.log"
       result=''${PIPESTATUS[0]}

@@ -1,4 +1,4 @@
-{ lib, pkgs, host, ... }:
+{ lib, pkgs, host, hostProfile, ... }:
 
 # book's Hyprland session gets the same crash net top has — there it is
 # sys/dsk/hyprland.nix, which rewrites the NixOS wayland-session entry so the
@@ -9,7 +9,7 @@
 # points at it, selected by a systemd drop-in (the one root step,
 # tools/install-ly-supervision.sh). Air-only: top's session is owned by its
 # NixOS module. Runbook: docs/agents/book-supervised-session.md.
-lib.mkIf (host == "air") {
+lib.mkIf hostProfile.isFedora {
   # ly reads ~/.config/ly/config.ini (via --config, see the drop-in) as the
   # confined xdm_t SELinux domain, which has no rule to read /nix/store
   # (label default_t) — a plain xdg.configFile symlink into the store is

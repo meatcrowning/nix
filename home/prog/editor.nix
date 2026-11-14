@@ -35,7 +35,7 @@ let
   editor =
     if hostProfile.isBook then
       pkgs.writeShellScriptBin "editor" ''
-        exec /usr/bin/python3 /home/lam/nix/apps/editor/main.py "$@"
+        exec ${hostProfile.bookPython pkgs} /home/lam/nix/apps/editor/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

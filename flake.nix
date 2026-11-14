@@ -44,6 +44,15 @@
     # Keep its own nixpkgs input for the prebuilt binary cache.
     llm-agents.url = "github:numtide/llm-agents.nix";
 
+    # book's kernel, m1n1 and U-Boot as NixOS. No upstream cache: top
+    # cross-builds them (hosts/air/configuration.nix).
+    apple-silicon = {
+      # Pinned before avd-fw codec selection, which needs a newer nixpkgs than
+      # this flake's. Move together with nixpkgs.
+      url = "github:nix-community/nixos-apple-silicon/73301d52f114946d53e62902692c36b0fea0c904";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Decrypts the in-repo Tavily secret with top's SSH host key.
     agenix = {
       url = "github:ryantm/agenix";
@@ -80,11 +89,20 @@
       arm = pkgsAirBase;
       native = mkPkgs "x86_64-linux" [];
     };
-    pkgsAir = pkgsAirBase.extend (final: prev: {
+    airOffloadOverlay = final: prev: {
       kdePackages = prev.kdePackages // {
         inherit (airOffload) konsole oxygen;
       };
-    });
+    };
+    pkgsAir = pkgsAirBase.extend airOffloadOverlay;
+
+    # Fedora book runs the standalone home configuration; NixOS book runs the
+    # same lam.nix through the system. hostProfile.isFedora tells them apart.
+    airHomeArgs = os: {
+      inherit inputs user privateConfig airOffload;
+      host = "air";
+      hostProfile = import ./lib/host-profile.nix { host = "air"; inherit os; };
+    };
 
   in
   {
@@ -98,6 +116,27 @@
       pad = nixpkgs.lib.nixosSystem {
         specialArgs = { inherit user; };
         modules = [ ./hosts/pad/configuration.nix ];
+      };
+      air = nixpkgs.lib.nixosSystem {
+        specialArgs = airHomeArgs "nixos";
+        modules = [
+          {
+            nixpkgs.hostPlatform = "aarch64-linux";
+            nixpkgs.overlays = [ vcv-rack-overlay konsole-style-background-overlay airOffloadOverlay ];
+          }
+          ./hosts/air/configuration.nix
+          home-manager.nixosModules.home-manager
+          {
+            home-manager = {
+              extraSpecialArgs = airHomeArgs "nixos";
+              useGlobalPkgs = true;
+              useUserPackages = true;
+              backupFileExtension = "backup";
+              sharedModules = [ plasma-manager.homeModules.plasma-manager ];
+              users.${user} = import ./lam.nix;
+            };
+          }
+        ];
       };
       top = nixpkgs.lib.nixosSystem {
         specialArgs = {
@@ -137,12 +176,7 @@
     homeConfigurations = {
       air = home-manager.lib.homeManagerConfiguration {
         pkgs = pkgsAir;
-        extraSpecialArgs = {
-          inherit inputs user privateConfig;
-          inherit airOffload;
-          host = "air";
-          hostProfile = import ./lib/host-profile.nix { host = "air"; };
-        };
+        extraSpecialArgs = airHomeArgs "fedora";
         modules = [
           plasma-manager.homeModules.plasma-manager
           ./lam.nix

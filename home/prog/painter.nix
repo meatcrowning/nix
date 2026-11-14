@@ -52,7 +52,7 @@ let
         export PAINTER_TAG_LLAMA=${tagLlama}/bin/llama-completion
         export PAINTER_TAG_MODEL=${tagModel}
         exec /home/lam/nix/apps/painter/tools/comfy-tunnel.sh -- \
-             /usr/bin/python3 /home/lam/nix/apps/painter/main.py "$@"
+             ${hostProfile.bookPython pkgs} /home/lam/nix/apps/painter/main.py "$@"
       ''
     else
       pkgs.stdenv.mkDerivation {

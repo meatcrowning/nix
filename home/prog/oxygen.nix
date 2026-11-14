@@ -1,4 +1,4 @@
-{ host, pkgs, lib, ... }:
+{ host, hostProfile, pkgs, lib, ... }:
 
 # `oxygenrc` is live input to both hosts' Plasma apps and their QML DeskStyle
 # bridge. Values declared here are reset at each switch; undeclared values stay
@@ -53,7 +53,7 @@
   #   oxygen-vivaldi-build
   # Loading a replacement decoration into the running compositor remains the
   # user's visual step; the helper installs it for the next Plasma login.
-  home.packages = lib.optionals (host == "air") [
+  home.packages = lib.optionals hostProfile.isFedora [
     (pkgs.writeShellScriptBin "oxygen-vivaldi-build" ''
       set -euo pipefail
       SOURCE=${pkgs.kdePackages.oxygen.src}

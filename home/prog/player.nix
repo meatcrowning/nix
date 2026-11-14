@@ -49,9 +49,11 @@ let
       # air-launch.sh) like everything else here, so it can be fixed on air
       # without a home-manager rebuild — and it degrades to a plain offline
       # launch when top is unreachable. See docs/agents/air-library-share.md.
-      pkgs.writeShellScriptBin "player" ''
+      pkgs.writeShellScriptBin "player" (lib.optionalString (!hostProfile.isFedora) ''
+        export PLAYER_PYTHON=${pyEnv}/bin/python3
+'' + ''
         exec /home/lam/nix/apps/player/tools/air-launch.sh "$@"
-      ''
+      '')
     else
       pkgs.stdenv.mkDerivation {
         pname = "player";
