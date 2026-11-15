@@ -56,12 +56,30 @@ done < <(grep '^Image=' "$APPLETSRC" 2>/dev/null)
 [ -n "$WALL" ] || exit 0
 WALL="$(realpath "$WALL")"
 
+# The image this watcher saw on its previous run. It tells a stale containment
+# image (unchanged since then) from a pick made in this session.
+mkdir -p "$CACHE"
+LAST_SEEN="$CACHE/plasma-last-image"
+last_seen="$(cat "$LAST_SEEN" 2>/dev/null || true)"
+printf '%s\n' "$WALL" > "$LAST_SEEN"
+
 # The Plasma containment file survives while wallpaper choices made in the
 # Hyprland session are recorded in the shared library marker.  On the first
 # containment write of a Plasma login, restore that newer cross-session choice
 # before treating Plasma's stale on-disk image as a new selection.
-if [ ! -e "$SESSION_RESTORED" ]; then
-    : > "$SESSION_RESTORED"
+#
+# Only a stale image qualifies: the one this watcher last saw, or Plasma's
+# store default after a panel regeneration recreated the file. book's Plasma
+# rewrites the file during login, so the first write there is always stale;
+# top's often does not, so its first write can be a Dolphin "Set as
+# Wallpaper", which this used to revert to the previous choice [2026-11-14].
+stale=1
+if [ -n "$last_seen" ] && [ "$WALL" != "$last_seen" ]; then
+    case "$WALL" in /nix/store/*) ;; *) stale=0 ;; esac
+fi
+first_write=0
+[ -e "$SESSION_RESTORED" ] || { first_write=1; : > "$SESSION_RESTORED"; }
+if [ "$first_write" = 1 ] && [ "$stale" = 1 ]; then
     library="$(realpath "$HOME/Pictures/Wallpapers" 2>/dev/null || true)"
     selected="$(cat "$library/.current-wallpaper" 2>/dev/null || true)"
     selected="$library/$selected"
