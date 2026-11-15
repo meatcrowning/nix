@@ -1,12 +1,10 @@
 { config, pkgs, lib, host, ... }:
 
 let
-  # Vivaldi's proprietary H.264/AAC codecs (`vivaldi-ffmpeg-codecs`) and the
-  # Widevine CDM (`enableWidevine`) are prebuilt x86_64-only blobs — the codec
-  # pkg's src is a hardcoded x86_64 snapcraft snap, and Google ships no desktop
-  # aarch64 Widevine — so both fail to build on `air` (Asahi/aarch64) even
-  # though their meta.platforms wrongly claims aarch64. Ship them only on
-  # x86_64.
+  # Vivaldi's proprietary H.264/AAC codecs (`vivaldi-ffmpeg-codecs`) are an
+  # x86_64-only snap despite meta.platforms claiming aarch64, so they ship only
+  # on x86_64. Widevine works on both: aarch64's widevine-cdm is the ChromeOS
+  # CDM re-aligned for the Asahi kernel's 16K pages.
   isx86 = pkgs.stdenv.hostPlatform.isx86_64;
 in
 {
@@ -65,7 +63,7 @@ in
   ] ++ [
         ((vivaldi.override {
           proprietaryCodecs = isx86;
-          enableWidevine = isx86;
+          enableWidevine = true;
           # Pin the password store instead of letting Chromium guess it.
           #
           # Chromium keeps the key it encrypts cookies and saved passwords

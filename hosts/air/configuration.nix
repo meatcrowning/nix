@@ -69,6 +69,10 @@
   };
   security.rtkit.enable = true;
   hardware.bluetooth.enable = true;
+  # Stop charging at 80% to slow battery wear.
+  services.udev.extraRules = ''
+    ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="macsmc-battery", ATTR{charge_control_end_threshold}="80"
+  '';
   zramSwap.enable = true;
   # PSI-based kills in the user slices before 7.3G runs out (sys/oomd.nix).
   systemd.oomd.enableUserSlices = true;
