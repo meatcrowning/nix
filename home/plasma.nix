@@ -422,7 +422,9 @@ in
       # The translucent left launcher needs compositor blur on both hosts.
       kwinrc.Plugins.blurEnabled = true;
       kwinrc.Tiling.padding = 4;
-      kwinrc.Xwayland.Scale = if host == "air" then 2 else 1;
+      # Match book's 1.5 output scale; 2 made KWin downscale X11 buffers by
+      # 0.75 and blurred pixel fonts.
+      kwinrc.Xwayland.Scale = if host == "air" then 1.5 else 1;
       plasma-localerc.Formats.LANG = "en_US.UTF-8";
     };
   };
