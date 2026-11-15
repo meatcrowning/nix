@@ -10,12 +10,24 @@ let
     mkdir -p $out/bin
     ln -s ${pkgs.fex}/bin/FEX $out/bin/FEXInterpreter
   '';
+  # The guest's /run/opengl-driver is the host's aarch64 Mesa, which the x86
+  # process cannot load. Point glvnd at x86 Mesa and use llvmpipe.
+  # PRINT_MODE:2D segfaults on any window resize (tile_cache_lookup, also
+  # natively on x86), so init.txt uses PRINT_MODE:STANDARD, which needs GL.
+  mesa = x86.mesa;
   launcher = pkgs.writeShellApplication {
     name = "dwarf-fortress";
     runtimeInputs = [ fexShim pkgs.muvm ];
     # Saves, init and art from the PeridexisErrant pack live as real files in
     # ~/.local/share/df_linux; the nixpkgs wrapper leaves non-symlinks alone.
-    text = ''exec muvm -- ${df}/bin/dwarf-fortress "$@"'';
+    text = ''
+      exec muvm \
+        -e LD_LIBRARY_PATH=${mesa}/lib \
+        -e __GLX_VENDOR_LIBRARY_NAME=mesa \
+        -e LIBGL_DRIVERS_PATH=${mesa}/lib/dri \
+        -e LIBGL_ALWAYS_SOFTWARE=1 \
+        -- ${df}/bin/dwarf-fortress "$@"
+    '';
   };
 in
 {
