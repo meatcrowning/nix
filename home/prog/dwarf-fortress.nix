@@ -11,9 +11,10 @@ let
     ln -s ${pkgs.fex}/bin/FEX $out/bin/FEXInterpreter
   '';
   # The guest's /run/opengl-driver is the host's aarch64 Mesa, which the x86
-  # process cannot load. Point glvnd at x86 Mesa and use llvmpipe.
-  # PRINT_MODE:2D segfaults on any window resize (tile_cache_lookup, also
-  # natively on x86), so init.txt uses PRINT_MODE:STANDARD, which needs GL.
+  # process cannot load. Point glvnd at x86 Mesa; its asahi driver reaches the
+  # GPU through muvm's native context. PRINT_MODE:2D segfaults on any window
+  # resize (tile_cache_lookup, also natively on x86), so init.txt uses
+  # PRINT_MODE:STANDARD with TEXTURE_PARAM:NEAREST for unfiltered text.
   mesa = x86.mesa;
   launcher = pkgs.writeShellApplication {
     name = "dwarf-fortress";
@@ -25,7 +26,6 @@ let
         -e LD_LIBRARY_PATH=${mesa}/lib \
         -e __GLX_VENDOR_LIBRARY_NAME=mesa \
         -e LIBGL_DRIVERS_PATH=${mesa}/lib/dri \
-        -e LIBGL_ALWAYS_SOFTWARE=1 \
         -- ${df}/bin/dwarf-fortress "$@"
     '';
   };
