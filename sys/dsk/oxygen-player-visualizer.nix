@@ -2,6 +2,7 @@
 
 let
   oxygenVisualizer = pkgs.kdePackages.oxygen.overrideAttrs (old: {
+    buildInputs = (old.buildInputs or []) ++ [ pkgs.kdePackages.kiconthemes ];
     patches = (old.patches or []) ++ [
       ../../home/prog/oxygen-player-visualizer.patch
       ../../home/prog/oxygen-themed-vivaldi.patch

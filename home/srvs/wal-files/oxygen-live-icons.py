@@ -6,15 +6,18 @@ from __future__ import annotations
 import argparse
 import colorsys
 import fcntl
+from functools import lru_cache
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 SOURCE = Path("@oxygenIcons@") / "share" / "icons" / "oxygen"
-RENDER_VERSION = "5"  # bump when the pixel transform changes
+RENDER_VERSION = "6"  # bump when the pixel transform changes
 VIVALDI_NAMES = ("vivaldi", "vivaldi-stable", "com.vivaldi.Vivaldi")
 CODEX_NAMES = ("codex",)
 
@@ -27,32 +30,39 @@ def theme_index(source, destination, name):
     (destination / "index.theme").write_text(text)
 
 
+@lru_cache(maxsize=16)
+def tint_table(accent):
+    h, s, _ = colorsys.rgb_to_hsv(*(c / 255 for c in bytes.fromhex(accent)))
+    # Retain the scalar transform's exact rounding, once per accent.
+    return np.array([tuple(round(c * 255) for c in colorsys.hsv_to_rgb(h, s, v / 255))
+                     for v in range(256)], dtype=np.uint8)
+
+
+def tint(image, accent, red_ink=False):
+    """Vectorised colorsys transform; preserve alpha, shading and semantic inks."""
+    pixels = np.array(image.convert("RGBA"))
+    rgb = pixels[..., :3].astype(np.float64) / 255.0
+    r, g, b = np.moveaxis(rgb, -1, 0)
+    high, low = rgb.max(axis=-1), rgb.min(axis=-1)
+    delta = high - low
+    safe = np.where(delta == 0, 1, delta)
+    rc, gc, bc = (high - r) / safe, (high - g) / safe, (high - b) / safe
+    hue = (np.where(r == high, bc - gc,
+                    np.where(g == high, 2 + rc - bc, 4 + gc - rc)) / 6) % 1
+    saturation = delta / np.where(high == 0, 1, high)
+    band = ((hue <= .08) | (hue >= .92)) if red_ink else ((hue >= .50) & (hue <= .72))
+    mask = band & (saturation >= (.30 if red_ink else .18)) & (pixels[..., 3] != 0)
+    value = pixels[..., :3].max(axis=-1)
+    pixels[..., :3][mask] = tint_table(accent)[value[mask]]
+    return Image.fromarray(pixels)
+
+
 def recolour(source, destination, accent):
-    """Replace Oxygen's blue paint, retaining its shading and other inks."""
-    accent_rgb = tuple(channel / 255.0 for channel in bytes.fromhex(accent))
-    accent_hue, accent_saturation, _ = colorsys.rgb_to_hsv(*accent_rgb)
-
-    def replace_blue(pixel):
-        red, green, blue, alpha = pixel
-        if alpha == 0:
-            return pixel
-        hue, saturation, value = colorsys.rgb_to_hsv(red / 255.0, green / 255.0,
-                                                      blue / 255.0)
-        # Oxygen's material colour is a blue band.  Keep black outlines,
-        # white highlights and semantic warning/error colours untouched.
-        if not (0.50 <= hue <= 0.72 and saturation >= 0.18):
-            return pixel
-        red, green, blue = colorsys.hsv_to_rgb(accent_hue, accent_saturation, value)
-        return (round(red * 255), round(green * 255), round(blue * 255), alpha)
-
     for image_path in source.glob("base/**/*.png"):
         target = destination / image_path.relative_to(source)
         target.parent.mkdir(parents=True, exist_ok=True)
         with Image.open(image_path) as image:
-            rgba = image.convert("RGBA")
-            tinted = Image.new("RGBA", rgba.size)
-            tinted.putdata([replace_blue(pixel) for pixel in rgba.getdata()])
-            tinted.save(target)
+            tint(image, accent).save(target, compress_level=1)
 
 
 def icon_data_roots():
@@ -69,20 +79,7 @@ def icon_data_roots():
 
 def recolour_vivaldi(destination, accent, data_roots=None):
     """Replace Vivaldi's red paint while retaining its white mark and shading."""
-    accent_rgb = tuple(channel / 255.0 for channel in bytes.fromhex(accent))
-    accent_hue, accent_saturation, _ = colorsys.rgb_to_hsv(*accent_rgb)
     roots = icon_data_roots() if data_roots is None else data_roots
-
-    def replace_red(pixel):
-        red, green, blue, alpha = pixel
-        if alpha == 0:
-            return pixel
-        hue, saturation, value = colorsys.rgb_to_hsv(red / 255.0, green / 255.0,
-                                                      blue / 255.0)
-        if not (saturation >= 0.30 and (hue <= 0.08 or hue >= 0.92)):
-            return pixel
-        red, green, blue = colorsys.hsv_to_rgb(accent_hue, accent_saturation, value)
-        return (round(red * 255), round(green * 255), round(blue * 255), alpha)
 
     for size_dir in SOURCE.glob("base/*x*"):
         size = size_dir.name
@@ -93,31 +90,16 @@ def recolour_vivaldi(destination, accent, data_roots=None):
         if source is None:
             continue
         with Image.open(source) as image:
-            rgba = image.convert("RGBA")
-            tinted = Image.new("RGBA", rgba.size)
-            tinted.putdata([replace_red(pixel) for pixel in rgba.getdata()])
+            tinted = tint(image, accent, red_ink=True)
             target_dir = destination / "base" / size / "apps"
             target_dir.mkdir(parents=True, exist_ok=True)
             for name in VIVALDI_NAMES:
-                tinted.save(target_dir / (name + ".png"))
+                tinted.save(target_dir / (name + ".png"), compress_level=1)
 
 
 def recolour_codex(destination, accent, data_roots=None):
     """Replace Codex's cobalt enamel while retaining its silver and shading."""
-    accent_rgb = tuple(channel / 255.0 for channel in bytes.fromhex(accent))
-    accent_hue, accent_saturation, _ = colorsys.rgb_to_hsv(*accent_rgb)
     roots = icon_data_roots() if data_roots is None else data_roots
-
-    def replace_blue(pixel):
-        red, green, blue, alpha = pixel
-        if alpha == 0:
-            return pixel
-        hue, saturation, value = colorsys.rgb_to_hsv(red / 255.0, green / 255.0,
-                                                      blue / 255.0)
-        if not (0.50 <= hue <= 0.72 and saturation >= 0.18):
-            return pixel
-        red, green, blue = colorsys.hsv_to_rgb(accent_hue, accent_saturation, value)
-        return (round(red * 255), round(green * 255), round(blue * 255), alpha)
 
     for size_dir in SOURCE.glob("base/*x*"):
         size = size_dir.name
@@ -128,13 +110,11 @@ def recolour_codex(destination, accent, data_roots=None):
         if source is None:
             continue
         with Image.open(source) as image:
-            rgba = image.convert("RGBA")
-            tinted = Image.new("RGBA", rgba.size)
-            tinted.putdata([replace_blue(pixel) for pixel in rgba.getdata()])
+            tinted = tint(image, accent, red_ink=False)
             target_dir = destination / "base" / size / "apps"
             target_dir.mkdir(parents=True, exist_ok=True)
             for name in CODEX_NAMES:
-                tinted.save(target_dir / (name + ".png"))
+                tinted.save(target_dir / (name + ".png"), compress_level=1)
 
 
 PLASMA_CHANGEICONS = Path("@plasmaChangeIcons@")
@@ -207,23 +187,29 @@ def main():
         if not args.no_activate and (newer := superseded(accent)):
             print(f"oxygen-live-icons: {accent} superseded by {newer}, skipping")
             return
-        previous = state.read_text().strip().split() if state.exists() else []
         # KDE retains pixmaps by theme name.  The name therefore identifies
         # immutable pixels: both the transform version and the accent belong
         # in it, rather than reusing one of two mutable directories.
         name = "oxygen-live-v" + RENDER_VERSION + "-" + accent
-        if args.activate_only and not (root / name).is_dir():
+        destination = root / name
+        ready = destination / ".complete"
+        if args.activate_only and not ready.is_file():
             raise SystemExit("oxygen-live-icons: prepared icon theme is unavailable")
-        if not args.activate_only and (previous != [RENDER_VERSION, accent] or not (root / name).is_dir()):
-            destination = root / name
-            if destination.exists():
-                shutil.rmtree(destination)
-            theme_index(SOURCE, destination, "Oxygen Live " + accent)
-            recolour(SOURCE, destination, accent)
-            recolour_vivaldi(destination, accent)
-            recolour_codex(destination, accent)
-            state.write_text(RENDER_VERSION + " " + accent + "\n")
-        # Minting takes about a minute; a newer pick may have landed meanwhile.
+        if not ready.is_file():
+            # Publish only a complete tree. A killed render cannot become a
+            # cache hit, and A -> B -> A reuses A without rewriting its pixels.
+            with tempfile.TemporaryDirectory(prefix=".oxygen-render-", dir=root) as work:
+                staging = Path(work) / name
+                theme_index(SOURCE, staging, "Oxygen Live " + accent)
+                recolour(SOURCE, staging, accent)
+                recolour_vivaldi(staging, accent)
+                recolour_codex(staging, accent)
+                (staging / ".complete").write_text(RENDER_VERSION + " " + accent + "\n")
+                if destination.exists():
+                    shutil.rmtree(destination)
+                staging.rename(destination)
+        state.write_text(RENDER_VERSION + " " + accent + "\n")
+        # A newer pick may have landed while the theme was rendering.
         if not args.no_activate and (newer := superseded(accent)):
             print(f"oxygen-live-icons: {accent} superseded by {newer}, not activating")
             return

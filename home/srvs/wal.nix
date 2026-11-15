@@ -10,11 +10,12 @@ let
     substitute ${./wal-files/wal-extract.py} $out \
       --replace-fail "/usr/bin/env python3" "${pillowPython}/bin/python3"
   '';
+  iconPython = pkgs.python3.withPackages (ps: [ ps.pillow ps.numpy ]);
   # Accent-qualified theme names are required: Qt caches icon pixels under a
   # theme name, so rewriting or reusing one cannot recolour an open program.
   oxygenLiveIcons = pkgs.runCommand "oxygen-live-icons.py" { } ''
     substitute ${./wal-files/oxygen-live-icons.py} $out \
-      --replace-fail "/usr/bin/env python3" "${pillowPython}/bin/python3" \
+      --replace-fail "/usr/bin/env python3" "${iconPython}/bin/python3" \
       --replace-fail "@oxygenIcons@" "${pkgs.kdePackages.oxygen-icons}" \
       --replace-fail "@plasmaChangeIcons@" "${pkgs.kdePackages.plasma-workspace}/libexec/plasma-changeicons"
     chmod +x $out

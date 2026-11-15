@@ -98,6 +98,7 @@ let
     paths = [ hostTools native.kdePackages.kcmutils.dev native.kdePackages.kpackage.dev ];
   };
   crossOxygen = (crossQt "oxygen").overrideAttrs (old: {
+    buildInputs = (old.buildInputs or []) ++ [ arm.kdePackages.kiconthemes ];
     # Book's applications and KWin decoration load THIS Oxygen. Same patch set
     # and order as Fedora's native build had: themed Vivaldi frames, native
     # content (from the overlay), the maximised-window field, compact menus.
