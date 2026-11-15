@@ -137,13 +137,31 @@ def recolour_codex(destination, accent, data_roots=None):
                 tinted.save(target_dir / (name + ".png"))
 
 
+PLASMA_CHANGEICONS = Path("@plasmaChangeIcons@")
+
+
 def activate(name):
+    # KIconLoader's shared pixmap cache (~/.cache/icon-cache.kcache) is keyed
+    # by icon name, not theme, so open KDE programs keep drawing the previous
+    # accent's pixmaps after a plain config write. plasma-changeicons is the
+    # System Settings path: it writes the key, deletes that cache and emits
+    # KIconLoader's change to every process [top, 2026-11-14].
+    if PLASMA_CHANGEICONS.is_file():
+        done = subprocess.run([str(PLASMA_CHANGEICONS), name], check=False,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if done.returncode == 0:
+            refresh_decorations()
+            return
     if kwriteconfig := shutil.which("kwriteconfig6"):
         subprocess.run([kwriteconfig, "--notify", "--file", "kdeglobals",
                         "--group", "Icons", "--key", "Theme", "--", name], check=False)
     if dbus_send := shutil.which("dbus-send"):
         subprocess.run([dbus_send, "--session", "--type=signal", "/KGlobalSettings",
                         "org.kde.KGlobalSettings.notifyChange", "int32:4", "int32:0"], check=False)
+    refresh_decorations()
+
+
+def refresh_decorations():
     # KWin's decoration keeps a separate QIcon cache.  The color-scheme
     # transaction already reconfigures it, but the icon theme finishes after
     # that transaction unless we ask it to re-read here.
