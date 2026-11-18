@@ -1,9 +1,8 @@
 { pkgs, lib, hostProfile, ... }:
 
 # player — the standalone Qt/QML music player (source at ~/nix/apps/player), fourth
-# sibling of surfer/filer/viewer. Packaging mirrors viewer.nix, including the
-# air split (air lacks nixpkgs GPU Qt — system python fallback; best-effort
-# there, the library SSD hangs off top anyway).
+# sibling of surfer/filer/viewer. Both hosts use Nix Python dependencies;
+# book adds the SMB library and metadata-sync launcher.
 #
 # Runtime deps beyond PySide6:
 #   * python-mpv (ps.mpv) — libmpv bindings, the playback engine (nixpkgs
@@ -98,7 +97,7 @@ let
 
           # Same Qt environment, none of player's body:
           #     player-qtenv python3 apps/player/tools/transport-test.py
-          # air needs no equivalent — there the interpreter IS /usr/bin/python3.
+          # Book receives its interpreter through PLAYER_PYTHON above.
           makeWrapper ${qtenvBody} $out/bin/player-qtenv \
             --prefix PATH : ${pyEnv}/bin \
             "''${qtWrapperArgs[@]}"

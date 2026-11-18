@@ -43,9 +43,8 @@ MAIN="$HERE/../main.py"
 DBSYNC="$HERE/dbsync.py"
 ART_LOCAL="${XDG_CACHE_HOME:-$HOME/.cache}/player/art"
 PREFS="${XDG_STATE_HOME:-$HOME/.local/state}/player/prefs.json"
-PY="${PLAYER_PYTHON:-/usr/bin/python3}"
-# Plasma's launch PATH on Fedora omits the home-manager profile, where the
-# visualizer's gforce-qtenv lives. Append it so Fedora's tools still win.
+PY="${PLAYER_PYTHON:?launch through the Nix player wrapper to select its Python environment}"
+# Include the user profile for the visualizer's gforce-qtenv helper.
 case ":$PATH:" in
     *":$HOME/.nix-profile/bin:"*) ;;
     *) export PATH="$PATH:$HOME/.nix-profile/bin" ;;
@@ -80,20 +79,12 @@ die_ui() {
 }
 
 # ---- dependency preflight -------------------------------------------------
-# air runs Fedora's system python, so the deps are dnf/pip's problem, not nix's.
-# Name what is missing instead of dying on an import traceback.
-#
-# Fedora 44 has NO python3-mpv package — the binding is pip-only, and it is a
-# pure-ctypes wrapper, so it also needs the library itself (dnf mpv-libs) or it
-# fails at import, not at play. mpris_server is likewise pip-only.
+# The Nix wrapper owns dependencies; report missing imports without suggesting
+# packages from a different distribution or mixing pip into that environment.
 check_deps() {
-    local missing=() mod pkg
-    for pair in "PySide6:dnf install python3-pyside6" \
-                "mpv:dnf install mpv-libs && pip install --user python-mpv" \
-                "mutagen:dnf install python3-mutagen" \
-                "mpris_server:pip install --user mpris-server"; do
-        mod="${pair%%:*}"; pkg="${pair#*:}"
-        "$PY" -c "import $mod" 2>/dev/null || missing+=("$mod  ($pkg)")
+    local missing=() mod
+    for mod in PySide6 mpv mutagen mpris_server PIL; do
+        "$PY" -c "import $mod" 2>/dev/null || missing+=("$mod")
     done
     if [ ${#missing[@]} -gt 0 ]; then
         say "missing python modules:"
@@ -113,19 +104,8 @@ fi
 # bash's /dev/tcp, so this needs no nc. A short timeout because the whole point
 # is to not sit here when the answer is "no".
 #
-# But resolve the name OURSELVES first, and with Fedora's python. `top.local`
-# is mDNS, which glibc answers by dlopen()ing /usr/lib64/libnss_mdns4_minimal;
-# a NIX-built binary links nix's glibc, which looks for that module under its
-# own store path, does not find it, and fails every .local lookup with
-# "Temporary failure in name resolution". This script runs under whichever bash
-# is first on PATH and on air that is ~/.nix-profile/bin/bash — so /dev/tcp
-# could never resolve top.local, top_up() was false forever, and the player
-# launched "offline" on a LAN where top was sitting right there. Fedora's
-# /usr/bin/python3 uses Fedora's glibc and resolves it fine.
-#
-# Only the probe needs the address: ssh is Fedora's (/usr/sbin/ssh) and
-# resolves the name itself, and keeping the NAME there keeps known_hosts and
-# the authorized key matching what Part B set up.
+# Resolve once with the wrapper's Python before the bounded TCP probe. Keep
+# the hostname for SSH so host-key checks and connection reuse stay consistent.
 resolve() { "$PY" -c 'import socket,sys
 try: print(socket.gethostbyname(sys.argv[1]))
 except OSError: print(sys.argv[1])' "$1" 2>/dev/null; }

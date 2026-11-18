@@ -8,6 +8,7 @@
     ./hardware-configuration.nix
     ./kwin-momentum.nix
     ./video.nix
+    ./music-share.nix
     inputs.apple-silicon.nixosModules.apple-silicon-support
   ];
 

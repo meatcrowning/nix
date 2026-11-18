@@ -357,11 +357,9 @@ C++/QML internals; a GIL-holding call may delay the watchdog too.
 Use the safety protocol in the parent/root guides: guarded offscreen or nested
 execution, isolated XDG state/runtime paths, fake mpv, no live player socket,
 MPRIS, scans, tag writes, audio, or preference saves. Read a harness before
-running it; never source the player wrapper to obtain its interpreter. On
-`book` PySide6 is Fedora's while the session exports a nix `QT_PLUGIN_PATH`:
-loading that platform plugin into Fedora's Qt aborts the process with no
-message at all, so a harness run there needs the variable dropped (the newer
-ones drop it themselves).
+running it; never source the player wrapper to obtain its interpreter. Both
+hosts use Nix PySide6; book's launcher receives its interpreter via
+`PLAYER_PYTHON` from `home/prog/player.nix`.
 `main.py --selftest` is the app-construction probe, not permission to use live
 state. `tools/resource-fixture.py` supplies scratch metadata and a no-audio stub
 for resource sampling. The user performs real visual/interaction checks.

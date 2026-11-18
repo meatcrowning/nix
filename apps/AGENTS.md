@@ -49,12 +49,11 @@ Each home/prog/<app>.nix wrapper executes the live source at
 /home/lam/nix/apps/<app>/main.py on both machines. .py and .qml edits therefore
 need no rebuild, but these apps have no hot reload: relaunch the app to observe
 them. A rebuild is needed for a dependency or packaging change; do not relaunch
-a user's running app on their behalf. Every wrapper has an air branch that uses
-book's /usr/bin/python3 rather than a Nix interpreter.
+a user's running app on their behalf. Both hosts use Nix Python environments.
+Book's Player additionally uses the SMB/sync launcher in `player/tools/`.
 
-Dependencies must work on both top and book: adding a package only to the Nix
-pyEnv does not affect the air branch. Add the Fedora python3-* dependency too,
-or degrade cleanly; a genuinely machine-specific dependency must be called out.
+Dependencies must work on both top and book. Declare Python dependencies in
+the app's Nix environment; call out genuinely machine-specific dependencies.
 See the root guide's “Applying changes” section.
 
 The default associations are deliberately centralized in
