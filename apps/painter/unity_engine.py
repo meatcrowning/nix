@@ -49,6 +49,8 @@ def submission(g, ctl):
                 keys += ['system_prompt', 'krea_sampling', 'krea_shift']
             if getattr(ctl, 'referenceImages', False):
                 keys += ['reference_megapixels']
+                if getattr(ctl, 'layoutSupport', False):
+                    keys += ['reference_phase']
     p = {key: g[key] for key in keys}
     if not getattr(ctl, 'layoutSupport', False):
         p.pop('moss_layout', None)
@@ -240,6 +242,8 @@ class Engine:
                     raise ValueError('Invalid sampling option')
             elif not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError('Invalid sampling value')
+        if g.get('reference_phase', 'early') not in ('early', 'middle', 'late'):
+            raise ValueError('Invalid reference phase')
         if g.get('moss_layout'):
             from moss_layout import valid
             g['moss_layout'] = valid(g['moss_layout'])

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 Panel {
     title: App.encoderControls ? "Encoder and sampling" : "References"
@@ -75,4 +76,28 @@ Panel {
             onEdited: function(v) { root.set("reference_megapixels", v) }
         }
     }
+    Field {
+        label: "Reference timing"
+        visible: App.layoutSupport && root.gen.useReferences
+        hint: "Apply references during the first, middle or final third of the sampling steps. Use text alone outside that interval."
+        Row {
+            width: parent.width
+            property string value: root.gen.reference_phase
+            spacing: 0
+            Repeater {
+                model: ["early", "middle", "late"]
+                Button {
+                    width: parent.width / 3
+                    required property string modelData
+                    objectName: "referencePhase_" + modelData
+                    text: modelData.charAt(0).toUpperCase() + modelData.slice(1)
+                    checkable: true
+                    autoExclusive: true
+                    checked: root.gen.reference_phase === modelData
+                    onClicked: root.set("reference_phase", modelData)
+                }
+            }
+        }
+    }
+
 }

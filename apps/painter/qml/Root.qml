@@ -125,7 +125,7 @@ Item {
         positive: "", negative: "", moss_layout: ({}),
         slg_single_layers: "22", slg_start_percent: 0.0, slg_end_percent: 1.0,
         system_prompt: "", krea_sampling: "native", krea_shift: 1.15,
-        reference_megapixels: 0.25, useReferences: false,
+        reference_megapixels: 0.25, reference_phase: "early", useReferences: false,
         steps: 20, cfg: 1.0, denoise: 1.0,
         sampler_name: "euler", scheduler: "simple",
         seed: -1, randomSeed: true, reuseSeed: false, batch_size: 1, count: 1,
@@ -286,6 +286,7 @@ Item {
     // saved object predates (a new field) keeps its default instead of vanishing.
     function mergeGen(base, saved) {
         var g = clone(base)
+        g.reference_phase = "early"
         g.slg_single_layers = "22"; g.slg_start_percent = 0; g.slg_end_percent = 1
         for (var k in saved) if (k !== "ms" && g[k] !== undefined) g[k] = saved[k]
         g.ms = clone(base.ms)
@@ -359,6 +360,7 @@ Item {
         g.krea_sampling = d.krea_sampling || "native"
         g.krea_shift = d.krea_shift !== undefined ? d.krea_shift : 1.15
         g.reference_megapixels = d.reference_megapixels || 0.25
+        g.reference_phase = d.reference_phase || "early"
         g.useReferences = false
         g.steps = d.steps
         // A video family has no CFG at all (BasicGuider takes none), so it
@@ -489,6 +491,7 @@ Item {
         }
         if (App.referenceImages) {
             imageParams.reference_megapixels = g.reference_megapixels
+            if (App.layoutSupport) imageParams.reference_phase = g.reference_phase
             imageParams.use_reference_images = g.useReferences
         }
         App.generate(imageParams, g.count)
@@ -1353,6 +1356,7 @@ Item {
                               && App.restoreInputImage(refs[0])
             if (g.useReferences) App.restoreEditImages(refs.slice(1))
         }
+        g.reference_phase = p.reference_phase || "early"
         g.slg_single_layers = p.slg_single_layers !== undefined ? p.slg_single_layers : "22"
         g.slg_start_percent = p.slg_start_percent !== undefined ? p.slg_start_percent : 0
         g.slg_end_percent = p.slg_end_percent !== undefined ? p.slg_end_percent : 1

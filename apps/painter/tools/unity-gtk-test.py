@@ -335,6 +335,16 @@ def test():
             assert all(not row.get_visible() for row in window.rows['system_prompt'])
             window.state['flags']['layoutSupport'] = True
             window.visibility()
+            window.controls['useReferences'].set_active(True)
+            window.visibility()
+            phase = window.controls['reference_phase']
+            assert phase.get_visible()
+            for name in ('early', 'middle', 'late'):
+                phase.buttons[name].set_active(True)
+                assert window.values()['reference_phase'] == name
+            window.apply_settings(dict(reference_phase='middle'))
+            assert phase.get_text() == 'middle'
+
             for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
                 assert window.controls[key].get_visible()
             window.loading = True

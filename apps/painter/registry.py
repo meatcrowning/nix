@@ -584,7 +584,7 @@ class Registry:
         if moss_refs:
             if toggles.get("negpip"):
                 raise G.GraphError("MOSS references do not support PPM weighting; turn PPM off")
-            required = {"PainterMossReference", "PainterMossReferenceEncode"}
+            required = {"PainterMossReference", "PainterMossReferenceEncode", "PainterMossReferenceTiming"}
             if object_info is not None and not required.issubset(object_info):
                 raise G.GraphError("MOSS references require the updated Painter backend; restart it when idle")
             try:
@@ -601,8 +601,17 @@ class Registry:
                 if previous is not None:
                     inputs["references"] = [previous, 0]
                 previous = g.add_node("PainterMossReference", inputs, f"moss_reference_{i}")
-            for role in ("encode_pos", "encode_neg"):
+            phase = p.get("reference_phase", "early")
+            if phase not in ("early", "middle", "late"):
+                raise G.GraphError("Reference timing must be early, middle or late")
+            p["reference_phase"] = phase
+            for role, branch in (("encode_pos", "positive"), ("encode_neg", "negative")):
+                plain = g.add_node("CLIPTextEncode", dict(g.node(role)["inputs"]), role + "_plain")
                 g.set_class(role, "PainterMossReferenceEncode", inputs={"references": [previous, 0]})
+                timed = g.add_node("PainterMossReferenceTiming", {
+                    "reference": [g.id_of(role), 0], "plain": [plain, 0],
+                    "sigmas": list(g.node("sampler")["inputs"]["sigmas"]), "phase": phase}, role + "_timed")
+                g.set_input("sampler", branch, [timed, 0])
 
         if fam.get("encoder_controls"):
             mode = p.get("krea_sampling", "native")

@@ -320,6 +320,51 @@ class PainterMossReferenceEncode:
             raise
 
 
+class PainterMossReferenceTiming:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {'required': {'reference': ('CONDITIONING',), 'plain': ('CONDITIONING',),
+                             'sigmas': ('SIGMAS',), 'phase': (['early', 'middle', 'late'],)}}
+
+    RETURN_TYPES = ('CONDITIONING',)
+    FUNCTION = 'schedule'
+    CATEGORY = 'painter'
+
+    def schedule(self, reference, plain, sigmas, phase):
+        if phase not in ('early', 'middle', 'late'):
+            raise ValueError('Reference timing must be early, middle or late')
+        steps = len(sigmas) - 1
+        if steps < 1:
+            return (plain,)
+        third = ('early', 'middle', 'late').index(phase)
+        start, end = ((steps * i + 2) // 3 for i in (third, third + 1))
+        if start == end:
+            return (plain,)
+        # Comfy compares inclusive sigma bounds, not sampler-step percentages.
+        # Use float32 neighbours to give every boundary exactly one branch.
+        def above(value):
+            return torch.nextafter(torch.tensor(value, dtype=torch.float32),
+                                   torch.tensor(float('inf'), dtype=torch.float32)).item()
+
+        def window(conditioning, high=None, low=None):
+            bounds = {}
+            if high is not None:
+                bounds['timestep_start'] = high
+            if low is not None:
+                bounds['timestep_end'] = low
+            return [[tensor, dict(metadata, **bounds)] for tensor, metadata in conditioning]
+
+        high = float(sigmas[start]) if start else None
+        low = float(sigmas[end]) if end < steps else None
+        result = window(reference, high, above(low) if low is not None else None)
+        if high is not None:
+            result += window(plain, low=above(high))
+        if low is not None:
+            result += window(plain, high=low)
+        return (result,)
+
+
 NODE_CLASS_MAPPINGS = {'PainterMossSampler': PainterMossSampler, 'PainterMossSaveImage': PainterMossSaveImage,
                        'PainterMossReference': PainterMossReference,
-                       'PainterMossReferenceEncode': PainterMossReferenceEncode}
+                       'PainterMossReferenceEncode': PainterMossReferenceEncode,
+                       'PainterMossReferenceTiming': PainterMossReferenceTiming}

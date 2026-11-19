@@ -103,6 +103,18 @@ def main():
                     link = node['inputs'].get('references')
                 assert found[::-1] == refs
             assert rg.node('encode_neg')['inputs']['text'] == 'blur'
+            for phase in ('early', 'middle', 'late'):
+                timed = reg.build(entry, dict(reference_params, reference_phase=phase))
+                tg = G.Graph(timed['prompt'])
+                assert timed['params']['reference_phase'] == phase
+                for role, branch in (('encode_pos', 'positive'), ('encode_neg', 'negative')):
+                    schedule = tg.node(role + '_timed')
+                    assert tg.node('sampler')['inputs'][branch] == [tg.id_of(role + '_timed'), 0]
+                    assert schedule['inputs']['phase'] == phase
+                    assert schedule['inputs']['sigmas'] == tg.node('sampler')['inputs']['sigmas']
+                    assert tg.node(role + '_plain')['class_type'] == 'CLIPTextEncode'
+                    assert tg.node(role + '_plain')['inputs']['text'] == tg.node(role)['inputs']['text']
+
             for bad in (0, -1, float('nan'), float('inf'), 17):
                 try:
                     reg.build(entry, dict(reference_params, reference_megapixels=bad))
@@ -125,7 +137,7 @@ def main():
             from unittest.mock import patch
             with patch.object(G, 'validate', return_value=[]):
                 oi = {name: {} for name in ('PainterMossSampler', 'PainterMossSaveImage',
-                                           'PainterMossReference', 'PainterMossReferenceEncode')}
+                                           'PainterMossReference', 'PainterMossReferenceEncode', 'PainterMossReferenceTiming')}
                 built = reg.build(entry, reference_params, object_info=oi)
                 assert not built['params'].get('moss_heatmaps')
                 assert all(n['class_type'] != 'PainterMossSampler' for n in built['prompt'].values())

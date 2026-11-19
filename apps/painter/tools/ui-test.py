@@ -5528,8 +5528,13 @@ def test_moss(win, ctl, tmp):
         check(model + " supports whole-image references", ctl.referenceImages)
         APP.set("useReferences", True)
         APP.set("reference_megapixels", .5)
+        for phase in ('early', 'middle', 'late'):
+            button = next(item for item in walk(win.contentItem()) if item.objectName() == 'referencePhase_' + phase)
+            button.metaObject().invokeMethod(button, 'clicked')
+            check(model + ' timing button ' + phase, prop(APP, 'gen')['reference_phase'] == phase)
+
         wire = E.submission(prop(APP, "gen"), ctl)
-        check(model + " Unity reference submission", wire['use_reference_images'] and wire['reference_megapixels'] == .5)
+        check(model + " Unity reference submission", wire['use_reference_images'] and wire['reference_megapixels'] == .5 and wire['reference_phase'] == 'late')
         from PySide6.QtGui import QImage
         source = os.path.join(tmp, "moss-reference.png")
         image = QImage(96, 32, QImage.Format_RGB32)
@@ -5546,10 +5551,10 @@ def test_moss(win, ctl, tmp):
             APP.metaObject().invokeMethod(APP, "submit")
             spin(50)
             check(model + " Qt references reach submission", len(sent) == 1 and
-                  sent[0]['reference_megapixels'] == .5 and
+                  sent[0]['reference_megapixels'] == .5 and sent[0]['reference_phase'] == 'late' and
                   sent[0]['reference_images_local'] == [source, source])
             APP.injectParams(sent[0])
-            check(model + " references restore", prop(APP, 'gen')['useReferences'] and ctl.inputImage != '')
+            check(model + " references restore", prop(APP, 'gen')['useReferences'] and prop(APP, 'gen')['reference_phase'] == 'late' and ctl.inputImage != '')
         finally:
             ctl._start_jobs, ctl.client.upload_image, ctl._object_info = original_start, original_upload, original_oi
             ctl.clearEditImages()

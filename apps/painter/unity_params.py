@@ -23,6 +23,27 @@ def label(text):
     return w
 
 
+class ReferencePhaseButtons(Gtk.Box):
+    def __init__(self, changed):
+        Gtk.Box.__init__(self, orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.get_style_context().add_class('linked')
+        self.buttons = {}
+        group = None
+        for phase in ('early', 'middle', 'late'):
+            button = Gtk.RadioButton.new_with_label_from_widget(group, phase.title())
+            button.set_mode(False)
+            group = button
+            self.buttons[phase] = button
+            self.pack_start(button, True, True, 0)
+            button.connect('toggled', lambda b: changed() if b.get_active() else None)
+
+    def get_text(self):
+        return next(phase for phase, button in self.buttons.items() if button.get_active())
+
+    def set_text(self, phase):
+        self.buttons.get(phase, self.buttons['early']).set_active(True)
+
+
 class ParameterForm(object):
     def build_parameters(self):
         params = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -252,6 +273,8 @@ class ParameterForm(object):
         self.combo('krea_sampling', 'Krea sampling', ['native', 'manual', 'turbo_fixed'])
         self.number('krea_shift', 'Krea shift', .01, 100, .1, 2)
         self.number('reference_megapixels', 'Reference MP', .01, 16, .05, 2)
+        self.add_row('reference_phase', 'Reference timing', ReferencePhaseButtons(self.changed))
+        self.controls['reference_phase'].set_tooltip_text('First, middle or final third of sampling steps; text alone outside that interval.')
         loras = Gtk.Button(label='LoRAs…')
         loras.connect('clicked', lambda *_: self.loras_dialog())
         self.grid.attach(loras, 0, self.grid_row, 2, 1)
@@ -524,6 +547,7 @@ class ParameterForm(object):
             self.visible(key, flags.get('encoderControls') and not edit)
         for key in ['reference_megapixels', 'useReferences']:
             self.visible(key, flags.get('referenceImages') and not edit)
+        self.visible('reference_phase', flags.get('layoutSupport') and flags.get('referenceImages') and self.controls['useReferences'].get_active() and not edit)
         self.controls['reference_megapixels'].set_tooltip_text('Pixel budget per whole image; no cropping. MOSS references do not support heatmaps or PPM weighting.')
         self.controls['seed'].set_sensitive(self.controls['seedPolicy'].get_active_id() == 'Fixed')
         images = edit or video or flags.get('referenceImages') or flags.get('optionalEditImage')

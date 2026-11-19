@@ -23,6 +23,7 @@
   "toggles": {"negpip": false, "model_sampling": false},
   "defaults": {
     "reference_megapixels": 0.25,
+    "reference_phase": "early",
     "steps": 50,
     "cfg": 3.0,
     "sampler_name": "euler",

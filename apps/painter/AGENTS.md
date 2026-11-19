@@ -215,6 +215,8 @@ MOSS references use `PainterMossReference` chains (no fixed slot count) and
 `PainterMossReferenceEncode` in the existing live backend module. One Reference
 MP budget applies per whole image; masks/cropping are not connected. Reference
 jobs reject PPM and omit token heatmaps because vision tokens change alignment.
+Reference timing selects early/middle/late thirds of the actual sigma schedule,
+with text-only conditioning outside the selected third on both CFG branches.
 Verify with `tools/moss-reference-test.py` using Comfy's Python, CUDA hidden,
 plus the MOSS graph and Qt/Unity harnesses. Backend changes load on its next start.
 

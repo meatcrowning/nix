@@ -145,6 +145,7 @@ class Controller:
                     raise ValueError('Out of range: ' + key)
         for key, options in [('sampler_name', self.ctl.samplers),
                              ('scheduler', self.ctl.schedulers + [self.ctl.nativeScheduler]),
+                             ('reference_phase', ['early', 'middle', 'late']),
                              ('krea_sampling', ['native', 'manual', 'turbo_fixed'])]:
             if key in patch and patch[key] not in options:
                 raise ValueError('Unknown ' + key)

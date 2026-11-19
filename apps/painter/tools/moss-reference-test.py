@@ -15,8 +15,8 @@ import comfy.utils
 
 source = Path(__file__).resolve().parents[1] / 'comfy_nodes/painter_moss.py'
 classes = [n for n in ast.parse(source.read_text()).body if isinstance(n, ast.ClassDef)
-           and n.name in ('PainterMossReference', 'PainterMossReferenceEncode')]
-ns = dict(math=math)
+           and n.name in ('PainterMossReference', 'PainterMossReferenceEncode', 'PainterMossReferenceTiming')]
+ns = dict(math=math, torch=torch)
 exec(compile(ast.Module(body=classes, type_ignores=[]), str(source), 'exec'), ns)
 append = ns['PainterMossReference']().append
 # Distinct borders must survive the resize, including a wide reference.
@@ -54,3 +54,31 @@ embeddings = [t[0] for row in tokens['qwen35_9b'] for t in row if isinstance(t[0
 assert len(embeddings) == 22
 assert all(e['type'] == 'image' for e in embeddings)
 print('PASS: whole-image resize, per-image MP, 22 references, both CFG branches and native vision tokens')
+
+# Every evaluation has exactly one branch, including exact switching sigmas.
+schedule = ns['PainterMossReferenceTiming']().schedule
+reference, plain = [['reference', {'kept': True}]], [['plain', {'kept': True}]]
+# Exercise Comfy's actual conditioning gate without importing its sampler stack.
+import collections
+sampler_source = Path(os.environ.get('COMFY_ROOT', '/home/lam/comfy')) / 'comfy/samplers.py'
+gate = next(n for n in ast.parse(sampler_source.read_text()).body
+            if isinstance(n, ast.FunctionDef) and n.name == 'get_area_and_mult')
+gate_ns = dict(torch=torch, collections=collections)
+exec(compile(ast.Module(body=[gate], type_ignores=[]), str(sampler_source), 'exec'), gate_ns)
+def enabled(metadata, sigma):
+    return gate_ns['get_area_and_mult'](dict(metadata, model_conds={}, uuid='test'),
+                                        torch.zeros(1, 1, 2, 2), sigma.reshape(1)) is not None
+
+for steps in (1, 2, 3, 7, 50):
+    sigmas = torch.linspace(1, 0, steps + 1).square()
+    for third, phase in enumerate(('early', 'middle', 'late')):
+        result, = schedule(reference, plain, sigmas, phase)
+        start, end = ((steps * i + 2) // 3 for i in (third, third + 1))
+        for i, sigma in enumerate(sigmas[:-1]):
+            active = [name for name, meta in result
+                      if enabled(meta, sigma)]
+            assert active == ['reference' if start <= i < end else 'plain'], (steps, phase, i, active)
+        for sigma in (sigmas[:-1] + sigmas[1:]) / 2:
+            assert sum(enabled(meta, sigma) for _, meta in result) == 1
+assert reference == [['reference', {'kept': True}]] and plain == [['plain', {'kept': True}]]
+print('PASS: early/middle/late follow actual sigmas with no gaps, overlapping branches or input mutation')
