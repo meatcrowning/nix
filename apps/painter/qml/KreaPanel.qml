@@ -82,16 +82,19 @@ Panel {
         hint: "Drag either handle, or drag the shaded interval. References apply only inside this portion of sampling steps."
         Column {
             width: parent.width
-            property string value: Math.round(root.gen.reference_start*100) + "% – " + Math.round(root.gen.reference_end*100) + "%"
+            property string value: timing.first.value === timing.second.value
+                ? "No reference steps (of " + timing.to + ")"
+                : "Steps " + (timing.first.value+1) + "–" + timing.second.value + " of " + timing.to
             RangeSlider {
                 id: timing
                 objectName: "referenceRange"
                 width: parent.width
-                from: 0; to: 1; stepSize: 0.01
-                first.value: root.gen.reference_start
-                second.value: root.gen.reference_end
-                first.onMoved: root.set("reference_start", first.value)
-                second.onMoved: root.set("reference_end", second.value)
+                from: 0; to: Math.max(1, root.gen.steps); stepSize: 1
+                snapMode: RangeSlider.SnapAlways
+                first.value: Math.ceil(root.gen.reference_start * to - 1e-9)
+                second.value: Math.ceil(root.gen.reference_end * to - 1e-9)
+                first.onMoved: root.set("reference_start", first.value / timing.to)
+                second.onMoved: root.set("reference_end", second.value / timing.to)
                 function moveRange(start, end) {
                     root.set("reference_start", start)
                     root.set("reference_end", end)
@@ -113,8 +116,8 @@ Panel {
                     onPositionChanged: function(mouse) {
                         if (!pressed) return
                         var delta = (mapToItem(timing, mouse.x, mouse.y).x-origin)/(timing.availableWidth-timing.first.handle.width)
-                        delta = Math.max(-low, Math.min(1-high, delta))
-                        timing.moveRange(low+delta, high+delta)
+                        delta = Math.max(-low, Math.min(timing.to-high, Math.round(delta * timing.to)))
+                        timing.moveRange((low+delta)/timing.to, (high+delta)/timing.to)
                     }
                 }
             }

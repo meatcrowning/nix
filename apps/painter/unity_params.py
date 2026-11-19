@@ -2,6 +2,7 @@
 """One native parameter form for live settings and isolated output snapshots."""
 from __future__ import unicode_literals
 import copy
+import math
 import random
 from gi.repository import Gtk, GLib, Pango, Gdk
 from unity_widgets import ResizableText, CompactSpin
@@ -24,10 +25,11 @@ def label(text):
 
 
 class ReferenceRange(Gtk.DrawingArea):
-    def __init__(self, changed):
+    def __init__(self, changed, steps=lambda: 50):
         Gtk.DrawingArea.__init__(self)
         self.low, self.high = 0.0, 1.0/3
         self.changed = changed
+        self.steps = steps
         self.drag = None
         self.set_size_request(150, 42)
         self.set_can_focus(True)
@@ -40,6 +42,15 @@ class ReferenceRange(Gtk.DrawingArea):
         self.connect('key-press-event', self.key)
         self.get_accessible().set_name('Reference timing range')
 
+    def step_bounds(self):
+        count = max(1, int(self.steps()))
+        return (int(math.ceil(self.low*count-1e-9)), int(math.ceil(self.high*count-1e-9)), count)
+
+    def range_label(self):
+        low, high, count = self.step_bounds()
+        return ('Steps %d–%d of %d' % (low+1, high, count) if low < high
+                else 'No reference steps (of %d)' % count)
+
     def get_range(self):
         return self.low, self.high
 
@@ -49,11 +60,14 @@ class ReferenceRange(Gtk.DrawingArea):
         self.queue_draw()
 
     def update_range(self, low, high):
-        self.set_range(low, high)
+        count = max(1, int(self.steps()))
+        self.set_range(round(low*count)/count, round(high*count)/count)
         self.changed()
 
     def draw_range(self, widget, cr):
         width = max(1, self.get_allocated_width()-16)
+        low_step, high_step, count = self.step_bounds()
+        low, high = low_step/float(count), high_step/float(count)
         ctx = self.get_style_context()
         ctx.save()
         ctx.add_class('scale')
@@ -67,13 +81,13 @@ class ReferenceRange(Gtk.DrawingArea):
         if not found:
             selected = ctx.get_background_color(Gtk.StateFlags.SELECTED)
         cr.set_source_rgba(selected.red, selected.green, selected.blue, selected.alpha)
-        cr.rectangle(8+self.low*width, 10, (self.high-self.low)*width, 6)
+        cr.rectangle(8+low*width, 10, (high-low)*width, 6)
         cr.fill()
         ctx.add_class('slider')
-        for value in (self.low, self.high):
+        for value in (low, high):
             Gtk.render_slider(ctx, cr, 2+value*width, 4, 12, 18, Gtk.Orientation.HORIZONTAL)
         ctx.restore()
-        text = self.create_pango_layout('%d%% – %d%%' % (round(self.low*100), round(self.high*100)))
+        text = self.create_pango_layout(self.range_label())
         Gtk.render_layout(ctx, cr, 8, 24, text)
         if self.has_focus():
             Gtk.render_focus(ctx, cr, 0, 0, self.get_allocated_width(), 23)
@@ -83,6 +97,8 @@ class ReferenceRange(Gtk.DrawingArea):
         if event.button != 1:
             return False
         self.grab_focus()
+        low, high, count = self.step_bounds()
+        self.set_range(low/float(count), high/float(count))
         width = max(1, self.get_allocated_width()-16)
         x = (event.x-8)/width
         low_distance, high_distance = abs(x-self.low), abs(x-self.high)
@@ -115,7 +131,9 @@ class ReferenceRange(Gtk.DrawingArea):
     def key(self, widget, event):
         if event.keyval not in (Gdk.KEY_Left, Gdk.KEY_Right):
             return False
-        delta = .01 if event.keyval == Gdk.KEY_Right else -.01
+        low, high, count = self.step_bounds()
+        self.set_range(low/float(count), high/float(count))
+        delta = (1.0 if event.keyval == Gdk.KEY_Right else -1.0)/count
         if event.state & Gdk.ModifierType.SHIFT_MASK:
             delta = max(-self.low, min(1-self.high, delta))
             self.update_range(self.low+delta, self.high+delta)
@@ -355,7 +373,7 @@ class ParameterForm(object):
         self.combo('krea_sampling', 'Krea sampling', ['native', 'manual', 'turbo_fixed'])
         self.number('krea_shift', 'Krea shift', .01, 100, .1, 2)
         self.number('reference_megapixels', 'Reference MP', .01, 16, .05, 2)
-        self.add_row('reference_range', 'Reference timing', ReferenceRange(self.changed))
+        self.add_row('reference_range', 'Reference timing', ReferenceRange(self.changed, lambda: self.controls['steps'].get_value_as_int()))
         self.controls['reference_range'].set_tooltip_text('Drag either handle or the selected interval. Arrow keys move start; Ctrl moves end; Shift moves both.')
         loras = Gtk.Button(label='LoRAs…')
         loras.connect('clicked', lambda *_: self.loras_dialog())
@@ -447,6 +465,8 @@ class ParameterForm(object):
         if self.loading:
             return
         self.visibility()
+        if 'reference_range' in self.controls:
+            self.controls['reference_range'].queue_draw()
         if self.save_timer:
             GLib.source_remove(self.save_timer)
         self.save_timer = GLib.timeout_add(700, self.save)

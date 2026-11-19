@@ -337,6 +337,8 @@ def test():
             window.visibility()
             window.controls['useReferences'].set_active(True)
             window.visibility()
+            previous_steps = window.controls['steps'].get_value_as_int()
+            window.controls['steps'].set_value(50)
             timing = window.controls['reference_range']
             assert timing.get_visible()
             timing.update_range(.2, .8)
@@ -349,7 +351,14 @@ def test():
             range_flags = dict(window.state['flags'])
             from unity_params import ReferenceRange
             probe = Gtk.Window()
-            timing = ReferenceRange(lambda: None)
+            count = [50]
+            timing = ReferenceRange(lambda: None, lambda: count[0])
+            timing.update_range(.221, .779)
+            assert timing.get_range() == (.22, .78)
+            assert timing.range_label() == 'Steps 12–39 of 50'
+            count[0] = 25
+            assert timing.range_label() == 'Steps 7–20 of 25'
+            count[0] = 50
             timing.set_range(.1, .9)
             probe.add(timing)
             probe.show_all()
@@ -380,6 +389,7 @@ def test():
             timing.release()
             assert abs(timing.low-.3) < .001 and abs(timing.high-.9) < .001, (timing.low, timing.high, width)
             probe.destroy()
+            window.controls['steps'].set_value(previous_steps)
             window.state['flags'] = range_flags
             window.visibility()
 

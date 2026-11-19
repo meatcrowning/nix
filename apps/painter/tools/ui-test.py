@@ -5530,6 +5530,13 @@ def test_moss(win, ctl, tmp):
         APP.set("reference_megapixels", .5)
         timing = next(item for item in walk(win.contentItem()) if item.objectName() == 'referenceRange')
         timing.moveRange(.2, .8)
+        APP.set('steps', 25)
+        spin(50)
+        check(model + ' reference bounds use steps', timing.property('to') == 25 and
+              timing.parentItem().property('value') == 'Steps 6–20 of 25')
+        APP.set('steps', 50)
+        spin(50)
+        check(model + ' reference range follows step count', timing.parentItem().property('value') == 'Steps 11–40 of 50')
         check(model + ' arbitrary reference range', prop(APP, 'gen')['reference_start'] == .2 and prop(APP, 'gen')['reference_end'] == .8)
         spin(60)
         scroll_to(timing)
