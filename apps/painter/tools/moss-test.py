@@ -53,7 +53,7 @@ def main():
             assert not reg.pair(entry)["problems"]
             fam = reg.family_of(entry)
             assert not fam["supports_patches"] and fam["supports_loras"]
-            assert not fam.get("edit") and not fam.get("reference_images")
+            assert not fam.get("edit") and fam.get("reference_images")
             for overrides in ({}, {"steps": 23, "cfg": 4.5, "sampler_name": "heun",
                                    "scheduler": "beta", "denoise": .8, "add_noise": False}):
                 p = dict(positive="A mountain\nwith a lake", negative="blur, text", seed=42,
@@ -85,6 +85,50 @@ def main():
                 assert inputs("scheduler")["denoise"] == overrides.get("denoise", 1)
                 assert "model_sampling" not in roles and "negpip" not in roles
                 assert built["params"]["prompt_boxes"] == {k: p[k] for k in ("positive", "negative")}
+            refs = [f"reference-{i}.png" for i in range(20)]
+            reference_params = dict(positive="red cube", negative="blur", reference_images=refs,
+                                    reference_megapixels=.5)
+            built = reg.build(entry, reference_params)
+            rg = G.Graph(built['prompt'])
+            for role in ('encode_pos', 'encode_neg'):
+                assert rg.node(role)['class_type'] == 'PainterMossReferenceEncode'
+                link = rg.node(role)['inputs']['references']
+                found = []
+                while link:
+                    node = built['prompt'][link[0]]
+                    assert node['inputs']['megapixels'] == .5
+                    image = built['prompt'][node['inputs']['image'][0]]
+                    assert node['inputs']['image'][1] == 0  # never connect LoadImage's mask
+                    found.append(image['inputs']['image'])
+                    link = node['inputs'].get('references')
+                assert found[::-1] == refs
+            assert rg.node('encode_neg')['inputs']['text'] == 'blur'
+            for bad in (0, -1, float('nan'), float('inf'), 17):
+                try:
+                    reg.build(entry, dict(reference_params, reference_megapixels=bad))
+                except G.GraphError:
+                    pass
+                else:
+                    raise AssertionError('Invalid reference budget accepted')
+            try:
+                reg.build(entry, dict(reference_params, toggles={"negpip": True}))
+            except G.GraphError as exc:
+                assert 'PPM' in str(exc)
+            else:
+                raise AssertionError('References silently accepted incompatible weighting')
+            try:
+                reg.build(entry, reference_params, object_info={})
+            except G.GraphError as exc:
+                assert 'restart' in str(exc)
+            else:
+                raise AssertionError('Old backend accepted references')
+            from unittest.mock import patch
+            with patch.object(G, 'validate', return_value=[]):
+                oi = {name: {} for name in ('PainterMossSampler', 'PainterMossSaveImage',
+                                           'PainterMossReference', 'PainterMossReferenceEncode')}
+                built = reg.build(entry, reference_params, object_info=oi)
+                assert not built['params'].get('moss_heatmaps')
+                assert all(n['class_type'] != 'PainterMossSampler' for n in built['prompt'].values())
             # Capability discovery must preserve older backends and PPM paths.
             from unittest.mock import patch
             capabilities = {name: {} for name in ('PainterMossSampler', 'PainterMossSaveImage')}

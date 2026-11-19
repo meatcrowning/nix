@@ -580,6 +580,30 @@ class Registry:
         g.set_input("encode_pos", "text", pos)
         g.set_input("encode_neg", "text", neg)
 
+        moss_refs = list(p.get("reference_images") or []) if fam["id"] == "moss_image" else []
+        if moss_refs:
+            if toggles.get("negpip"):
+                raise G.GraphError("MOSS references do not support PPM weighting; turn PPM off")
+            required = {"PainterMossReference", "PainterMossReferenceEncode"}
+            if object_info is not None and not required.issubset(object_info):
+                raise G.GraphError("MOSS references require the updated Painter backend; restart it when idle")
+            try:
+                budget = float(p["reference_megapixels"])
+            except (TypeError, ValueError):
+                raise G.GraphError("Reference MP must be between 0.01 and 16") from None
+            if not math.isfinite(budget) or not .01 <= budget <= 16:
+                raise G.GraphError("Reference MP must be between 0.01 and 16")
+            p["reference_megapixels"] = budget
+            previous = None
+            for i, ref in enumerate(moss_refs):
+                image = g.add_node("LoadImage", {"image": ref}, f"reference_{i}")
+                inputs = {"image": [image, 0], "megapixels": budget}
+                if previous is not None:
+                    inputs["references"] = [previous, 0]
+                previous = g.add_node("PainterMossReference", inputs, f"moss_reference_{i}")
+            for role in ("encode_pos", "encode_neg"):
+                g.set_class(role, "PainterMossReferenceEncode", inputs={"references": [previous, 0]})
+
         if fam.get("encoder_controls"):
             mode = p.get("krea_sampling", "native")
             if mode not in ("native", "manual", "turbo_fixed"):
@@ -663,7 +687,7 @@ class Registry:
 
         p.pop("moss_heatmaps", None)
         if (fam["id"] == "moss_image" and p.get("moss_capture", True)
-                and not g.has("negpip") and object_info
+                and not moss_refs and not g.has("negpip") and object_info
                 and "PainterMossSampler" in object_info and "PainterMossSaveImage" in object_info):
             g.node("sampler")["class_type"] = "PainterMossSampler"
             g.set_inputs("sampler", {"clip": list(g.node("encode_pos")["inputs"]["clip"]), "text": pos})

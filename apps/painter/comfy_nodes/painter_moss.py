@@ -1,5 +1,6 @@
 """MOSS token inspection and generation-bound, portable token attention maps."""
 import asyncio
+import math
 from pathlib import Path
 import sys
 import threading
@@ -264,4 +265,61 @@ class PainterMossSaveImage(nodes.SaveImage):
         return result
 
 
-NODE_CLASS_MAPPINGS = {'PainterMossSampler': PainterMossSampler, 'PainterMossSaveImage': PainterMossSaveImage}
+class PainterMossReference:
+    """Accumulate independently sized whole images without a fixed slot count."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {'required': {'image': ('IMAGE',), 'megapixels': ('FLOAT', {
+            'default': .25, 'min': .01, 'max': 16})},
+                'optional': {'references': ('PAINTER_MOSS_REFERENCES',)}}
+
+    RETURN_TYPES = ('PAINTER_MOSS_REFERENCES',)
+    FUNCTION = 'append'
+    CATEGORY = 'painter'
+
+    def append(self, image, megapixels, references=None):
+        from comfy.utils import common_upscale
+        if not math.isfinite(megapixels) or not .01 <= megapixels <= 16:
+            raise ValueError('Reference MP must be between 0.01 and 16')
+        height, width = image.shape[1:3]
+        scale = math.sqrt(megapixels * 1_000_000 / (height * width))
+        size = [max(32, round(side * scale / 32) * 32) for side in (width, height)]
+        # IMAGE batches may contain animation frames; one slot is one reference.
+        pixels = image[:1]
+        if pixels.shape[-1] == 4:
+            pixels = pixels[..., :3] * pixels[..., 3:] + (1 - pixels[..., 3:])
+        pixels = common_upscale(pixels.movedim(-1, 1), *size,
+                                'lanczos', 'disabled').movedim(1, -1)
+        return (list(references or []) + [pixels],)
+
+
+class PainterMossReferenceEncode:
+    """Vision-token conditioning as exposed by ComfyUI-MossTextEncoder.
+
+    Keep native MOSS's chat template; references precede both CFG prompts.
+    https://github.com/thezveroboy/ComfyUI-MossTextEncoder
+    """
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {'required': {'clip': ('CLIP',), 'text': ('STRING', {'multiline': True}),
+                             'references': ('PAINTER_MOSS_REFERENCES',)}}
+
+    RETURN_TYPES = ('CONDITIONING',)
+    FUNCTION = 'encode'
+    CATEGORY = 'painter'
+
+    def encode(self, clip, text, references):
+        markers = '<|vision_start|><|image_pad|><|vision_end|>' * len(references)
+        tokens = clip.tokenize(markers + text.strip(), images=references, prevent_empty_text=True)
+        try:
+            return (clip.encode_from_tokens_scheduled(tokens),)
+        except NotImplementedError as exc:
+            if 'Float8' in str(exc):
+                raise RuntimeError('MOSS image references require a BF16, FP16 or supported INT8 '
+                                   'text encoder; FP8 supports text only') from exc
+            raise
+
+
+NODE_CLASS_MAPPINGS = {'PainterMossSampler': PainterMossSampler, 'PainterMossSaveImage': PainterMossSaveImage,
+                       'PainterMossReference': PainterMossReference,
+                       'PainterMossReferenceEncode': PainterMossReferenceEncode}

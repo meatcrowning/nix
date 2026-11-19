@@ -251,7 +251,7 @@ class ParameterForm(object):
         self.controls['system_prompt'] = system_box.text
         self.combo('krea_sampling', 'Krea sampling', ['native', 'manual', 'turbo_fixed'])
         self.number('krea_shift', 'Krea shift', .01, 100, .1, 2)
-        self.number('reference_megapixels', 'Reference budget (MP)', .1, 16, .1, 2)
+        self.number('reference_megapixels', 'Reference MP', .01, 16, .05, 2)
         loras = Gtk.Button(label='LoRAs…')
         loras.connect('clicked', lambda *_: self.loras_dialog())
         self.grid.attach(loras, 0, self.grid_row, 2, 1)
@@ -520,8 +520,11 @@ class ParameterForm(object):
         for key in self.controls:
             if key.startswith('ms.'):
                 self.visible(key, patches and self.controls['modelSampling'].get_active())
-        for key in ['system_prompt', 'krea_sampling', 'krea_shift', 'reference_megapixels', 'useReferences']:
+        for key in ['system_prompt', 'krea_sampling', 'krea_shift']:
             self.visible(key, flags.get('encoderControls') and not edit)
+        for key in ['reference_megapixels', 'useReferences']:
+            self.visible(key, flags.get('referenceImages') and not edit)
+        self.controls['reference_megapixels'].set_tooltip_text('Pixel budget per whole image; no cropping. MOSS references do not support heatmaps or PPM weighting.')
         self.controls['seed'].set_sensitive(self.controls['seedPolicy'].get_active_id() == 'Fixed')
         images = edit or video or flags.get('referenceImages') or flags.get('optionalEditImage')
         self.input_button.set_visible(bool(images))
@@ -531,7 +534,7 @@ class ParameterForm(object):
         loras = bool(flags.get('supportsLoras', False))
         self.loras_button.set_sensitive(loras)
         self.loras_button.set_visible(loras)
-        self.advanced.set_visible(bool(patches or flags.get('encoderControls') or loras))
+        self.advanced.set_visible(bool(patches or flags.get('encoderControls') or flags.get('referenceImages') or loras))
 
     def model_changed(self, *_):
         if not self.loading and self.models.get_active_id():

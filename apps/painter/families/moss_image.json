@@ -17,10 +17,12 @@
     "arch": "flux2",
     "prefer": ["moss-image-vae.safetensors"]
   },
+  "reference_images": true,
   "supports_patches": false,
   "supports_loras": true,
   "toggles": {"negpip": false, "model_sampling": false},
   "defaults": {
+    "reference_megapixels": 0.25,
     "steps": 50,
     "cfg": 3.0,
     "sampler_name": "euler",

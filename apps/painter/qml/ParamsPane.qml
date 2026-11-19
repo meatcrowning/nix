@@ -110,7 +110,7 @@ Item {
     // column stays empty. Measured exactly that way.
     function sectionVisible(key) {
         return key === "edit" ? (App.isEdit || App.optionalEditImage || (App.referenceImages && root.gen.useReferences))
-             : key === "krea" ? App.encoderControls
+             : key === "krea" ? (App.encoderControls || App.referenceImages)
              : key === "editscale" ? App.isEdit
              : key === "regions" ? App.layoutSupport
              : key === "video" ? (App.isVideo && !App.isEdit)

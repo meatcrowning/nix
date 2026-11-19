@@ -211,6 +211,13 @@ saves remain in the recovery journal. Derivative preparation never waits on the
 UI thread; drag payloads activate when ready. Preview decoding retains only the
 active and newest frame.
 
+MOSS references use `PainterMossReference` chains (no fixed slot count) and
+`PainterMossReferenceEncode` in the existing live backend module. One Reference
+MP budget applies per whole image; masks/cropping are not connected. Reference
+jobs reject PPM and omit token heatmaps because vision tokens change alignment.
+Verify with `tools/moss-reference-test.py` using Comfy's Python, CUDA hidden,
+plus the MOSS graph and Qt/Unity harnesses. Backend changes load on its next start.
+
 ## MOSS token inspection
 
 `moss_inspect.py` owns asynchronous token requests and selected-output maps;

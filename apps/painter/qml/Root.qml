@@ -486,6 +486,8 @@ Item {
             imageParams.system_prompt = g.system_prompt
             imageParams.krea_sampling = g.krea_sampling
             imageParams.krea_shift = g.krea_shift
+        }
+        if (App.referenceImages) {
             imageParams.reference_megapixels = g.reference_megapixels
             imageParams.use_reference_images = g.useReferences
         }

@@ -5523,8 +5523,38 @@ def test_moss(win, ctl, tmp):
         check(model + " has author defaults", (g["steps"], g["cfg"], g["sampler_name"],
               g["scheduler"]) == (50, 3, "euler", "sgm_uniform"))
         check(model + " is a manual text-to-image choice", ctl.mode == "" and
-              not any((ctl.isEdit, ctl.isVideo, ctl.encoderControls, ctl.referenceImages,
-                       ctl.supportsPatches, ctl.supportsLoras)))
+              not any((ctl.isEdit, ctl.isVideo, ctl.encoderControls,
+                       ctl.supportsPatches)))
+        check(model + " supports whole-image references", ctl.referenceImages)
+        APP.set("useReferences", True)
+        APP.set("reference_megapixels", .5)
+        wire = E.submission(prop(APP, "gen"), ctl)
+        check(model + " Unity reference submission", wire['use_reference_images'] and wire['reference_megapixels'] == .5)
+        from PySide6.QtGui import QImage
+        source = os.path.join(tmp, "moss-reference.png")
+        image = QImage(96, 32, QImage.Format_RGB32)
+        image.fill(0xff224466)
+        image.save(source)
+        ctl.setInputImage(source)
+        ctl.addEditImage(source)
+        sent = []
+        original_start, original_upload, original_oi = ctl._start_jobs, ctl.client.upload_image, ctl._object_info
+        ctl._object_info = {"stub": True}
+        ctl._start_jobs = lambda entry, params, count: sent.append(params)
+        ctl.client.upload_image = lambda path, cb: cb("remote/" + os.path.basename(path), None)
+        try:
+            APP.metaObject().invokeMethod(APP, "submit")
+            spin(50)
+            check(model + " Qt references reach submission", len(sent) == 1 and
+                  sent[0]['reference_megapixels'] == .5 and
+                  sent[0]['reference_images_local'] == [source, source])
+            APP.injectParams(sent[0])
+            check(model + " references restore", prop(APP, 'gen')['useReferences'] and ctl.inputImage != '')
+        finally:
+            ctl._start_jobs, ctl.client.upload_image, ctl._object_info = original_start, original_upload, original_oi
+            ctl.clearEditImages()
+            ctl.clearInputImage()
+        APP.set("useReferences", False)
         APP.set("reuseSeed", True)
         APP.set("randomSeed", False)
         APP.metaObject().invokeMethod(APP, "materializeSeedPolicy")
@@ -5577,7 +5607,7 @@ def test_moss(win, ctl, tmp):
         check(model + " exposes only standard sections", all(
             panes.sectionVisible(key) == expected for key, expected in {
                 "prompt": True, "resolution": True, "regions": True, "sampling": True,
-                "patches": False, "lora": False, "edit": False, "krea": False}.items()))
+                "patches": False, "lora": True, "edit": False, "krea": True}.items()))
         canvas = next((item for item in walk(win.contentItem()) if item.objectName() == "mossLayoutCanvas"), None)
         add = next((item for item in walk(win.contentItem()) if item.objectName() == "layoutAdd"), None)
         check(model + " shows inline canvas by default", canvas is not None and canvas.isVisible() and canvas.width() > 100)

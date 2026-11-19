@@ -46,7 +46,9 @@ def submission(g, ctl):
         else:
             keys += ['negative', 'cfg', 'batch_size', 'aspectW', 'aspectH', 'megapixels']
             if ctl.encoderControls:
-                keys += ['system_prompt', 'krea_sampling', 'krea_shift', 'reference_megapixels']
+                keys += ['system_prompt', 'krea_sampling', 'krea_shift']
+            if getattr(ctl, 'referenceImages', False):
+                keys += ['reference_megapixels']
     p = {key: g[key] for key in keys}
     if not getattr(ctl, 'layoutSupport', False):
         p.pop('moss_layout', None)
@@ -56,7 +58,7 @@ def submission(g, ctl):
         p['edit'] = True
     elif ctl.isVideo and not g['still']:
         p.update(use_input_image=g['useInputImage'], use_last_frame=g['useLastFrame'])
-    elif ctl.encoderControls:
+    elif getattr(ctl, 'referenceImages', False):
         p['use_reference_images'] = g['useReferences']
     if (ctl.isEdit and ctl.editPatches) or (not ctl.isEdit and not ctl.isVideo):
         p['toggles'] = dict(negpip=g['negpip'], model_sampling=g['modelSampling'])

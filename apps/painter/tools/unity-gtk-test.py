@@ -313,7 +313,7 @@ def test():
             assert window.controls['steps'].get_parent() == window.sampling.get_child().get_children()[0]
             assert window.get_title() == 'Painter'
             assert window.actions['generate'][0].get_sensitive()
-            # Plain text-to-image families such as MOSS expose no advanced UI.
+            # Plain text-to-image families without extra capabilities hide advanced UI.
             flags = window.state['flags']
             window.state['flags'] = dict(isEdit=False, isVideo=False, supportsPatches=False,
                                         supportsLoras=False, encoderControls=False,
@@ -327,6 +327,12 @@ def test():
                 assert all(w.get_visible() for w in (rows if isinstance(rows, tuple) else (rows,))), key
             for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
                 assert not window.controls[key].get_visible()
+            window.state['flags']['referenceImages'] = True
+            window.visibility()
+            assert window.advanced.get_visible() and window.reference_button.get_visible()
+            assert window.controls['useReferences'].get_visible()
+            assert window.controls['reference_megapixels'].get_visible()
+            assert all(not row.get_visible() for row in window.rows['system_prompt'])
             window.state['flags']['layoutSupport'] = True
             window.visibility()
             for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
