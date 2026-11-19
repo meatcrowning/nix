@@ -337,13 +337,52 @@ def test():
             window.visibility()
             window.controls['useReferences'].set_active(True)
             window.visibility()
-            phase = window.controls['reference_phase']
-            assert phase.get_visible()
-            for name in ('early', 'middle', 'late'):
-                phase.buttons[name].set_active(True)
-                assert window.values()['reference_phase'] == name
-            window.apply_settings(dict(reference_phase='middle'))
-            assert phase.get_text() == 'middle'
+            timing = window.controls['reference_range']
+            assert timing.get_visible()
+            timing.update_range(.2, .8)
+            assert window.values()['reference_start'] == .2
+            assert window.values()['reference_end'] == .8
+            window.apply_settings(dict(reference_start=.1, reference_end=.9))
+            assert timing.get_range() == (.1, .9)
+            # The form can be outside the current viewport. Exercise the same
+            # production widget in an allocated window on the private X server.
+            range_flags = dict(window.state['flags'])
+            from unity_params import ReferenceRange
+            probe = Gtk.Window()
+            timing = ReferenceRange(lambda: None)
+            timing.set_range(.1, .9)
+            probe.add(timing)
+            probe.show_all()
+            while Gtk.events_pending(): Gtk.main_iteration()
+            assert timing.get_allocated_width() >= 150
+            Gdk.pixbuf_get_from_window(probe.get_window(), 0, 0, probe.get_allocated_width(), probe.get_allocated_height()).savev('/home/test/reference-range.png', 'png', [], [])
+            class Event(object):
+                pass
+            event = Event()
+            event.button = 1
+            width = max(1, timing.get_allocated_width()-16)
+            event.x = 8+.1*width
+            timing.press(timing, event)
+            event.x = 8+.2*width
+            timing.motion(timing, event)
+            timing.release()
+            assert abs(timing.low-.2) < .001 and timing.high == .9
+            event.x = 8+.9*width
+            timing.press(timing, event)
+            event.x = 8+.8*width
+            timing.motion(timing, event)
+            timing.release()
+            assert abs(timing.high-.8) < .001
+            event.x = 8+.5*width
+            timing.press(timing, event)
+            event.x = 8+.6*width
+            timing.motion(timing, event)
+            timing.release()
+            assert abs(timing.low-.3) < .001 and abs(timing.high-.9) < .001, (timing.low, timing.high, width)
+            probe.destroy()
+            window.state['flags'] = range_flags
+            window.visibility()
+
 
             for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
                 assert window.controls[key].get_visible()

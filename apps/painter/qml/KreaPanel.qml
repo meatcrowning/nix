@@ -79,25 +79,46 @@ Panel {
     Field {
         label: "Reference timing"
         visible: App.layoutSupport && root.gen.useReferences
-        hint: "Apply references during the first, middle or final third of the sampling steps. Use text alone outside that interval."
-        Row {
+        hint: "Drag either handle, or drag the shaded interval. References apply only inside this portion of sampling steps."
+        Column {
             width: parent.width
-            property string value: root.gen.reference_phase
-            spacing: 0
-            Repeater {
-                model: ["early", "middle", "late"]
-                Button {
-                    width: parent.width / 3
-                    required property string modelData
-                    objectName: "referencePhase_" + modelData
-                    text: modelData.charAt(0).toUpperCase() + modelData.slice(1)
-                    checkable: true
-                    autoExclusive: true
-                    checked: root.gen.reference_phase === modelData
-                    onClicked: root.set("reference_phase", modelData)
+            property string value: Math.round(root.gen.reference_start*100) + "% – " + Math.round(root.gen.reference_end*100) + "%"
+            RangeSlider {
+                id: timing
+                objectName: "referenceRange"
+                width: parent.width
+                from: 0; to: 1; stepSize: 0.01
+                first.value: root.gen.reference_start
+                second.value: root.gen.reference_end
+                first.onMoved: root.set("reference_start", first.value)
+                second.onMoved: root.set("reference_end", second.value)
+                function moveRange(start, end) {
+                    root.set("reference_start", start)
+                    root.set("reference_end", end)
+                }
+                readonly property real firstCenter: leftPadding + first.position * (availableWidth-first.handle.width) + first.handle.width/2
+                readonly property real secondCenter: leftPadding + second.position * (availableWidth-second.handle.width) + second.handle.width/2
+                MouseArea {
+                    x: timing.firstCenter + timing.first.handle.width/2
+                    width: Math.max(0, timing.secondCenter-timing.second.handle.width/2-x)
+                    height: parent.height
+                    cursorShape: Qt.SizeHorCursor
+                    property real origin
+                    property real low
+                    property real high
+                    onPressed: function(mouse) {
+                        origin = mapToItem(timing, mouse.x, mouse.y).x
+                        low = timing.first.value; high = timing.second.value
+                    }
+                    onPositionChanged: function(mouse) {
+                        if (!pressed) return
+                        var delta = (mapToItem(timing, mouse.x, mouse.y).x-origin)/(timing.availableWidth-timing.first.handle.width)
+                        delta = Math.max(-low, Math.min(1-high, delta))
+                        timing.moveRange(low+delta, high+delta)
+                    }
                 }
             }
+            PixelText { text: parent.value; color: Theme.textDim }
         }
     }
-
 }

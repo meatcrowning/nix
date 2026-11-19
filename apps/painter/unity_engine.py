@@ -50,7 +50,7 @@ def submission(g, ctl):
             if getattr(ctl, 'referenceImages', False):
                 keys += ['reference_megapixels']
                 if getattr(ctl, 'layoutSupport', False):
-                    keys += ['reference_phase']
+                    keys += ['reference_start', 'reference_end']
     p = {key: g[key] for key in keys}
     if not getattr(ctl, 'layoutSupport', False):
         p.pop('moss_layout', None)
@@ -134,7 +134,10 @@ class Engine:
         toggles = d.get('toggles') or {}
         g['negpip'] = bool(toggles.get('negpip', False))
         g['modelSampling'] = bool(toggles.get('model_sampling', False))
-        g.update(userprefs.saved_for(self.model, self.prefs._doc))
+        saved = userprefs.saved_for(self.model, self.prefs._doc)
+        g.update(saved)
+        from reference_timing import interval
+        g.update(interval(saved))
         self.settings = g
         self.resolve_dims()
         g.update(controls_for_size(g['width'], g['height'], self.multiple, g))
@@ -242,8 +245,8 @@ class Engine:
                     raise ValueError('Invalid sampling option')
             elif not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError('Invalid sampling value')
-        if g.get('reference_phase', 'early') not in ('early', 'middle', 'late'):
-            raise ValueError('Invalid reference phase')
+        from reference_timing import interval
+        g.update(interval(g))
         if g.get('moss_layout'):
             from moss_layout import valid
             g['moss_layout'] = valid(g['moss_layout'])
@@ -515,6 +518,8 @@ class Engine:
         for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
             g[key] = p.get(key, BASE[key])
         g.update({key: value for key, value in p.items() if key in BASE})
+        from reference_timing import interval
+        g.update(interval(p))
         g.update({key: value for key, value in (p.get('prompt_boxes') or {}).items()
                   if key in ('positive', 'negative')})
         if p.get('width', 0) > 0 and p.get('height', 0) > 0:

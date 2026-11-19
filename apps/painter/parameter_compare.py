@@ -12,7 +12,7 @@ BASE = dict(slg_single_layers='22', slg_start_percent=0.0, slg_end_percent=1.0,
             ms=dict(shift_start=3.5, shift_end=1.2, start_percent=0.0, end_percent=.5,
                     curve='ease_in', outside_window='hold', multiplier=1.0),
             system_prompt='', krea_sampling='native', krea_shift=1.0,
-            reference_megapixels=1.0, reference_phase="early", useReferences=False)
+            reference_megapixels=1.0, reference_phase="early", reference_start=0.0, reference_end=1/3, useReferences=False)
 
 
 def snapshot(params, ctl):
@@ -20,6 +20,8 @@ def snapshot(params, ctl):
         return None
     from moss_layout import import_prompt
     p = import_prompt(params)
+    from reference_timing import interval
+    p.update(interval(p))
     name = p.get('model', '')
     index = ctl.models.index_of_name(name)
     entry = ctl.models.entry_at(index) if index >= 0 else None

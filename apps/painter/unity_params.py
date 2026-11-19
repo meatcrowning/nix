@@ -3,7 +3,7 @@
 from __future__ import unicode_literals
 import copy
 import random
-from gi.repository import Gtk, GLib, Pango
+from gi.repository import Gtk, GLib, Pango, Gdk
 from unity_widgets import ResizableText, CompactSpin
 from wildcard_gtk import WildcardCard
 
@@ -23,25 +23,107 @@ def label(text):
     return w
 
 
-class ReferencePhaseButtons(Gtk.Box):
+class ReferenceRange(Gtk.DrawingArea):
     def __init__(self, changed):
-        Gtk.Box.__init__(self, orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        self.get_style_context().add_class('linked')
-        self.buttons = {}
-        group = None
-        for phase in ('early', 'middle', 'late'):
-            button = Gtk.RadioButton.new_with_label_from_widget(group, phase.title())
-            button.set_mode(False)
-            group = button
-            self.buttons[phase] = button
-            self.pack_start(button, True, True, 0)
-            button.connect('toggled', lambda b: changed() if b.get_active() else None)
+        Gtk.DrawingArea.__init__(self)
+        self.low, self.high = 0.0, 1.0/3
+        self.changed = changed
+        self.drag = None
+        self.set_size_request(150, 42)
+        self.set_can_focus(True)
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK |
+                        Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.KEY_PRESS_MASK)
+        self.connect('draw', self.draw_range)
+        self.connect('button-press-event', self.press)
+        self.connect('button-release-event', self.release)
+        self.connect('motion-notify-event', self.motion)
+        self.connect('key-press-event', self.key)
+        self.get_accessible().set_name('Reference timing range')
 
-    def get_text(self):
-        return next(phase for phase, button in self.buttons.items() if button.get_active())
+    def get_range(self):
+        return self.low, self.high
 
-    def set_text(self, phase):
-        self.buttons.get(phase, self.buttons['early']).set_active(True)
+    def set_range(self, low, high):
+        self.low = max(0, min(1, low))
+        self.high = max(self.low, min(1, high))
+        self.queue_draw()
+
+    def update_range(self, low, high):
+        self.set_range(low, high)
+        self.changed()
+
+    def draw_range(self, widget, cr):
+        width = max(1, self.get_allocated_width()-16)
+        ctx = self.get_style_context()
+        ctx.save()
+        ctx.add_class('scale')
+        ctx.add_class('trough')
+        Gtk.render_background(ctx, cr, 8, 10, width, 6)
+        Gtk.render_frame(ctx, cr, 8, 10, width, 6)
+        ctx.remove_class('trough')
+        # GTK 3.6 themes do not consistently paint a scale's highlight class.
+        # Use the theme's selection colour for the selected interval itself.
+        found, selected = ctx.lookup_color('theme_selected_bg_color')
+        if not found:
+            selected = ctx.get_background_color(Gtk.StateFlags.SELECTED)
+        cr.set_source_rgba(selected.red, selected.green, selected.blue, selected.alpha)
+        cr.rectangle(8+self.low*width, 10, (self.high-self.low)*width, 6)
+        cr.fill()
+        ctx.add_class('slider')
+        for value in (self.low, self.high):
+            Gtk.render_slider(ctx, cr, 2+value*width, 4, 12, 18, Gtk.Orientation.HORIZONTAL)
+        ctx.restore()
+        text = self.create_pango_layout('%d%% – %d%%' % (round(self.low*100), round(self.high*100)))
+        Gtk.render_layout(ctx, cr, 8, 24, text)
+        if self.has_focus():
+            Gtk.render_focus(ctx, cr, 0, 0, self.get_allocated_width(), 23)
+        return False
+
+    def press(self, widget, event):
+        if event.button != 1:
+            return False
+        self.grab_focus()
+        width = max(1, self.get_allocated_width()-16)
+        x = (event.x-8)/width
+        low_distance, high_distance = abs(x-self.low), abs(x-self.high)
+        mode = 'low' if low_distance <= high_distance else 'high'
+        if self.low == self.high:
+            mode = 'high' if x >= self.high else 'low'
+        if self.low < x < self.high and min(low_distance, high_distance)*width > 8:
+            mode = 'range'
+        self.drag = (mode, x, self.low, self.high)
+        return True
+
+    def motion(self, widget, event):
+        if not self.drag:
+            return False
+        mode, origin, low, high = self.drag
+        x = (event.x-8)/max(1, self.get_allocated_width()-16)
+        if mode == 'range':
+            delta = max(-low, min(1-high, x-origin))
+            self.update_range(low+delta, high+delta)
+        elif mode == 'low':
+            self.update_range(max(0, min(high, x)), high)
+        else:
+            self.update_range(low, max(low, min(1, x)))
+        return True
+
+    def release(self, *_):
+        self.drag = None
+        return True
+
+    def key(self, widget, event):
+        if event.keyval not in (Gdk.KEY_Left, Gdk.KEY_Right):
+            return False
+        delta = .01 if event.keyval == Gdk.KEY_Right else -.01
+        if event.state & Gdk.ModifierType.SHIFT_MASK:
+            delta = max(-self.low, min(1-self.high, delta))
+            self.update_range(self.low+delta, self.high+delta)
+        elif event.state & Gdk.ModifierType.CONTROL_MASK:
+            self.update_range(self.low, max(self.low, min(1, self.high+delta)))
+        else:
+            self.update_range(max(0, min(self.high, self.low+delta)), self.high)
+        return True
 
 
 class ParameterForm(object):
@@ -273,8 +355,8 @@ class ParameterForm(object):
         self.combo('krea_sampling', 'Krea sampling', ['native', 'manual', 'turbo_fixed'])
         self.number('krea_shift', 'Krea shift', .01, 100, .1, 2)
         self.number('reference_megapixels', 'Reference MP', .01, 16, .05, 2)
-        self.add_row('reference_phase', 'Reference timing', ReferencePhaseButtons(self.changed))
-        self.controls['reference_phase'].set_tooltip_text('First, middle or final third of sampling steps; text alone outside that interval.')
+        self.add_row('reference_range', 'Reference timing', ReferenceRange(self.changed))
+        self.controls['reference_range'].set_tooltip_text('Drag either handle or the selected interval. Arrow keys move start; Ctrl moves end; Shift moves both.')
         loras = Gtk.Button(label='LoRAs…')
         loras.connect('clicked', lambda *_: self.loras_dialog())
         self.grid.attach(loras, 0, self.grid_row, 2, 1)
@@ -338,6 +420,9 @@ class ParameterForm(object):
         values = {'moss_layout': self.layout_doc}
         for key, control in self.controls.items():
             if key == 'seedPolicy':
+                continue
+            if isinstance(control, ReferenceRange):
+                values['reference_start'], values['reference_end'] = control.get_range()
                 continue
             if isinstance(control, Gtk.TextView):
                 buf = control.get_buffer()
@@ -480,6 +565,13 @@ class ParameterForm(object):
             if key == 'seedPolicy':
                 control.set_active_id('Reuse last' if values.get('reuseSeed') else 'Random' if values.get('randomSeed') else 'Fixed')
                 continue
+            if isinstance(control, ReferenceRange):
+                if not any(k in values for k in ('reference_phase', 'reference_start', 'reference_end')):
+                    continue
+                from reference_timing import interval
+                timing = interval(values)
+                control.set_range(timing['reference_start'], timing['reference_end'])
+                continue
             value = values.get('ms', {}).get(key[3:]) if key.startswith('ms.') else values.get(key)
             if key == 'seed' and values.get('reuseSeed') and self.state.get('lastSeed', -1) >= 0:
                 value = self.state['lastSeed']
@@ -547,7 +639,7 @@ class ParameterForm(object):
             self.visible(key, flags.get('encoderControls') and not edit)
         for key in ['reference_megapixels', 'useReferences']:
             self.visible(key, flags.get('referenceImages') and not edit)
-        self.visible('reference_phase', flags.get('layoutSupport') and flags.get('referenceImages') and self.controls['useReferences'].get_active() and not edit)
+        self.visible('reference_range', flags.get('layoutSupport') and flags.get('referenceImages') and self.controls['useReferences'].get_active() and not edit)
         self.controls['reference_megapixels'].set_tooltip_text('Pixel budget per whole image; no cropping. MOSS references do not support heatmaps or PPM weighting.')
         self.controls['seed'].set_sensitive(self.controls['seedPolicy'].get_active_id() == 'Fixed')
         images = edit or video or flags.get('referenceImages') or flags.get('optionalEditImage')

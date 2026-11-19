@@ -106,15 +106,28 @@ def main():
             for phase in ('early', 'middle', 'late'):
                 timed = reg.build(entry, dict(reference_params, reference_phase=phase))
                 tg = G.Graph(timed['prompt'])
-                assert timed['params']['reference_phase'] == phase
+                assert 'reference_phase' not in timed['params']
                 for role, branch in (('encode_pos', 'positive'), ('encode_neg', 'negative')):
                     schedule = tg.node(role + '_timed')
                     assert tg.node('sampler')['inputs'][branch] == [tg.id_of(role + '_timed'), 0]
-                    assert schedule['inputs']['phase'] == phase
+                    from reference_timing import interval
+                    expected = interval(dict(reference_phase=phase))
+                    assert schedule['inputs']['start'] == expected['reference_start']
+                    assert schedule['inputs']['end'] == expected['reference_end']
                     assert schedule['inputs']['sigmas'] == tg.node('sampler')['inputs']['sigmas']
                     assert tg.node(role + '_plain')['class_type'] == 'CLIPTextEncode'
                     assert tg.node(role + '_plain')['inputs']['text'] == tg.node(role)['inputs']['text']
 
+            for start, end in ((.2, .8), (0, 1), (.5, .5)):
+                timed = reg.build(entry, dict(reference_params, reference_start=start, reference_end=end))
+                assert timed['params']['reference_start'] == start and timed['params']['reference_end'] == end
+            for start, end in ((.8, .2), (-1, 1), (0, float('nan'))):
+                try:
+                    reg.build(entry, dict(reference_params, reference_start=start, reference_end=end))
+                except G.GraphError:
+                    pass
+                else:
+                    raise AssertionError('Invalid reference interval accepted')
             for bad in (0, -1, float('nan'), float('inf'), 17):
                 try:
                     reg.build(entry, dict(reference_params, reference_megapixels=bad))
@@ -138,6 +151,7 @@ def main():
             with patch.object(G, 'validate', return_value=[]):
                 oi = {name: {} for name in ('PainterMossSampler', 'PainterMossSaveImage',
                                            'PainterMossReference', 'PainterMossReferenceEncode', 'PainterMossReferenceTiming')}
+                oi['PainterMossReferenceTiming'] = {'input': {'required': {'start': ('FLOAT',), 'end': ('FLOAT',)}}}
                 built = reg.build(entry, reference_params, object_info=oi)
                 assert not built['params'].get('moss_heatmaps')
                 assert all(n['class_type'] != 'PainterMossSampler' for n in built['prompt'].values())

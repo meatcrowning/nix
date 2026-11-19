@@ -601,16 +601,22 @@ class Registry:
                 if previous is not None:
                     inputs["references"] = [previous, 0]
                 previous = g.add_node("PainterMossReference", inputs, f"moss_reference_{i}")
-            phase = p.get("reference_phase", "early")
-            if phase not in ("early", "middle", "late"):
-                raise G.GraphError("Reference timing must be early, middle or late")
-            p["reference_phase"] = phase
+            from reference_timing import interval
+            try:
+                timing = interval(p)
+            except (ValueError, TypeError) as exc:
+                raise G.GraphError(str(exc)) from exc
+            p.update(timing)
+            p.pop("reference_phase", None)
+            if object_info is not None and not {"start", "end"}.issubset(object_info["PainterMossReferenceTiming"].get("input", {}).get("required", {})):
+                raise G.GraphError("Reference ranges require the updated Painter backend; restart it when idle")
             for role, branch in (("encode_pos", "positive"), ("encode_neg", "negative")):
                 plain = g.add_node("CLIPTextEncode", dict(g.node(role)["inputs"]), role + "_plain")
                 g.set_class(role, "PainterMossReferenceEncode", inputs={"references": [previous, 0]})
                 timed = g.add_node("PainterMossReferenceTiming", {
                     "reference": [g.id_of(role), 0], "plain": [plain, 0],
-                    "sigmas": list(g.node("sampler")["inputs"]["sigmas"]), "phase": phase}, role + "_timed")
+                    "sigmas": list(g.node("sampler")["inputs"]["sigmas"]),
+                    "start": timing["reference_start"], "end": timing["reference_end"]}, role + "_timed")
                 g.set_input("sampler", branch, [timed, 0])
 
         if fam.get("encoder_controls"):

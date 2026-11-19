@@ -70,6 +70,7 @@ BOUNDS = {
     'aspectW': (1, 999), 'aspectH': (1, 999), 'seed': (-1, 2**53 - 1),
     'cfg': (0, 100), 'denoise': (0, 1), 'duration': (.1, 120), 'fps': (1, 120),
     'megapixels': (.01, 16), 'editMegapixels': (.01, 16),
+    'reference_start': (0, 1), 'reference_end': (0, 1),
     'reference_megapixels': (.01, 16), 'krea_shift': (0, 100),
     'slg_start_percent': (0, 1), 'slg_end_percent': (0, 1),
 }
@@ -149,6 +150,12 @@ class Controller:
                              ('krea_sampling', ['native', 'manual', 'turbo_fixed'])]:
             if key in patch and patch[key] not in options:
                 raise ValueError('Unknown ' + key)
+        if {'reference_phase', 'reference_start', 'reference_end'} & patch.keys():
+            from reference_timing import interval
+            if 'reference_phase' in patch and not {'reference_start', 'reference_end'} & patch.keys():
+                patch.update(interval(patch))
+            else:
+                interval(dict(self.gen(), **patch))
         if 'ms' in patch:
             keys(patch['ms'], BASE['ms'], 'model sampling settings')
             for key, value in patch['ms'].items():

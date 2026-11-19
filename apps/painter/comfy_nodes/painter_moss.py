@@ -324,20 +324,21 @@ class PainterMossReferenceTiming:
     @classmethod
     def INPUT_TYPES(cls):
         return {'required': {'reference': ('CONDITIONING',), 'plain': ('CONDITIONING',),
-                             'sigmas': ('SIGMAS',), 'phase': (['early', 'middle', 'late'],)}}
+                             'sigmas': ('SIGMAS',),
+                             'start': ('FLOAT', {'default': 0.0, 'min': 0.0, 'max': 1.0}),
+                             'end': ('FLOAT', {'default': 1/3, 'min': 0.0, 'max': 1.0})}}
 
     RETURN_TYPES = ('CONDITIONING',)
     FUNCTION = 'schedule'
     CATEGORY = 'painter'
 
-    def schedule(self, reference, plain, sigmas, phase):
-        if phase not in ('early', 'middle', 'late'):
-            raise ValueError('Reference timing must be early, middle or late')
+    def schedule(self, reference, plain, sigmas, start, end):
+        if not (math.isfinite(start) and math.isfinite(end) and 0 <= start <= end <= 1):
+            raise ValueError('Invalid reference range')
         steps = len(sigmas) - 1
         if steps < 1:
             return (plain,)
-        third = ('early', 'middle', 'late').index(phase)
-        start, end = ((steps * i + 2) // 3 for i in (third, third + 1))
+        start, end = (min(steps, math.ceil(steps * fraction - 1e-9)) for fraction in (start, end))
         if start == end:
             return (plain,)
         # Comfy compares inclusive sigma bounds, not sampler-step percentages.

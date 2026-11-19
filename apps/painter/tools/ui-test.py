@@ -5528,13 +5528,30 @@ def test_moss(win, ctl, tmp):
         check(model + " supports whole-image references", ctl.referenceImages)
         APP.set("useReferences", True)
         APP.set("reference_megapixels", .5)
-        for phase in ('early', 'middle', 'late'):
-            button = next(item for item in walk(win.contentItem()) if item.objectName() == 'referencePhase_' + phase)
-            button.metaObject().invokeMethod(button, 'clicked')
-            check(model + ' timing button ' + phase, prop(APP, 'gen')['reference_phase'] == phase)
+        timing = next(item for item in walk(win.contentItem()) if item.objectName() == 'referenceRange')
+        timing.moveRange(.2, .8)
+        check(model + ' arbitrary reference range', prop(APP, 'gen')['reference_start'] == .2 and prop(APP, 'gen')['reference_end'] == .8)
+        spin(60)
+        scroll_to(timing)
+        spin(60)
+        y = timing.height()/2
+        first, second = timing.property('firstCenter'), timing.property('secondCenter')
+        drag(win, timing, first, y, first+20, y)
+        check(model + ' start handle drags', prop(APP, 'gen')['reference_start'] > .2 and prop(APP, 'gen')['reference_end'] == .8)
+        first, second = timing.property('firstCenter'), timing.property('secondCenter')
+        drag(win, timing, second, y, second-15, y)
+        check(model + ' end handle drags', prop(APP, 'gen')['reference_end'] < .8)
+        before = prop(APP, 'gen')
+        first, second = timing.property('firstCenter'), timing.property('secondCenter')
+        drag(win, timing, (first+second)/2, y, (first+second)/2+10, y)
+        after = prop(APP, 'gen')
+        check(model + ' interval drags without resizing', after['reference_start'] > before['reference_start'] and
+              abs((after['reference_end']-after['reference_start'])-(before['reference_end']-before['reference_start'])) < 1e-6)
+        timing.moveRange(.2, .8)
+
 
         wire = E.submission(prop(APP, "gen"), ctl)
-        check(model + " Unity reference submission", wire['use_reference_images'] and wire['reference_megapixels'] == .5 and wire['reference_phase'] == 'late')
+        check(model + " Unity reference submission", wire['use_reference_images'] and wire['reference_megapixels'] == .5 and wire['reference_start'] == .2 and wire['reference_end'] == .8)
         from PySide6.QtGui import QImage
         source = os.path.join(tmp, "moss-reference.png")
         image = QImage(96, 32, QImage.Format_RGB32)
@@ -5551,10 +5568,10 @@ def test_moss(win, ctl, tmp):
             APP.metaObject().invokeMethod(APP, "submit")
             spin(50)
             check(model + " Qt references reach submission", len(sent) == 1 and
-                  sent[0]['reference_megapixels'] == .5 and sent[0]['reference_phase'] == 'late' and
+                  sent[0]['reference_megapixels'] == .5 and sent[0]['reference_start'] == .2 and sent[0]['reference_end'] == .8 and
                   sent[0]['reference_images_local'] == [source, source])
             APP.injectParams(sent[0])
-            check(model + " references restore", prop(APP, 'gen')['useReferences'] and prop(APP, 'gen')['reference_phase'] == 'late' and ctl.inputImage != '')
+            check(model + " references restore", prop(APP, 'gen')['useReferences'] and prop(APP, 'gen')['reference_start'] == .2 and prop(APP, 'gen')['reference_end'] == .8 and ctl.inputImage != '')
         finally:
             ctl._start_jobs, ctl.client.upload_image, ctl._object_info = original_start, original_upload, original_oi
             ctl.clearEditImages()

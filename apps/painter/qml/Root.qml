@@ -125,7 +125,7 @@ Item {
         positive: "", negative: "", moss_layout: ({}),
         slg_single_layers: "22", slg_start_percent: 0.0, slg_end_percent: 1.0,
         system_prompt: "", krea_sampling: "native", krea_shift: 1.15,
-        reference_megapixels: 0.25, reference_phase: "early", useReferences: false,
+        reference_megapixels: 0.25, reference_phase: "early", reference_start: 0, reference_end: 1/3, useReferences: false,
         steps: 20, cfg: 1.0, denoise: 1.0,
         sampler_name: "euler", scheduler: "simple",
         seed: -1, randomSeed: true, reuseSeed: false, batch_size: 1, count: 1,
@@ -282,13 +282,20 @@ Item {
         return out
     }
 
-    // Lay a remembered preset's settings over the current shape, so a key the
-    // saved object predates (a new field) keeps its default instead of vanishing.
+    // Migrate the original three timing presets when explicit bounds are absent.
+    function referenceRange(p) {
+        var phase = ["early", "middle", "late"].indexOf(p.reference_phase || "early")
+        return { reference_start: p.reference_start !== undefined ? p.reference_start : Math.max(0, phase)/3,
+                 reference_end: p.reference_end !== undefined ? p.reference_end : (Math.max(0, phase)+1)/3 }
+    }
+
+    // Lay remembered settings over the current shape, retaining new defaults.
     function mergeGen(base, saved) {
         var g = clone(base)
         g.reference_phase = "early"
         g.slg_single_layers = "22"; g.slg_start_percent = 0; g.slg_end_percent = 1
         for (var k in saved) if (k !== "ms" && g[k] !== undefined) g[k] = saved[k]
+        Object.assign(g, referenceRange(saved))
         g.ms = clone(base.ms)
         if (saved.ms) for (var mk in saved.ms) if (g.ms[mk] !== undefined) g.ms[mk] = saved.ms[mk]
         return g
@@ -361,6 +368,7 @@ Item {
         g.krea_shift = d.krea_shift !== undefined ? d.krea_shift : 1.15
         g.reference_megapixels = d.reference_megapixels || 0.25
         g.reference_phase = d.reference_phase || "early"
+        Object.assign(g, referenceRange(d))
         g.useReferences = false
         g.steps = d.steps
         // A video family has no CFG at all (BasicGuider takes none), so it
@@ -491,7 +499,10 @@ Item {
         }
         if (App.referenceImages) {
             imageParams.reference_megapixels = g.reference_megapixels
-            if (App.layoutSupport) imageParams.reference_phase = g.reference_phase
+            if (App.layoutSupport) {
+                imageParams.reference_start = g.reference_start
+                imageParams.reference_end = g.reference_end
+            }
             imageParams.use_reference_images = g.useReferences
         }
         App.generate(imageParams, g.count)
@@ -1357,6 +1368,7 @@ Item {
             if (g.useReferences) App.restoreEditImages(refs.slice(1))
         }
         g.reference_phase = p.reference_phase || "early"
+        Object.assign(g, referenceRange(p))
         g.slg_single_layers = p.slg_single_layers !== undefined ? p.slg_single_layers : "22"
         g.slg_start_percent = p.slg_start_percent !== undefined ? p.slg_start_percent : 0
         g.slg_end_percent = p.slg_end_percent !== undefined ? p.slg_end_percent : 1

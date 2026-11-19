@@ -72,7 +72,7 @@ def enabled(metadata, sigma):
 for steps in (1, 2, 3, 7, 50):
     sigmas = torch.linspace(1, 0, steps + 1).square()
     for third, phase in enumerate(('early', 'middle', 'late')):
-        result, = schedule(reference, plain, sigmas, phase)
+        result, = schedule(reference, plain, sigmas, third/3, (third+1)/3)
         start, end = ((steps * i + 2) // 3 for i in (third, third + 1))
         for i, sigma in enumerate(sigmas[:-1]):
             active = [name for name, meta in result
@@ -82,3 +82,11 @@ for steps in (1, 2, 3, 7, 50):
             assert sum(enabled(meta, sigma) for _, meta in result) == 1
 assert reference == [['reference', {'kept': True}]] and plain == [['plain', {'kept': True}]]
 print('PASS: early/middle/late follow actual sigmas with no gaps, overlapping branches or input mutation')
+
+for start, end in ((.2, .8), (0, 1), (.5, .5), (.13, .91)):
+    sigmas = torch.linspace(1, 0, 51).square()
+    result, = schedule(reference, plain, sigmas, start, end)
+    for i, sigma in enumerate(sigmas[:-1]):
+        active = [name for name, meta in result if enabled(meta, sigma)]
+        assert active == ['reference' if start <= i/50 < end else 'plain']
+print('PASS: arbitrary, full and empty reference windows')
