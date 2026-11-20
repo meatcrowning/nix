@@ -75,15 +75,16 @@ class Interrupted(Exception):
     pass
 events.clear()
 namespace['STATE'] = SimpleNamespace(consume=lambda: False, take_discard=lambda: True)
-namespace['comfy'] = SimpleNamespace(model_management=SimpleNamespace(InterruptProcessingException=Interrupted))
+namespace['comfy'] = SimpleNamespace(model_management=SimpleNamespace(InterruptProcessingException=Interrupted,
+                                                                synchronize=lambda: events.append('sync')))
 try:
     namespace['_callback'](model,50,{ })(16,None,None,50)
 except Interrupted:
     pass
 else:
     raise AssertionError('Discard callback did not interrupt')
-assert events == []
-print('PASS: hard cancel discards at a step boundary before preview')
+assert events == ['sync']
+print('PASS: hard cancel drains the GPU and discards at a step boundary before preview')
 
 from moss_capture import map_shape
 assert map_shape(94,63,534) == (94,63)

@@ -175,6 +175,9 @@ def _callback(model, steps, x0_output):
 
     def wrapped(step, x0, x, total):
         if STATE.take_discard():
+            # Comfy's failed-node cleanup frees captured CUDA graph memory
+            # before it synchronizes; drain this step's kernels first.
+            comfy.model_management.synchronize()
             raise comfy.model_management.InterruptProcessingException()
         observer = model.model_options.get('painter_step_observer')
         if observer is not None:
