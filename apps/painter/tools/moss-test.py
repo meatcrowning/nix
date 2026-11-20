@@ -103,6 +103,18 @@ def main():
                     link = node['inputs'].get('references')
                 assert found[::-1] == refs
             assert rg.node('encode_neg')['inputs']['text'] == 'blur'
+            for positive, negative in ((True, False), (False, True), (False, False)):
+                selective = reg.build(entry, dict(reference_params,
+                    reference_positive=positive, reference_negative=negative))
+                sg = G.Graph(selective['prompt'])
+                for role, branch, enabled in (('encode_pos', 'positive', positive),
+                                               ('encode_neg', 'negative', negative)):
+                    assert sg.node(role)['class_type'] == ('PainterMossReferenceEncode' if enabled else 'CLIPTextEncode')
+                    assert sg.node('sampler')['inputs'][branch] == [sg.id_of(role + '_timed' if enabled else role), 0]
+                    assert selective['params']['reference_' + branch] is enabled
+                if not (positive or negative):
+                    assert not any(n['class_type'].startswith('PainterMossReference') for n in selective['prompt'].values())
+
             for phase in ('early', 'middle', 'late'):
                 timed = reg.build(entry, dict(reference_params, reference_phase=phase))
                 tg = G.Graph(timed['prompt'])

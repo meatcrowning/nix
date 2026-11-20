@@ -142,6 +142,9 @@ def params_for(model_name, kind="image", doc=None):
             out[key] = g[key]
     put("krea_shift")
     put("reference_megapixels")
+    for key in ("reference_positive", "reference_negative"):
+        if isinstance(g.get(key), bool):
+            out[key] = g[key]
     from reference_timing import interval
     if any(key in g for key in ("reference_phase", "reference_start", "reference_end")):
         out.update(interval(g))

@@ -373,6 +373,18 @@ class ParameterForm(object):
         self.combo('krea_sampling', 'Krea sampling', ['native', 'manual', 'turbo_fixed'])
         self.number('krea_shift', 'Krea shift', .01, 100, .1, 2)
         self.number('reference_megapixels', 'Reference MP', .01, 16, .05, 2)
+        budget = self.controls['reference_megapixels']
+        self.grid.remove(budget)
+        reference_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        reference_row.pack_start(budget, False, False, 0)
+        for key, title in [('reference_positive', 'Pos'), ('reference_negative', 'Neg')]:
+            control = Gtk.CheckButton(label=title)
+            control.connect('toggled', self.changed)
+            reference_row.pack_start(control, False, False, 0)
+            self.controls[key] = control
+            self.rows[key] = (control,)
+        self.grid.attach(reference_row, 1, self.grid_row - 1, 1, 1)
+        self.rows['reference_megapixels'] = (self.rows['reference_megapixels'][0], reference_row)
         self.add_row('reference_range', 'Reference timing', ReferenceRange(self.changed, lambda: self.controls['steps'].get_value_as_int()))
         self.controls['reference_range'].set_tooltip_text('Drag either handle or the selected interval. Arrow keys move start; Ctrl moves end; Shift moves both.')
         loras = Gtk.Button(label='LoRAs…')
@@ -659,6 +671,8 @@ class ParameterForm(object):
             self.visible(key, flags.get('encoderControls') and not edit)
         for key in ['reference_megapixels', 'useReferences']:
             self.visible(key, flags.get('referenceImages') and not edit)
+        for key in ('reference_positive', 'reference_negative'):
+            self.visible(key, flags.get('layoutSupport') and self.controls['useReferences'].get_active() and not edit)
         self.visible('reference_range', flags.get('layoutSupport') and flags.get('referenceImages') and self.controls['useReferences'].get_active() and not edit)
         self.controls['reference_megapixels'].set_tooltip_text('Pixel budget per whole image; no cropping. MOSS references do not support heatmaps or PPM weighting.')
         self.controls['seed'].set_sensitive(self.controls['seedPolicy'].get_active_id() == 'Fixed')

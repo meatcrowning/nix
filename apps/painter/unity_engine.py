@@ -50,7 +50,7 @@ def submission(g, ctl):
             if getattr(ctl, 'referenceImages', False):
                 keys += ['reference_megapixels']
                 if getattr(ctl, 'layoutSupport', False):
-                    keys += ['reference_start', 'reference_end']
+                    keys += ['reference_start', 'reference_end', 'reference_positive', 'reference_negative']
     p = {key: g[key] for key in keys}
     if not getattr(ctl, 'layoutSupport', False):
         p.pop('moss_layout', None)
@@ -517,6 +517,7 @@ class Engine:
         g['moss_layout'] = p.get('moss_layout') or {}
         for key in ('slg_single_layers', 'slg_start_percent', 'slg_end_percent'):
             g[key] = p.get(key, BASE[key])
+        g.update(reference_positive=True, reference_negative=True)
         g.update({key: value for key, value in p.items() if key in BASE})
         from reference_timing import interval
         g.update(interval(p))

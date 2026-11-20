@@ -5528,6 +5528,18 @@ def test_moss(win, ctl, tmp):
         check(model + " supports whole-image references", ctl.referenceImages)
         APP.set("useReferences", True)
         APP.set("reference_megapixels", .5)
+        spin(50)
+        positive_toggle = next(item for item in walk(win.contentItem()) if item.objectName() == 'referencePositive')
+        negative_toggle = next(item for item in walk(win.contentItem()) if item.objectName() == 'referenceNegative')
+        check(model + ' branches default on', positive_toggle.property('checked') and negative_toggle.property('checked'))
+        pane = find(win.contentItem(), 'ParamsPane')
+        check(model + ' image section merged', not pane.sectionVisible('edit'))
+        reference_panel = find(win.contentItem(), 'KreaPanel')
+        check(model + ' images belong to References', find(reference_panel, 'ImageInputs') is not None)
+        check(model + ' branch controls share MP row', positive_toggle.parentItem() == negative_toggle.parentItem() and positive_toggle.x() >= 80 and negative_toggle.x() > positive_toggle.x())
+        QMetaObject.invokeMethod(negative_toggle, 'toggled', Qt.DirectConnection, Q_ARG(bool, False))
+        check(model + ' independent reference branches', prop(APP, 'gen')['reference_positive'] and not prop(APP, 'gen')['reference_negative'])
+
         timing = next(item for item in walk(win.contentItem()) if item.objectName() == 'referenceRange')
         timing.moveRange(.2, .8)
         APP.set('steps', 25)
@@ -5558,7 +5570,7 @@ def test_moss(win, ctl, tmp):
 
 
         wire = E.submission(prop(APP, "gen"), ctl)
-        check(model + " Unity reference submission", wire['use_reference_images'] and wire['reference_megapixels'] == .5 and wire['reference_start'] == .2 and wire['reference_end'] == .8)
+        check(model + " Unity reference submission", wire['reference_positive'] and not wire['reference_negative'] and wire['use_reference_images'] and wire['reference_megapixels'] == .5 and wire['reference_start'] == .2 and wire['reference_end'] == .8)
         from PySide6.QtGui import QImage
         source = os.path.join(tmp, "moss-reference.png")
         image = QImage(96, 32, QImage.Format_RGB32)
@@ -5575,9 +5587,10 @@ def test_moss(win, ctl, tmp):
             APP.metaObject().invokeMethod(APP, "submit")
             spin(50)
             check(model + " Qt references reach submission", len(sent) == 1 and
-                  sent[0]['reference_megapixels'] == .5 and sent[0]['reference_start'] == .2 and sent[0]['reference_end'] == .8 and
+                  sent[0]['reference_positive'] and not sent[0]['reference_negative'] and sent[0]['reference_megapixels'] == .5 and sent[0]['reference_start'] == .2 and sent[0]['reference_end'] == .8 and
                   sent[0]['reference_images_local'] == [source, source])
             APP.injectParams(sent[0])
+            check(model + ' reference branches restore', prop(APP, 'gen')['reference_positive'] and not prop(APP, 'gen')['reference_negative'])
             check(model + " references restore", prop(APP, 'gen')['useReferences'] and prop(APP, 'gen')['reference_start'] == .2 and prop(APP, 'gen')['reference_end'] == .8 and ctl.inputImage != '')
         finally:
             ctl._start_jobs, ctl.client.upload_image, ctl._object_info = original_start, original_upload, original_oi

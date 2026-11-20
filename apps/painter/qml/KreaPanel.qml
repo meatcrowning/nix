@@ -55,35 +55,47 @@ Panel {
         }
     }
     Toggle {
-        label: "Use reference images"
+        label: "Use images"
         checked: root.gen.useReferences
         onToggled: function(v) { root.set("useReferences", v) }
     }
-    PixelText {
-        visible: App.layoutSupport && root.gen.useReferences
-        width: parent.width
-        wrapMode: Text.WordWrap
-        text: "References use whole images. Heatmaps and PPM weighting are unavailable with references."
-        color: Theme.textDim
-    }
     Field {
-        label: "Reference MP"
+        label: "MP"
         visible: root.gen.useReferences
         hint: "Pixel budget for each whole reference image; aspect ratio is preserved."
-        Spin {
-            width: 80
-            value: root.gen.reference_megapixels; from: 0.01; to: 16; step: 0.05; decimals: 2
-            onEdited: function(v) { root.set("reference_megapixels", v) }
+        Row {
+            spacing: 8
+            Spin {
+                width: 80
+                value: root.gen.reference_megapixels; from: 0.01; to: 16; step: 0.05; decimals: 2
+                onEdited: function(v) { root.set("reference_megapixels", v) }
+            }
+            Toggle {
+                objectName: "referencePositive"
+                visible: App.layoutSupport
+                anchors.verticalCenter: parent.verticalCenter
+                label: "Pos"
+                checked: root.gen.reference_positive
+                onToggled: function(v) { root.set("reference_positive", v) }
+            }
+            Toggle {
+                objectName: "referenceNegative"
+                visible: App.layoutSupport
+                anchors.verticalCenter: parent.verticalCenter
+                label: "Neg"
+                checked: root.gen.reference_negative
+                onToggled: function(v) { root.set("reference_negative", v) }
+            }
         }
     }
     Field {
-        label: "Reference timing"
+        label: "Timing"
         visible: App.layoutSupport && root.gen.useReferences
         hint: "Drag either handle, or drag the shaded interval. References apply only inside this portion of sampling steps."
         Column {
             width: parent.width
             property string value: timing.first.value === timing.second.value
-                ? "No reference steps (of " + timing.to + ")"
+                ? "No steps (of " + timing.to + ")"
                 : "Steps " + (timing.first.value+1) + "–" + timing.second.value + " of " + timing.to
             RangeSlider {
                 id: timing
@@ -123,5 +135,8 @@ Panel {
             }
             PixelText { text: parent.value; color: Theme.textDim }
         }
+    }
+    ImageInputs {
+        visible: App.layoutSupport && root.gen.useReferences
     }
 }

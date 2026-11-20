@@ -109,7 +109,7 @@ Item {
     // (the loader hides the item, the item then reports hidden) and the whole
     // column stays empty. Measured exactly that way.
     function sectionVisible(key) {
-        return key === "edit" ? (App.isEdit || App.optionalEditImage || (App.referenceImages && root.gen.useReferences))
+        return key === "edit" ? (App.isEdit || App.optionalEditImage || (App.referenceImages && !App.layoutSupport && root.gen.useReferences))
              : key === "krea" ? (App.encoderControls || App.referenceImages)
              : key === "editscale" ? App.isEdit
              : key === "regions" ? App.layoutSupport

@@ -581,6 +581,8 @@ class Registry:
         g.set_input("encode_neg", "text", neg)
 
         moss_refs = list(p.get("reference_images") or []) if fam["id"] == "moss_image" else []
+        if not (p.get("reference_positive", True) or p.get("reference_negative", True)):
+            moss_refs = []
         if moss_refs:
             if toggles.get("negpip"):
                 raise G.GraphError("MOSS references do not support PPM weighting; turn PPM off")
@@ -611,6 +613,8 @@ class Registry:
             if object_info is not None and not {"start", "end"}.issubset(object_info["PainterMossReferenceTiming"].get("input", {}).get("required", {})):
                 raise G.GraphError("Reference ranges require the updated Painter backend; restart it when idle")
             for role, branch in (("encode_pos", "positive"), ("encode_neg", "negative")):
+                if not p.get("reference_" + branch, True):
+                    continue
                 plain = g.add_node("CLIPTextEncode", dict(g.node(role)["inputs"]), role + "_plain")
                 g.set_class(role, "PainterMossReferenceEncode", inputs={"references": [previous, 0]})
                 timed = g.add_node("PainterMossReferenceTiming", {
