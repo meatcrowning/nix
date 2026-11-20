@@ -173,21 +173,27 @@ class _HistorySignals(QObject):
 
 
 class _HistoryScan(QRunnable):
-    def __init__(self, serial):
+    def __init__(self, serial, publish_local=True):
         super().__init__()
         self.serial = serial
+        self.publish_local = publish_local
         self.sig = _HistorySignals()
 
     def run(self):
-        # Publish local history without waiting for an unavailable peer mount.
         local = _history_rows([OUT_DIR])
-        self.sig.done.emit(self.serial, local, not PEER_OUTS)
-        if PEER_OUTS:
-            try:
-                rows = _catalogue_rows(local) if catalogue.enabled() else _history_rows([OUT_DIR, *PEER_OUTS])
-            except (OSError, ValueError, TypeError, KeyError):
-                rows = local
-            self.sig.done.emit(self.serial, rows, True)
+        if not PEER_OUTS:
+            self.sig.done.emit(self.serial, local, True)
+            return
+        # The first scan publishes local history without waiting for the peer.
+        # A rescan keeps the installed peer rows until the merged list lands,
+        # or every reconnect would hide and reshow them.
+        if self.publish_local:
+            self.sig.done.emit(self.serial, local, False)
+        try:
+            rows = _catalogue_rows(local) if catalogue.enabled() else _history_rows([OUT_DIR, *PEER_OUTS])
+        except (OSError, ValueError, TypeError, KeyError):
+            rows = local
+        self.sig.done.emit(self.serial, rows, True)
 
 
 class _SearchIndex(QRunnable):
@@ -463,7 +469,8 @@ class Gallery(QAbstractListModel):
             return
         self._scan_serial += 1
         self._scan_added = {}
-        job = self._history_job = _HistoryScan(self._scan_serial)
+        installed = any(not r.get('live') for r in self._all)
+        job = self._history_job = _HistoryScan(self._scan_serial, not installed)
         job.sig.done.connect(self._history_ready)
         self._history_pool.start(job)
 

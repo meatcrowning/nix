@@ -57,7 +57,7 @@ source = Path(__file__).resolve().parents[1]/'comfy_nodes/painter_partial_stop.p
 callback = next(n for n in ast.parse(source.read_text()).body if isinstance(n, ast.FunctionDef) and n.name == '_callback')
 events = []
 namespace = dict(latent_preview=SimpleNamespace(prepare_callback=lambda *a: lambda *a: events.append('preview')),
-                 STATE=SimpleNamespace(consume=lambda: True), _StopHere=RuntimeError)
+                 STATE=SimpleNamespace(consume=lambda: True, take_discard=lambda: False), _StopHere=RuntimeError)
 exec(compile(ast.Module(body=[callback],type_ignores=[]),str(source),'exec'),namespace)
 model = SimpleNamespace(model_options={'painter_step_observer':lambda i: events.append(i)})
 try:
@@ -68,6 +68,22 @@ else:
     raise AssertionError('Stop callback did not stop')
 assert events == [16,'preview']
 print('PASS: production callback commits capture before preview/stop')
+
+# A hard cancel discards at the step boundary, before capture or preview runs
+# any GPU work; an interrupt inside a forward pass aborts ComfyUI.
+class Interrupted(Exception):
+    pass
+events.clear()
+namespace['STATE'] = SimpleNamespace(consume=lambda: False, take_discard=lambda: True)
+namespace['comfy'] = SimpleNamespace(model_management=SimpleNamespace(InterruptProcessingException=Interrupted))
+try:
+    namespace['_callback'](model,50,{ })(16,None,None,50)
+except Interrupted:
+    pass
+else:
+    raise AssertionError('Discard callback did not interrupt')
+assert events == []
+print('PASS: hard cancel discards at a step boundary before preview')
 
 from moss_capture import map_shape
 assert map_shape(94,63,534) == (94,63)

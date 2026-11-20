@@ -52,6 +52,15 @@ def main():
                 time.sleep(.005)
             assert gallery.rowCount() == 2
             assert gallery.paramsAt(1)['positive'] == 'red cube'
+            # A reconnect rescan must never install the local-only list.
+            counts = []
+            gallery.countChanged.connect(lambda: counts.append(gallery.rowCount()))
+            gallery.load_background()
+            until = time.monotonic() + 5
+            while gallery._history_job is not None and time.monotonic() < until:
+                app.processEvents()
+                time.sleep(.005)
+            assert gallery.rowCount() == 2 and min(counts or [2]) == 2, counts
             gallery.setFilter('blue sphere')
             assert gallery.rowCount() == 1
             gallery.setFilter('')

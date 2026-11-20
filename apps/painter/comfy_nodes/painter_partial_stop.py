@@ -27,22 +27,38 @@ class _State:
         self.lock = threading.Lock()
         self.active = 0
         self.requested = False
+        self.discard = False
 
     def begin(self):
         with self.lock:
             self.active += 1
 
     def end(self):
+        """Return True when a discard arrived too late for any step boundary."""
         with self.lock:
             self.active = max(0, self.active - 1)
+            unconsumed = False
             if not self.active:
+                unconsumed = self.discard
                 self.requested = False
+                self.discard = False
+            return unconsumed
 
-    def request(self):
+    def request(self, discard=False):
         with self.lock:
             if not self.active:
                 return False
-            self.requested = True
+            if discard:
+                self.discard = True
+            else:
+                self.requested = True
+            return True
+
+    def take_discard(self):
+        with self.lock:
+            if not self.discard:
+                return False
+            self.discard = False
             return True
 
     def consume(self):
@@ -83,7 +99,11 @@ async def _stop_request(request, hard):
     except (ValueError, TypeError):
         return web.json_response({"stopping": False, "error": "invalid stop request"}, status=400)
     def interrupt():
-        comfy.model_management.interrupt_current_processing()
+        # An interrupt raised inside a forward pass unwinds dynamic-VRAM casts
+        # while kernels still use them; ComfyUI then aborts on an illegal CUDA
+        # access. Inside Painter's samplers, discard at the next step boundary.
+        if not STATE.request(discard=True):
+            comfy.model_management.interrupt_current_processing()
         return True
     stopped = _owned_request(doc, interrupt if hard else STATE.request)
     return web.json_response({"stopping": stopped,
@@ -154,6 +174,8 @@ def _callback(model, steps, x0_output):
     preview = latent_preview.prepare_callback(model, steps, x0_output)
 
     def wrapped(step, x0, x, total):
+        if STATE.take_discard():
+            raise comfy.model_management.InterruptProcessingException()
         observer = model.model_options.get('painter_step_observer')
         if observer is not None:
             observer(step)
@@ -220,7 +242,9 @@ class PainterSamplerCustom(custom.SamplerCustom):
                 samples = model.model.process_latent_out(stop.latent.cpu())
             return _out(latent, samples, x0, model)
         finally:
-            STATE.end()
+            if STATE.end():
+                # The next node checks this flag before it runs any GPU op.
+                comfy.model_management.interrupt_current_processing()
 
 
 class PainterSamplerCustomAdvanced(custom.SamplerCustomAdvanced):
@@ -256,7 +280,9 @@ class PainterSamplerCustomAdvanced(custom.SamplerCustomAdvanced):
             samples = samples.to(comfy.model_management.intermediate_device())
             return _out(latent, samples, x0, guider.model_patcher)
         finally:
-            STATE.end()
+            if STATE.end():
+                # The next node checks this flag before it runs any GPU op.
+                comfy.model_management.interrupt_current_processing()
 
 
 NODE_CLASS_MAPPINGS = {
