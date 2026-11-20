@@ -48,10 +48,24 @@ if ! python3 "$REPO/tools/privacy-check.py" --repo "$REPO"; then
   fail=1
 fi
 
-echo "eval: nixosConfigurations.top ..."
-if ! "$REPO/tools/nix-private.sh" eval --raw "$FLAKE#nixosConfigurations.top.config.system.build.toplevel.drvPath" >/dev/null; then
-  echo "FAIL: system eval failed"
+# Evaluate only the configuration this host deploys; book cannot spare the
+# memory for top's full system eval. PREFLIGHT_HOST names another flake host.
+host="${PREFLIGHT_HOST:-}"
+if [ -z "$host" ]; then
+  case "$(hostname)" in
+    top) host=top ;;
+    book) host=air ;;
+  esac
+fi
+if [ -z "$host" ]; then
+  echo "FAIL: unknown host $(hostname); set PREFLIGHT_HOST to a flake host"
   fail=1
+else
+  echo "eval: nixosConfigurations.$host ..."
+  if ! "$REPO/tools/nix-private.sh" eval --raw "$FLAKE#nixosConfigurations.$host.config.system.build.toplevel.drvPath" >/dev/null; then
+    echo "FAIL: system eval failed"
+    fail=1
+  fi
 fi
 
 # Source-ahead drift is expected before activation reconciles mutable files.
