@@ -88,6 +88,17 @@ def main():
             refs = [f"reference-{i}.png" for i in range(20)]
             reference_params = dict(positive="red cube", negative="blur", reference_images=refs,
                                     reference_megapixels=.5)
+            for fit, crop in (("normal", None), ("cropped", "center"), ("stretched", "disabled")):
+                fitted = reg.build(entry, dict(reference_params, reference_fit=fit, width=816, height=1232))
+                scales = [n['inputs'] for n in fitted['prompt'].values() if n['class_type'] == 'ImageScale']
+                assert fitted['params']['reference_fit'] == fit
+                assert len(scales) == (0 if crop is None else len(refs))
+                assert all((n['width'], n['height'], n['crop']) == (816, 1232, crop) for n in scales)
+            try:
+                reg.build(entry, dict(reference_params, reference_fit='invalid'))
+                raise AssertionError('invalid reference fit accepted')
+            except G.GraphError:
+                pass
             built = reg.build(entry, reference_params)
             rg = G.Graph(built['prompt'])
             for role in ('encode_pos', 'encode_neg'):

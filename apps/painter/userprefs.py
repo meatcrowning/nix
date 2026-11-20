@@ -134,7 +134,7 @@ def params_for(model_name, kind="image", doc=None):
         put("height", cast=int)
         return out
 
-    for key in ("system_prompt", "krea_sampling", "reference_phase"):
+    for key in ("system_prompt", "krea_sampling", "reference_phase", "reference_fit"):
         if isinstance(g.get(key), str):
             out[key] = g[key]
     for key in ("slg_single_layers", "slg_start_percent", "slg_end_percent"):

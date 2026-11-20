@@ -125,7 +125,7 @@ Item {
         positive: "", negative: "", moss_layout: ({}),
         slg_single_layers: "22", slg_start_percent: 0.0, slg_end_percent: 1.0,
         system_prompt: "", krea_sampling: "native", krea_shift: 1.15,
-        reference_positive: true, reference_negative: true, reference_megapixels: 0.25, reference_phase: "early", reference_start: 0, reference_end: 1/3, useReferences: false,
+        reference_fit: "normal", reference_positive: true, reference_negative: true, reference_megapixels: 0.25, reference_phase: "early", reference_start: 0, reference_end: 1/3, useReferences: false,
         steps: 20, cfg: 1.0, denoise: 1.0,
         sampler_name: "euler", scheduler: "simple",
         seed: -1, randomSeed: true, reuseSeed: false, batch_size: 1, count: 1,
@@ -366,6 +366,7 @@ Item {
         g.system_prompt = d.system_prompt !== undefined ? d.system_prompt : ""
         g.krea_sampling = d.krea_sampling || "native"
         g.krea_shift = d.krea_shift !== undefined ? d.krea_shift : 1.15
+        g.reference_fit = d.reference_fit || "normal"
         g.reference_positive = d.reference_positive !== false
         g.reference_negative = d.reference_negative !== false
         g.reference_megapixels = d.reference_megapixels || 0.25
@@ -502,6 +503,7 @@ Item {
         if (App.referenceImages) {
             imageParams.reference_megapixels = g.reference_megapixels
             if (App.layoutSupport) {
+                imageParams.reference_fit = g.reference_fit
                 imageParams.reference_positive = g.reference_positive
                 imageParams.reference_negative = g.reference_negative
                 imageParams.reference_start = g.reference_start
@@ -1371,6 +1373,7 @@ Item {
                               && App.restoreInputImage(refs[0])
             if (g.useReferences) App.restoreEditImages(refs.slice(1))
         }
+        g.reference_fit = p.reference_fit || "normal"
         g.reference_positive = p.reference_positive !== false
         g.reference_negative = p.reference_negative !== false
         g.reference_phase = p.reference_phase || "early"

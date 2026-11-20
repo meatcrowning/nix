@@ -213,7 +213,9 @@ active and newest frame.
 
 MOSS references use `PainterMossReference` chains (no fixed slot count) and
 `PainterMossReferenceEncode` in the existing live backend module. One Reference
-MP budget applies per whole image; masks/cropping are not connected. Reference
+MP budget applies per image after `reference_fit`: normal preserves proportions,
+cropped center-crops to the output aspect, and stretched fits without cropping.
+The graph uses ImageScale before encoding; masks are not connected. Reference
 jobs reject PPM and omit token heatmaps because vision tokens change alignment.
 Reference timing selects a start/end fraction of the actual sampling steps,
 with text-only conditioning outside the interval on both CFG branches.

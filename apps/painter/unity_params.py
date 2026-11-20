@@ -372,6 +372,7 @@ class ParameterForm(object):
         self.controls['system_prompt'] = system_box.text
         self.combo('krea_sampling', 'Krea sampling', ['native', 'manual', 'turbo_fixed'])
         self.number('krea_shift', 'Krea shift', .01, 100, .1, 2)
+        self.combo('reference_fit', 'Fit', ['normal', 'cropped', 'stretched'])
         self.number('reference_megapixels', 'Reference MP', .01, 16, .05, 2)
         budget = self.controls['reference_megapixels']
         self.grid.remove(budget)
@@ -671,10 +672,10 @@ class ParameterForm(object):
             self.visible(key, flags.get('encoderControls') and not edit)
         for key in ['reference_megapixels', 'useReferences']:
             self.visible(key, flags.get('referenceImages') and not edit)
-        for key in ('reference_positive', 'reference_negative'):
+        for key in ('reference_fit', 'reference_positive', 'reference_negative'):
             self.visible(key, flags.get('layoutSupport') and self.controls['useReferences'].get_active() and not edit)
         self.visible('reference_range', flags.get('layoutSupport') and flags.get('referenceImages') and self.controls['useReferences'].get_active() and not edit)
-        self.controls['reference_megapixels'].set_tooltip_text('Pixel budget per whole image; no cropping. MOSS references do not support heatmaps or PPM weighting.')
+        self.controls['reference_megapixels'].set_tooltip_text('Pixel budget per reference after fitting. MOSS references do not support heatmaps or PPM weighting.')
         self.controls['seed'].set_sensitive(self.controls['seedPolicy'].get_active_id() == 'Fixed')
         images = edit or video or flags.get('referenceImages') or flags.get('optionalEditImage')
         self.input_button.set_visible(bool(images))

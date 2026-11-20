@@ -5528,6 +5528,9 @@ def test_moss(win, ctl, tmp):
         check(model + " supports whole-image references", ctl.referenceImages)
         APP.set("useReferences", True)
         APP.set("reference_megapixels", .5)
+        fit_picker = next(item for item in walk(win.contentItem()) if item.objectName() == "referenceFit")
+        fit_picker.accept("cropped")
+        check(model + " reference fit saved", prop(APP, "gen")["reference_fit"] == "cropped")
         spin(50)
         positive_toggle = next(item for item in walk(win.contentItem()) if item.objectName() == 'referencePositive')
         negative_toggle = next(item for item in walk(win.contentItem()) if item.objectName() == 'referenceNegative')
@@ -5570,7 +5573,7 @@ def test_moss(win, ctl, tmp):
 
 
         wire = E.submission(prop(APP, "gen"), ctl)
-        check(model + " Unity reference submission", wire['reference_positive'] and not wire['reference_negative'] and wire['use_reference_images'] and wire['reference_megapixels'] == .5 and wire['reference_start'] == .2 and wire['reference_end'] == .8)
+        check(model + " Unity reference submission", wire['reference_fit'] == 'cropped' and wire['reference_positive'] and not wire['reference_negative'] and wire['use_reference_images'] and wire['reference_megapixels'] == .5 and wire['reference_start'] == .2 and wire['reference_end'] == .8)
         from PySide6.QtGui import QImage
         source = os.path.join(tmp, "moss-reference.png")
         image = QImage(96, 32, QImage.Format_RGB32)
@@ -5587,10 +5590,10 @@ def test_moss(win, ctl, tmp):
             APP.metaObject().invokeMethod(APP, "submit")
             spin(50)
             check(model + " Qt references reach submission", len(sent) == 1 and
-                  sent[0]['reference_positive'] and not sent[0]['reference_negative'] and sent[0]['reference_megapixels'] == .5 and sent[0]['reference_start'] == .2 and sent[0]['reference_end'] == .8 and
+                  sent[0]['reference_fit'] == 'cropped' and sent[0]['reference_positive'] and not sent[0]['reference_negative'] and sent[0]['reference_megapixels'] == .5 and sent[0]['reference_start'] == .2 and sent[0]['reference_end'] == .8 and
                   sent[0]['reference_images_local'] == [source, source])
             APP.injectParams(sent[0])
-            check(model + ' reference branches restore', prop(APP, 'gen')['reference_positive'] and not prop(APP, 'gen')['reference_negative'])
+            check(model + ' reference branches restore', prop(APP, 'gen')['reference_fit'] == 'cropped' and prop(APP, 'gen')['reference_positive'] and not prop(APP, 'gen')['reference_negative'])
             check(model + " references restore", prop(APP, 'gen')['useReferences'] and prop(APP, 'gen')['reference_start'] == .2 and prop(APP, 'gen')['reference_end'] == .8 and ctl.inputImage != '')
         finally:
             ctl._start_jobs, ctl.client.upload_image, ctl._object_info = original_start, original_upload, original_oi

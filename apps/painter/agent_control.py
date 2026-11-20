@@ -147,6 +147,7 @@ class Controller:
         for key, options in [('sampler_name', self.ctl.samplers),
                              ('scheduler', self.ctl.schedulers + [self.ctl.nativeScheduler]),
                              ('reference_phase', ['early', 'middle', 'late']),
+                             ('reference_fit', ['normal', 'cropped', 'stretched']),
                              ('krea_sampling', ['native', 'manual', 'turbo_fixed'])]:
             if key in patch and patch[key] not in options:
                 raise ValueError('Unknown ' + key)

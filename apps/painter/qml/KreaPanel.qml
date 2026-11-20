@@ -60,9 +60,20 @@ Panel {
         onToggled: function(v) { root.set("useReferences", v) }
     }
     Field {
+        label: "Fit"
+        visible: App.layoutSupport && root.gen.useReferences
+        hint: "Normal preserves each reference; cropped or stretched matches the output aspect ratio."
+        Picker {
+            objectName: "referenceFit"
+            options: ["normal", "cropped", "stretched"]
+            value: root.gen.reference_fit
+            onPicked: function(v) { root.set("reference_fit", v) }
+        }
+    }
+    Field {
         label: "MP"
         visible: root.gen.useReferences
-        hint: "Pixel budget for each whole reference image; aspect ratio is preserved."
+        hint: "Pixel budget for each reference after fitting."
         Row {
             spacing: 8
             Spin {

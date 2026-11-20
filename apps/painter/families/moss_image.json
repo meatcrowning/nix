@@ -22,6 +22,7 @@
   "supports_loras": true,
   "toggles": {"negpip": false, "model_sampling": false},
   "defaults": {
+    "reference_fit": "normal",
     "reference_positive": true,
     "reference_negative": true,
     "reference_megapixels": 0.25,

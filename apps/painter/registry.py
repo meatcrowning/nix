@@ -596,9 +596,24 @@ class Registry:
             if not math.isfinite(budget) or not .01 <= budget <= 16:
                 raise G.GraphError("Reference MP must be between 0.01 and 16")
             p["reference_megapixels"] = budget
+            fit = p.get("reference_fit", "normal")
+            if fit not in ("normal", "cropped", "stretched"):
+                raise G.GraphError("Unknown reference fit: " + str(fit))
+            p["reference_fit"] = fit
             previous = None
             for i, ref in enumerate(moss_refs):
                 image = g.add_node("LoadImage", {"image": ref}, f"reference_{i}")
+                if fit != "normal":
+                    # Fit against the actual latent, including dimension rounding.
+                    w, h = p.get("width"), p.get("height")
+                    if not w or not h:
+                        res = fam["resolution"]
+                        w, h = calc_dims(res["aspect"], res["megapixels"], res["multiple"])
+                    image = g.add_node("ImageScale", {
+                        "image": [image, 0], "upscale_method": "lanczos",
+                        "width": int(w), "height": int(h),
+                        "crop": "center" if fit == "cropped" else "disabled",
+                    }, f"reference_fit_{i}")
                 inputs = {"image": [image, 0], "megapixels": budget}
                 if previous is not None:
                     inputs["references"] = [previous, 0]
