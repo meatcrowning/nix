@@ -9,6 +9,7 @@ colour scheme instead of the theme's own.
 import json, os, shutil, sys, glob
 import oxyscheme
 import taskframes
+import menuframe
 
 # Breeze deliberately leaves these baked -- they are illustrations, not chrome.
 # branding.svgz is the only multi-hue raster in the theme (the KDE logo).
@@ -46,6 +47,13 @@ def main(src, out):
     # Task states need full frames, unlike the overlay-only button focus glow.
     taskframes.build(os.path.join(out, "widgets/button.svgz"),
                      os.path.join(out, "widgets/tasks.svgz"))
+
+    # Popups and tooltips wear the same frame as Oxygen's context menus.
+    for variant in ("", "opaque/", "solid/", "translucent/"):
+        for rel in ("dialogs/background.svgz", "widgets/tooltip.svgz"):
+            p = os.path.join(out, variant + rel)
+            if os.path.exists(p):
+                menuframe.build(p)
 
     # plasmarc carries the theme's blur/compositing hints -- keep it.
     for extra in ("plasmarc",):
