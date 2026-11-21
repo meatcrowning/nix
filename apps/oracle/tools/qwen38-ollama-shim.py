@@ -18,9 +18,12 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import http.client
 import json
 import os
+import select
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -450,7 +453,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the client already left; nothing is listening for this
 
     def _proxy(self, body: bytes) -> None:
         url = UPSTREAM + self.path
@@ -586,11 +592,57 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as error:  # surfaced to chatter, never a blank failure
             self._send_json(503, {"error": str(error)})
 
+    def _watch_client(self, upstream: http.client.HTTPConnection,
+                      done: threading.Event) -> None:
+        """Cancel the generation as soon as the client hangs up.
+
+        During prompt processing llama-server sends nothing, so the relay
+        never writes and would only notice a stopped reply once prefill ended,
+        holding REQUEST_LOCK (and refusing his next send) for that long.  The
+        request body is fully read and the reply is Connection: close, so the
+        client socket turns readable only by closing.
+        """
+        while not done.wait(0.25):
+            try:
+                ready, _, _ = select.select([self.connection], [], [], 0)
+                if not ready:
+                    continue
+                gone = not self.connection.recv(1, socket.MSG_PEEK)
+            except (OSError, ValueError):
+                gone = True
+            if not gone:
+                continue
+            log("client disconnected; cancelling generation")
+            sock = upstream.sock
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            return
+
     def _chat_stream(self, payload: dict) -> None:
-        req = urllib.request.Request(
-            LLAMA + "/v1/chat/completions", data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"})
-        response = urllib.request.urlopen(req, timeout=None)
+        url = urllib.parse.urlsplit(LLAMA)
+        upstream = http.client.HTTPConnection(url.hostname, url.port, timeout=None)
+        done = threading.Event()
+        watcher = threading.Thread(target=self._watch_client,
+                                   args=(upstream, done), daemon=True)
+        try:
+            upstream.request("POST", "/v1/chat/completions", body=json.dumps(payload).encode(),
+                             headers={"Content-Type": "application/json"})
+            watcher.start()
+            response = upstream.getresponse()
+            if response.status != 200:
+                raise urllib.error.HTTPError(LLAMA + "/v1/chat/completions", response.status,
+                                             response.reason, response.headers, response)
+            self._relay_stream(payload, response)
+        finally:
+            done.set()
+            if watcher.is_alive():
+                watcher.join(1)
+            upstream.close()
+
+    def _relay_stream(self, payload: dict, response) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
         self.send_header("Connection", "close")

@@ -308,6 +308,29 @@ def main():
                 Llama.mode = "normal"
             assert not worker.is_alive() and not shim.REQUEST_LOCK.locked()
 
+            # A stop during prefill (upstream silent) frees the router at once,
+            # not when llama-server next writes.
+            import socket, time
+            Llama.mode = "blocked"; Llama.entered.clear(); Llama.release.clear()
+            body = json.dumps({"model": route.name, "messages": [], "stream": True}).encode()
+            client = socket.create_connection(("127.0.0.1", router.server_port))
+            client.sendall(b"POST /api/chat HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                           b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+            try:
+                assert Llama.entered.wait(3)
+                assert shim.REQUEST_LOCK.locked()
+                client.close()
+                deadline = time.monotonic() + 3
+                while shim.REQUEST_LOCK.locked() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                assert not shim.REQUEST_LOCK.locked(), "stop held the router until upstream wrote"
+                assert not Llama.release.is_set()
+            finally:
+                Llama.release.set()
+                Llama.mode = "normal"
+            assert json.loads(post(base + "/api/chat", {
+                "model": route.name, "stream": False, "messages": []}))["done"]
+
             # Real engine lifecycle against fake processes/network only.
             events = []
             class Process:
