@@ -363,6 +363,18 @@ in
       dolphinrc.General.ShowFullPath = true;
       dolphinrc.General.ShowStatusBar = "FullWidth";
       dolphinrc.General.ShowZoomSlider = true;
+      dolphinrc.PreviewSettings.Plugins = lib.concatStringsSep "," [
+        "audiothumbnail" "blenderthumbnail" "comicbookthumbnail"
+        "cursorthumbnail" "directorythumbnail" "djvuthumbnail"
+        "ebookthumbnail" "exrthumbnail" "ffmpegthumbs" "fontthumbnail"
+        "gsthumbnail" "imagethumbnail" "jpegthumbnail" "kraorathumbnail"
+        "mobithumbnail" "opendocumentthumbnail" "rawthumbnail"
+        "svgthumbnail" "windowsexethumbnail" "windowsimagethumbnail"
+      ];
+      # Zero disables remote previews, including locally mounted network
+      # files. KIO reads this as a byte count, not an "unlimited" sentinel.
+      kdeglobals.PreviewSettings.MaximumRemoteSize = "18446744073709551615";
+      kdeglobals.PreviewSettings.EnableRemoteFolderThumbnail = true;
       dolphinrc."KFileDialog Settings"."Places Icons Auto-resize" = false;
       dolphinrc."KFileDialog Settings"."Places Icons Static Size" = 22;
       # Konsole's clean window is a desktop preference, not an accidental

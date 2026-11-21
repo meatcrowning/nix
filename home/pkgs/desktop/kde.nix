@@ -45,6 +45,13 @@ in {
     # in transitively; declaring them keeps book's standalone system complete
     # too.
     dolphin
+    # Remote previews use KIO-FUSE for seekable access instead of downloading
+    # a whole video into a temporary file before decoding its thumbnail.
+    kio-fuse
+    kio-extras
+    ffmpegthumbs
+    kimageformats
+    qtimageformats
     gwenview
     haruna
     okular
