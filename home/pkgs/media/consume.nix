@@ -1,6 +1,16 @@
 {pkgs, lib, host, ... }:
 
 {
+	# Let Dolphin use KIO/FUSE's authenticated connection for remote files.
+	# VLC's native SFTP/SMB clients otherwise prompt independently of KIO.
+	xdg.dataFile."applications/vlc.desktop".source = pkgs.runCommand "vlc-kio-desktop" {} ''
+		cp ${pkgs.vlc}/share/applications/vlc.desktop "$out"
+		chmod u+w "$out"
+		substituteInPlace "$out" \
+			--replace-fail 'X-KDE-Protocols=ftp,http,https,mms,rtmp,rtsp,sftp,smb' \
+			'X-KDE-Protocols=ftp,http,https,mms,rtmp,rtsp'
+	'';
+
 	home.packages = with pkgs; [
 		vlc
 		kew
