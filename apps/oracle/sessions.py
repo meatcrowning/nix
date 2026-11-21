@@ -42,7 +42,7 @@ class Sessions(QObject):
     def _store_argv():
         if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            ssh = os.environ.get("OLLAMA_SSH", "ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:

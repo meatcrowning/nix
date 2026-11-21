@@ -18,8 +18,7 @@ trap '' PIPE
 
 PORT="${OLLAMA_PORT:-11434}"
 WPORT="${AI_WARDEN_PORT:-8199}"     # top's ai-warden; see the header comment
-SSH="${OLLAMA_SSH:-/usr/bin/ssh}"   # Fedora's ssh: nix-built binaries on book
-                                    # cannot resolve .local names (nss-mdns).
+SSH="${OLLAMA_SSH:-ssh}"            # book's launcher pins the Nix openssh
 CONNECT_TIMEOUT="${OLLAMA_CONNECT_TIMEOUT:-15}"
 
 say() { printf 'ollama-tunnel: %s\n' "$*" >&2; }

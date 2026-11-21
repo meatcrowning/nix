@@ -4326,7 +4326,7 @@ class Jobs(QObject):
     def _argv(*args):
         if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            ssh = os.environ.get("OLLAMA_SSH", "ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:
@@ -4616,7 +4616,7 @@ class CtxFit(QObject):
         handshake.
         """
         host = os.environ.get("OLLAMA_SSH_HOST", "top")
-        ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+        ssh = os.environ.get("OLLAMA_SSH", "ssh")
         argv = [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=4"]
         ctl = os.environ.get("OLLAMA_SSH_CTL")
         if ctl:
@@ -9628,7 +9628,7 @@ class Ollama(QObject):
         host = str(spec.get("host") or "").strip().lower()
         if not host or host == LOCAL_HOST:
             return [spec["prog"]]
-        ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+        ssh = os.environ.get("OLLAMA_SSH", "ssh")
         argv = [ssh, "-o", "BatchMode=yes"]
         ctl = os.environ.get("OLLAMA_SSH_CTL")
         if ctl:
@@ -9805,7 +9805,7 @@ class Ollama(QObject):
         script = os.environ.get("ORACLE_MUSIC", "").strip() or MUSIC_SCRIPT
         if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            ssh = os.environ.get("OLLAMA_SSH", "ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:
@@ -10554,7 +10554,7 @@ class Ollama(QObject):
         local = LOCAL_HOST
         if host == local:
             return [sys.executable, FS_SCRIPT, WRITE_ROOT, READ_ROOT]
-        ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+        ssh = os.environ.get("OLLAMA_SSH", "ssh")
         argv = [ssh, "-o", "BatchMode=yes"]
         if ON_BOOK and host == "top":
             ssh_host = os.environ.get("OLLAMA_SSH_HOST", "top")
@@ -11246,7 +11246,7 @@ class Ollama(QObject):
     def _painter_ssh():
         """`ssh … top` — the generator's host, and the kill's."""
         host = os.environ.get("OLLAMA_SSH_HOST", "top")
-        ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+        ssh = os.environ.get("OLLAMA_SSH", "ssh")
         argv = [ssh, "-o", "BatchMode=yes"]
         ctl = os.environ.get("OLLAMA_SSH_CTL")
         if ctl:
@@ -12020,7 +12020,7 @@ class Ollama(QObject):
         extra = [] if EXEC_NET else ["--no-net"]
         if TOOLS_REMOTE:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            ssh = os.environ.get("OLLAMA_SSH", "ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:
@@ -12263,7 +12263,7 @@ class Ollama(QObject):
         tunnel's ssh master from `book`."""
         if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            ssh = os.environ.get("OLLAMA_SSH", "ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:
@@ -12345,7 +12345,7 @@ class Ollama(QObject):
         """
         if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            ssh = os.environ.get("OLLAMA_SSH", "ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:
@@ -12404,7 +12404,7 @@ class Ollama(QObject):
         in one canonical place both machines share."""
         if ON_BOOK and not STORE_LOCAL:
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            ssh = os.environ.get("OLLAMA_SSH", "ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:
@@ -12943,7 +12943,7 @@ class Backend(QObject):
             # exactly this command; ollama-tunnel.sh exports the resolved host
             # and the ssh control path so this reuses the tunnel's master.
             host = os.environ.get("OLLAMA_SSH_HOST", "top")
-            ssh = os.environ.get("OLLAMA_SSH", "/usr/bin/ssh")
+            ssh = os.environ.get("OLLAMA_SSH", "ssh")
             argv = [ssh, "-o", "BatchMode=yes"]
             ctl = os.environ.get("OLLAMA_SSH_CTL")
             if ctl:

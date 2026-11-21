@@ -49,13 +49,9 @@ let
     exec "$@"
   '';
 
-  oracle =
-    if hostProfile.isBook then
-      pkgs.writeShellScriptBin "oracle" ''
-        exec /home/lam/nix/apps/oracle/tools/ollama-tunnel.sh -- \
-             ${hostProfile.bookPython pkgs} /home/lam/nix/apps/oracle/main.py "$@"
-      ''
-    else
+  # Both hosts run the same wrapped interpreter: the Plasma face needs the KDE
+  # style/QPA/QML plugins below on book as much as on top.
+  oracleApp =
       pkgs.stdenv.mkDerivation {
         pname = "oracle";
         version = "live";
@@ -93,7 +89,7 @@ let
           makeWrapper ${pyEnv}/bin/python3 $out/bin/oracle \
             --add-flags /home/lam/nix/apps/oracle/main.py \
             --prefix PATH : ${lib.makeBinPath [ pkgs.yt-dlp pkgs.playerctl ]} \
-            --set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda \
+            ${lib.optionalString (!hostProfile.isBook) "--set-default QT_FFMPEG_DECODING_HW_DEVICE_TYPES cuda"} \
             --prefix XDG_DATA_DIRS : ${lib.concatStringsSep ":" [
               "${pkgs.kdePackages.oxygen-icons}/share"
               "${pkgs.kdePackages.breeze-icons}/share"
@@ -108,6 +104,22 @@ let
           runHook postInstall
         '';
       };
+
+  # Book first forwards top's Ollama and warden, then runs the same package.
+  oracle =
+    if hostProfile.isBook then
+      pkgs.symlinkJoin {
+        name = "oracle-book";
+        paths = [
+          (pkgs.writeShellScriptBin "oracle" ''
+            export OLLAMA_SSH=${pkgs.openssh}/bin/ssh
+            exec /home/lam/nix/apps/oracle/tools/ollama-tunnel.sh -- \
+                 ${oracleApp}/bin/oracle "$@"
+          '')
+          oracleApp
+        ];
+      }
+    else oracleApp;
 in
 {
   home.packages = [ oracle ];
