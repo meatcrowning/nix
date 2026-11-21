@@ -1,6 +1,8 @@
 { config, pkgs, lib, ... }:
 
 {
+  imports = [ ../../lib/plasma-tooltip-padding.nix ];
+
   services = {
     # Swapped SDDM for ly: SDDM's greeter is itself Wayland/DRM-capable and
     # on this NVIDIA card sometimes fails to reacquire the DRM master after

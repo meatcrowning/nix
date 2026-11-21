@@ -1,0 +1,22 @@
+--- a/src/declarativeimports/core/private/DefaultToolTip.qml	2026-11-21 00:01:28.068520385 -0900
++++ b/src/declarativeimports/core/private/DefaultToolTip.qml	2026-11-21 00:01:28.078888944 -0900
+@@ -17,8 +17,8 @@
+     property Item toolTip
+     property int preferredTextWidth: Kirigami.Units.gridUnit * 20
+ 
+-    implicitWidth: mainLayout.implicitWidth + Kirigami.Units.largeSpacing * 2
+-    implicitHeight: mainLayout.implicitHeight + Kirigami.Units.largeSpacing * 2
++    implicitWidth: mainLayout.implicitWidth
++    implicitHeight: mainLayout.implicitHeight
+ 
+     LayoutMirroring.enabled: Application.layoutDirection === Qt.RightToLeft
+     LayoutMirroring.childrenInherit: true
+@@ -29,7 +29,7 @@
+     RowLayout {
+         id: mainLayout
+         anchors.centerIn: parent
+-        anchors.margins: Kirigami.Units.largeSpacing
++        anchors.margins: 0
+ 
+         spacing: Kirigami.Units.gridUnit
+ 

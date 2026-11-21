@@ -1,0 +1,24 @@
+diff -ru a/applets/taskmanager/qml/ToolTipDelegate.qml b/applets/taskmanager/qml/ToolTipDelegate.qml
+--- a/applets/taskmanager/qml/ToolTipDelegate.qml	2026-11-21 00:01:28.083474331 -0900
++++ b/applets/taskmanager/qml/ToolTipDelegate.qml	2026-11-21 00:01:28.092025812 -0900
+@@ -95,7 +95,7 @@
+                 // when vertical, all delegates have the same fixed width, but with an extra
+                 // gridUnit when thumbnails are disabled to match the default tooltip margins
+                 let listContentWidth = groupToolTipListView.orientation == ListView.Vertical
+-                   ? toolTipDelegate.tooltipInstanceMaximumWidth + (toolTipDelegate.isWin && Plasmoid.configuration.showToolTips ? 0 : Kirigami.Units.gridUnit)
++                   ? toolTipDelegate.tooltipInstanceMaximumWidth
+                    : groupToolTipListView.contentWidth
+ 
+                 return leftPadding + rightPadding + Math.min(maximumWidth, Math.max(delegateModel.estimatedWidth, listContentWidth))
+diff -ru a/applets/taskmanager/qml/ToolTipInstance.qml b/applets/taskmanager/qml/ToolTipInstance.qml
+--- a/applets/taskmanager/qml/ToolTipInstance.qml	2026-11-21 00:01:28.084521441 -0900
++++ b/applets/taskmanager/qml/ToolTipInstance.qml	2026-11-21 00:01:28.095211314 -0900
+@@ -89,7 +89,7 @@
+         Layout.minimumWidth: (toolTipDelegate.isWin && Plasmoid.configuration.showToolTips) || toolTipDelegate.isGroup ? Layout.maximumWidth : 0
+         Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
+         // match margins of DefaultToolTip.qml in plasma-framework
+-        Layout.margins: toolTipDelegate.isWin && Plasmoid.configuration.showToolTips ? 0 : Kirigami.Units.gridUnit / 2
++        Layout.margins: 0
+ 
+         RowLayout {
+             id: header

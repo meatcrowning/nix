@@ -107,6 +107,8 @@
       air-hyprvtb = airOffload.hyprvtb;
       air-konsole = airOffload.konsole;
       air-oxygen = airOffload.oxygen;
+      air-libplasma = airOffload.libplasma;
+      air-plasma-desktop = airOffload.plasma-desktop;
     };
     nixosConfigurations = {
       # Deliberately standalone: sys/ and home/ import top's complete desktop.

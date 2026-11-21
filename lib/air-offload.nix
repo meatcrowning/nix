@@ -95,7 +95,7 @@ let
   crossKonsole = crossQt "konsole";
   oxygenHostTools = native.symlinkJoin {
     name = "oxygen-cross-host-tools";
-    paths = [ hostTools native.kdePackages.kcmutils.dev native.kdePackages.kpackage.dev ];
+    paths = [ hostTools ] ++ (with native.kdePackages; [ kcmutils.dev kpackage.dev kauth.dev ]);
   };
   crossOxygen = (crossQt "oxygen").overrideAttrs (old: {
     buildInputs = (old.buildInputs or []) ++ [ arm.kdePackages.kiconthemes ];
@@ -108,4 +108,41 @@ let
     cmakeFlags = old.cmakeFlags ++ [ "-DBUILD_QT5=OFF" "-DBUILD_QT6=ON" "-DKF6_HOST_TOOLING=${oxygenHostTools}/lib/cmake" ];
     postInstall = "";
   });
-in { hyprvtb = crossPlugin; konsole = crossKonsole; oxygen = crossOxygen; headers = headersX86; }
+  # replaceDependencies (lib/plasma-tooltip-padding.nix) needs the same
+  # store-name length as book's package, but cross builds always append the
+  # target triple. Copy the build under the native name and rewrite its own
+  # path, padded with slashes to keep every string the same length.
+  nativeNamed = name: drv: native.runCommand "${name}-${arm.kdePackages.${name}.version}"
+    { nativeBuildInputs = [ native.perl ]; } ''
+    cp -a ${drv} $out
+    chmod -R u+w $out
+    old=$(basename ${drv}) new=$(basename $out)
+    pad=$(printf "%''${#old}s" "" | cut -c$((''${#new} + 1))- | tr ' ' /)
+    find $out -type f -print0 | xargs -0 perl -0777 -pi -e "s|\Q$old\E(?!-)|$new$pad|g"
+    find $out -type l | while read -r l; do
+      t=$(readlink "$l"); ln -sfn "''${t//$old/$new}" "$l"
+    done
+    if grep -rqP "\Q$old\E(?!-)" $out; then echo "stale $old reference" >&2; exit 1; fi
+  '';
+  intltoolMerge = native.writeShellScript "intltool-merge" ''
+    PERL5LIB=${native.perlPackages.makePerlPath [ native.perlPackages.XMLParser ]} \
+      exec ${native.intltool}/bin/intltool-merge "$@"
+  '';
+  crossPatched = name: patch: nativeNamed name ((crossQt name).overrideAttrs (old: {
+    patches = (old.patches or []) ++ [ patch ];
+    cmakeFlags = old.cmakeFlags ++ [
+      "-DKF6_HOST_TOOLING=${oxygenHostTools}/lib/cmake"
+      "-DWaylandScanner_EXECUTABLE=${native.wayland-scanner.bin}/bin/wayland-scanner"
+      "-DQt6QmlTools_DIR=${native.qt6.qtdeclarative}/lib/cmake/Qt6QmlTools"
+      "-DQt6QuickTools_DIR=${native.qt6.qtdeclarative}/lib/cmake/Qt6QuickTools"
+      "-DINTLTOOL_MERGE=${intltoolMerge}"
+      "-DQt6ShaderToolsTools_DIR=${native.qt6.qtshadertools}/lib/cmake/Qt6ShaderToolsTools"
+    ];
+    doInstallCheck = false;
+  }));
+  crossLibplasma = crossPatched "libplasma" ../home/prog/plasma-tooltip-padding-libplasma.patch;
+  crossPlasmaDesktop = crossPatched "plasma-desktop" ../home/prog/plasma-tooltip-padding-taskmanager.patch;
+in {
+  hyprvtb = crossPlugin; konsole = crossKonsole; oxygen = crossOxygen; headers = headersX86;
+  libplasma = crossLibplasma; plasma-desktop = crossPlasmaDesktop;
+}

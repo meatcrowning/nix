@@ -10,6 +10,7 @@
     ./kwin-momentum.nix
     ./video.nix
     ./music-share.nix
+    ../../lib/plasma-tooltip-padding.nix
     inputs.apple-silicon.nixosModules.apple-silicon-support
   ];
 
