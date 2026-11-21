@@ -6,6 +6,7 @@
 {
   imports = [
     ./hardware-configuration.nix
+    ./fairydust.nix
     ./kwin-momentum.nix
     ./video.nix
     ./music-share.nix
