@@ -83,7 +83,6 @@
     "vm.watermark_boost_factor" = 0;
     "vm.watermark_scale_factor" = 125;
   };
-  systemd.tmpfiles.rules = [ "w- /sys/kernel/mm/lru_gen/enabled - - - - y" ];
   # PSI-based kills in the user slices before 7.3G runs out (sys/oomd.nix).
   systemd.oomd.enableUserSlices = true;
 
