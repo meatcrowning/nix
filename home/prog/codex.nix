@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, pkgs, ... }:
 
 # Codex's official six-lobed terminal mark, redrawn with Oxygen's cobalt glass,
 # silver rim, upper-left highlight and dark keyline.  It stays a full-colour
@@ -8,6 +8,10 @@
 # resolves under oxygen-live on both hosts without duplicating the bitmap into
 # every generated accent theme.
 {
+  # Codex prepends a bundled rg that cannot use NixOS's dynamic linker.
+  # Our existing ~/.local/bin PATH entry precedes it in agent shells.
+  home.file.".local/bin/rg".source = "${pkgs.ripgrep}/bin/rg";
+
   home.file.".local/share/icons/hicolor/16x16/apps/codex.png".source = ./app-icons/codex/16.png;
   home.file.".local/share/icons/hicolor/22x22/apps/codex.png".source = ./app-icons/codex/22.png;
   home.file.".local/share/icons/hicolor/32x32/apps/codex.png".source = ./app-icons/codex/32.png;

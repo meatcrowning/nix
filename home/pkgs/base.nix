@@ -19,6 +19,7 @@
 
     btop
     tree
+    ripgrep
     unzip
     git
     gh
