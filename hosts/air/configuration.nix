@@ -74,7 +74,16 @@
   services.udev.extraRules = ''
     ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="macsmc-battery", ATTR{charge_control_end_threshold}="80"
   '';
-  zramSwap.enable = true;
+  # macOS-style memory: compress early and deep, spill to disk only after zram.
+  zramSwap = { enable = true; memoryPercent = 100; priority = 100; };
+  swapDevices = [{ device = "/var/lib/swapfile"; size = 4096; priority = 1; }];
+  boot.kernel.sysctl = {
+    "vm.swappiness" = 180; # zram is cheaper than dropping page cache
+    "vm.page-cluster" = 0; # no swap readahead; zram has no seek cost
+    "vm.watermark_boost_factor" = 0;
+    "vm.watermark_scale_factor" = 125;
+  };
+  systemd.tmpfiles.rules = [ "w- /sys/kernel/mm/lru_gen/enabled - - - - y" ];
   # PSI-based kills in the user slices before 7.3G runs out (sys/oomd.nix).
   systemd.oomd.enableUserSlices = true;
 
