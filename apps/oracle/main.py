@@ -3416,6 +3416,10 @@ def sampler_for(model, preset="default"):
         # runtime defaults and invalidate comparisons with this model's card.
         return {"temperature": 1.0, "top_p": 0.95, "top_k": 20,
                 "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0}
+    if "inkling-2-mini" in name:
+        # Model card: temperature 1.0 with no truncation, for any task.
+        return {"temperature": 1.0, "top_p": 1.0, "top_k": 0, "min_p": 0.0,
+                "repeat_penalty": 1.0}
     if re.search(r"qwen3[._-]6(?:\D|$)", name):
         return dict(QWEN_PUBLISHED_SAMPLER)
     opts = {}

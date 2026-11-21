@@ -261,6 +261,13 @@ def main():
                                "prism-server", 32768, "PQ2_0", shim.BONSAI.args)
             shim.ROUTES.append(route)
             assert "vision" not in json.loads(post(base + "/api/show", {"model": route.name}))["capabilities"]
+            shim.ROUTES.append(shim.INKLING)
+            show = json.loads(post(base + "/api/show", {"model": shim.INKLING.name}))
+            shim.ROUTES.remove(shim.INKLING)
+            assert show["model_info"] == {"general.architecture": "inkling2_loop",
+                                          "inkling2_loop.context_length": 1048576}
+            assert show["details"]["parameter_size"] == "26.4B"
+            assert "vision" in show["capabilities"]
             try:
                 post(base + "/api/chat", {"model": route.name,
                     "messages": [{"role": "user", "images": [png]}]})
@@ -342,6 +349,25 @@ def main():
                 assert engines.route is route2
                 engines.stop_llama()
                 assert engines.llama is None
+                # Inkling: its own sampler, single-pass experts on the CPU.
+                ink = shim.Route(shim.INKLING.name, str(weights), 10, route.digest,
+                                 "inkling-server", shim.INKLING.ctx, shim.INKLING.quant,
+                                 shim.INKLING.args, arch=shim.INKLING.arch,
+                                 sampling=shim.INKLING.sampling)
+                engines.start_llama(ink)
+                argv = events[-1][1]
+                assert argv[0] == "inkling-server" and "--spec-type" not in argv
+                assert argv[argv.index("--top-k") + 1] == "0"
+                assert argv[argv.index("--top-p") + 1] == "1.0"
+                assert argv.count("--temp") == 1
+                pattern = argv[argv.index("--override-tensor") + 1]
+                import re
+                rx = re.compile(pattern.split("=")[0])
+                assert pattern.endswith("=CPU")
+                cpu = {i for i in range(24) if rx.search(f"blk.{i}.ffn_gate_up_exps.weight")}
+                assert cpu == set(range(6)) | set(range(18, 24)), cpu
+                assert not rx.search("blk.0.attn_q.weight")
+                engines.stop_llama()
             with patch.object(shim.urllib.request, "urlopen", side_effect=OSError("fake unload failure")), \
                  patch.object(shim.subprocess, "Popen") as launch:
                 try:
@@ -383,7 +409,7 @@ def main():
         for srv in (router, llama, upstream):
             if srv is not None:
                 srv.shutdown(); srv.server_close()
-    print("router: original protocol, two routes, lifecycle, concurrency, corrupt/missing weights and stream failures passed")
+    print("router: original protocol, three routes, lifecycle, concurrency, corrupt/missing weights and stream failures passed")
 
 
 if __name__ == "__main__":

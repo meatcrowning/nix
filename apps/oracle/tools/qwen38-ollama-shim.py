@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ollama-compatible router for chatter's Qwen QAT and Bonsai models.
+"""Ollama-compatible router for chatter's Qwen QAT, Bonsai and Inkling models.
 
 Ordinary requests are relayed byte-for-byte to the Ollama daemon on the
 private upstream port.  The registered tags Ollama cannot parse are translated to
@@ -72,11 +72,20 @@ class Artifact:
             self.verified_stat = identity
 
 
+#: Qwen's published thinking profile; the default for routes that name none.
+QWEN_SAMPLING = ("--temp", "1.0", "--top-p", "0.95", "--top-k", "20",
+                 "--min-p", "0.0", "--presence-penalty", "0.0",
+                 "--repeat-penalty", "1.0")
+
+
 class Route(Artifact):
-    def __init__(self, name, path, size, digest, binary, ctx, quant, args=(), projector=None):
+    def __init__(self, name, path, size, digest, binary, ctx, quant, args=(), projector=None,
+                 arch="qwen35", params="26.9B", native_ctx=262144, sampling=QWEN_SAMPLING):
         super().__init__(name, path, size, digest)
         self.binary, self.ctx, self.quant, self.args = binary, ctx, quant, args
         self.projector = projector
+        self.arch, self.params, self.native_ctx = arch, params, native_ctx
+        self.sampling = sampling
 
     def verify(self):
         super().verify()
@@ -84,8 +93,8 @@ class Route(Artifact):
             self.projector.verify()
 
     def details(self):
-        return {"format": "gguf", "family": "qwen35",
-                "parameter_size": "26.9B", "quantization_level": self.quant}
+        return {"format": "gguf", "family": self.arch,
+                "parameter_size": self.params, "quantization_level": self.quant}
 
     def tag(self):
         return {"name": self.name, "model": self.name, "size": self.size,
@@ -110,7 +119,31 @@ BONSAI = Route("prism-ml/Ternary-Bonsai-2-27B-PQ2_0",
                os.environ.get("BONSAI_MODEL_PATH", "/home/lam/.local/share/bonsai/" + BONSAI_DIGEST + ".gguf"),
                7206168928, BONSAI_DIGEST, os.environ.get("BONSAI_LLAMA_BIN", ""),
                32768, "PQ2_0", ("--parallel", "1", "--cache-type-k", "f16", "--cache-type-v", "f16"))
-ROUTES = [QWEN] + ([BONSAI] if BONSAI.binary else [])
+INKLING_DIGEST = "e64276656f072e9b2197a61723667cbdb71da66a716ffd966e572c21088f3cd3"
+INKLING_MMPROJ_DIGEST = "3bff75ffeb2d6e0371ba7bd42e30d26a7d98aea681fa44b03b5a20891cfa2c5f"
+INKLING_DIR = os.environ.get("INKLING_DIR", "/home/lam/.local/share/inkling")
+INKLING = Route("thinkingmachines/Inkling-2-Mini:UD-Q4_K_XL",
+                os.path.join(INKLING_DIR, INKLING_DIGEST + ".gguf"),
+                17629760736, INKLING_DIGEST, os.environ.get("INKLING_LLAMA_BIN", ""),
+                int(os.environ.get("INKLING_CTX", "32768")), "UD-Q4_K_XL",
+                # 26.4B MoE, 15.8 GB of it experts: more than the 12 GB GPU.
+                # Layers 6-17 run three times per token, so their experts stay
+                # on the GPU and only the single-pass layers' experts (0-5,
+                # 18-23) are computed from RAM.
+                # The 201k-token vocabulary makes a 512-token ubatch's compute
+                # buffer 3.4 GB; 128 loads at 11.0 of 12.2 GB (measured on top).
+                ("--parallel", "1", "--batch-size", "512", "--ubatch-size", "128",
+                 "--override-tensor",
+                 os.environ.get("INKLING_CPU_TENSORS",
+                                r"blk\.([0-5]|1[89]|2[0-3])\.ffn_.*_exps\.=CPU")),
+                projector=Artifact("Inkling 2 Mini vision projector",
+                                   os.path.join(INKLING_DIR, INKLING_MMPROJ_DIGEST + ".gguf"),
+                                   639348160, INKLING_MMPROJ_DIGEST),
+                arch="inkling2_loop", params="26.4B", native_ctx=1048576,
+                # Model card: temperature 1.0 and no truncation.
+                sampling=("--temp", "1.0", "--top-p", "1.0", "--top-k", "0",
+                          "--min-p", "0.0", "--repeat-penalty", "1.0"))
+ROUTES = [QWEN] + [r for r in (BONSAI, INKLING) if r.binary]
 # Covers the whole generation, not just Popen: concurrent clients must never
 # switch/unload an engine while another request is still using it.
 REQUEST_LOCK = threading.Lock()
@@ -335,10 +368,8 @@ class Engines:
                 "--jinja", "--reasoning-budget", "-1",
                 "--ctx-size", str(route.ctx), "--host", str(parsed.hostname),
                 "--port", str(parsed.port), "-ngl", "99",
-                "--temp", "1.0", "--top-p", "0.95", "--top-k", "20",
-                "--min-p", "0.0", "--presence-penalty", "0.0",
-                "--repeat-penalty", "1.0", "--flash-attn", "on",
-                "--slots", "--metrics",
+            ] + list(route.sampling) + [
+                "--flash-attn", "on", "--slots", "--metrics",
             ] + (["--mmproj", route.projector.path] if route.projector else ["--no-mmproj"]) + list(route.args)
             self.llama = subprocess.Popen(argv)
             self.route = route
@@ -508,8 +539,8 @@ class Handler(BaseHTTPRequestHandler):
     def _show(self, route=QWEN) -> None:
         self._send_json(200, {
             "details": route.details(),
-            "model_info": {"general.architecture": "qwen35",
-                           "qwen35.context_length": 262144},
+            "model_info": {"general.architecture": route.arch,
+                           route.arch + ".context_length": route.native_ctx},
             "capabilities": ["completion", "tools", "thinking"] + (["vision"] if route.projector else []),
         })
 

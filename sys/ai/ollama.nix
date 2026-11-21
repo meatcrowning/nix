@@ -5,6 +5,7 @@
 }: let
   qwen38ShimEnabled = true;
   bonsaiLlama = pkgs.callPackage ../../lib/bonsai-llama.nix {};
+  inklingLlama = pkgs.callPackage ../../lib/inkling-llama.nix {};
 
   # A deliberately narrow llama.cpp build for the one GGUF Ollama cannot parse.
   # Current upstream carries Q2_0, Qwen3.8's chat template, reasoning stream and
@@ -101,6 +102,9 @@ in {
       # Install with apps/oracle/tools/fetch-qwen38-projector.py.
       QWEN38_Q2_MMPROJ_PATH = "/home/lam/.local/share/qwen38/02262642680a6ea1e44aba92ad3fa551032803f6dc39f880b3cac82a55fea085.gguf";
       BONSAI_LLAMA_BIN = "${bonsaiLlama}/bin/llama-server";
+      # Weights and projector: ~/.local/share/inkling/<sha256>.gguf (Unsloth's
+      # Mainline_Support UD-Q4_K_XL and mmproj-F16).
+      INKLING_LLAMA_BIN = "${inklingLlama}/bin/llama-server";
     };
   };
 

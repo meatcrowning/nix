@@ -197,3 +197,8 @@ top with `python3 apps/oracle/tools/fetch-qwen38-projector.py` before applying
 the service. The router verifies both artifacts before loading and converts
 Ollama base64 images to llama.cpp image content parts. Bonsai remains text-only;
 image requests to that route fail explicitly. Book uses the same remote service.
+
+Inkling 2 Mini runs on `lib/inkling-llama.nix` (mainline llama.cpp plus #32704,
+which Unsloth's Mainline_Support NVFP4 quants require). Its weights and
+projector live in `~/.local/share/inkling/<sha256>.gguf` on top; the route keeps
+the looped layers' experts on the GPU and the single-pass layers' experts in RAM.
