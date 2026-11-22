@@ -39,19 +39,17 @@ let
     exec "$@"
   '';
 
+  playerLauncher = if hostProfile.isBook then
+    pkgs.writeShellScript "player-air" ''
+      export PLAYER_PYTHON=${pyEnv}/bin/python3
+      exec /home/lam/nix/apps/player/tools/air-launch.sh "$@"
+    ''
+  else
+    pkgs.writeShellScript "player-local" ''
+      exec ${pyEnv}/bin/python3 /home/lam/nix/apps/player/main.py "$@"
+    '';
+
   player =
-    if hostProfile.isBook then
-      # air plays top's library over SMB, so launching is more than exec'ing
-      # python: probe top, mount, pull the metadata database + art cache, run,
-      # push back. That lives in the repo as live source (player/tools/
-      # air-launch.sh) like everything else here, so it can be fixed on air
-      # without a home-manager rebuild — and it degrades to a plain offline
-      # launch when top is unreachable. See docs/agents/air-library-share.md.
-      pkgs.writeShellScriptBin "player" (''
-        export PLAYER_PYTHON=${pyEnv}/bin/python3
-        exec /home/lam/nix/apps/player/tools/air-launch.sh "$@"
-      '')
-    else
       pkgs.stdenv.mkDerivation {
         pname = "player";
         version = "live";
@@ -87,8 +85,7 @@ let
         installPhase = ''
           runHook preInstall
           mkdir -p $out/bin
-          makeWrapper ${pyEnv}/bin/python3 $out/bin/player \
-            --add-flags /home/lam/nix/apps/player/main.py \
+          makeWrapper ${playerLauncher} $out/bin/player \
             --prefix XDG_DATA_DIRS : ${lib.concatStringsSep ":" [
               "${pkgs.kdePackages.oxygen-icons}/share"
               "${pkgs.kdePackages.breeze-icons}/share"
@@ -97,7 +94,7 @@ let
 
           # Same Qt environment, none of player's body:
           #     player-qtenv python3 apps/player/tools/transport-test.py
-          # Book receives its interpreter through PLAYER_PYTHON above.
+          # Both hosts need this helper for the embedded G-Force worker.
           makeWrapper ${qtenvBody} $out/bin/player-qtenv \
             --prefix PATH : ${pyEnv}/bin \
             "''${qtWrapperArgs[@]}"
