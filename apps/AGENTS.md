@@ -33,6 +33,7 @@ establish the user's live session.
 | updater/ | flake-input updater | home/prog/updater.nix |
 | oracle/ | local-ollama chat | home/prog/oracle.nix |
 | coder/ | Claude Code / Codex front end | home/prog/coder.nix |
+| booru/ | booru browser (Danbooru and others) | home/prog/booru.nix |
 | tuner/ | RTL-SDR receiver (GTK, top's Unity session) | home/prog/tuner.nix |
 | pylib/ | shared Python helpers | imported, not packaged |
 | collage/ | private browser collage userscript | symlink to `docs/apps/collage/`; local updater, no host package |
@@ -209,6 +210,10 @@ zoom handler consumes every wheel event. Surfer's ZoomFilter requires
 wheelGain: WheelGain on all its scrollable overlays. If momentum is absent,
 inspect the plugin:hyprvtb:kinetic setting and host configuration; hyprctl reload
 clears runtime kinetic_set(true).
+
+TagPopup.qml is the only Danbooru tag completion list (painter's prompt boxes,
+booru's search field). The editor drives it from its own key handler; it
+never takes the keyboard (DESIGN §7.7).
 
 SpellMarks.qml is the only spelling renderer. Place it beside the text item,
 with a real visible viewport; use menuItems() in the existing CtxMenu and
