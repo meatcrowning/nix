@@ -5,6 +5,7 @@ import http.server
 import importlib.util
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -21,6 +22,8 @@ class Backend(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.server.requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+        self.server.entered.set()
+        self.server.unblock.wait(5)
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
         self.end_headers()
@@ -31,6 +34,9 @@ class RelayTest(unittest.TestCase):
     def setUp(self):
         self.backend = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Backend)
         self.backend.requests = []
+        self.backend.entered = threading.Event()
+        self.backend.unblock = threading.Event()
+        self.backend.unblock.set()
         self.backend.reply = b'{"message":{"tool_calls":[{"function":{"name":"read","arguments":{"path":"a"}}}]},"done":false}\n{"done":true}\n'
         self.relay = http.server.ThreadingHTTPServer(("127.0.0.1", 0), launch.Relay)
         for server in (self.backend, self.relay):
@@ -83,6 +89,33 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(self.request("other")[0], 503)
         self.assertEqual(self.backend.requests, [])
         self.assertEqual(self.calls, [])
+
+    def test_parallel_title_and_main_are_serialized(self):
+        self.backend.unblock.clear()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(self.request)
+            self.assertTrue(self.backend.entered.wait(3))
+            second = pool.submit(self.request)
+            # A second request must not reach inference or reserve resources
+            # while the first still owns the stream.
+            self.assertFalse(threading.Event().wait(0.4))
+            try:
+                self.assertEqual(len(self.backend.requests), 1)
+                self.assertEqual([x[0] for x in self.calls], ["reserve-owned"])
+            finally:
+                self.backend.unblock.set()
+            self.assertEqual(first.result(timeout=3)[0], 200)
+            self.assertEqual(second.result(timeout=3)[0], 200)
+        self.assertEqual([x[0] for x in self.calls],
+                         ["reserve-owned", "done-owned", "reserve-owned", "done-owned"])
+
+    def test_cancelled_queue_entry_never_acquires_lease(self):
+        cancelled = threading.Event()
+        cancelled.set()
+        with self.assertRaises(ConnectionAbortedError):
+            with launch.request_slot(cancelled):
+                self.fail("Cancelled request was admitted")
+        self.assertFalse(launch.REQUEST_SLOT.locked())
 
 
 if __name__ == "__main__":

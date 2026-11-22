@@ -17,6 +17,22 @@ import urllib.request
 import uuid
 
 MODEL = "thinkingmachines/Inkling-2-Mini:UD-Q4_K_XL"
+REQUEST_SLOT = threading.Lock()
+
+
+@contextlib.contextmanager
+def request_slot(cancelled):
+    # OpenCode generates titles alongside the main response. Top's router
+    # rejects concurrent inference instead of queuing it.
+    while not REQUEST_SLOT.acquire(timeout=0.25):
+        if cancelled.is_set():
+            raise ConnectionAbortedError("Cancelled while waiting for inference")
+    try:
+        if cancelled.is_set():
+            raise ConnectionAbortedError("Cancelled while waiting for inference")
+        yield
+    finally:
+        REQUEST_SLOT.release()
 
 
 def warden(path, **fields):
@@ -65,12 +81,14 @@ class Relay(http.server.BaseHTTPRequestHandler):
         started = False
         upstream = http.client.HTTPConnection("127.0.0.1", 11434, timeout=3600)
         finished = threading.Event()
+        cancelled = threading.Event()
         # Closing OpenCode mid-prefill must release top's active generation.
         def watch_disconnect():
             while not finished.wait(0.25):
                 try:
                     ready, _, _ = select.select([self.connection], [], [], 0)
                     if ready and not self.connection.recv(1, socket.MSG_PEEK):
+                        cancelled.set()
                         if upstream.sock:
                             upstream.sock.shutdown(socket.SHUT_RDWR)
                         return
@@ -82,9 +100,9 @@ class Relay(http.server.BaseHTTPRequestHandler):
                 raise ValueError("This provider serves Inkling 2 Mini only")
             # Top allocates 32K, despite the model's advertised 1M context.
             payload.setdefault("options", {})["num_ctx"] = 32768
-            with lease("reserve-owned", "renew-owned", "done-owned",
+            threading.Thread(target=watch_disconnect, daemon=True).start()
+            with request_slot(cancelled), lease("reserve-owned", "renew-owned", "done-owned",
                        token=uuid.uuid4().hex, model=MODEL, lease=60):
-                threading.Thread(target=watch_disconnect, daemon=True).start()
                 upstream.request("POST", "/api/chat", json.dumps(payload),
                                  {"Content-Type": "application/json"})
                 response = upstream.getresponse()
