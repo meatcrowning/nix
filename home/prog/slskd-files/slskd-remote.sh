@@ -19,8 +19,7 @@ set -uo pipefail
 
 PORT="${SLSKD_PORT:-5030}"
 HOSTS="${SLSKD_SSH_HOSTS:-top top.local}"
-# Fedora's ssh: nix-built binaries on book cannot resolve .local (nss-mdns).
-SSH="${SLSKD_SSH:-/usr/bin/ssh}"
+SSH="${SLSKD_SSH:-ssh}"
 CTL="${XDG_RUNTIME_DIR:-/tmp}/slskd-remote.ctl"
 KEY_FILE="$HOME/.secrets/slskd-api-key"
 CONNECT_TIMEOUT="${SLSKD_CONNECT_TIMEOUT:-15}"
