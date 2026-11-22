@@ -1,9 +1,10 @@
 """OpenCode's native Ollama adapter, with Chatter's backend/turn leases.
 
 Book enters through ollama-tunnel.sh; top uses the same loopback services.
-The per-process relay preserves NDJSON and tool calls without translating them.
+The relay preserves tool calls and fills Ollama metadata required by OpenCode.
 """
 import contextlib
+from datetime import datetime, timezone
 import http.client
 import http.server
 import json
@@ -111,9 +112,21 @@ class Relay(http.server.BaseHTTPRequestHandler):
                 self.send_header("Connection", "close")
                 self.end_headers()
                 started = True
-                while chunk := response.read1(65536):
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
+                if response.status == 200:
+                    # Chatter's router omits Ollama's timestamp. The SDK
+                    # validates every NDJSON frame, including the final one.
+                    for line in response:
+                        if not line.strip():
+                            continue
+                        frame = json.loads(line)
+                        if "error" not in frame:
+                            frame.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+                        self.wfile.write(json.dumps(frame).encode() + b"\n")
+                        self.wfile.flush()
+                else:
+                    while chunk := response.read1(65536):
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
         except (OSError, ValueError, RuntimeError, http.client.HTTPException) as error:
             if not started:
                 with contextlib.suppress(OSError):

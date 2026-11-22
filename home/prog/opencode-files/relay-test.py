@@ -1,13 +1,16 @@
 """Isolated relay checks: no SSH, warden, model, or desktop access."""
 import contextlib
+from datetime import datetime
 import http.client
 import http.server
 import importlib.util
+import io
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("launch", Path(__file__).with_name("launch.py"))
@@ -72,7 +75,11 @@ class RelayTest(unittest.TestCase):
 
     def test_stream_tools_and_owned_reservation(self):
         status, data = self.request()
-        self.assertEqual((status, data), (200, self.backend.reply))
+        self.assertEqual(status, 200)
+        frames = [json.loads(line) for line in data.splitlines()]
+        for frame in frames:
+            self.assertIsNotNone(datetime.fromisoformat(frame.pop("created_at")).tzinfo)
+        self.assertEqual(frames, [json.loads(line) for line in self.backend.reply.splitlines()])
         self.assertEqual(self.backend.requests[0]["options"]["num_ctx"], 32768)
         self.assertEqual(self.backend.requests[0]["tools"][0]["function"]["name"], "read")
         self.assertEqual([x[0] for x in self.calls], ["reserve-owned", "done-owned"])
@@ -84,6 +91,39 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertIn(b"painter is busy", data)
         self.assertEqual(self.backend.requests, [])
+
+    def test_actual_router_frames_gain_required_metadata(self):
+        path = Path(__file__).resolve().parents[3] / "apps/oracle/tools/qwen38-ollama-shim.py"
+        spec = importlib.util.spec_from_file_location("router", path)
+        router = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(router)
+        output = io.BytesIO()
+        handler = SimpleNamespace(wfile=output, send_response=lambda *_: None,
+                                  send_header=lambda *_: None, end_headers=lambda: None)
+        events = [
+            {"choices": [{"delta": {"reasoning_content": "think"}}]},
+            {"choices": [{"delta": {"content": "text"}}]},
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1",
+                "function": {"name": "read", "arguments": '{"filePath":"probe.txt"}'}}]}}]},
+            {"choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+             "usage": {"prompt_tokens": 10, "completion_tokens": 3}},
+        ]
+        stream = io.BytesIO(b"".join(b"data: " + json.dumps(e).encode() + b"\n\n" for e in events))
+        router.Handler._relay_stream(handler, {"model": launch.MODEL}, stream)
+        self.backend.reply = output.getvalue()
+        status, data = self.request()
+        self.assertEqual(status, 200)
+        frames = [json.loads(line) for line in data.splitlines()]
+        for frame in frames:
+            datetime.fromisoformat(frame.pop("created_at"))
+        self.assertEqual(frames, [json.loads(line) for line in self.backend.reply.splitlines()])
+        self.assertEqual(frames[0]["message"]["thinking"], "think")
+        self.assertEqual(frames[2]["message"]["tool_calls"][0]["function"]["name"], "read")
+        self.assertTrue(frames[-1]["done"])
+
+    def test_stream_error_is_preserved(self):
+        self.backend.reply = b'{"error":"generation failed"}\n'
+        self.assertEqual(json.loads(self.request()[1]), {"error": "generation failed"})
 
     def test_unknown_model_never_reaches_backend(self):
         self.assertEqual(self.request("other")[0], 503)
