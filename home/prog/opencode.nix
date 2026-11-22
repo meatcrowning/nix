@@ -6,11 +6,8 @@ let
       --version|-v|--help|-h|completion)
         exec ${pkgs.opencode}/bin/opencode "$@" ;;
     esac
-    ${lib.optionalString hostProfile.isBook ''
-      exec ${pkgs.bash}/bin/bash /home/lam/nix/apps/oracle/tools/ollama-tunnel.sh -- \
-    ''}
-      ${pkgs.python3}/bin/python3 ${./opencode-files/launch.py} \
-        ${pkgs.opencode}/bin/opencode "$@"
+    exec ${lib.optionalString hostProfile.isBook "${pkgs.bash}/bin/bash /home/lam/nix/apps/oracle/tools/ollama-tunnel.sh -- "}${pkgs.python3}/bin/python3 ${./opencode-files/launch.py} \
+      ${pkgs.opencode}/bin/opencode "$@"
   '';
 in {
   home.packages = [ launcher ];
