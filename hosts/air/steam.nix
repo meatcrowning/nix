@@ -24,9 +24,15 @@ let
     ln -sfn ${x86.pkgsi686Linux.mesa} /run/opengl-driver-32
   '';
 
+  # The guest cannot reach the host's session bus, and SteamRT3's launcher
+  # service exits without one.
+  guestSteam = pkgs.writeShellScript "steam-guest" ''
+    exec ${pkgs.dbus}/bin/dbus-run-session -- ${x86.steam}/bin/steam "$@"
+  '';
+
   launcher = pkgs.writeShellScriptBin "steam" ''
     export PATH=${fexShim}/bin:$PATH
-    exec ${pkgs.muvm}/bin/muvm --execute-pre=${guestInit} -- ${x86.steam}/bin/steam "$@"
+    exec ${pkgs.muvm}/bin/muvm --execute-pre=${guestInit} -- ${guestSteam} "$@"
   '';
 
   steam = pkgs.runCommand "steam-muvm" { } ''
