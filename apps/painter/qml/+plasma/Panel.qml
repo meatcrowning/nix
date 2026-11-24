@@ -121,6 +121,12 @@ Item {
             if (r.parent !== panel.homeFor(r)) { first = i; break }
         }
         if (first < 0) return
+        // Settle both Columns before and after the moves (see `stash`): before,
+        // so a row its source culled at zero size and that has grown since is
+        // un-culled by the Column still tracking it; after, so each Column
+        // registers its new rows as they are now, not later when one has grown.
+        inner.forceLayout()
+        stash.forceLayout()
         for (var j = first; j < panel.rowOrder.length; j++) {
             var q = panel.rowOrder[j]
             // A row that hides itself is never moved — see `homeFor`. It also
@@ -136,6 +142,8 @@ Item {
             q.parent = stash
             q.parent = panel.homeFor(q)
         }
+        inner.forceLayout()
+        stash.forceLayout()
     }
 
     // Where a row belongs right now: the column, or the stash it waits out a
@@ -257,6 +265,13 @@ Item {
         visible: !panel.collapsed || panel.pins.length > 0
     }
 
-    // Where an unpinned row waits out a collapse. Never drawn.
-    Item { id: stash; visible: false }
+    // Where an unpinned row waits out a collapse. Never drawn. A COLUMN AS WIDE
+    // AS `inner`, not a bare Item: Qt's positioner culls a child it sees at
+    // zero size or hidden, and un-culls only a child it is still tracking, never
+    // one added already sized (qquickpositioners.cpp prePositioning, Qt 6.11).
+    // A row that was empty when the panel folded (Regions' Loader before its
+    // editor exists) and grew while parked came back laid out, visible and never
+    // drawn again. This stash tracks the row through that change, and
+    // `applyPins` settles both Columns around every move.
+    Column { id: stash; width: inner.width; visible: false }
 }

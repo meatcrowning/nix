@@ -5850,6 +5850,43 @@ def test_moss(win, ctl, tmp):
               {"positive": "a lake", "negative": "blur"})
 
 
+def test_regions_parked(win, ctl):
+    """Regions saved folded, relaunched, then unfolded under MOSS.
+
+    The editor's Loader is zero-height when the panel's Column first lays it
+    out, so the Column culls it, and it grows while parked. A Column un-culls
+    only a child it is still tracking, so it came back laid out, visible and
+    never drawn (see Panel.qml's stash)."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtQml import qmlContext
+    prefs = qmlContext(APP).contextProperty("Prefs")
+    prefs.set("panel.regions", True)
+    eng, win2, root2, ctl2, keep2 = build_window()
+    try:
+        ctl2.selectModelByName("moss-base-int8.safetensors")
+        spin(300)
+        panel = next(item for item in walk(win2.contentItem()) if item.objectName() == "regionsPanel")
+        check("regions starts folded from preferences", panel.property("collapsed"))
+        panel.setProperty("collapsed", False)
+        spin(300)
+        scroll_to(panel)
+        spin(300)
+        editor = next(item for item in walk(panel) if item.metaObject().className().startswith("LayoutEditor"))
+        image = win2.grabWindow()
+        origin = editor.mapToScene(QPointF(0, 0))
+        colours = set()
+        for y in range(int(origin.y()), min(image.height(), int(origin.y() + editor.height())), 3):
+            for x in range(int(origin.x()), min(image.width(), int(origin.x() + editor.width())), 3):
+                colours.add(image.pixel(x, y))
+        check("regions editor draws after unfolding a saved fold", len(colours) > 20,
+              "%d colours" % len(colours))
+    finally:
+        root2.setProperty("restored", False)     # this window must not re-save
+        win2.close()
+        prefs.set("panel.regions", False)
+    return eng, win2, ctl2, keep2
+
+
 def test_independent_wildcards(win, ctl, keep):
     from PySide6.QtCore import Q_ARG
     prefs = keep[2]
@@ -6584,6 +6621,7 @@ def main():
             test_snapshot_families(win, ctl)
         elif only == "moss":
             test_moss(win, ctl, tmp)
+            regions_keep = test_regions_parked(win, ctl)
             test_snapshot_families(win, ctl)
             test_text_history_actions(win)
             test_region_wildcard_submission(ctl, tmp)
