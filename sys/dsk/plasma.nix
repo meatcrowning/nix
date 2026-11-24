@@ -1,7 +1,10 @@
 { config, pkgs, lib, ... }:
 
 {
-  imports = [ ../../lib/plasma-tooltip-padding.nix ];
+  imports = [
+    ../../lib/plasma-tooltip-padding.nix
+    ../../lib/plasma-session-generation.nix
+  ];
 
   services = {
     # Swapped SDDM for ly: SDDM's greeter is itself Wayland/DRM-capable and

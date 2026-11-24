@@ -12,6 +12,7 @@
     ./music-share.nix
     ./steam.nix
     ../../lib/plasma-tooltip-padding.nix
+    ../../lib/plasma-session-generation.nix
     inputs.apple-silicon.nixosModules.apple-silicon-support
   ];
 
