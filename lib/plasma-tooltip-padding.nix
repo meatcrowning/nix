@@ -6,9 +6,12 @@
 # them. replaceDependencies swaps the patched builds into the closure without
 # rebuilding everything that links libplasma. Book takes top's cross builds
 # (lib/air-offload.nix). NixOS module for top and book.
-{ pkgs, airOffload ? null, ... }:
+{ pkgs, specialArgs, ... }:
 
 let
+  # Module argument defaults do not bypass _module.args lookup. Only book
+  # supplies these cross builds; top uses its native KDE packages.
+  airOffload = specialArgs.airOffload or null;
   kde = pkgs.kdePackages;
   patched = name: patch:
     if airOffload != null then airOffload.${name}
