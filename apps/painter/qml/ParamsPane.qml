@@ -166,7 +166,7 @@ Item {
         for (var n = 0; n < out.length; n++) sectionModel.append({ key: out[n] })
     }
 
-    Component.onCompleted: { console.warn('PANE COMPLETED'); root.buildSections() }
+    Component.onCompleted: root.buildSections()
 
     function indexOfSection(key) {
         for (var i = 0; i < sectionModel.count; i++)
