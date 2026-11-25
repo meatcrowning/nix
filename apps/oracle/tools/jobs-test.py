@@ -242,7 +242,7 @@ def selftest(face):
     env["QT_QPA_PLATFORM"] = "offscreen"
     env.pop("WAYLAND_DISPLAY", None)
     env.pop("DISPLAY", None)
-    if face == "plasma":
+    if face in ("plasma", "oxygen"):
         env["XDG_CURRENT_DESKTOP"] = "KDE"
         env["QT_QPA_PLATFORMTHEME"] = "kde"
         env["DESK_SESSION"] = "plasma"
@@ -250,10 +250,25 @@ def selftest(face):
         env["XDG_CURRENT_DESKTOP"] = "Hyprland"
         env.pop("QT_QPA_PLATFORMTHEME", None)
         env.pop("DESK_SESSION", None)
-    out = subprocess.run([sys.executable, str(APP / "main.py"), "--selftest"],
-                         env=env, capture_output=True, text=True, timeout=240)
+    # The Plasma session defaults to the Oxygen face, which leaves the tray to
+    # the Fleet dock; `--face=plasma` is the legacy KStyle face that draws it.
+    argv = [sys.executable, str(APP / "main.py"), "--selftest", "--face=" + face]
+    out = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=240)
     return out.stdout + out.stderr
 
+
+# The Oxygen face draws no tray, but the status bar still counts the jobs.
+txt = selftest("oxygen")
+tray = re.search(r"jobs tray: face=(\S+) visible=(\S+) height=(\d+) rows=(\d+)", txt)
+right = re.search(r"jobs status right: '([^']*)'", txt)
+check("oxygen: the tray draws nothing, the Fleet dock holds the jobs",
+      tray is not None and tray.groups() == ("oxygen", "False", "0", "0"),
+      tray.group(0) if tray else txt[-400:])
+check("oxygen: the status bar still carries the count",
+      right is not None and right.group(1).startswith("1 job · "),
+      right.group(0) if right else txt[-300:])
+check("oxygen: and the window still loads clean", "0 QML warning(s)" in txt,
+      txt[-300:])
 
 for face in ("hypr", "plasma"):
     txt = selftest(face)

@@ -146,7 +146,11 @@ for line in txt.splitlines():
         bar.append(line.strip())
     elif not line.startswith("    "):
         cur = None
+# A `barText` row is a QToolButton widget, dumped as <QToolButton 'C&ontinue'>;
+# an icon-only one has no text and so no letter to carry.
 named = [r for r in bar if not r.startswith("<") and r != "---"]
+named += [m.group(1) for r in bar
+          for m in [re.match(r"^<QToolButton '(.*)'>$", r)] if m]
 letters = [re.search(r"&(\w)", r).group(1).upper() for r in named
            if re.search(r"&(\w)", r)]
 title_letters = [re.search(r"&(\w)", t).group(1).upper() for t in titles
