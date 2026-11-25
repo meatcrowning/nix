@@ -610,6 +610,15 @@ def _build_shell_class():
         def __init__(self, title: str, size=(1280, 900), min_size=(720, 560),
                      state_key=""):
             self._state_key = str(state_key or "")
+            # An offscreen harness keeps its menubar in-window. With Plasma's
+            # AppMenu registrar on the session bus, Qt exports every menubar
+            # over D-Bus; offscreen that segfaults in
+            # QDBusMenuBar::registerMenuBar, and it would publish test menus
+            # to the live session's global menu anyway.
+            from PySide6.QtCore import QCoreApplication, Qt
+            from PySide6.QtGui import QGuiApplication
+            if QGuiApplication.platformName() == "offscreen":
+                QCoreApplication.setAttribute(Qt.AA_DontUseNativeMenuBar)
             self.window = QMainWindow()
             self.window.setWindowTitle(title)
             self.window.resize(*size)
