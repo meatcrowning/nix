@@ -46,6 +46,18 @@
   # top's builder and SMB share resolve as `top` over the tailnet.
   services.tailscale.enable = true;
 
+  # Let top run nix-pull on book over the tailnet.
+  services.openssh = {
+    enable = true;
+    openFirewall = false;
+    settings = {
+      PasswordAuthentication = false;
+      KbdInteractiveAuthentication = false;
+      PermitRootLogin = "no";
+    };
+  };
+  networking.firewall.interfaces.tailscale0.allowedTCPPorts = [ 22 ];
+
   time.timeZone = privateConfig.location.timeZone;
   i18n.defaultLocale = "en_US.UTF-8";
 
