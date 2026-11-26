@@ -296,6 +296,17 @@ def icon_for(game, offline):
     return "retroarch" if game["runner"] == "retroarch" else RUNNER_LABELS[game["runner"]][1]
 
 
+def steam_icon(game):
+    """The shortcut icon as a file path, or empty for Steam's default icon.
+
+    Steam resolves a theme icon name with GTK2 from several job threads at
+    once; concurrent first loads of the icon theme corrupt GTK's lists, and the
+    threads then spin forever, so Steam can never shut down.
+    """
+    icon = icon_for(game, offline=True)
+    return icon if icon.startswith("/") else ""
+
+
 def comment(game):
     if "thumb" in game:
         return SYSTEM_LABELS.get(game["thumb"].split("/", 1)[0], "Console")
@@ -547,7 +558,7 @@ def steam(games):
                 "AppName": game["name"],
                 "Exe": exe,
                 "StartDir": f'"{HOME}"',
-                "icon": icon_for(game, offline=True),
+                "icon": steam_icon(game),
                 "ShortcutPath": "",
                 "LaunchOptions": f"run {game['slug']}",
                 "IsHidden": 0, "AllowDesktopConfig": 1, "AllowOverlay": 1,
