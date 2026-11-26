@@ -85,8 +85,8 @@ MouseArea {
     // wheel-notch branch scrolls three lines where the finger moved a quarter
     // of a pixel. QtWayland sets angleDelta = 12 x the true surface-pixel
     // delta, so that is the high-resolution signal to divide by; a real mouse
-    // wheel is told apart by its detent (|angleDelta| >= 120, and it never
-    // carries a pixelDelta).
+    // wheel is told apart by its scroll phase (always NoScrollPhase; since Qt
+    // 6.12 it carries a pixelDelta too).
     //
     // CLAMP AGAINST originY, NOT 0: a Flickable's content does not have to
     // start at 0 (a ListView recomputes originY whenever delegate sizes change
@@ -100,9 +100,9 @@ MouseArea {
             return;
         }
         var ad = wheel.angleDelta.y;
-        var dy = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.gain
-               : Math.abs(ad) >= root.detent
-                                          ? (ad / root.detent) * root.lines * root.step
+        var finger = wheel.phase !== Qt.NoScrollPhase;
+        var dy = !finger                  ? (ad / root.detent) * root.lines * root.step
+               : wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.gain
                :                            (ad / root.anglePerPixel) * root.gain;
         view.contentY = Math.max(minY, Math.min(minY + span, view.contentY - dy));
         wheel.accepted = true;

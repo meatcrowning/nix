@@ -360,9 +360,9 @@ class LayoutCanvas(QQuickPaintedItem):
         event.accept()
 
     def wheelEvent(self, event):
-        from kinetic import DETENT, ANGLE_PER_PIXEL, is_wheel_detent
+        from kinetic import DETENT, ANGLE_PER_PIXEL, is_wheel
         px, angle = event.pixelDelta(), event.angleDelta()
-        steps = angle.y() / DETENT if is_wheel_detent(px, angle) else (px.y() if not px.isNull() else angle.y() / ANGLE_PER_PIXEL) / 40
+        steps = angle.y() / DETENT if is_wheel(event) else (px.y() if not px.isNull() else angle.y() / ANGLE_PER_PIXEL) / 40
         self._bridge.editor.zoom_at(event.position().x(), event.position().y(), steps)
         event.accept()
 

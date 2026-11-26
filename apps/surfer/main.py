@@ -73,7 +73,7 @@ from kdetheme import is_plasma, kde_chrome, theme_source  # noqa: E402  (pylib; 
 from styleparticipant import StyleParticipant  # noqa: E402  (live theme acknowledgement)
 from glyphs import Glyphs  # noqa: E402  (pylib; docs/DESIGN.md 2.3 display-site px())
 from kinetic import (WHEEL_GAIN, QML_WHEEL_GAIN,  # noqa: E402
-                     is_wheel_detent as _is_wheel_detent)
+                     is_wheel as _is_wheel)
 
 # Same live wallpaper palette source filer parses (rewritten by wal-set.sh).
 PANEL_THEME = Path.home() / ".config" / "quickshell" / "Theme.qml"
@@ -3029,7 +3029,7 @@ class ZoomFilter(QObject):
     Plain (unmodified) TOUCHPAD wheel events are consumed and re-sent scaled
     by WHEEL_GAIN, with fractional remainders carried so the sub-pixel tail of
     a kinetic glide is not rounded to death; real mouse-wheel detents
-    (_is_wheel_detent) and zero-delta phase markers
+    (_is_wheel) and zero-delta phase markers
     (ScrollBegin/ScrollEnd) passed through untouched so scroll sequences stay
     coherent. NB this is window-wide: wheel over the QML overlays is scaled
     too, so the file picker's KineticListView takes `wheelGain: WheelGain`
@@ -3063,7 +3063,7 @@ class ZoomFilter(QObject):
                 px, ang = event.pixelDelta(), event.angleDelta()
                 if px.isNull() and ang.isNull():
                     return False  # phase marker (Begin/End): pass untouched
-                if _is_wheel_detent(px, ang):
+                if _is_wheel(event):
                     return False  # real wheel: Chromium's own step, untouched
                 spx = QPoint(self._scaled(self._carry_px, 0, px.x()),
                              self._scaled(self._carry_px, 1, px.y()))

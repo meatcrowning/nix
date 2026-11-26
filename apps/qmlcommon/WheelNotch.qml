@@ -17,8 +17,8 @@ import QtQuick
 // Retune one and retune the other.
 //
 // THE UNIT. Both branches of Qt's wheel event reduce to the same scale, so
-// there is no detent discriminator to get wrong: a real wheel click is
-// angleDelta 120 with pixelDelta 0, and QtWayland sets angleDelta = 12 x the
+// the only discriminator is the scroll phase: a real wheel click is
+// angleDelta 120 with no phase, and QtWayland sets angleDelta = 12 x the
 // surface-pixel delta for high-resolution sources (apps/pylib/kinetic.py's
 // DETENT and ANGLE_PER_PIXEL — the Python half of the same seam). So accumulate
 // angle units, preferring pixelDelta * 12 when it is non-zero (it is the
@@ -45,7 +45,10 @@ QtObject {
     // Whole notches completed by this event, signed. 0 most of the time on a
     // touchpad: that is the point — the sub-notch remainder is carried.
     function steps(wheel) {
-        var pd = wheel.pixelDelta ? wheel.pixelDelta.y : 0;
+        // Only a finger stream's pixelDelta is the high-resolution truth; a
+        // wheel notch carries one too since Qt 6.12 (15px, not 120/12).
+        var finger = wheel.phase !== undefined && wheel.phase !== Qt.NoScrollPhase;
+        var pd = finger && wheel.pixelDelta ? wheel.pixelDelta.y : 0;
         var units = pd !== 0 ? pd * root.anglePerPixel
                              : (wheel.angleDelta ? wheel.angleDelta.y : 0);
         if (units === 0)

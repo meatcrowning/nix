@@ -44,9 +44,10 @@ MouseArea {
     // angleDelta = 12 x the true surface-pixel delta, so that is the
     // high-resolution signal to divide by; contentY is a real, so fractional
     // pixels accumulate on their own with nothing to carry by hand.
-    // A real mouse wheel is told apart by its detent: |angleDelta| >= 120, and
-    // it never carries a pixelDelta (qtbase qwaylandinputdevice.cpp:
-    // FrameData::hasPixelDelta() is false for axis_source_wheel).
+    // A real mouse wheel is told apart by its scroll PHASE: QtWayland opens a
+    // Begin/Update/End sequence only for axis_source_finger (hyprvtb's coast
+    // included), so a wheel is always NoScrollPhase. Since Qt 6.12 a wheel
+    // notch carries a pixelDelta as well, so pixelDelta cannot decide it.
     // CLAMP AGAINST originY, NOT 0. A Flickable's content does not have to
     // start at contentY 0: `originY` is where it starts, and Qt's own bounds
     // are [originY, originY + contentHeight - height]. It is 0 for a plain
@@ -66,9 +67,9 @@ MouseArea {
             return;
         }
         var ad = wheel.angleDelta.y;
-        var dy = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.gain
-               : Math.abs(ad) >= root.detent
-                                          ? (ad / root.detent) * root.lines * root.step
+        var finger = wheel.phase !== Qt.NoScrollPhase;
+        var dy = !finger                  ? (ad / root.detent) * root.lines * root.step
+               : wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * root.gain
                :                            (ad / root.anglePerPixel) * root.gain;
         view.contentY = Math.max(minY, Math.min(minY + span, view.contentY - dy));
         wheel.accepted = true;

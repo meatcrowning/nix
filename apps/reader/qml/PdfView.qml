@@ -404,8 +404,8 @@ Item {
         onWheel: function (w) {
             if (!(w.modifiers & Qt.ControlModifier)) { w.accepted = false; return; }
             var ad = w.angleDelta.y;
-            var d = w.pixelDelta.y !== 0 ? w.pixelDelta.y * 3
-                  : Math.abs(ad) >= 120  ? ad          // a real wheel detent
+            var d = w.phase === Qt.NoScrollPhase ? ad  // a real wheel
+                  : w.pixelDelta.y !== 0 ? w.pixelDelta.y * 3
                   :                        ad / 4;     // touchpad sub-pixel
             if (d !== 0) pdfv.zoomAt(Math.exp(Math.log(1.25) / 120 * d), w.x, w.y);
             w.accepted = true;

@@ -204,7 +204,7 @@ compositor's proportional high-resolution stream without adding momentum. Keep
 the overlay behind content (z: -1) so nested wheel handlers receive events; the
 view's optional wheelLines, wheelStep, wheelEnabled, surfer-only wheelGain, and
 onWheelScrolled remain available. Python wheel handling uses pylib/kinetic.py
-(DETENT, ANGLE_PER_PIXEL, WHEEL_GAIN, is_wheel_detent()), never copied
+(DETENT, ANGLE_PER_PIXEL, WHEEL_GAIN, is_wheel()), never copied
 constants. viewer/qml/ImageViewer.qml is the documented exception because its
 zoom handler consumes every wheel event. Surfer's ZoomFilter requires
 wheelGain: WheelGain on all its scrollable overlays. If momentum is absent,

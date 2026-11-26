@@ -384,21 +384,20 @@ Item {
                 // fingers on a touchpad mean PAN in every other program that
                 // shows a picture, and pinch means zoom; only a mouse wheel
                 // means zoom on its own. libinput/KWin says which is which:
-                // a finger scroll carries a pixelDelta (or a sub-detent
-                // angleDelta), a real wheel carries whole 120-unit detents and
-                // no pixelDelta. So the finger stream pans in both axes and the
-                // wheel keeps the zoom it always had; Ctrl+scroll zooms either
-                // way, which is the escape hatch every viewer has.
+                // a finger scroll opens a scroll phase, a real wheel never
+                // does (since Qt 6.12 a wheel carries a pixelDelta too, so
+                // only the phase decides). So the finger stream pans in both
+                // axes and the wheel keeps the zoom it always had; Ctrl+scroll
+                // zooms either way, which is the escape hatch every viewer has.
                 onWheel: function (w) {
                     var px = w.pixelDelta.x, py = w.pixelDelta.y
                     var ad = w.angleDelta.y
-                    var finger = (px !== 0 || py !== 0)
-                               || (ad !== 0 && Math.abs(ad) < 120)
+                    var finger = w.phase !== Qt.NoScrollPhase
                     if (finger && !(w.modifiers & Qt.ControlModifier)) {
                         // Direct manipulation: the picture follows the fingers,
                         // one pixel per pixel, and stops at its own edges.
                         var dx = px !== 0 ? px : 0
-                        var dy = py !== 0 ? py : ad
+                        var dy = py !== 0 ? py : ad / 12
                         pane.panX += dx
                         pane.panY += dy
                         pane.clampPan()
@@ -406,7 +405,7 @@ Item {
                         w.accepted = true
                         return
                     }
-                    var d = (px !== 0 || py !== 0) ? py * 3 : ad
+                    var d = !finger ? ad : py !== 0 ? py * 3 : ad / 4
                     if (d !== 0) pane.zoomAt(Math.exp(Math.log(1.2) / 120 * d), w.x, w.y)
                     viewMa.trackCompare(w.x, w.y)
                     w.accepted = true

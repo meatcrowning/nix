@@ -208,9 +208,11 @@ Rectangle {
                 // A sub-pixel event (pixelDelta rounds to 0) carries the same
                 // motion in angleDelta at 12x scale, so it needs /4 — feeding
                 // it the raw value would zoom 4x faster when moving slowly.
+                // A wheel has no scroll phase (and since Qt 6.12 a pixelDelta
+                // of its own, which must not be read as finger travel).
                 const ad = e.angleDelta.y;
-                const d = e.pixelDelta.y !== 0 ? e.pixelDelta.y * 3
-                        : Math.abs(ad) >= 120  ? ad          // real wheel detent
+                const d = e.phase === Qt.NoScrollPhase ? ad  // real wheel
+                        : e.pixelDelta.y !== 0 ? e.pixelDelta.y * 3
                         :                        ad / 4;     // touchpad sub-pixel
                 viewer.zoomAround(Math.exp(Math.log(1.2) / 120 * d), e.x, e.y);
                 // zooming a pane is using it: the chrome follows the wheel, so

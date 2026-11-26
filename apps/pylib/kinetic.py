@@ -15,7 +15,7 @@ duplication is what this file exists to stop.
 Import it the way every app imports pylib:
 
     sys.path.insert(0, str(HERE.parent / "pylib"))
-    from kinetic import WHEEL_GAIN, is_wheel_detent
+    from kinetic import WHEEL_GAIN, is_wheel
 """
 
 # One classic mouse-wheel notch, in Qt angleDelta units. Protocol constant.
@@ -35,7 +35,7 @@ ANGLE_PER_PIXEL = 12
 # with the drag — deliberately NOT special-cased in the compositor's momentum
 # engine). Raise it if pages should feel a bit brisker than lists.
 #
-# IT APPLIES TO TOUCHPADS ONLY — see is_wheel_detent(). The correction is
+# IT APPLIES TO TOUCHPADS ONLY — see is_wheel(). The correction is
 # entirely about QtWayland's angleDelta = 12 x finger-pixels synthesis; a real
 # mouse wheel has no such inflation, and applying the gain there made top's
 # wheel scroll web pages at 1/6 speed, which is the bug this note exists to
@@ -49,17 +49,19 @@ WHEEL_GAIN = 1 / 6
 QML_WHEEL_GAIN = 1 / WHEEL_GAIN
 
 
-def is_wheel_detent(px, ang):
-    """True for a real mouse-wheel notch (leave it alone), False for a
-    touchpad's high-resolution stream (scale it).
+def is_wheel(event):
+    """True for a real mouse wheel (leave it alone), False for a touchpad's
+    high-resolution stream (scale it).
 
-    Exact, not a heuristic (qtbase 6.11 qwaylandinputdevice.cpp):
-    FrameData::hasPixelDelta() returns false for axis_source_wheel
-    unconditionally, so a wheel NEVER carries a pixelDelta and always reports
-    angleDelta = -delta120, i.e. +-120 per detent; a touchpad reports either a
-    non-null pixelDelta or, when the finger moved under a pixel, a bare
-    angleDelta below 120. Same discriminator WheelScroll.qml uses.
+    The scroll PHASE is the discriminator. QtWayland opens a ScrollBegin /
+    ScrollUpdate / ScrollEnd sequence only for axis_source_finger, which is
+    also what hyprvtb's momentum coast emits, so finger streams always carry
+    a phase and a wheel never does. Since Qt 6.12 a wheel notch carries a
+    pixelDelta too (FrameData::hasPixelDelta() is gone), so a null
+    pixelDelta no longer identifies a wheel, and |angleDelta| >= 120 never
+    did for high-resolution wheels.
 
-    `px` and `ang` are QPoint (event.pixelDelta() / event.angleDelta()).
+    `event` is a QWheelEvent.
     """
-    return px.isNull() and max(abs(ang.x()), abs(ang.y())) >= DETENT
+    from PySide6.QtCore import Qt
+    return event.phase() == Qt.ScrollPhase.NoScrollPhase
