@@ -9,8 +9,15 @@
     };
 
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # Packages held back while nixpkgs rolls: ollama, firefox, and pad's
+    # nixpkgs Hyprland. Same revision they were built from, so no rebuild.
+    # See overlays/hold.nix.
+    nixpkgs-hold.url = "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0";
+
+    # master tracks nixos-unstable; release branches stop matching it.
     home-manager = {
-      url = "github:nix-community/home-manager/release-25.11";
+      url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     plasma-manager = {
@@ -47,9 +54,8 @@
     # book's kernel, m1n1 and U-Boot as NixOS. No upstream cache: top
     # cross-builds them (hosts/air/configuration.nix).
     apple-silicon = {
-      # Pinned before avd-fw codec selection, which needs a newer nixpkgs than
-      # this flake's. Move together with nixpkgs.
-      url = "github:nix-community/nixos-apple-silicon/73301d52f114946d53e62902692c36b0fea0c904";
+      # Exact pin; move together with nixpkgs.
+      url = "github:nix-community/nixos-apple-silicon/193fc37ecc8793da8b6bb5dd6d16a1746c9c44ac";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -73,9 +79,11 @@
 
     konsole-style-background-overlay = import ./overlays/konsole-style-background.nix;
 
-    ollama-cuda-overlay = import ./overlays/ollama-cuda.nix;
+    hold-overlay = import ./overlays/hold.nix { inherit inputs; };
 
-    overlays = [ vcv-rack-overlay breeze-square-overlay ollama-cuda-overlay kwin-rollup-overlay konsole-style-background-overlay ];
+    oxygen-icons-overlay = import ./overlays/oxygen-icons-names.nix;
+
+    overlays = [ vcv-rack-overlay breeze-square-overlay hold-overlay kwin-rollup-overlay konsole-style-background-overlay oxygen-icons-overlay ];
 
     mkPkgs = system: overlays: import nixpkgs {
       inherit system overlays;
@@ -114,14 +122,17 @@
       # Deliberately standalone: sys/ and home/ import top's complete desktop.
       pad = nixpkgs.lib.nixosSystem {
         specialArgs = { inherit user; };
-        modules = [ ./hosts/pad/configuration.nix ];
+        modules = [
+          { nixpkgs.overlays = [ hold-overlay ]; }
+          ./hosts/pad/configuration.nix
+        ];
       };
       air = nixpkgs.lib.nixosSystem {
         specialArgs = airArgs;
         modules = [
           {
             nixpkgs.hostPlatform = "aarch64-linux";
-            nixpkgs.overlays = [ vcv-rack-overlay konsole-style-background-overlay airOffloadOverlay ];
+            nixpkgs.overlays = [ vcv-rack-overlay konsole-style-background-overlay hold-overlay oxygen-icons-overlay airOffloadOverlay ];
           }
           ./hosts/air/configuration.nix
           home-manager.nixosModules.home-manager

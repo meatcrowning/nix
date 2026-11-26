@@ -40,7 +40,9 @@ QQuickItem *MenuBarApplet::createNativeMenu(QQuickItem *host)
 {
     if (!host || !containment()) return nullptr;
     if (m_nativeItem) return m_nativeItem;
-    auto *applet = Plasma::PluginLoader::self()->loadApplet(QStringLiteral("org.kde.plasma.appmenu"));
+    // libplasma 6.8 returns an owning unique_ptr; this applet is owned by its
+    // QObject parent (set below) instead, so release it.
+    Plasma::Applet *applet = Plasma::PluginLoader::self()->loadApplet(QStringLiteral("org.kde.plasma.appmenu")).release();
     if (!applet) return nullptr;
     applet->setParent(this);
     applet->config().writeEntry("compactView", false);

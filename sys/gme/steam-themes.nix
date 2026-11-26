@@ -6,7 +6,11 @@ let
     url = "https://github.com/Jovian-Experiments/Jovian-NixOS/archive/49c2c729cc6d78bf64ae252d3a31e6311d896ab9.tar.gz";
     sha256 = "sha256-mpFFy+vabu4WOma4Tx7myAPUaj+Ob58qK8ZXL/xANmo=";
   };
-  decky = pkgs.callPackage "${jovian}/pkgs/decky-loader" { };
+  # This Jovian pin passes "--prefix PATH : …" as one string, which
+  # structured-attrs makeWrapper rejects; pass it as separate arguments.
+  decky = (pkgs.callPackage "${jovian}/pkgs/decky-loader" { }).overridePythonAttrs (_: {
+    makeWrapperArgs = [ "--prefix" "PATH" ":" (lib.makeBinPath [ pkgs.coreutils pkgs.psmisc ]) ];
+  });
   cssArchive = pkgs.fetchurl {
     url = "https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/1a1e8f4dded8494febe56df16429ef5bba1e5b8feb3fd989d5808fbef0d71350.zip";
     sha256 = "1a1e8f4dded8494febe56df16429ef5bba1e5b8feb3fd989d5808fbef0d71350";
