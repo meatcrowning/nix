@@ -31,11 +31,17 @@ fn describe_exit(result: io::Result<ExitStatus>) -> (String, i32) {
     }
 }
 
+fn oom_kills() -> Option<u64> {
+    fs::read_to_string("/proc/vmstat").ok()?.lines()
+        .find_map(|line| line.strip_prefix("oom_kill ")?.parse().ok())
+}
+
 fn capture_game(run: &Path, program: OsString, args: impl Iterator<Item = OsString>) -> io::Result<i32> {
     let mut report = File::create(run.join("game.txt"))?;
     writeln!(report, "Executable: {program:?}")?;
     writeln!(report, "LD_PRELOAD: {:?}", env::var_os("LD_PRELOAD"))?;
 
+    let oom_before = oom_kills();
     let result = match Command::new(program).args(args).spawn() {
         Ok(mut child) => {
             let maps = format!("/proc/{}/maps", child.id());
@@ -69,13 +75,16 @@ fn capture_game(run: &Path, program: OsString, args: impl Iterator<Item = OsStri
     };
     let (summary, code) = describe_exit(result);
     writeln!(report, "{summary}")?;
+    if let (Some(before), Some(after)) = (oom_before, oom_kills()) {
+        writeln!(report, "System OOM kills during game: {}", after.saturating_sub(before))?;
+    }
     fs::write(run.join("game-result.txt"), format!("Game: {summary}\n"))?;
     Ok(code)
 }
 
 fn capture() -> io::Result<i32> {
     let mut args = env::args_os().skip(1);
-    let program = args.next().ok_or_else(|| {
+    let mut program = args.next().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "expected Steam's %command%")
     })?;
     if program == "--capture-game" {
@@ -83,6 +92,11 @@ fn capture() -> io::Result<i32> {
         let executable = args.next().ok_or(io::ErrorKind::InvalidInput)?;
         return capture_game(Path::new(&run), executable, args);
     }
+    let direct = program == "--direct";
+    if direct {
+        program = args.next().ok_or(io::ErrorKind::InvalidInput)?;
+    }
+    let runner = if direct { "Game runtime" } else { "Steam command" };
     let mut args: Vec<_> = args.collect();
     let home = env::var_os("HOME").ok_or(io::ErrorKind::NotFound)?;
     // Use the same home-relative path in Steam's runtime and on the desktop.
@@ -114,13 +128,13 @@ fn capture() -> io::Result<i32> {
         .stderr(File::create(run.join("process-stderr.txt"))?)
         .status();
     let (summary, code) = describe_exit(result);
-    writeln!(report, "Steam command: {summary}")?;
+    writeln!(report, "{runner}: {summary}")?;
     let summary = if game.is_some() {
         fs::read_to_string(run.join("game-result.txt"))
-            .unwrap_or_else(|_| format!("Game exit unavailable. Steam command: {summary}"))
+            .unwrap_or_else(|_| format!("Game exit unavailable. {runner}: {summary}"))
             .trim_end().to_owned()
     } else {
-        format!("Steam command: {summary}")
+        format!("{runner}: {summary}")
     };
     for (name, previous) in GAME_LOGS.iter().zip(before) {
         let current = fingerprint(name);

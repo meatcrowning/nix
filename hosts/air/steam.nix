@@ -30,9 +30,14 @@ let
     exec ${pkgs.dbus}/bin/dbus-run-session -- ${x86.steam}/bin/steam "$@"
   '';
 
-  launcher = pkgs.writeShellScriptBin "steam" ''
+  # Enter the same x86 environment without starting the Steam client.
+  gameRuntime = pkgs.writeShellScriptBin "df-game-runtime" ''
     export PATH=${fexShim}/bin:$PATH
-    exec ${pkgs.muvm}/bin/muvm --execute-pre=${guestInit} -- ${guestSteam} "$@"
+    exec ${pkgs.muvm}/bin/muvm --execute-pre=${guestInit} -- "$@"
+  '';
+
+  launcher = pkgs.writeShellScriptBin "steam" ''
+    exec ${gameRuntime}/bin/df-game-runtime ${guestSteam} "$@"
   '';
 
   steam = pkgs.runCommand "steam-muvm" { } ''
@@ -42,6 +47,6 @@ let
   '';
 in
 {
-  environment.systemPackages = [ steam ];
+  environment.systemPackages = [ steam gameRuntime ];
   services.udev.packages = [ pkgs.steam-devices-udev-rules ];
 }

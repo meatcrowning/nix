@@ -12,6 +12,7 @@
 #include <QProcessEnvironment>
 #include <QPushButton>
 #include <QStyle>
+#include <QStandardPaths>
 #include <QTimer>
 #include <cstdio>
 #include <QUrl>
@@ -42,15 +43,26 @@ int main(int argc, char **argv)
     layout->addWidget(open);
 
     QObject::connect(launch, &QPushButton::clicked, &window, [&] {
-        QProcess steam;
-        steam.setProgram("steam");
-        steam.setArguments({"-applaunch", "975370"});
+        const auto override = qEnvironmentVariable("DF_STEAM_GAME_DIR");
+        const auto game = override.isEmpty()
+            ? QDir::homePath() + "/.local/share/Steam/steamapps/common/Dwarf Fortress"
+            : override;
+        const auto common = QFileInfo(game).absolutePath();
+        if (!QFileInfo(game + "/dwarfort").isExecutable()
+            || !QFileInfo(common + "/SteamLinuxRuntime_soldier/_v2-entry-point").isExecutable()
+            || !QFileInfo(common + "/SteamLinuxRuntime/scout-on-soldier-entry-point-v2").isExecutable()) {
+            status->setText("Dwarf Fortress or its Linux runtime could not be found.");
+            return;
+        }
+        QProcess launcher;
+        launcher.setProgram(QStandardPaths::findExecutable("df-launcher-direct"));
+        launcher.setArguments({game});
         auto environment = QProcessEnvironment::systemEnvironment();
         environment.remove("QT_PLUGIN_PATH");
-        steam.setProcessEnvironment(environment);
-        status->setText(steam.startDetached()
-                            ? "Launch requested through Steam."
-                            : "Could not start Steam.");
+        launcher.setProcessEnvironment(environment);
+        status->setText(launcher.startDetached()
+                            ? "Starting Dwarf Fortress."
+                            : "Could not start the game launcher.");
     });
     QObject::connect(history, &QListWidget::currentItemChanged, &window,
                      [open](QListWidgetItem *item) { open->setEnabled(item != nullptr); });
