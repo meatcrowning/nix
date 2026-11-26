@@ -5,6 +5,15 @@ import sys
 bundle, bridge, backend = map(Path, sys.argv[1:])
 text = bundle.read_text()
 patches = {
+    '  function changeMenuMusic(newMusic, menuMusic, setGlobalState, gamesRunning, soundPacks, musicVolume) {':
+        '  const bigPictureMode = 4;\n'
+        '  let inBigPicture = false;\n'
+        '  function changeMenuMusic(newMusic, menuMusic, setGlobalState, gamesRunning, soundPacks, musicVolume) {',
+    '          menuMusic.currentTime = 0;\n          setGlobalState("menuMusic", null);':
+        '          menuMusic.onended = null;\n'
+        '          menuMusic.currentTime = 0;\n          setGlobalState("menuMusic", null);',
+    '      if (newMusic !== "None" && gamesRunning.length === 0) {':
+        '      if (inBigPicture && newMusic !== "None" && gamesRunning.length === 0) {',
     '      return `/sounds_custom/${truncatedPackPath || "error"}/${fileName}`;':
         '      return homeAudioURL(`/sounds_custom/${truncatedPackPath || "error"}/${fileName}`);',
     '          args[0] = newSoundURL;':
@@ -13,12 +22,34 @@ patches = {
     '  var index = deckyFrontendLib.definePlugin((serverApi) => {':
         bridge.read_text() + '\n  var index = deckyFrontendLib.definePlugin((serverApi) => {',
     '      getAndSetSoundPacks().then(() => {':
-        '      let removeHomeBridge = () => {};\n      getAndSetSoundPacks().then(() => {',
+        '      let removeHomeBridge = () => {};\n'
+        '      const updateMusicMode = (mode) => {\n'
+        '          const next = mode === bigPictureMode;\n'
+        '          if (next === inBigPicture) return;\n'
+        '          inBigPicture = next;\n'
+        '          const { legacyEnabled, selectedMusic, menuMusic, gamesRunning, soundPacks, musicVolume } = state.getPublicState();\n'
+        '          if (menuMusic || legacyEnabled) {\n'
+        '              changeMenuMusic(selectedMusic, menuMusic, setGlobalState, gamesRunning, soundPacks, musicVolume);\n'
+        '          }\n'
+        '      };\n'
+        '      let observedMode = false;\n'
+        '      const musicModeRegistrar = SteamClient.UI.RegisterForUIModeChanged((mode) => {\n'
+        '          observedMode = true;\n'
+        '          updateMusicMode(mode);\n'
+        '      });\n'
+        '      Promise.resolve(SteamClient.UI.GetUIMode()).then((mode) => {\n'
+        '          if (!observedMode) updateMusicMode(mode);\n'
+        '      }, () => {});\n'
+        '      getAndSetSoundPacks().then(() => {',
     '              setGlobalState("legacyEnabled", configLegacyEnabled);':
         '              setGlobalState("legacyEnabled", configLegacyEnabled);\n'
         '              removeHomeBridge = installHomeAudioBridge(state, {setConfig, changeMenuMusic}, window);',
     '          onDismount: () => {\n              const { menuMusic, soundPatchInstance, volumePatchInstance }':
-        '          onDismount: () => {\n              removeHomeBridge();\n              const { menuMusic, soundPatchInstance, volumePatchInstance }',
+        '          onDismount: () => {\n'
+        '              musicModeRegistrar.unregister();\n'
+        '              observedMode = true;\n'
+        '              updateMusicMode(-1);\n'
+        '              removeHomeBridge();\n              const { menuMusic, soundPatchInstance, volumePatchInstance }',
 }
 for old, new in patches.items():
     if text.count(old) != 1:
