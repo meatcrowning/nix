@@ -124,6 +124,20 @@ in
 
   home.packages = [ panel-surface-renderer ];
 
+  # KSvg caches element rects in ~/.cache/ksvg-elements and invalidates them by
+  # file mtime, which is constant in the Nix store. After a rebuild of this theme
+  # it keeps the old build's rects; on 6.8 that cut the left panel's blur mask
+  # 7px short. Drop the cache when the theme path changes; plasmashell rereads it
+  # on its next start.
+  home.activation.dropStaleKsvgCache = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    stamp="$HOME/.local/state/ksvg-theme-path"
+    if [ "$(cat "$stamp" 2>/dev/null)" != "${oxygen-scheme}" ]; then
+      run rm -f "$HOME/.cache/ksvg-elements"
+      run mkdir -p "$HOME/.local/state"
+      run sh -c 'printf "%s\n" "$1" > "$2"' _ "${oxygen-scheme}" "$stamp"
+    fi
+  '';
+
   # The generated image is a cache of the active Qt style, so refresh it on
   # activation and whenever Plasma's palette/theme settings change.
   home.activation.renderPlasmaPanelSurface = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
