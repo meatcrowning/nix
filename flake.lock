@@ -1160,11 +1160,11 @@
     "saves": {
       "flake": false,
       "locked": {
-        "lastModified": 1795803160,
-        "narHash": "sha256-MI8cogBb3q96aGU/BV/Hx2JBNssFm4+Tl5QwFEwl9j8=",
+        "lastModified": 1795805693,
+        "narHash": "sha256-a8UrIsSZLyPlPl2143DPEHg5T7JhPS0iy/BjjXx46bA=",
         "ref": "refs/heads/master",
-        "rev": "3b80ffd93eb57c7078915b4ae1eefaacfef33c6a",
-        "revCount": 38,
+        "rev": "aa230696bda854de6543f5c28aa97d5699df3cc3",
+        "revCount": 39,
         "type": "git",
         "url": "ssh://git@github.com/meatcrowning/saves"
       },
