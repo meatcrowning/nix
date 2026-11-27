@@ -111,6 +111,11 @@
 
   in
   {
+    # Termux:X11 uses the last Plasma series with an X11 session.
+    packages.aarch64-linux.phone-desktop = import ./hosts/phone/desktop.nix {
+      pkgs = import inputs.nixpkgs-hold { system = "aarch64-linux"; };
+    };
+
     packages.x86_64-linux = {
       air-hyprvtb = airOffload.hyprvtb;
       air-konsole = airOffload.konsole;
