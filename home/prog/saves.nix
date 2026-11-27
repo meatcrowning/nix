@@ -1,4 +1,4 @@
-{ config, pkgs, lib, inputs, host, ... }:
+{ config, pkgs, inputs, host, airOffload ? null, ... }:
 
 # Saves: the Qt gallery for Instagram saves, X bookmarks, YouTube and
 # SoundCloud likes, built from the private `saves` flake input. Its library
@@ -7,43 +7,15 @@
 # saves-sync.nix keeps identical between top and book.
 let
   root = "${config.home.homeDirectory}/Projects/saves";
-  src = inputs.saves;
-  saves = pkgs.stdenv.mkDerivation {
-    pname = "saves";
-    version = "0-${src.shortRev or "dirty"}";
-    inherit src;
-    cargoDeps = pkgs.rustPlatform.importCargoLock { lockFile = "${src}/Cargo.lock"; };
-    nativeBuildInputs = with pkgs; [
-      cmake
-      cargo
-      rustc
-      rustPlatform.cargoSetupHook
-      qt6.wrapQtAppsHook
-    ];
-    buildInputs = with pkgs; [
-      qt6.qtbase
-      qt6.qtmultimedia
-      qt6.qtsvg
-      libglvnd
-      vulkan-headers
-    ];
-    # rusqlite bundles SQLite into the static library. cargoSetupHook's
-    # system-library default would link it dynamically instead, and the C++
-    # link line never names libsqlite3.
-    preBuild = "unset LIBSQLITE3_SYS_USE_PKG_CONFIG";
-    cmakeFlags = [
-      "-DSAVES_ROOT=${root}"
-      "-DSAVES_DESKTOP_EXEC=${placeholder "out"}/bin/saves"
-    ];
-    # Suffixed, not prefixed: the profile's pinned yt-dlp and gallery-dl
-    # (home/pkgs/media/aquire.nix) carry the site fixes and must win.
-    # SAVES_PEER: the other host, which a fetch asks first so the two never
-    # download the same posts into the synced library at once.
-    qtWrapperArgs = [
-      "--suffix PATH : ${lib.makeBinPath (with pkgs; [ ffmpeg yt-dlp gallery-dl curl coreutils openssh ])}"
-      "--set-default SAVES_PEER ${if host == "top" then "book" else "top"}"
-    ];
-  };
+  peer = if host == "top" then "book" else "top";
+  saves =
+    if host == "air" then airOffload.saves { inherit root peer; }
+    else pkgs.callPackage ../../lib/saves.nix {
+      inherit root peer;
+      src = inputs.saves;
+      inherit (pkgs.rustPlatform) cargoSetupHook importCargoLock;
+      inherit (pkgs.qt6) wrapQtAppsHook;
+    };
 in
 {
   home.packages = [ saves ];

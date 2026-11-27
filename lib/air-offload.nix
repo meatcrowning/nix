@@ -167,8 +167,24 @@ let
     inherit (agentsArm) aws-lc openssl rust-jemalloc-sys libgit2 oniguruma sqlite zlib zstd
       libcap ripgrep bubblewrap;
   };
+  # saves: its Rust core and Qt front end, cross-built on top against book's
+  # cached Qt (lib/saves.nix).
+  armCross = native.pkgsCross.aarch64-multiplatform;
+  crossSaves = { root, peer }: native.callPackage ./saves.nix {
+    inherit root peer;
+    src = inputs.saves;
+    inherit (armCross) stdenv;
+    inherit (armCross.buildPackages) cargo rustc;
+    inherit (armCross.rustPlatform) cargoSetupHook;
+    inherit (native.rustPlatform) importCargoLock;
+    wrapQtAppsHook = crossQtWrap;
+    hostQt = native.qt6.qtbase;
+    rustTarget = armCross.stdenv.hostPlatform.rust.rustcTarget;
+    inherit (arm) qt6 libglvnd vulkan-headers ffmpeg yt-dlp gallery-dl curl coreutils openssh;
+  };
 in {
   codex = crossCodex;
+  saves = crossSaves;
   hyprvtb = crossPlugin; konsole = crossKonsole; oxygen = crossOxygen; headers = headersX86;
   libplasma = crossLibplasma; plasma-desktop = crossPlasmaDesktop;
 }

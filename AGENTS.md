@@ -176,7 +176,7 @@ also verifies the public noreply Git identity (home/git-privacy.nix).
 - Labwc is top-only (sys/dsk/labwc.nix, home/prog/labwc.nix).
   Its config is seeded once and owned by its tools; never reconcile it.
   The greeter default does not identify the active desktop.
-- Book's custom Hyprvtb, Konsole, Oxygen and Asahi kernel are cross-built by
+- Book's custom Hyprvtb, Konsole, Oxygen, Codex, Saves and Asahi kernel are cross-built by
   top's restricted builder (lib/air-offload.nix, sys/book-builder.nix; book's
   side is hosts/air/configuration.nix). /etc/nix/book-builder-key is machine
   state on book. Cap local ARM jobs in rebuild-air.
