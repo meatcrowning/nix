@@ -59,6 +59,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Saves, the social-media gallery (home/prog/saves.nix). A private repo:
+    # the first fetch on each host needs the user's GitHub SSH key.
+    saves = {
+      url = "git+ssh://git@github.com/meatcrowning/saves";
+      flake = false;
+    };
+
     # Decrypts the in-repo Tavily secret with top's SSH host key.
     agenix = {
       url = "github:ryantm/agenix";

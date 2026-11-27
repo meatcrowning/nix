@@ -1153,7 +1153,24 @@
         "nixpkgs-quickshell": "nixpkgs-quickshell",
         "plasma-manager": "plasma-manager",
         "private-config": "private-config",
+        "saves": "saves",
         "tuxmanager": "tuxmanager"
+      }
+    },
+    "saves": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1795756072,
+        "narHash": "sha256-8MJlyLrtrW4VtbeJz2U3YYDgjSfq4ITDEZC+APBIqIQ=",
+        "ref": "refs/heads/master",
+        "rev": "b5ca5f3a6cdcfc933f17e3c6ef7dd74c28a4cc54",
+        "revCount": 34,
+        "type": "git",
+        "url": "ssh://git@github.com/meatcrowning/saves"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/meatcrowning/saves"
       }
     },
     "systems": {
