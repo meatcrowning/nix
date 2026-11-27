@@ -102,12 +102,12 @@ void MomentumFilter::emitAxis(double dx, double dy)
     const auto t = nowUs();
     if (dy != 0.0) {
         pointer->processAxis(KWin::PointerAxis::Vertical, dy, 0,
-                             KWin::PointerAxisSource::Continuous, false, t,
+                             KWin::PointerAxisSource::Continuous, false, false, t,
                              m_lastDevice);
     }
     if (dx != 0.0) {
         pointer->processAxis(KWin::PointerAxis::Horizontal, dx, 0,
-                             KWin::PointerAxisSource::Continuous, false, t,
+                             KWin::PointerAxisSource::Continuous, false, false, t,
                              m_lastDevice);
     }
 }
@@ -121,7 +121,7 @@ void MomentumFilter::emitStop()
     const auto t = nowUs();
     // A single explicit axis-stop (delta 0) ends the coast — never mid-flight.
     pointer->processAxis(KWin::PointerAxis::Vertical, 0.0, 0,
-                         KWin::PointerAxisSource::Continuous, false, t,
+                         KWin::PointerAxisSource::Continuous, false, false, t,
                          m_lastDevice);
 }
 

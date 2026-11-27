@@ -6,13 +6,14 @@
     through) and drives the session-agnostic MomentumEngine. The coast is fed
     back into the compositor via input()->pointer()->processAxis(...).
 
-    Both entry points are KWin 6.7.4 private ABI, confirmed by grepping the
-    installed headers (kwin-devel-6.7.4-2.fc44) — see the runbook §2:
+    Both entry points are KWin private ABI, first confirmed against 6.7.4
+    (kwin-devel-6.7.4-2.fc44, runbook §2) and rechecked against 6.8.3:
       * intercept: bool InputEventFilter::pointerAxis(PointerAxisEvent *)
         (input.h:426), PointerAxisEvent fields at input_event.h:47.
       * inject:    PointerInputRedirection::processAxis(PointerAxis, qreal,
-        qint32, PointerAxisSource, bool, microseconds, InputDevice*)
-        (pointer_input.h:101), reached via input()->pointer().
+        qint32, PointerAxisSource, bool inverted, bool autoscroll,
+        microseconds, InputDevice*) (pointer_input.h:106; 6.8 added
+        autoscroll), reached via input()->pointer().
     A KWin minor-version bump can move either; this whole .so is recompile-only.
 */
 #pragma once
