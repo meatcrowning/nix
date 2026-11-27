@@ -7,7 +7,8 @@
 #
 # The derived index saves.sqlite3 is not synced; each host rebuilds it from the
 # synced files (saves-sync-reindex). Host-local caches, logs, locks and
-# in-progress downloads stay out. A file changed on both sides is a conflict:
+# in-progress downloads stay out, and so does top's HDD-backed youtube/media.
+# A file changed on both sides is a conflict:
 # the merge-listed ones are merged three ways (merge.py), and any other file
 # keeps the newer copy.
 let
@@ -48,10 +49,9 @@ in
       times = true
       fastcheck = true
       confirmbigdel = true
-      # top keeps YouTube media on its HDD through this symlink; book has a
-      # plain directory. Abort rather than read a missing mount as deletions.
-      follow = Path youtube/media
-      mountpoint = youtube/media
+      # top keeps liked-YouTube media on its HDD through this symlink. It
+      # stays on top: book keeps whatever it downloads itself.
+      ignore = Path youtube/media
 
       ignore = Name saves.sqlite3
       ignore = Name saves.next.sqlite3
