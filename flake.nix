@@ -124,6 +124,7 @@
     };
 
     packages.x86_64-linux = {
+      air-codex = airOffload.codex;
       air-hyprvtb = airOffload.hyprvtb;
       air-konsole = airOffload.konsole;
       air-oxygen = airOffload.oxygen;

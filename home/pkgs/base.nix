@@ -1,4 +1,4 @@
-{ pkgs, lib, host, inputs, ... }:
+{ pkgs, lib, host, inputs, airOffload, ... }:
 
 {
   home.packages = with pkgs; [
@@ -11,7 +11,9 @@
     home-manager
     cava
     killall
-    inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.codex
+    # book's codex is cross-built on top (lib/air-offload.nix).
+    (if host == "air" then airOffload.codex
+     else inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.codex)
     inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code
     #kde-material-you-colors-latest
     #ventoy-full-qt

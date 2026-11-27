@@ -142,7 +142,33 @@ let
   }));
   crossLibplasma = crossPatched "libplasma" ../home/prog/plasma-tooltip-padding-libplasma.patch;
   crossPlasmaDesktop = crossPatched "plasma-desktop" ../home/prog/plasma-tooltip-padding-taskmanager.patch;
+  # codex: after most llm-agents bumps its aarch64 build is uncached, and book
+  # spends hours compiling the Rust workspace. Cross-compile it against
+  # llm-agents' own nixpkgs (its cache's), linking that set's cached ARM
+  # libraries so only codex itself is built.
+  agents = inputs.llm-agents;
+  agentsArm = import agents.inputs.nixpkgs { system = "aarch64-linux"; };
+  agentsCross = import agents.inputs.nixpkgs {
+    system = "x86_64-linux";
+    crossSystem = "aarch64-linux";
+  };
+  # Both expressions assume a native build: their build-time helpers (the
+  # cargo-skeleton script, zstd, the serialising rustc wrapper) must run on
+  # top, so take those from buildPackages.
+  hostSide = agentsCross.buildPackages;
+  agentsScope = agentsCross.lib.makeScope agentsCross.newScope (self: {
+    buildRustPackageCached = self.callPackage "${agents}/lib/build-rust-package-cached.nix" {
+      inherit (hostSide) writers python3Packages zstd;
+    };
+  });
+  crossCodex = agentsScope.callPackage "${agents}/packages/codex/package.nix" {
+    doInstallCheck = false;
+    inherit (hostSide) flock writeShellScript;
+    inherit (agentsArm) aws-lc openssl rust-jemalloc-sys libgit2 oniguruma sqlite zlib zstd
+      libcap ripgrep bubblewrap;
+  };
 in {
+  codex = crossCodex;
   hyprvtb = crossPlugin; konsole = crossKonsole; oxygen = crossOxygen; headers = headersX86;
   libplasma = crossLibplasma; plasma-desktop = crossPlasmaDesktop;
 }
