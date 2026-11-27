@@ -1,4 +1,4 @@
-{ config, pkgs, lib, inputs, ... }:
+{ config, pkgs, lib, inputs, host, ... }:
 
 # Saves: the Qt gallery for Instagram saves, X bookmarks, YouTube and
 # SoundCloud likes, built from the private `saves` flake input. Its library
@@ -37,8 +37,11 @@ let
     ];
     # Suffixed, not prefixed: the profile's pinned yt-dlp and gallery-dl
     # (home/pkgs/media/aquire.nix) carry the site fixes and must win.
+    # SAVES_PEER: the other host, which a fetch asks first so the two never
+    # download the same posts into the synced library at once.
     qtWrapperArgs = [
-      "--suffix PATH : ${lib.makeBinPath (with pkgs; [ ffmpeg yt-dlp gallery-dl curl coreutils ])}"
+      "--suffix PATH : ${lib.makeBinPath (with pkgs; [ ffmpeg yt-dlp gallery-dl curl coreutils openssh ])}"
+      "--set-default SAVES_PEER ${if host == "top" then "book" else "top"}"
     ];
   };
 in
