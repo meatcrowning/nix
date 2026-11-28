@@ -50,3 +50,31 @@ with tempfile.TemporaryDirectory(prefix="df-ambience-capture-") as temporary:
             assert "Activity observer unavailable:" in (run / "game.txt").read_text()
         assert "Exited with code 0" in (run / "game-result.txt").read_text()
         print(label, "passed")
+
+    # Exercise the outer Steam entry point, including runtimes with a -- game
+    # boundary and Steam launching dwarfort as the command itself.
+    library.with_suffix(".disabled").rename(library)
+    game = root / "dwarfort"
+    game.write_text(f"#!{sys.executable}\nimport os,json,sys\nprint(json.dumps({{'env':dict(os.environ),'args':sys.argv[1:]}}))\n")
+    game.chmod(0o755)
+    runtime = root / "runtime"
+    runtime.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n')
+    runtime.chmod(0o755)
+    for label, command in (("direct-game", [str(game)]),
+                           ("steam-runtime", [str(runtime), "--runtime-option", "--", str(game)])):
+        work = root / label
+        work.mkdir()
+        (work / "dfhack-config").mkdir()
+        environment = dict(os.environ, HOME=str(home))
+        for key in ("LD_PRELOAD", "DF_AMBIENCE_FIX", "DF_AMBIENCE_STATE"):
+            environment.pop(key, None)
+        subprocess.run([str(binary), *command, "argument with spaces"], cwd=work,
+                       env=environment, capture_output=True, check=True)
+        runs = sorted((home / ".local/state/df-launcher/runs").iterdir())
+        run = runs[-1]
+        recorded = json.loads((run / "process-stdout.txt").read_text())
+        assert recorded["env"]["LD_PRELOAD"] == str(library)
+        assert recorded["env"]["DF_AMBIENCE_STATE"] == str(run / "ambience-state.txt")
+        assert recorded["args"] == ["argument with spaces"]
+        assert "Game: Exited with code 0" in (run / "result.txt").read_text()
+        print(label, "passed")

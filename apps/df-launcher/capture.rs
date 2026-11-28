@@ -152,7 +152,15 @@ fn capture() -> io::Result<i32> {
         *index > 0 && args[*index - 1] == "--"
             && Path::new(argument).file_name() == Some(OsStr::new("dwarfort"))
     }).map(|(index, _)| index);
-    if let Some(index) = game {
+    let direct_game = Path::new(&program).file_name() == Some(OsStr::new("dwarfort"));
+    if direct_game {
+        args.splice(0..0, [
+            OsString::from("--capture-game"),
+            run.clone().into_os_string(),
+            program,
+        ]);
+        program = env::current_exe()?.into_os_string();
+    } else if let Some(index) = game {
         args.splice(index..index, [
             env::current_exe()?.into_os_string(),
             OsString::from("--capture-game"),
@@ -166,7 +174,7 @@ fn capture() -> io::Result<i32> {
         .status();
     let (summary, code) = describe_exit(result);
     writeln!(report, "{runner}: {summary}")?;
-    let summary = if game.is_some() {
+    let summary = if direct_game || game.is_some() {
         fs::read_to_string(run.join("game-result.txt"))
             .unwrap_or_else(|_| format!("Game exit unavailable. {runner}: {summary}"))
             .trim_end().to_owned()
