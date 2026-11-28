@@ -499,7 +499,32 @@ PlasmoidItem {
                     PlasmaComponents3.ToolTip.text: Accessible.name
                 }
                 PlasmaComponents3.ToolButton {
-                    icon.name: "window-minimize"
+                    id: minimizeButton
+                    // Oxygen's titlebar minimize glyph, in its 21-unit grid.
+                    contentItem: Canvas {
+                        implicitWidth: 18
+                        implicitHeight: 18
+                        readonly property color ink: minimizeButton.palette.buttonText
+                        onInkChanged: requestPaint()
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d");
+                            ctx.reset();
+                            const size = Math.min(width, height, 21);
+                            ctx.translate((width - size) / 2, (height - size) / 2);
+                            ctx.scale(size / 21, size / 21);
+                            ctx.strokeStyle = ink;
+                            ctx.lineWidth = Math.max(1.1 * 21 / size, 1.2);
+                            ctx.lineCap = "round";
+                            ctx.lineJoin = "round";
+                            ctx.beginPath();
+                            ctx.moveTo(7.5, 9.5);
+                            ctx.lineTo(10.5, 12.5);
+                            ctx.lineTo(13.5, 9.5);
+                            ctx.stroke();
+                        }
+                    }
                     Accessible.name: qsTr("Minimize")
                     enabled: root.folded && root.shown.minimizable
                     implicitHeight: 22
@@ -511,21 +536,6 @@ PlasmoidItem {
                     Layout.preferredWidth: 22
                     Layout.fillHeight: true
                     onClicked: if (root.folded) tasksModel.requestToggleMinimized(root.activeIndex())
-                    PlasmaComponents3.ToolTip.text: Accessible.name
-                }
-                PlasmaComponents3.ToolButton {
-                    icon.name: "window-restore"
-                    Accessible.name: qsTr("Restore")
-                    enabled: root.folded && root.shown.maximizable
-                    implicitHeight: 22
-                    implicitWidth: 22
-                    padding: 2
-                    icon.width: 14
-                    icon.height: 14
-                    focusPolicy: Qt.NoFocus
-                    Layout.preferredWidth: 22
-                    Layout.fillHeight: true
-                    onClicked: if (root.folded) tasksModel.requestToggleMaximized(root.activeIndex())
                     PlasmaComponents3.ToolTip.text: Accessible.name
                 }
             }
