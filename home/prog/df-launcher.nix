@@ -6,6 +6,19 @@ let
     system = "x86_64-linux";
     config.allowUnfree = true;
   } else pkgs;
+  # DF runs as x86_64 on both hosts, including inside book's microVM.
+  ambience = x86.stdenv.mkDerivation {
+    pname = "df-ambience";
+    version = "53.17";
+    src = ../../apps/df-launcher/ambience.c;
+    dontUnpack = true;
+    buildPhase = ''
+      "$CC" -shared -fPIC -O2 -Wall -Wextra -Werror "$src" -o ambience.so -ldl
+    '';
+    installPhase = ''
+      install -Dm755 ambience.so "$out/lib/ambience.so"
+    '';
+  };
   launchGame = pkgs.writeShellScript "df-direct-game" ''
     set -eu
     cd "$1"
@@ -31,6 +44,10 @@ in
     if ! cmp -s "${launcher}/bin/df-launcher-capture" "$capture_dir/capture"; then
       run install -m 755 "${launcher}/bin/df-launcher-capture" "$capture_dir/capture.new"
       run mv -T "$capture_dir/capture.new" "$capture_dir/capture"
+    fi
+    if ! cmp -s "${ambience}/lib/ambience.so" "$capture_dir/ambience.so"; then
+      run install -m 755 "${ambience}/lib/ambience.so" "$capture_dir/ambience.so.new"
+      run mv -T "$capture_dir/ambience.so.new" "$capture_dir/ambience.so"
     fi
   '';
 

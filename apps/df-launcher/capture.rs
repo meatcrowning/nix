@@ -42,7 +42,22 @@ fn capture_game(run: &Path, program: OsString, args: impl Iterator<Item = OsStri
     writeln!(report, "LD_PRELOAD: {:?}", env::var_os("LD_PRELOAD"))?;
 
     let oom_before = oom_kills();
-    let result = match Command::new(program).args(args).spawn() {
+    let mut command = Command::new(program);
+    command.args(args);
+    let ambience = env::var_os("HOME").map(PathBuf::from)
+        .map(|home| home.join(".local/share/df-launcher/ambience.so"));
+    if env::var_os("DF_AMBIENCE_FIX").as_deref() != Some(OsStr::new("0")) {
+        if let Some(ambience) = ambience.filter(|path| path.is_file()) {
+            let mut preload = ambience.into_os_string();
+            if let Some(existing) = env::var_os("LD_PRELOAD").filter(|s| !s.is_empty()) {
+                preload.push(":");
+                preload.push(existing);
+            }
+            writeln!(report, "Ambience repair preload: {preload:?}")?;
+            command.env("LD_PRELOAD", preload);
+        }
+    }
+    let result = match command.spawn() {
         Ok(mut child) => {
             let maps = format!("/proc/{}/maps", child.id());
             let mut status = None;

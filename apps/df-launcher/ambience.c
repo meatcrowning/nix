@@ -1,0 +1,190 @@
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <link.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* DF 53.17 still supplies surroundings bits 2 (tavern) and 4 (workshop),
+ * but its FMOD surroundings updater omits those events. Reconnect the native
+ * events without accessing game memory or changing the game's sound banks.
+ * Gate the environment_state ABI to the Steam Linux executable verified here.
+ */
+static const unsigned char build_id[20] = {
+    0xf9,0xd1,0x3d,0x46,0xa8,0xb7,0xe2,0xe8,0xb7,0x0c,
+    0x38,0x01,0x27,0xde,0xcf,0x53,0xc4,0x35,0x81,0xbd
+};
+static bool enabled;
+static atomic_uint surroundings;
+struct environment_state {
+    int32_t biome, weather;
+    uint32_t surroundings;
+    int32_t elevation;
+    float occlusion, evilness, savagery;
+};
+_Static_assert(sizeof(struct environment_state) == 28, "DF 53.17 environment ABI");
+struct layer {
+    unsigned bit;
+    const char *path;
+    void *instance;
+    float volume;
+};
+static struct layer layers[] = {
+    {2, "event:/Ambiance/Surroundings/Tavern", NULL, 0},
+    {4, "event:/Ambiance/Surroundings/Workshop", NULL, 0},
+};
+static int (*get_event)(void *, const char *, void **);
+static int (*get_count)(void *, int *);
+static int (*create_instance)(void *, void **);
+static int (*start_instance)(void *);
+static int (*stop_instance)(void *, int);
+static int (*release_instance)(void *);
+static int (*set_volume)(void *, float);
+
+static int check_build(struct dl_phdr_info *info, size_t size, void *data)
+{
+    (void)size;
+    (void)data;
+    if (info->dlpi_name[0]) return 0;
+    for (int i = 0; i < info->dlpi_phnum; ++i) {
+        const ElfW(Phdr) *p = &info->dlpi_phdr[i];
+        if (p->p_type != PT_NOTE) continue;
+        const unsigned char *s = (void *)(info->dlpi_addr + p->p_vaddr);
+        const unsigned char *end = s + p->p_memsz;
+        while ((size_t)(end - s) >= sizeof(ElfW(Nhdr))) {
+            ElfW(Nhdr) n;
+            memcpy(&n, s, sizeof(n));
+            s += sizeof(n);
+            size_t namesize = ((size_t)n.n_namesz + 3) & ~(size_t)3;
+            size_t descsize = ((size_t)n.n_descsz + 3) & ~(size_t)3;
+            if (namesize > (size_t)(end - s) || descsize > (size_t)(end - s) - namesize) break;
+            if (n.n_type == NT_GNU_BUILD_ID && n.n_namesz == 4 &&
+                !memcmp(s, "GNU", 4) && n.n_descsz == sizeof(build_id) &&
+                !memcmp(s + namesize, build_id, sizeof(build_id))) enabled = true;
+            s += namesize + descsize;
+        }
+    }
+    return 1;
+}
+
+__attribute__((constructor)) static void initialize(void)
+{
+    const char *off = getenv("DF_AMBIENCE_FIX");
+    if (off && !strcmp(off, "0")) return;
+    dl_iterate_phdr(check_build, NULL);
+    if (enabled) fprintf(stderr, "df-ambience: restoring DF 53.17 tavern/workshop triggers\n");
+}
+
+/* These hooks forward the original C++ ABI; FMOD's opaque C API supplies all
+ * playback operations. No Lua ABI, DFHack structures or binary offsets used.
+ */
+bool environment(void *, const struct environment_state *)
+    __asm__("_ZN12musicsoundst15set_environmentERKN7dfaudio17environment_stateE");
+bool environment(void *self, const struct environment_state *state)
+{
+    static bool (*real)(void *, const struct environment_state *);
+    if (!real) real = dlsym(RTLD_NEXT, "_ZN12musicsoundst15set_environmentERKN7dfaudio17environment_stateE");
+    if (enabled) atomic_store(&surroundings, state->surroundings);
+    return real(self, state);
+}
+
+static bool resolve_api(void)
+{
+#define RESOLVE(var, symbol) do { if (!var) var = dlsym(RTLD_NEXT, symbol); if (!var) return false; } while (0)
+    RESOLVE(get_event, "FMOD_Studio_System_GetEvent");
+    RESOLVE(get_count, "FMOD_Studio_EventDescription_GetInstanceCount");
+    RESOLVE(create_instance, "FMOD_Studio_EventDescription_CreateInstance");
+    RESOLVE(start_instance, "FMOD_Studio_EventInstance_Start");
+    RESOLVE(stop_instance, "FMOD_Studio_EventInstance_Stop");
+    RESOLVE(release_instance, "FMOD_Studio_EventInstance_Release");
+    RESOLVE(set_volume, "FMOD_Studio_EventInstance_SetVolume");
+#undef RESOLVE
+    return true;
+}
+
+static void release_layers(void)
+{
+    for (size_t i = 0; i < sizeof(layers)/sizeof(layers[0]); ++i) {
+        struct layer *l = &layers[i];
+        if (l->instance) {
+            stop_instance(l->instance, 1);
+            release_instance(l->instance);
+        }
+        l->instance = NULL;
+        l->volume = 0;
+    }
+    atomic_store(&surroundings, 0);
+}
+
+int update(void *) __asm__("_ZN4FMOD6Studio6System6updateEv");
+int update(void *system)
+{
+    static int (*real)(void *);
+    if (!real) real = dlsym(RTLD_NEXT, "_ZN4FMOD6Studio6System6updateEv");
+    if (enabled && resolve_api()) {
+        unsigned flags = atomic_load(&surroundings);
+        for (size_t i = 0; i < sizeof(layers)/sizeof(layers[0]); ++i) {
+            struct layer *l = &layers[i];
+            bool wanted = flags & l->bit;
+            if (wanted && !l->instance) {
+                void *description = NULL;
+                int count = 0;
+                /* Leave a native instance alone if a later fix starts it. */
+                if (get_event(system, l->path, &description) ||
+                    get_count(description, &count) || count ||
+                    create_instance(description, &l->instance)) continue;
+                set_volume(l->instance, 0);
+                if (start_instance(l->instance)) {
+                    release_instance(l->instance);
+                    l->instance = NULL;
+                    continue;
+                }
+                fprintf(stderr, "df-ambience: started %s\n", l->path);
+            }
+            if (!l->instance) continue;
+            /* Match the existing 50 Hz presentation rate with a short fade. */
+            /* A modest +1.94 dB lift over the stock ambience event. */
+            float target = wanted ? 1.25f : 0.0f;
+            l->volume += (target - l->volume) * 0.04f;
+            set_volume(l->instance, l->volume);
+            if (!wanted && l->volume < 0.001f) {
+                stop_instance(l->instance, 1);
+                release_instance(l->instance);
+                l->instance = NULL;
+                l->volume = 0;
+                fprintf(stderr, "df-ambience: stopped %s\n", l->path);
+            }
+        }
+    }
+    return real(system);
+}
+
+int unload(void *) __asm__("_ZN4FMOD6Studio6System9unloadAllEv");
+int unload(void *system)
+{
+    static int (*real)(void *);
+    if (!real) real = dlsym(RTLD_NEXT, "_ZN4FMOD6Studio6System9unloadAllEv");
+    if (enabled && resolve_api()) release_layers();
+    return real(system);
+}
+
+int release_system(void *) __asm__("_ZN4FMOD6Studio6System7releaseEv");
+int release_system(void *system)
+{
+    static int (*real)(void *);
+    if (!real) real = dlsym(RTLD_NEXT, "_ZN4FMOD6Studio6System7releaseEv");
+    if (enabled && resolve_api()) release_layers();
+    return real(system);
+}
+
+void reset_audio(void *) __asm__("_ZN12musicsoundst15reset_all_audioEv");
+void reset_audio(void *self)
+{
+    static void (*real)(void *);
+    if (!real) real = dlsym(RTLD_NEXT, "_ZN12musicsoundst15reset_all_audioEv");
+    if (enabled) atomic_store(&surroundings, 0);
+    real(self);
+}
