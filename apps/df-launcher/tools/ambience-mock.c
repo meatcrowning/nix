@@ -1,11 +1,13 @@
 /* Link only into the isolated ambience harness, never into the game. */
 #include <string.h>
-int counts[4], starts[4];
+int counts[5], starts[5];
 float walla = .5f;
+float native_biome = 3;
 int FMOD_Studio_System_GetEvent(void *s, const char *path, void **out)
 {
     (void)s;
-    int i = strstr(path,"Tavern") ? 0 : strstr(path,"Workshop") ? 1 : strstr(path,"TradeDepot") ? 2 : 3;
+    int i = strstr(path,"Tavern") ? 0 : strstr(path,"Workshop") ? 1 :
+        strstr(path,"TradeDepot") ? 2 : strstr(path,"Walla") ? 3 : 4;
     *out = &counts[i]; return 0;
 }
 int FMOD_Studio_EventDescription_GetInstanceCount(void *d, int *n) { *n=*(int *)d; return 0; }
@@ -17,7 +19,7 @@ int FMOD_Studio_EventInstance_SetVolume(void *i,float v) { (void)i;(void)v;retur
 int FMOD_Studio_System_SetParameterByName(void *s,const char *n,float v,int ignore)
 { (void)s;(void)n;(void)ignore;walla=v;return 0; }
 int FMOD_Studio_System_GetParameterByName(void *s,const char *n,float *v,float *final)
-{ (void)s;(void)n;(void)final;*v=walla;return 0; }
+{ (void)s;(void)final;*v=!strcmp(n,"Biome") ? native_biome : walla;return 0; }
 int native_update(void *s) __asm__("_ZN4FMOD6Studio6System6updateEv");
 int native_update(void *s) { (void)s;return 0; }
 int native_unload(void *s) __asm__("_ZN4FMOD6Studio6System9unloadAllEv");

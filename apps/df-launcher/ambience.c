@@ -126,6 +126,21 @@ static void restore_walla(void *system)
     crowd_parameter_owned = false;
 }
 
+static bool embedded_crowd(void *system)
+{
+    float biome;
+    void *description;
+    int count;
+    /* Settlement biomes already embed a Walla layer in Global Ambience.
+     * Fortress maps normally send a landscape biome instead. Feed the shared
+     * parameter in both cases, adding a standalone layer only for landscapes.
+     */
+    if (get_parameter(system, "Biome", &biome, NULL) ||
+        !(biome == 8 || biome == 10 || biome == 11 || biome == 14 || biome == 15)) return false;
+    return !get_event(system, "event:/Ambiance/Dynamic/Global Ambience/Global Ambience", &description) &&
+        !get_count(description, &count) && count > 0;
+}
+
 static void read_activity(void)
 {
     static time_t last_read;
@@ -170,11 +185,17 @@ int update(void *system)
     if (enabled && resolve_api()) {
         unsigned flags = atomic_load(&surroundings);
         read_activity();
+        bool crowd_wanted = crowd_level != 0 && !(flags & 2) && !depot_active;
+        if (crowd_wanted && !crowd_parameter_owned &&
+            !get_parameter(system, "Walla", &previous_walla, NULL) &&
+            !set_parameter(system, "Walla", crowd_level, 1)) crowd_parameter_owned = true;
+        if (crowd_wanted && crowd_parameter_owned) set_parameter(system, "Walla", crowd_level, 0);
+        bool use_embedded_crowd = crowd_wanted && embedded_crowd(system);
         for (size_t i = 0; i < sizeof(layers)/sizeof(layers[0]); ++i) {
             struct layer *l = &layers[i];
             bool crowd = l->activity == CROWD;
             bool wanted = l->bit ? (flags & l->bit) != 0 :
-                crowd ? crowd_level != 0 && !(flags & 2) && !depot_active : depot_active != 0;
+                crowd ? crowd_wanted && crowd_parameter_owned && !use_embedded_crowd : depot_active != 0;
             if (wanted && !l->instance) {
                 void *description = NULL;
                 int count = 0;
@@ -182,26 +203,15 @@ int update(void *system)
                 if (get_event(system, l->path, &description) ||
                     get_count(description, &count) || count ||
                     create_instance(description, &l->instance)) continue;
-                if (crowd) {
-                    if (get_parameter(system, "Walla", &previous_walla, NULL) ||
-                        set_parameter(system, "Walla", crowd_level, 1)) {
-                        release_instance(l->instance);
-                        l->instance = NULL;
-                        continue;
-                    }
-                    crowd_parameter_owned = true;
-                }
                 set_volume(l->instance, 0);
                 if (start_instance(l->instance)) {
                     release_instance(l->instance);
                     l->instance = NULL;
-                    if (crowd) restore_walla(system);
                     continue;
                 }
                 fprintf(stderr, "df-ambience: started %s\n", l->path);
             }
             if (!l->instance) continue;
-            if (crowd && wanted) set_parameter(system, "Walla", crowd_level, 0);
             /* Match the existing 50 Hz presentation rate with a short fade. */
             /* A modest +1.94 dB lift over the stock ambience event. */
             float target = wanted ? (crowd ? 1.0f : 1.25f) : 0.0f;
@@ -212,10 +222,10 @@ int update(void *system)
                 release_instance(l->instance);
                 l->instance = NULL;
                 l->volume = 0;
-                if (crowd) restore_walla(system);
                 fprintf(stderr, "df-ambience: stopped %s\n", l->path);
             }
         }
+        if (!crowd_wanted && !layers[3].instance) restore_walla(system);
     }
     return real(system);
 }

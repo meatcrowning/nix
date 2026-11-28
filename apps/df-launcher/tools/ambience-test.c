@@ -1,8 +1,8 @@
 /* Build with ambience-mock.c as a separate shared library; uses no FMOD/device. */
 #include "../ambience.c"
 #include <assert.h>
-extern int counts[4], starts[4];
-extern float walla;
+extern int counts[5], starts[5];
+extern float walla, native_biome;
 static time_t clock_now=1700000000;
 time_t time(time_t *out) { if(out)*out=clock_now;return clock_now; }
 static void observation(int crowd,int depot,int age)
@@ -24,6 +24,9 @@ int main(int argc,char **argv)
     observation(99,1,0);frames();assert(counts[2]==0 && counts[3]==0);
     observation(3,0,0);frames();assert(counts[3]==1);
     assert(unload(NULL)==0);assert(counts[3]==0 && walla==.5f);
+    counts[4]=1;native_biome=11;observation(3,0,0);frames();
+    assert(counts[3]==0 && walla==3); /* Use the embedded settlement crowd. */
+    observation(0,0,0);frames();assert(walla==.5f);
     observation(0,0,0);counts[0]=1;atomic_store(&surroundings,2);frames();
     assert(starts[0]==1 && counts[0]==1); /* Leave an existing native event alone. */
     puts("fades, density changes, expiry, malformed state, unloading and duplicate suppression passed");
