@@ -13,6 +13,8 @@ PlasmoidItem {
     id: root
     Plasmoid.status: hasAudio ? PlasmaCore.Types.ActiveStatus : PlasmaCore.Types.HiddenStatus
     preferredRepresentation: compactRepresentation
+    // Panel sizing may select the full representation even for a tiny applet.
+    fullRepresentation: compactRepresentation
     property var levels: []
     property double lastAudio: 0
     property bool hasAudio: false
@@ -30,7 +32,7 @@ PlasmoidItem {
                 root.levels = Date.now() / 1000 - Number(parsed.updated || 0) < 2
                     ? parsed.levels || [] : [];
                 if (root.levels.some(level => level > 0)) root.lastAudio = Date.now();
-                root.hasAudio = Date.now() - root.lastAudio < 500;
+                root.hasAudio = Date.now() - root.lastAudio < 1200;
             } catch (_) {
                 root.levels = [];
                 root.hasAudio = false;

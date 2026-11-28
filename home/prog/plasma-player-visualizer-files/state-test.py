@@ -78,9 +78,9 @@ root.hasAudio;
 assert not feed([0, 0])
 assert feed([10, 0])
 assert feed([0, 0], advance=100)  # Bridge brief gaps between beats.
-assert not feed([0, 0], advance=600)
+assert not feed([0, 0], advance=1300)
 assert not feed([90, 90], age=5)  # A dead producer cannot leave bars visible.
 assert feed([5, 10])  # Works without Player or any MPRIS metadata.
-assert not feed([], advance=600)
+assert not feed([], advance=1300)
 assert engine.evaluate("disconnected").toInt() == 7
 print("PASS spectrum routing, silence, stale data, cleanup, and repeated polling")
