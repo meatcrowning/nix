@@ -7,10 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* DF 53.17 still supplies surroundings bits 2 (tavern) and 4 (workshop),
  * but its FMOD surroundings updater omits those events. Reconnect the native
  * events without accessing game memory or changing the game's sound banks.
+ * A DFHack observer supplies nearby fortress crowds and occupied trade depots,
+ * which have no inputs in environment_state. Observations expire after 5 s.
  * Gate the environment_state ABI to the Steam Linux executable verified here.
  */
 static const unsigned char build_id[20] = {
@@ -19,6 +22,10 @@ static const unsigned char build_id[20] = {
 };
 static bool enabled;
 static atomic_uint surroundings;
+static const char *activity_path;
+static unsigned crowd_level, depot_active;
+static bool crowd_parameter_owned;
+static float previous_walla;
 struct environment_state {
     int32_t biome, weather;
     uint32_t surroundings;
@@ -31,10 +38,13 @@ struct layer {
     const char *path;
     void *instance;
     float volume;
+    enum { ENVIRONMENT, DEPOT, CROWD } activity;
 };
 static struct layer layers[] = {
-    {2, "event:/Ambiance/Surroundings/Tavern", NULL, 0},
-    {4, "event:/Ambiance/Surroundings/Workshop", NULL, 0},
+    {2, "event:/Ambiance/Surroundings/Tavern", NULL, 0, ENVIRONMENT},
+    {4, "event:/Ambiance/Surroundings/Workshop", NULL, 0, ENVIRONMENT},
+    {0, "event:/Ambiance/Surroundings/TradeDepot", NULL, 0, DEPOT},
+    {0, "event:/Ambiance/Dynamic/Global Ambience/Global Surroundings/Walla_Fortress", NULL, 0, CROWD},
 };
 static int (*get_event)(void *, const char *, void **);
 static int (*get_count)(void *, int *);
@@ -43,6 +53,8 @@ static int (*start_instance)(void *);
 static int (*stop_instance)(void *, int);
 static int (*release_instance)(void *);
 static int (*set_volume)(void *, float);
+static int (*set_parameter)(void *, const char *, float, int);
+static int (*get_parameter)(void *, const char *, float *, float *);
 
 static int check_build(struct dl_phdr_info *info, size_t size, void *data)
 {
@@ -75,7 +87,8 @@ __attribute__((constructor)) static void initialize(void)
     const char *off = getenv("DF_AMBIENCE_FIX");
     if (off && !strcmp(off, "0")) return;
     dl_iterate_phdr(check_build, NULL);
-    if (enabled) fprintf(stderr, "df-ambience: restoring DF 53.17 tavern/workshop triggers\n");
+    activity_path = getenv("DF_AMBIENCE_STATE");
+    if (enabled) fprintf(stderr, "df-ambience: restoring DF 53.17 activity ambience\n");
 }
 
 /* These hooks forward the original C++ ABI; FMOD's opaque C API supplies all
@@ -101,11 +114,39 @@ static bool resolve_api(void)
     RESOLVE(stop_instance, "FMOD_Studio_EventInstance_Stop");
     RESOLVE(release_instance, "FMOD_Studio_EventInstance_Release");
     RESOLVE(set_volume, "FMOD_Studio_EventInstance_SetVolume");
+    RESOLVE(set_parameter, "FMOD_Studio_System_SetParameterByName");
+    RESOLVE(get_parameter, "FMOD_Studio_System_GetParameterByName");
 #undef RESOLVE
     return true;
 }
 
-static void release_layers(void)
+static void restore_walla(void *system)
+{
+    if (crowd_parameter_owned) set_parameter(system, "Walla", previous_walla, 1);
+    crowd_parameter_owned = false;
+}
+
+static void read_activity(void)
+{
+    static time_t last_read;
+    time_t now = time(NULL);
+    if (now == last_read) return;
+    last_read = now;
+    crowd_level = depot_active = 0;
+    if (!activity_path) return;
+    FILE *file = fopen(activity_path, "r");
+    if (!file) return;
+    long long stamp;
+    unsigned crowd, depot;
+    if (fscanf(file, "%lld %u %u", &stamp, &crowd, &depot) == 3 &&
+        stamp <= (long long)now && (long long)now - stamp <= 5 && crowd <= 3 && depot <= 1) {
+        crowd_level = crowd;
+        depot_active = depot;
+    }
+    fclose(file);
+}
+
+static void release_layers(void *system)
 {
     for (size_t i = 0; i < sizeof(layers)/sizeof(layers[0]); ++i) {
         struct layer *l = &layers[i];
@@ -117,6 +158,8 @@ static void release_layers(void)
         l->volume = 0;
     }
     atomic_store(&surroundings, 0);
+    restore_walla(system);
+    crowd_level = depot_active = 0;
 }
 
 int update(void *) __asm__("_ZN4FMOD6Studio6System6updateEv");
@@ -126,9 +169,12 @@ int update(void *system)
     if (!real) real = dlsym(RTLD_NEXT, "_ZN4FMOD6Studio6System6updateEv");
     if (enabled && resolve_api()) {
         unsigned flags = atomic_load(&surroundings);
+        read_activity();
         for (size_t i = 0; i < sizeof(layers)/sizeof(layers[0]); ++i) {
             struct layer *l = &layers[i];
-            bool wanted = flags & l->bit;
+            bool crowd = l->activity == CROWD;
+            bool wanted = l->bit ? (flags & l->bit) != 0 :
+                crowd ? crowd_level != 0 && !(flags & 2) && !depot_active : depot_active != 0;
             if (wanted && !l->instance) {
                 void *description = NULL;
                 int count = 0;
@@ -136,18 +182,29 @@ int update(void *system)
                 if (get_event(system, l->path, &description) ||
                     get_count(description, &count) || count ||
                     create_instance(description, &l->instance)) continue;
+                if (crowd) {
+                    if (get_parameter(system, "Walla", &previous_walla, NULL) ||
+                        set_parameter(system, "Walla", crowd_level, 1)) {
+                        release_instance(l->instance);
+                        l->instance = NULL;
+                        continue;
+                    }
+                    crowd_parameter_owned = true;
+                }
                 set_volume(l->instance, 0);
                 if (start_instance(l->instance)) {
                     release_instance(l->instance);
                     l->instance = NULL;
+                    if (crowd) restore_walla(system);
                     continue;
                 }
                 fprintf(stderr, "df-ambience: started %s\n", l->path);
             }
             if (!l->instance) continue;
+            if (crowd && wanted) set_parameter(system, "Walla", crowd_level, 0);
             /* Match the existing 50 Hz presentation rate with a short fade. */
             /* A modest +1.94 dB lift over the stock ambience event. */
-            float target = wanted ? 1.25f : 0.0f;
+            float target = wanted ? (crowd ? 1.0f : 1.25f) : 0.0f;
             l->volume += (target - l->volume) * 0.04f;
             set_volume(l->instance, l->volume);
             if (!wanted && l->volume < 0.001f) {
@@ -155,6 +212,7 @@ int update(void *system)
                 release_instance(l->instance);
                 l->instance = NULL;
                 l->volume = 0;
+                if (crowd) restore_walla(system);
                 fprintf(stderr, "df-ambience: stopped %s\n", l->path);
             }
         }
@@ -167,7 +225,7 @@ int unload(void *system)
 {
     static int (*real)(void *);
     if (!real) real = dlsym(RTLD_NEXT, "_ZN4FMOD6Studio6System9unloadAllEv");
-    if (enabled && resolve_api()) release_layers();
+    if (enabled && resolve_api()) release_layers(system);
     return real(system);
 }
 
@@ -176,7 +234,7 @@ int release_system(void *system)
 {
     static int (*real)(void *);
     if (!real) real = dlsym(RTLD_NEXT, "_ZN4FMOD6Studio6System7releaseEv");
-    if (enabled && resolve_api()) release_layers();
+    if (enabled && resolve_api()) release_layers(system);
     return real(system);
 }
 

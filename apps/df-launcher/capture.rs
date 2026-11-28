@@ -36,6 +36,20 @@ fn oom_kills() -> Option<u64> {
         .find_map(|line| line.strip_prefix("oom_kill ")?.parse().ok())
 }
 
+fn install_activity_observer() -> io::Result<()> {
+    for (path, contents) in [
+        ("dfhack-config/scripts/df-launcher-ambience.lua", include_str!("ambience.lua")),
+        ("dfhack-config/init/dfhack.df-launcher-ambience.init", "# Owned by Dwarf Fortress Launcher.\ndf-launcher-ambience\n"),
+    ] {
+        let path = Path::new(path);
+        fs::create_dir_all(path.parent().unwrap())?;
+        let temporary = path.with_extension("new");
+        fs::write(&temporary, contents)?;
+        fs::rename(temporary, path)?;
+    }
+    Ok(())
+}
+
 fn capture_game(run: &Path, program: OsString, args: impl Iterator<Item = OsString>) -> io::Result<i32> {
     let mut report = File::create(run.join("game.txt"))?;
     writeln!(report, "Executable: {program:?}")?;
@@ -55,6 +69,14 @@ fn capture_game(run: &Path, program: OsString, args: impl Iterator<Item = OsStri
             }
             writeln!(report, "Ambience repair preload: {preload:?}")?;
             command.env("LD_PRELOAD", preload);
+            // Each run owns its observation file; stale data from another game
+            // cannot turn on crowd or depot ambience in this one.
+            if Path::new("dfhack-config").is_dir() {
+                match install_activity_observer() {
+                    Ok(()) => { command.env("DF_AMBIENCE_STATE", run.join("ambience-state.txt")); }
+                    Err(error) => { writeln!(report, "Activity observer unavailable: {error}")?; }
+                }
+            }
         }
     }
     let result = match command.spawn() {
